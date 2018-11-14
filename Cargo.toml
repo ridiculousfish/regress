@@ -1,0 +1,23 @@
+[package]
+name = "regress"
+version = "0.1.0"
+authors = ["ridiculousfish <corydoras@ridiculousfish.com>"]
+description = "A regular expression engine targeting EcmaScript syntax"
+license = "MIT"
+repository = "https://github.com/ridiculousfish/regress"
+keywords = ["regex", "regexp"]
+edition = "2018"
+
+[profile.release]
+
+[features]
+default = ["backend-pikevm"]
+
+# Exposes flags for dumping IR and bytecode, useful for debugging or optimization.
+dump-phases = []
+
+# Enables the PikeVM backend.
+backend-pikevm = []
+
+# Prohibits all uses of unsafe code, for the paranoid.
+prohibit-unsafe = []
