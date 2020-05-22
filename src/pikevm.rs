@@ -157,6 +157,11 @@ fn try_match_state<Cursor: Cursorable>(
             nextinsn_or_fail!(matches)
         }
 
+        Insn::MatchAny => match cursor.next(&mut s.pos) {
+            Some(_) => nextinsn_or_fail!(true),
+            _ => StateMatch::Fail,
+        },
+
         Insn::MatchAnyExceptLineTerminator => match cursor.next(&mut s.pos) {
             Some(c2) => nextinsn_or_fail!(!Cursor::CharProps::is_line_terminator(c2)),
             _ => StateMatch::Fail,

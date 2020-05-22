@@ -45,7 +45,6 @@ There's lots of stuff still missing, maybe you want to contribute?
 - An API for replacing a string while substituting in capture groups (e.g. with `$1`)
 - An API for escaping a string to make it a literal
 - Implementing `std::str::pattern::Pattern`
-- The `s` flag ("DotAll")
 - The `tester` binary needs some real usage.
 
 ### Missing Performance Optimizations

@@ -129,6 +129,7 @@ impl Emitter {
                     self.emit_insn(Insn::Bracket(contents.clone()))
                 }
             }
+            Node::MatchAny => self.emit_insn(Insn::MatchAny),
             Node::MatchAnyExceptLineTerminator => {
                 self.emit_insn(Insn::MatchAnyExceptLineTerminator)
             }

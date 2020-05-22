@@ -238,6 +238,7 @@ impl<'a> MatchAttempter<'a> {
             Insn::AsciiBracket(bitmap) => {
                 self.run_scm_loop_impl(scm::MatchByteSet { bytes: bitmap }, min, max, *pos, cursor)
             }
+            Insn::MatchAny => self.run_scm_loop_impl(scm::MatchAny::new(), min, max, *pos, cursor),
             Insn::MatchAnyExceptLineTerminator => self.run_scm_loop_impl(
                 scm::MatchAnyExceptLineTerminator::new(),
                 min,
@@ -575,6 +576,8 @@ impl<'a> MatchAttempter<'a> {
                     }
 
                     Insn::Bracket(bc) => next_or_bt!(scm::Bracket { bc }.matches(&mut pos, cursor)),
+
+                    Insn::MatchAny => next_or_bt!(scm::MatchAny::new().matches(&mut pos, cursor)),
 
                     Insn::MatchAnyExceptLineTerminator => next_or_bt!(
                         scm::MatchAnyExceptLineTerminator::new().matches(&mut pos, cursor)

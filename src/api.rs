@@ -25,6 +25,10 @@ pub struct Flags {
     /// Equivalent to the 'm' flag in JavaScript.
     pub multiline: bool,
 
+    /// If set, . matches at line separators as well as any other character.
+    /// Equivalent to the 'm' flag in JavaScript.
+    pub dot_all: bool,
+
     /// If set, disable regex IR passes.
     pub no_opt: bool,
 
@@ -55,6 +59,9 @@ impl Flags {
                 }
                 'i' => {
                     result.icase = true;
+                }
+                's' => {
+                    result.dot_all = true;
                 }
                 _ => {
                     // Silently skip unsupported flags.

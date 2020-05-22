@@ -52,6 +52,9 @@ pub enum Node {
     /// Match an alternation like a|b.
     Alt(Box<Node>, Box<Node>),
 
+    /// Match anything including newlines.
+    MatchAny,
+
     /// Match anything except a newline.
     MatchAnyExceptLineTerminator,
 
@@ -130,6 +133,7 @@ impl Node {
             Node::Char { .. } => true,
             Node::CharSet { .. } => true,
             Node::Bracket { .. } => true,
+            Node::MatchAny => true,
             Node::MatchAnyExceptLineTerminator => true,
             _ => false,
         }
@@ -149,6 +153,7 @@ impl Node {
             Node::Alt(left, right) => {
                 Node::Alt(Box::new(left.duplicate()), Box::new(right.duplicate()))
             }
+            Node::MatchAny => Node::MatchAny,
             Node::MatchAnyExceptLineTerminator => Node::MatchAnyExceptLineTerminator,
             &Node::Anchor(anchor_type) => Node::Anchor(anchor_type),
 
@@ -247,6 +252,7 @@ where
                 self.process(left.as_ref());
                 self.process(right.as_ref());
             }
+            Node::MatchAny => {}
             Node::MatchAnyExceptLineTerminator => {}
             Node::Anchor { .. } => {}
             Node::Loop { loopee, .. } => self.process(loopee),
@@ -315,6 +321,7 @@ where
                 self.process(left.as_mut());
                 self.process(right.as_mut());
             }
+            Node::MatchAny => {}
             Node::MatchAnyExceptLineTerminator => {}
             Node::Anchor { .. } => {}
             Node::Loop { loopee, .. } => {
@@ -441,6 +448,9 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
         }
         Node::Alt(..) => {
             writeln!(f, "Alt")?;
+        }
+        Node::MatchAny => {
+            writeln!(f, "MatchAny")?;
         }
         Node::MatchAnyExceptLineTerminator => {
             writeln!(f, "MatchAnyExceptLineTerminator")?;

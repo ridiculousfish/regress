@@ -64,6 +64,39 @@ fn test_multiline() {
     test_with_configs(test_multiline_tc)
 }
 
+fn test_dotall_tc(tc: TestConfig) {
+    tc.compile(r".").test_fails("\n");
+    tc.compilef(r".", "s").match1f("\n").test_eq("\n");
+
+    tc.compile(r".").test_fails("\r");
+    tc.compilef(r".", "s").match1f("\r").test_eq("\r");
+
+    tc.compile(r".").test_fails("\u{2028}");
+    tc.compilef(r".", "s")
+        .match1f("\u{2028}")
+        .test_eq("\u{2028}");
+
+    tc.compile(r".").test_fails("\u{2029}");
+    tc.compilef(r".", "s")
+        .match1f("\u{2029}")
+        .test_eq("\u{2029}");
+
+    tc.compile("abc.def").test_fails("abc\ndef");
+    tc.compilef("abc.def", "s")
+        .match1f("abc\ndef")
+        .test_eq("abc\ndef");
+
+    tc.compile(".*").match1f("abc\ndef").test_eq("abc");
+    tc.compilef(".*", "s")
+        .match1f("abc\ndef")
+        .test_eq("abc\ndef");
+}
+
+#[test]
+fn test_dotall() {
+    test_with_configs(test_dotall_tc)
+}
+
 fn test_lookbehinds_tc(tc: TestConfig) {
     tc.compilef(r"(?<=efg)..", "")
         .match1f("abcdefghijk123456")

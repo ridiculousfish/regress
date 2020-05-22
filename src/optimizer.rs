@@ -133,6 +133,7 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
                 PassAction::Keep
             }
         }
+        Node::MatchAny => PassAction::Keep,
         Node::MatchAnyExceptLineTerminator => PassAction::Keep,
         Node::Anchor { .. } => PassAction::Keep,
         Node::Loop {
