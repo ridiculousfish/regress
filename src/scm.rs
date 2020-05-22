@@ -70,6 +70,21 @@ impl<'a, Cursor: Cursorable> SingleCharMatcher<Cursor> for Bracket<'a> {
     }
 }
 
+/// Insn::MatchAny
+pub struct MatchAny {}
+impl MatchAny {
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+impl<Cursor: Cursorable> SingleCharMatcher<Cursor> for MatchAny {
+    #[inline(always)]
+    fn matches(&self, pos: &mut Position, cursor: Cursor) -> bool {
+        // If there is a character, it counts as a match.
+        cursor.next(pos).is_some()
+    }
+}
+
 /// Insn::MatchAnyExceptLineTerminator
 pub struct MatchAnyExceptLineTerminator {}
 impl MatchAnyExceptLineTerminator {

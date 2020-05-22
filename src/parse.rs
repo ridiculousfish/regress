@@ -231,7 +231,11 @@ impl<'a> Parser<'a> {
 
                 '.' => {
                     self.consume('.');
-                    result.push(ir::Node::MatchAnyExceptLineTerminator);
+                    result.push(if self.flags.dot_all {
+                        ir::Node::MatchAny
+                    } else {
+                        ir::Node::MatchAnyExceptLineTerminator
+                    });
                 }
 
                 '(' => {

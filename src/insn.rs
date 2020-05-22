@@ -44,6 +44,10 @@ pub enum Insn {
     /// Match the end of a line; emitted by '$'
     EndOfLine,
 
+    /// Match any character except a line terminator; emitted by '.' only when
+    /// the dot_all flag is set to true.
+    MatchAny,
+
     /// Match any character except a line terminator; emitted by '.'
     MatchAnyExceptLineTerminator,
 

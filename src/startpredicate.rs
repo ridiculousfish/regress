@@ -150,6 +150,9 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         // Cats return the first non-None value, if any.
         Node::Cat(nodes) => nodes.iter().filter_map(compute_start_predicate).next(),
 
+        // MatchAny (aka .) is too common to do a fast prefix search for.
+        Node::MatchAny => arbitrary,
+
         // MatchAnyExceptLineTerminator (aka .) is too common to do a fast prefix search for.
         Node::MatchAnyExceptLineTerminator => arbitrary,
 
