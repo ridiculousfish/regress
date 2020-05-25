@@ -1,5 +1,6 @@
 use crate::insn::MAX_CHAR_SET_LENGTH;
 use std::fmt;
+extern crate memchr;
 
 /// Facilities for searching bytes.
 pub trait ByteSearcher {
@@ -56,6 +57,9 @@ macro_rules! literal_bytes_impl {
             impl ByteSearcher for [u8; $N] {
                 #[inline(always)]
                 fn find_in(&self, rhs: &[u8]) -> Option<usize> {
+                    if $N == 1 {
+                        return memchr::memchr(self[0], rhs)
+                    }
                     for win in rhs.windows(Self::LENGTH) {
                         if self.equals_known_len(win) {
                             // Black magic?
@@ -93,18 +97,15 @@ impl<ArraySet: SmallArraySet> ByteArraySet<ArraySet> {
 impl<ArraySet: SmallArraySet> ByteSearcher for ByteArraySet<ArraySet> {
     #[inline(always)]
     fn find_in(&self, rhs: &[u8]) -> Option<usize> {
-        // TODO: obvious vectorization opportunity.
-        for (idx, byte) in rhs.iter().enumerate() {
-            if self.0.contains(*byte) {
-                return Some(idx);
-            }
-        }
-        None
+        self.0.find_in(rhs)
     }
 }
 
+/// A SmallArraySet is a set implemented as a small byte array.
 pub trait SmallArraySet: Copy {
     fn contains(self, b: u8) -> bool;
+
+    fn find_in(self, rhs: &[u8]) -> Option<usize>;
 }
 
 // Beware: Rust is cranky about loop unrolling.
@@ -114,17 +115,38 @@ impl SmallArraySet for [u8; 2] {
     fn contains(self, b: u8) -> bool {
         b == self[0] || b == self[1]
     }
+
+    #[inline(always)]
+    fn find_in(self, rhs: &[u8]) -> Option<usize> {
+        memchr::memchr2(self[0], self[1], rhs)
+    }
 }
 impl SmallArraySet for [u8; 3] {
     #[inline(always)]
     fn contains(self, b: u8) -> bool {
         b == self[0] || b == self[1] || b == self[2]
     }
+
+    #[inline(always)]
+    fn find_in(self, rhs: &[u8]) -> Option<usize> {
+        memchr::memchr3(self[0], self[1], self[2], rhs)
+    }
 }
 impl SmallArraySet for [u8; 4] {
     #[inline(always)]
     fn contains(self, b: u8) -> bool {
         b == self[0] || b == self[1] || b == self[2] || b == self[3]
+    }
+
+    #[inline(always)]
+    fn find_in(self, rhs: &[u8]) -> Option<usize> {
+        // TODO.
+        for (idx, byte) in rhs.iter().enumerate() {
+            if self.contains(*byte) {
+                return Some(idx);
+            }
+        }
+        None
     }
 }
 
