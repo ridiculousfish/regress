@@ -4,9 +4,20 @@ oh no why
 
 ## Introduction
 
-regress is a backtracking regular expression engine implemented in Rust, which targets JavaScript regular expression syntax. See the crate documentation for more.
+regress is a backtracking regular expression engine implemented in Rust, which targets JavaScript regular expression syntax. See [the crate documentation](https://docs.rs/regress) for more.
 
-It's fast, Unicode-aware, has no dependencies outside of `std`, and has a big test suite.
+It's fast, Unicode-aware, has no dependencies outside of `std`, and has a big test suite. It makes fewer guarantees than the `regex` crate but it enables more syntactic features, such as backreferences and lookaround assertions.
+
+## Usage
+
+Add this to your `Cargo.toml`:
+
+```toml
+[dependencies]
+regress = "0.1"
+```
+
+
 
 ### Fun Tools
 
