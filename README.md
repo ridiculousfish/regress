@@ -6,7 +6,7 @@ oh no why
 
 regress is a backtracking regular expression engine implemented in Rust, which targets JavaScript regular expression syntax. See [the crate documentation](https://docs.rs/regress) for more.
 
-It's fast, Unicode-aware, has no dependencies outside of `std`, and has a big test suite. It makes fewer guarantees than the `regex` crate but it enables more syntactic features, such as backreferences and lookaround assertions.
+It's fast, Unicode-aware, has few dependencies, and has a big test suite. It makes fewer guarantees than the `regex` crate but it enables more syntactic features, such as backreferences and lookaround assertions.
 
 ## Usage
 
@@ -26,6 +26,10 @@ The `tester` binary can be used for some fun.
 You can see how things get compiled with the `dump-phases` crate feature:
 
     > cargo run --features dump-phases --bin tester 'x{3,4}' 'i'
+
+You can run a little benchmark too, for example:
+
+    > cargo run --release --bin tester 'abcd' 'i' --file ~/3200.txt
 
 
 ## Want to contribute?

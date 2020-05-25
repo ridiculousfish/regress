@@ -99,6 +99,10 @@ regress supports features that regex does not, in particular backreferences and 
 However the regex crate provides linear-time matching guarantees, while regress does not. This difference is due
 to the architecture: regex uses finite automata while regress uses "classical backtracking."
 
+# Comparison to fancy-regex crate
+
+fancy-regex wraps the regex crate and extends it with PCRE-style syntactic features. regress has more complete support for these features: backreferences may be case-insensitive, and lookbehinds may be arbitrary-width.
+
 # Architecture
 
 regress has a parser, intermediate representation, optimizer which acts on the IR, bytecode emitter, and two bytecode interpreters, referred to as "backends".
