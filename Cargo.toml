@@ -22,3 +22,6 @@ backend-pikevm = []
 
 # Prohibits all uses of unsafe code, for the paranoid.
 prohibit-unsafe = []
+
+[dependencies]
+memchr = "2.3.3"
