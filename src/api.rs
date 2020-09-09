@@ -128,32 +128,8 @@ impl Match {
         self.total_range.clone()
     }
 
-    pub fn groups(&self) -> Groups {
-        Groups::new(self)
-    }
-}
-
-pub struct Groups<'m> {
-    mat: &'m Match,
-    i: usize,
-}
-
-impl<'m> Groups<'m> {
-    fn new(mat: &'m Match) -> Self {
-        Self { mat, i: 0 }
-    }
-}
-
-impl<'m> Iterator for Groups<'m> {
-    type Item = Option<Range>;
-    fn next(&mut self) -> Option<Self::Item> {
-        let i = self.i;
-        self.i += 1;
-        let max = self.mat.captures.len() + 1;
-        match i {
-            i if i < max => Some(self.mat.group(i)),
-            _ => None,
-        }
+    pub fn groups(&self) -> impl Iterator<Item = Option<Range>> + '_ {
+        std::iter::once(Some(self.total())).chain(self.captures.iter().cloned())
     }
 }
 
