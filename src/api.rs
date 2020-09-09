@@ -128,6 +128,7 @@ impl Match {
         self.total_range.clone()
     }
 
+    /// Returns an iterator over the capture groups of a Match
     pub fn groups(&self) -> impl Iterator<Item = Option<Range>> + '_ {
         std::iter::once(Some(self.total())).chain(self.captures.iter().cloned())
     }
