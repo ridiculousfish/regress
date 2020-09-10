@@ -129,8 +129,44 @@ impl Match {
     }
 
     /// Returns an iterator over the capture groups of a Match
-    pub fn groups(&self) -> impl Iterator<Item = Option<Range>> + '_ {
-        std::iter::once(Some(self.total())).chain(self.captures.iter().cloned())
+    pub fn groups(&self) -> Groups {
+        Groups::new(self)
+    }
+}
+
+/// An iterator over the capture groups of a [`Match`]
+///
+/// This struct is created by the [`groups`] method on [`Match`].
+///
+/// [`Match`]: ../struct.Match.html
+/// [`groups`]: ../struct.Match.html#method.groups
+#[derive(Clone)]
+pub struct Groups<'m> {
+    mat: &'m Match,
+    i: usize,
+    max: usize,
+}
+
+impl<'m> Groups<'m> {
+    fn new(mat: &'m Match) -> Self {
+        Self {
+            mat,
+            i: 0,
+            max: mat.captures.len() + 1,
+        }
+    }
+}
+
+impl<'m> Iterator for Groups<'m> {
+    type Item = Option<Range>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let i = self.i;
+        if i < self.max {
+            self.i += 1;
+            Some(self.mat.group(i))
+        } else {
+            None
+        }
     }
 }
 
