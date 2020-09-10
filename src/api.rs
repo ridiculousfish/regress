@@ -128,7 +128,8 @@ impl Match {
         self.total_range.clone()
     }
 
-    /// Returns an iterator over the capture groups of a Match
+    /// Return an iterator over a Match. The first returned value is the total
+    /// match, and subsequent values represent the capture groups.
     pub fn groups(&self) -> Groups {
         Groups::new(self)
     }
