@@ -170,7 +170,7 @@ impl TestConfig {
         let mut flags = regress::Flags::from(flags_str);
         flags.no_opt = !self.optimize;
 
-        let re = regress::Regex::newf(pattern, flags);
+        let re = regress::Regex::with_flags(pattern, flags);
         assert!(
             re.is_ok(),
             "Failed to parse! flags: {} pattern: {}, error: {}",

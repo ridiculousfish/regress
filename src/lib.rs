@@ -63,7 +63,7 @@ regress supports Unicode case folding. For example:
 
 ```rust
 use regress::{Regex, Flags};
-let re = Regex::newf("\u{00B5}", Flags::from("i")).unwrap();
+let re = Regex::with_flags("\u{00B5}", Flags::from("i")).unwrap();
 assert!(re.find("\u{03BC}").is_some());
 ```
 
@@ -88,7 +88,7 @@ Example:
 
 ```rust
 use regress::{Flags, Regex};
-let re = Regex::newf("BC", Flags::from("i")).unwrap();
+let re = Regex::with_flags("BC", Flags::from("i")).unwrap();
 assert!(re.find("abcd").is_some());
 ```
 
