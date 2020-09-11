@@ -9,7 +9,7 @@ use crate::parse;
 #[cfg(feature = "backend-pikevm")]
 use crate::pikevm;
 
-use std::fmt;
+use std::{fmt, str::FromStr};
 
 pub use parse::Error;
 
@@ -269,6 +269,15 @@ impl Regex {
     /// `start`.
     pub fn find_from_ascii<'r, 't>(&'r self, text: &'t str, start: usize) -> AsciiMatches<'r, 't> {
         backends::find(self, text, start)
+    }
+}
+
+impl FromStr for Regex {
+    type Err = Error;
+
+    /// Attempts to parse a string into a regular expression
+    fn from_str(s: &str) -> Result<Self, Error> {
+        Self::new(s)
     }
 }
 
