@@ -183,7 +183,7 @@ impl Regex {
     /// Note that this is rather expensive; prefer to cache a Regex which is
     /// intended to be used more than once.
     pub fn new(pattern: &str) -> Result<Regex, Error> {
-        Self::newf(pattern, Flags::default())
+        Self::with_flags(pattern, Flags::default())
     }
 
     /// Construct a regex by parsing `pattern` with `flags`.
@@ -191,7 +191,7 @@ impl Regex {
     //
     /// Note it is preferable to cache a Regex which is intended to be used more
     /// than once, as the parse may be expensive. For example:
-    pub fn newf(pattern: &str, flags: Flags) -> Result<Regex, Error> {
+    pub fn with_flags(pattern: &str, flags: Flags) -> Result<Regex, Error> {
         let mut ire = parse::try_parse(pattern, flags)?;
 
         #[cfg(feature = "dump-phases")]

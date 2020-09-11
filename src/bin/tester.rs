@@ -82,7 +82,7 @@ fn main() -> Result<(), regress::Error> {
         flags.dump_opt_ir = true;
         flags.dump_bytecode = true;
     }
-    let re = regress::Regex::newf(pattern.as_str(), flags)?;
+    let re = regress::Regex::with_flags(pattern.as_str(), flags)?;
 
     loop {
         match args.next() {
