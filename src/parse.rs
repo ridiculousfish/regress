@@ -8,20 +8,23 @@ use crate::ir;
 use crate::types::{
     BracketContents, CaptureGroupID, CharacterClassType, MAX_CAPTURE_GROUPS, MAX_LOOPS,
 };
-use std::fmt;
-use std::iter::Peekable;
+use std::{error::Error as StdError, fmt, iter::Peekable};
 
 /// Represents an error encountered during regex compilation.
+///
 /// The text contains a human-readable error message.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Error {
     pub text: String,
 }
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(&self.text)
     }
 }
+
+impl StdError for Error {}
 
 enum ClassAtom {
     CodePoint(char),
