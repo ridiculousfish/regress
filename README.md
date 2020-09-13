@@ -23,13 +23,13 @@ regress = "0.1"
 
 The `tester` binary can be used for some fun.
 
-You can see how things get compiled with the `dump-phases` crate feature:
+You can see how things get compiled with the `dump-all` cli flag:
 
-    > cargo run --features dump-phases --bin tester 'x{3,4}' 'i'
+    > cargo run 'x{3,4}' 'i' --dump-phases
 
 You can run a little benchmark too, for example:
 
-    > cargo run --release --bin tester 'abcd' 'i' --file ~/3200.txt
+    > cargo run --release -- 'abcd' 'i' --bench ~/3200.txt
 
 
 ## Want to contribute?
@@ -49,7 +49,6 @@ There's lots of stuff still missing, maybe you want to contribute?
 - An API for replacing a string while substituting in capture groups (e.g. with `$1`)
 - An API for escaping a string to make it a literal
 - Implementing `std::str::pattern::Pattern`
-- The `tester` binary needs some real usage.
 
 ### Missing Performance Optimizations
 
