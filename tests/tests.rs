@@ -147,7 +147,7 @@ fn test_lookbehinds_mjsunit() {
     test_with_configs(test_lookbehinds_mjsunit_tc)
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
+#[rustfmt::skip]
 fn test_lookbehinds_mjsunit_tc(tc: TestConfig) {
     // alternations.js
     tc.compilef(r".*(?<=(..|...|....))(.*)", "").match1f("xabcd").test_eq("xabcd,cd,");
@@ -394,84 +394,84 @@ fn run_regexp_lookahead_tests() {
     test_with_configs(run_regexp_lookahead_tests_tc)
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
+#[rustfmt::skip]
 fn run_regexp_lookahead_tests_tc(tc: TestConfig) {
     // From regexp-lookahead.js
     tc.test_match_succeeds(r#"^(?=a)"#, "", "a");
     tc.test_match_fails(r#"^(?=a)"#, "", "b");
-    tc.compilef(r#"^(?=a)"#, "").match1f("a").test_eq(""); 
+    tc.compilef(r#"^(?=a)"#, "").match1f("a").test_eq("");
     tc.test_match_succeeds(r#"^(?=\woo)f\w"#, "", "foo");
     tc.test_match_fails(r#"^(?=\woo)f\w"#, "", "boo");
     tc.test_match_fails(r#"^(?=\woo)f\w"#, "", "fao");
     tc.test_match_fails(r#"^(?=\woo)f\w"#, "", "foa");
-    tc.compilef(r#"^(?=\woo)f\w"#, "").match1f("foo").test_eq("fo"); 
+    tc.compilef(r#"^(?=\woo)f\w"#, "").match1f("foo").test_eq("fo");
     tc.test_match_succeeds(r#"(?=\w).(?=\W)"#, "", r#".a! "#);
     tc.test_match_fails(r#"(?=\w).(?=\W)"#, "", r#".! "#);
     tc.test_match_succeeds(r#"(?=\w).(?=\W)"#, "", r#".ab! "#);
-    tc.compilef(r#"(?=\w).(?=\W)"#, "").match1f(r#".ab! "#).test_eq("b"); 
+    tc.compilef(r#"(?=\w).(?=\W)"#, "").match1f(r#".ab! "#).test_eq("b");
     tc.test_match_succeeds(r#"(?=f(?=[^f]o)).."#, "", r#", foo!"#);
     tc.test_match_fails(r#"(?=f(?=[^f]o)).."#, "", r#", fo!"#);
     tc.test_match_fails(r#"(?=f(?=[^f]o)).."#, "", ", ffo");
-    tc.compilef(r#"(?=f(?=[^f]o)).."#, "").match1f(r#", foo!"#).test_eq("fo"); 
+    tc.compilef(r#"(?=f(?=[^f]o)).."#, "").match1f(r#", foo!"#).test_eq("fo");
     tc.test_match_succeeds(r#"^[^'"]*(?=(['"])).*\1(\w+)\1"#, "", "  'foo' ");
     tc.test_match_succeeds(r#"^[^'"]*(?=(['"])).*\1(\w+)\1"#, "", r#"  "foo" "#);
     tc.test_match_fails(r#"^[^'"]*(?=(['"])).*\1(\w+)\1"#, "", r#" " 'foo' "#);
     tc.test_match_fails(r#"^[^'"]*(?=(['"])).*\1(\w+)\1"#, "", r#" ' "foo" "#);
     tc.test_match_fails(r#"^[^'"]*(?=(['"])).*\1(\w+)\1"#, "", r#"  'foo" "#);
     tc.test_match_fails(r#"^[^'"]*(?=(['"])).*\1(\w+)\1"#, "", r#"  "foo' "#);
-    tc.compilef(r#"^[^'"]*(?=(['"])).*\1(\w+)\1"#, "").match1f("  'foo' ").test_eq("  'foo',',foo"); 
-    tc.compilef(r#"^[^'"]*(?=(['"])).*\1(\w+)\1"#, "").match1f(r#"  "foo" "#).test_eq(r#"  "foo",",foo"#); 
+    tc.compilef(r#"^[^'"]*(?=(['"])).*\1(\w+)\1"#, "").match1f("  'foo' ").test_eq("  'foo',',foo");
+    tc.compilef(r#"^[^'"]*(?=(['"])).*\1(\w+)\1"#, "").match1f(r#"  "foo" "#).test_eq(r#"  "foo",",foo"#);
     tc.test_match_succeeds(r#"^(?:(?=(.))a|b)\1$"#, "", "aa");
     tc.test_match_succeeds(r#"^(?:(?=(.))a|b)\1$"#, "", "b");
     tc.test_match_fails(r#"^(?:(?=(.))a|b)\1$"#, "", "bb");
     tc.test_match_fails(r#"^(?:(?=(.))a|b)\1$"#, "", "a");
-    tc.compilef(r#"^(?:(?=(.))a|b)\1$"#, "").match1f("aa").test_eq("aa,a"); 
-    tc.compilef(r#"^(?:(?=(.))a|b)\1$"#, "").match1f("b").test_eq("b,"); 
+    tc.compilef(r#"^(?:(?=(.))a|b)\1$"#, "").match1f("aa").test_eq("aa,a");
+    tc.compilef(r#"^(?:(?=(.))a|b)\1$"#, "").match1f("b").test_eq("b,");
     tc.test_match_succeeds(r#"^(?=(.)(?=(.)\1\2)\2\1)\1\2"#, "", "abab");
     tc.test_match_succeeds(r#"^(?=(.)(?=(.)\1\2)\2\1)\1\2"#, "", "ababxxxxxxxx");
     tc.test_match_fails(r#"^(?=(.)(?=(.)\1\2)\2\1)\1\2"#, "", "aba");
-    tc.compilef(r#"^(?=(.)(?=(.)\1\2)\2\1)\1\2"#, "").match1f("abab").test_eq("ab,a,b"); 
+    tc.compilef(r#"^(?=(.)(?=(.)\1\2)\2\1)\1\2"#, "").match1f("abab").test_eq("ab,a,b");
     tc.test_match_succeeds(r#"^(?:(?=(.))a|b|c)$"#, "", "a");
     tc.test_match_succeeds(r#"^(?:(?=(.))a|b|c)$"#, "", "b");
     tc.test_match_succeeds(r#"^(?:(?=(.))a|b|c)$"#, "", "c");
     tc.test_match_fails(r#"^(?:(?=(.))a|b|c)$"#, "", "d");
-    tc.compilef(r#"^(?:(?=(.))a|b|c)$"#, "").match1f("a").test_eq("a,a"); 
-    tc.compilef(r#"^(?:(?=(.))a|b|c)$"#, "").match1f("b").test_eq("b,"); 
-    tc.compilef(r#"^(?:(?=(.))a|b|c)$"#, "").match1f("c").test_eq("c,"); 
-    tc.compilef(r#"^(?=(b))b"#, "").match1f("b").test_eq("b,b"); 
-    tc.compilef(r#"^(?:(?=(b))|a)b"#, "").match1f("ab").test_eq("ab,"); 
-    tc.compilef(r#"^(?:(?=(b)(?:(?=(c))|d))|)bd"#, "").match1f("bd").test_eq("bd,b,"); 
+    tc.compilef(r#"^(?:(?=(.))a|b|c)$"#, "").match1f("a").test_eq("a,a");
+    tc.compilef(r#"^(?:(?=(.))a|b|c)$"#, "").match1f("b").test_eq("b,");
+    tc.compilef(r#"^(?:(?=(.))a|b|c)$"#, "").match1f("c").test_eq("c,");
+    tc.compilef(r#"^(?=(b))b"#, "").match1f("b").test_eq("b,b");
+    tc.compilef(r#"^(?:(?=(b))|a)b"#, "").match1f("ab").test_eq("ab,");
+    tc.compilef(r#"^(?:(?=(b)(?:(?=(c))|d))|)bd"#, "").match1f("bd").test_eq("bd,b,");
     tc.test_match_succeeds(r#"(?!x)."#, "", "y");
     tc.test_match_fails(r#"(?!x)."#, "", "x");
-    tc.compilef(r#"(?!x)."#, "").match1f("y").test_eq("y"); 
+    tc.compilef(r#"(?!x)."#, "").match1f("y").test_eq("y");
     tc.test_match_succeeds(r#"(?!(\d))|\d"#, "", "4");
-    tc.compilef(r#"(?!(\d))|\d"#, "").match1f("4").test_eq("4,"); 
-    tc.compilef(r#"(?!(\d))|\d"#, "").match1f("x").test_eq(","); 
+    tc.compilef(r#"(?!(\d))|\d"#, "").match1f("4").test_eq("4,");
+    tc.compilef(r#"(?!(\d))|\d"#, "").match1f("x").test_eq(",");
     tc.test_match_succeeds(r#"^(?=(x)(?=(y)))"#, "", "xy");
     tc.test_match_fails(r#"^(?=(x)(?=(y)))"#, "", "xz");
-    tc.compilef(r#"^(?=(x)(?=(y)))"#, "").match1f("xy").test_eq(",x,y"); 
+    tc.compilef(r#"^(?=(x)(?=(y)))"#, "").match1f("xy").test_eq(",x,y");
     tc.test_match_succeeds(r#"^(?!(x)(?!(y)))"#, "", "xy");
     tc.test_match_fails(r#"^(?!(x)(?!(y)))"#, "", "xz");
-    tc.compilef(r#"^(?!(x)(?!(y)))"#, "").match1f("xy").test_eq(",,"); 
+    tc.compilef(r#"^(?!(x)(?!(y)))"#, "").match1f("xy").test_eq(",,");
     tc.test_match_succeeds(r#"^(?=(x)(?!(y)))"#, "", "xz");
     tc.test_match_fails(r#"^(?=(x)(?!(y)))"#, "", "xy");
-    tc.compilef(r#"^(?=(x)(?!(y)))"#, "").match1f("xz").test_eq(",x,"); 
+    tc.compilef(r#"^(?=(x)(?!(y)))"#, "").match1f("xz").test_eq(",x,");
     tc.test_match_succeeds(r#"^(?!(x)(?=(y)))"#, "", "xz");
     tc.test_match_fails(r#"^(?!(x)(?=(y)))"#, "", "xy");
-    tc.compilef(r#"^(?!(x)(?=(y)))"#, "").match1f("xz").test_eq(",,"); 
+    tc.compilef(r#"^(?!(x)(?=(y)))"#, "").match1f("xz").test_eq(",,");
     tc.test_match_succeeds(r#"^(?=(x)(?!(y)(?=(z))))"#, "", "xaz");
     tc.test_match_succeeds(r#"^(?=(x)(?!(y)(?=(z))))"#, "", "xya");
     tc.test_match_fails(r#"^(?=(x)(?!(y)(?=(z))))"#, "", "xyz");
     tc.test_match_fails(r#"^(?=(x)(?!(y)(?=(z))))"#, "", "a");
-    tc.compilef(r#"^(?=(x)(?!(y)(?=(z))))"#, "").match1f("xaz").test_eq(",x,,"); 
-    tc.compilef(r#"^(?=(x)(?!(y)(?=(z))))"#, "").match1f("xya").test_eq(",x,,"); 
+    tc.compilef(r#"^(?=(x)(?!(y)(?=(z))))"#, "").match1f("xaz").test_eq(",x,,");
+    tc.compilef(r#"^(?=(x)(?!(y)(?=(z))))"#, "").match1f("xya").test_eq(",x,,");
     tc.test_match_succeeds(r#"^(?!(x)(?=(y)(?!(z))))"#, "", "a");
     tc.test_match_succeeds(r#"^(?!(x)(?=(y)(?!(z))))"#, "", "xa");
     tc.test_match_succeeds(r#"^(?!(x)(?=(y)(?!(z))))"#, "", "xyz");
     tc.test_match_fails(r#"^(?!(x)(?=(y)(?!(z))))"#, "", "xya");
-    tc.compilef(r#"^(?!(x)(?=(y)(?!(z))))"#, "").match1f("a").test_eq(",,,"); 
-    tc.compilef(r#"^(?!(x)(?=(y)(?!(z))))"#, "").match1f("xa").test_eq(",,,"); 
-    tc.compilef(r#"^(?!(x)(?=(y)(?!(z))))"#, "").match1f("xyz").test_eq(",,,");     
+    tc.compilef(r#"^(?!(x)(?=(y)(?!(z))))"#, "").match1f("a").test_eq(",,,");
+    tc.compilef(r#"^(?!(x)(?=(y)(?!(z))))"#, "").match1f("xa").test_eq(",,,");
+    tc.compilef(r#"^(?!(x)(?=(y)(?!(z))))"#, "").match1f("xyz").test_eq(",,,");
 }
 
 #[test]
@@ -567,7 +567,7 @@ fn run_regexp_standalones() {
     test_with_configs(run_regexp_standalones_tc)
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
+#[rustfmt::skip]
 fn run_regexp_standalones_tc(tc: TestConfig) {
     // From regexp-standalones.js
     tc.compilef(r"^\d", "m").run_global_match("aaa\n789\r\nccc\r\n345").test_eq("7,3");
@@ -588,7 +588,7 @@ fn run_regexp_regexp() {
     test_with_configs(run_regexp_regexp_tc)
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
+#[rustfmt::skip]
 fn run_regexp_regexp_tc(tc: TestConfig) {
     // From regexp.js
     tc.compilef("[\u{0}]", "").match1f("[\u{0}]").test_eq("\u{0}");

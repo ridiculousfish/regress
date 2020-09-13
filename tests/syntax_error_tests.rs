@@ -1,5 +1,3 @@
-use regress;
-
 fn test_1_error(pattern: &str, expected_err: &str) {
     let res = regress::Regex::new(pattern);
     assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);
