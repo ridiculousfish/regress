@@ -58,7 +58,7 @@ fn run_pcre_match_tests() {
     test_with_configs(run_pcre_match_tests_config)
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
+#[rustfmt::skip]
 fn run_pcre_match_tests_config(tc: TestConfig) {
     let run1_match = |pattern: &str, flags_str: &str, input: &str| -> String {
         let cr = tc.compilef(pattern, flags_str);
