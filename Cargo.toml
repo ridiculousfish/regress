@@ -8,14 +8,13 @@ repository = "https://github.com/ridiculousfish/regress"
 keywords = ["regex", "regexp"]
 edition = "2018"
 readme = "README.md"
+default-run = "tester"
 
 [profile.release]
 
 [features]
-default = ["backend-pikevm"]
-
-# Exposes flags for dumping IR and bytecode, useful for debugging or optimization.
-dump-phases = []
+default = ["backend-pikevm", "cli"]
+cli = ["structopt"]
 
 # Enables the PikeVM backend.
 backend-pikevm = []
@@ -25,3 +24,11 @@ prohibit-unsafe = []
 
 [dependencies]
 memchr = "2.3.3"
+
+# Optional dependencies
+structopt = { version = "0.3", optional = true}
+
+[[bin]]
+name = "tester"
+path = "src/bin/tester.rs"
+required-features = ["cli"]

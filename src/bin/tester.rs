@@ -1,11 +1,52 @@
-use std::env;
-use std::fs;
-use std::time::Instant;
+use regress::{backends, Error, Flags, Regex};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    time::Instant,
+};
+use structopt::StructOpt;
 
-fn print_usage(n: &str) {
-    println!("Usage: {} <pattern> <flags> <input>...", n);
-    println!("       {} <pattern> <flags>  --file <file_input>...", n);
-    println!("       {} <pattern> <flags>  --bench <file_input>...", n);
+#[derive(Debug, StructOpt)]
+#[structopt(name = "tester")]
+struct Opt {
+    /// The regular expression.
+    pattern: String,
+
+    /// The flags of the regular expression.
+    #[structopt(long, short, parse(from_str = Flags::from))]
+    flags: Option<Flags>,
+
+    /// Should the regular expression be optimized.
+    #[structopt(long, short)]
+    optimization: Option<bool>,
+
+    /// Dump the unoptimized IR to stdout
+    #[structopt(long)]
+    dump_unoptimized_ir: bool,
+
+    /// Dump the optimized IR to stdout
+    #[structopt(long)]
+    dump_optimized_ir: bool,
+
+    /// Dump the bytecode to stdout.
+    #[structopt(long)]
+    dump_bytecode: bool,
+
+    /// Dump all regular expression compilation phases to stdout.
+    #[structopt(long)]
+    dump_phases: bool,
+
+    /// The input values to match against.
+    #[structopt(conflicts_with_all = &["bench", "file"])]
+    inputs: Vec<String>,
+
+    /// Match against the contents of a specified file.
+    #[structopt(long, conflicts_with_all = &["bench", "inputs"])]
+    file: Option<PathBuf>,
+
+    /// Benchmark the matches of the specified file.
+    #[structopt(long, conflicts_with_all = &["file", "inputs"])]
+    bench: Option<PathBuf>,
 }
 
 fn format_match(r: &regress::Match, input: &str) -> String {
@@ -19,32 +60,21 @@ fn format_match(r: &regress::Match, input: &str) -> String {
     result
 }
 
-fn exec_re_on_string(re: &regress::Regex, input: &str) {
+fn exec_re_on_string(re: &Regex, input: &str) {
     let mut matches = re.find_iter(input);
     if let Some(res) = matches.next() {
         let count = 1 + matches.count();
-        println!(
-            "Match: {}, total: {}",
-            format_match(&res, &input),
-            1 + count
-        );
+        println!("Match: {}, total: {}", format_match(&res, &input), count);
     } else {
         println!("No match");
     }
 }
 
-fn exec_re_on_path(re: &regress::Regex, path: &str) {
-    match fs::read_to_string(path) {
-        Ok(contents) => exec_re_on_string(re, contents.as_str()),
-        Err(err) => println!("{}: {}", err, path),
-    }
-}
-
-fn bench_re_on_path(re: &regress::Regex, path: &str) {
+fn bench_re_on_path(re: &Regex, path: &Path) {
     let contents = match fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(err) => {
-            println!("{}: {}", err, path);
+            println!("{}: {}", err, path.display());
             return;
         }
     };
@@ -59,45 +89,37 @@ fn bench_re_on_path(re: &regress::Regex, path: &str) {
     println!("{} ms", duration.as_millis());
 }
 
-fn main() -> Result<(), regress::Error> {
-    let mut args = env::args();
+fn main() -> Result<(), Error> {
+    let args = Opt::from_args();
 
-    // argv[0] is program name.
-    let proc_name = args.next().unwrap_or_default();
-
-    // argv[1] is the pattern.
-    let pattern = args.next().unwrap_or_else(|| {
-        print_usage(&proc_name);
-        std::process::exit(1)
-    });
-
-    // argv[2] are flags.
-    let mut flags = regress::Flags::default();
-    if let Some(flags_str) = args.next() {
-        flags = regress::Flags::from(flags_str.as_str());
+    let flags = args.flags.unwrap_or_default();
+    let mut ire = backends::try_parse(&args.pattern, flags)?;
+    if args.dump_phases || args.dump_unoptimized_ir {
+        println!("Unoptimized IR:\n{}", ire);
     }
-    #[cfg(feature = "dump-phases")]
-    {
-        flags.dump_init_ir = true;
-        flags.dump_opt_ir = true;
-        flags.dump_bytecode = true;
-    }
-    let re = regress::Regex::with_flags(pattern.as_str(), flags)?;
 
-    loop {
-        match args.next() {
-            None => break,
-            Some(s) if s == "--file" => {
-                let path = args.next().expect("No file provided");
-                exec_re_on_path(&re, path.as_str());
-            }
-            Some(s) if s == "--bench" => {
-                let path = args.next().expect("No file provided");
-                bench_re_on_path(&re, path.as_str());
-            }
-            Some(s) => {
-                exec_re_on_string(&re, s.as_str());
-            }
+    if args.optimization.unwrap_or(true) {
+        backends::optimize(&mut ire);
+        if args.dump_phases || args.dump_optimized_ir {
+            println!("Optimized IR:\n{}", ire);
+        }
+    }
+    let cr = backends::emit(&ire);
+    if args.dump_phases || args.dump_bytecode {
+        println!("Bytecode:\n{:#?}", cr);
+    }
+    let re = cr.into();
+
+    if let Some(ref path) = args.file {
+        match fs::read_to_string(path) {
+            Ok(contents) => exec_re_on_string(&re, contents.as_str()),
+            Err(err) => println!("{}: {}", err, path.display()),
+        };
+    } else if let Some(ref path) = args.bench {
+        bench_re_on_path(&re, &path);
+    } else {
+        for input in args.inputs {
+            exec_re_on_string(&re, &input);
         }
     }
     Ok(())

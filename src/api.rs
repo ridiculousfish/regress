@@ -31,18 +31,6 @@ pub struct Flags {
 
     /// If set, disable regex IR passes.
     pub no_opt: bool,
-
-    /// If set, dump the IR before optimization.
-    #[cfg(feature = "dump-phases")]
-    pub dump_init_ir: bool,
-
-    /// If set, dump the IR after optimization.
-    #[cfg(feature = "dump-phases")]
-    pub dump_opt_ir: bool,
-
-    /// If set, dump the emitted bytecode.
-    #[cfg(feature = "dump-phases")]
-    pub dump_bytecode: bool,
 }
 
 impl Flags {
@@ -177,6 +165,12 @@ pub struct Regex {
     cr: CompiledRegex,
 }
 
+impl From<CompiledRegex> for Regex {
+    fn from(cr: CompiledRegex) -> Self {
+        Self { cr }
+    }
+}
+
 impl Regex {
     /// Construct a regex by parsing `pattern` using the default flags.
     /// An Error may be returned if the syntax is invalid.
@@ -193,31 +187,10 @@ impl Regex {
     /// than once, as the parse may be expensive. For example:
     pub fn with_flags(pattern: &str, flags: Flags) -> Result<Regex, Error> {
         let mut ire = parse::try_parse(pattern, flags)?;
-
-        #[cfg(feature = "dump-phases")]
-        {
-            if flags.dump_init_ir {
-                println!("Unoptimized IR:\n{}", ire);
-            }
-        }
-
         if !flags.no_opt {
             optimizer::optimize(&mut ire);
-
-            #[cfg(feature = "dump-phases")]
-            {
-                if flags.dump_opt_ir {
-                    println!("Optimized IR:\n{}", ire);
-                }
-            }
         }
         let cr = emit::emit(&ire);
-        #[cfg(feature = "dump-phases")]
-        {
-            if flags.dump_bytecode {
-                println!("Bytecode:\n{:?}", cr);
-            }
-        }
         Ok(Regex { cr })
     }
 
@@ -288,6 +261,9 @@ pub mod backends {
     use super::exec;
     use super::indexing;
     use super::Regex;
+    pub use crate::emit::emit;
+    pub use crate::optimizer::optimize;
+    pub use crate::parse::try_parse;
 
     /// An Executor using the classical backtracking algorithm.
     pub type BacktrackExecutor<'r, 't> =
