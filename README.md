@@ -41,7 +41,6 @@ There's lots of stuff still missing, maybe you want to contribute?
 ### Currently Missing Syntax
 
 - Named capture groups like `(?<count>\d+)`
-- Named character classes like `[[:alpha:]]`
 - Unicode property escapes like `\p{Sc}`
 
 ### Currently Missing Features
