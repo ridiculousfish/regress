@@ -62,8 +62,8 @@ Note the parser assumes the `u` (Unicode) flag, as the non-Unicode path is tied 
 regress supports Unicode case folding. For example:
 
 ```rust
-use regress::{Regex, Flags};
-let re = Regex::with_flags("\u{00B5}", Flags::from("i")).unwrap();
+use regress::Regex;
+let re = Regex::with_flags("\u{00B5}", "i").unwrap();
 assert!(re.find("\u{03BC}").is_some());
 ```
 
@@ -87,8 +87,8 @@ This may provide improved performance if you do not need Unicode semantics, beca
 Example:
 
 ```rust
-use regress::{Flags, Regex};
-let re = Regex::with_flags("BC", Flags::from("i")).unwrap();
+use regress::Regex;
+let re = Regex::with_flags("BC", "i").unwrap();
 assert!(re.find("abcd").is_some());
 ```
 
