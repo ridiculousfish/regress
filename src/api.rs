@@ -38,6 +38,7 @@ impl Flags {
     /// 'i' means to ignore case, 'm' means multiline.
     /// Note the 'g' flag implies a stateful regex and is not supported.
     /// Other flags are not implemented and are ignored.
+    #[inline]
     pub fn from(s: &str) -> Self {
         let mut result = Self::default();
         for c in s.chars() {
@@ -102,6 +103,7 @@ impl Match {
     /// Access a group by index, using the convention of Python's group()
     /// function. Index 0 is the total match, index 1 is the first capture
     /// group.
+    #[inline]
     pub fn group(&self, idx: usize) -> Option<Range> {
         if idx == 0 {
             Some(self.total_range.clone())
@@ -112,12 +114,14 @@ impl Match {
 
     /// Return the total range. This is a convenience function to work around
     /// the fact that Range does not support Copy.
+    #[inline]
     pub fn total(&self) -> Range {
         self.total_range.clone()
     }
 
     /// Return an iterator over a Match. The first returned value is the total
     /// match, and subsequent values represent the capture groups.
+    #[inline]
     pub fn groups(&self) -> Groups {
         Groups::new(self)
     }
@@ -137,6 +141,7 @@ pub struct Groups<'m> {
 }
 
 impl<'m> Groups<'m> {
+    #[inline]
     fn new(mat: &'m Match) -> Self {
         Self {
             mat,
@@ -148,6 +153,8 @@ impl<'m> Groups<'m> {
 
 impl<'m> Iterator for Groups<'m> {
     type Item = Option<Range>;
+
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         let i = self.i;
         if i < self.max {
@@ -176,6 +183,7 @@ impl Regex {
     /// An Error may be returned if the syntax is invalid.
     /// Note that this is rather expensive; prefer to cache a Regex which is
     /// intended to be used more than once.
+    #[inline]
     pub fn new(pattern: &str) -> Result<Regex, Error> {
         Self::with_flags(pattern, Flags::default())
     }
@@ -185,6 +193,7 @@ impl Regex {
     //
     /// Note it is preferable to cache a Regex which is intended to be used more
     /// than once, as the parse may be expensive. For example:
+    #[inline]
     pub fn with_flags(pattern: &str, flags: Flags) -> Result<Regex, Error> {
         let mut ire = parse::try_parse(pattern, flags)?;
         if !flags.no_opt {
@@ -195,6 +204,7 @@ impl Regex {
     }
 
     /// Searches `text` to find the first match.
+    #[inline]
     pub fn find(&self, text: &str) -> Option<Match> {
         self.find_iter(text).next()
     }
@@ -202,6 +212,7 @@ impl Regex {
     /// Searches `text`, returning an iterator over non-overlapping matches.
     /// Note that the resulting Iterator borrows both the regex `'r` and the
     /// input string as `'t`.
+    #[inline]
     pub fn find_iter<'r, 't>(&'r self, text: &'t str) -> Matches<'r, 't> {
         self.find_from(text, 0)
     }
@@ -220,6 +231,7 @@ impl Regex {
     ///   let t2 = re.find_from(text, 1).next().unwrap().total();
     ///   assert!(t2 == (1..2));
     ///   ```
+    #[inline]
     pub fn find_from<'r, 't>(&'r self, text: &'t str, start: usize) -> Matches<'r, 't> {
         backends::find(self, text, start)
     }
@@ -227,6 +239,7 @@ impl Regex {
     /// Searches `text` to find the first match.
     /// The input text is expected to be ascii-only: only ASCII case-folding is
     /// supported.
+    #[inline]
     pub fn find_ascii(&self, text: &str) -> Option<Match> {
         self.find_iter_ascii(text).next()
     }
@@ -234,12 +247,14 @@ impl Regex {
     /// Searches `text`, returning an iterator over non-overlapping matches.
     /// The input text is expected to be ascii-only: only ASCII case-folding is
     /// supported.
+    #[inline]
     pub fn find_iter_ascii<'r, 't>(&'r self, text: &'t str) -> AsciiMatches<'r, 't> {
         self.find_from_ascii(text, 0)
     }
 
     /// Returns an iterator for matches found in 'text' starting at byte index
     /// `start`.
+    #[inline]
     pub fn find_from_ascii<'r, 't>(&'r self, text: &'t str, start: usize) -> AsciiMatches<'r, 't> {
         backends::find(self, text, start)
     }
@@ -249,6 +264,7 @@ impl FromStr for Regex {
     type Err = Error;
 
     /// Attempts to parse a string into a regular expression
+    #[inline]
     fn from_str(s: &str) -> Result<Self, Error> {
         Self::new(s)
     }

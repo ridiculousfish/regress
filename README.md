@@ -23,7 +23,7 @@ regress = "0.1"
 
 The `tester` binary can be used for some fun.
 
-You can see how things get compiled with the `dump-all` cli flag:
+You can see how things get compiled with the `dump-phases` cli flag:
 
     > cargo run 'x{3,4}' 'i' --dump-phases
 
