@@ -33,13 +33,13 @@ pub struct Flags {
     pub no_opt: bool,
 }
 
-impl Flags {
+impl From<&str> for Flags {
     /// Construct a Flags from a string, using JavaScript field names.
     /// 'i' means to ignore case, 'm' means multiline.
     /// Note the 'g' flag implies a stateful regex and is not supported.
     /// Other flags are not implemented and are ignored.
     #[inline]
-    pub fn from(s: &str) -> Self {
+    fn from(s: &str) -> Self {
         let mut result = Self::default();
         for c in s.chars() {
             match c {
@@ -194,7 +194,11 @@ impl Regex {
     /// Note it is preferable to cache a Regex which is intended to be used more
     /// than once, as the parse may be expensive. For example:
     #[inline]
-    pub fn with_flags(pattern: &str, flags: Flags) -> Result<Regex, Error> {
+    pub fn with_flags<F>(pattern: &str, flags: F) -> Result<Regex, Error>
+    where
+        F: Into<Flags>,
+    {
+        let flags = flags.into();
         let mut ire = parse::try_parse(pattern, flags)?;
         if !flags.no_opt {
             optimizer::optimize(&mut ire);
