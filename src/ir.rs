@@ -112,18 +112,12 @@ impl Node {
 
     /// \return whether this is an Empty node.
     pub fn is_empty(&self) -> bool {
-        match self {
-            Node::Empty => true,
-            _ => false,
-        }
+        matches!(self, Node::Empty)
     }
 
     /// \return whether this is a Cat node.
     pub fn is_cat(&self) -> bool {
-        match self {
-            Node::Cat(..) => true,
-            _ => false,
-        }
+        matches!(self, Node::Cat(..))
     }
 
     /// \return whether this node is known to match exactly one char.
