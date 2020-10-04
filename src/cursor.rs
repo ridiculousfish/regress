@@ -109,26 +109,26 @@ impl<Dir: Direction, Inp: InputIndexer> Cursorable for Cursor<Dir, Inp> {
 
     fn remaining_len(&self, pos: Position) -> usize {
         if Self::FORWARD {
-            self.input.bytelength() - pos.pos
+            self.input.bytelength() - pos.0
         } else {
-            pos.pos
+            pos.0
         }
     }
 
     fn peek_right(&self, pos: Position) -> Option<Self::Element> {
-        self.input.peek_right(pos.pos)
+        self.input.peek_right(pos)
     }
 
     fn peek_left(&self, pos: Position) -> Option<Self::Element> {
-        self.input.peek_left(pos.pos)
+        self.input.peek_left(pos)
     }
 
     #[inline(always)]
     fn next_byte(&self, pos: &mut Position) -> Option<u8> {
         let mc = if Self::FORWARD {
-            self.input.peek_byte_right(pos.pos)
+            self.input.peek_byte_right(*pos)
         } else {
-            self.input.peek_byte_left(pos.pos)
+            self.input.peek_byte_left(*pos)
         };
         if mc.is_some() {
             self.advance(pos, 1);
@@ -150,9 +150,9 @@ impl<Dir: Direction, Inp: InputIndexer> Cursorable for Cursor<Dir, Inp> {
 
     fn remaining_bytes(&self, pos: Position) -> &[u8] {
         if Self::FORWARD {
-            self.input.slice(pos.pos..self.input.bytelength())
+            self.input.slice(pos.0..self.input.bytelength())
         } else {
-            self.input.slice(0..pos.pos)
+            self.input.slice(0..pos.0)
         }
     }
 
@@ -164,9 +164,9 @@ impl<Dir: Direction, Inp: InputIndexer> Cursorable for Cursor<Dir, Inp> {
             false
         } else {
             let r = if Self::FORWARD {
-                (pos.pos)..(pos.pos + len)
+                (pos.0)..(pos.0 + len)
             } else {
-                (pos.pos - len)..pos.pos
+                (pos.0 - len)..pos.0
             };
             let s1 = self.input.slice(r);
             if s1.len() != len {
@@ -185,9 +185,9 @@ impl<Dir: Direction, Inp: InputIndexer> Cursorable for Cursor<Dir, Inp> {
     fn advance(&self, pos: &mut Position, amt: usize) {
         debug_assert!(amt <= self.remaining_len(*pos), "Advanced out of bounds");
         if Self::FORWARD {
-            pos.pos += amt;
+            pos.0 += amt;
         } else {
-            pos.pos -= amt;
+            pos.0 -= amt;
         }
     }
 
@@ -200,9 +200,9 @@ impl<Dir: Direction, Inp: InputIndexer> Cursorable for Cursor<Dir, Inp> {
         };
         if let Some(c) = mc {
             if Self::FORWARD {
-                pos.pos += c.bytelength()
+                pos.0 += c.bytelength()
             } else {
-                pos.pos -= c.bytelength()
+                pos.0 -= c.bytelength()
             }
         } else {
             if cfg!(feature = "prohibit-unsafe") {
@@ -222,9 +222,9 @@ impl<Dir: Direction, Inp: InputIndexer> Cursorable for Cursor<Dir, Inp> {
         };
         if let Some(c) = mc {
             if Self::FORWARD {
-                pos.pos -= c.bytelength();
+                pos.0 -= c.bytelength();
             } else {
-                pos.pos += c.bytelength();
+                pos.0 += c.bytelength();
             }
         } else {
             if cfg!(feature = "prohibit-unsafe") {
@@ -242,9 +242,9 @@ impl<Dir: Direction, Inp: InputIndexer> Cursorable for Cursor<Dir, Inp> {
         }
         let range_slice = self.input.slice(range);
         let pos_slice = if Self::FORWARD {
-            self.input.slice(pos.pos..pos.pos + range_len)
+            self.input.slice(pos.0..pos.0 + range_len)
         } else {
-            self.input.slice(pos.pos - range_len..pos.pos)
+            self.input.slice(pos.0 - range_len..pos.0)
         };
         if range_slice == pos_slice {
             self.advance(pos, range_len);

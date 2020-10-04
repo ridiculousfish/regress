@@ -41,7 +41,7 @@ impl LoopData {
     pub fn new() -> LoopData {
         LoopData {
             iters: 0,
-            entry: Position { pos: 0 },
+            entry: Position(0),
         }
     }
 }
@@ -58,35 +58,31 @@ impl GroupData {
 
     pub fn new() -> GroupData {
         GroupData {
-            start: Position {
-                pos: GroupData::NOT_MATCHED,
-            },
-            end: Position {
-                pos: GroupData::NOT_MATCHED,
-            },
+            start: Position(GroupData::NOT_MATCHED),
+            end: Position(GroupData::NOT_MATCHED),
         }
     }
 
     pub fn start_matched(&self) -> bool {
-        self.start.pos != GroupData::NOT_MATCHED
+        self.start.0 != GroupData::NOT_MATCHED
     }
 
     pub fn end_matched(&self) -> bool {
-        self.end.pos != GroupData::NOT_MATCHED
+        self.end.0 != GroupData::NOT_MATCHED
     }
 
     pub fn as_range(&self) -> Option<Range> {
         // Note: we may have only start_matched (if forwards) or end_matched (if
         // backwards) set.
         if self.start_matched() && self.end_matched() {
-            Some(self.start.pos..self.end.pos)
+            Some(self.start.0..self.end.0)
         } else {
             None
         }
     }
 
     pub fn reset(&mut self) {
-        self.start.pos = GroupData::NOT_MATCHED;
-        self.end.pos = GroupData::NOT_MATCHED;
+        self.start.0 = GroupData::NOT_MATCHED;
+        self.end.0 = GroupData::NOT_MATCHED;
     }
 }

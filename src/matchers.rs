@@ -78,11 +78,9 @@ pub fn backref_icase<Cursor: Cursorable>(
 ) -> bool {
     let ref_cursor = cursor.subcursor(orig_range.clone());
     let mut ref_pos = if Cursor::FORWARD {
-        Position { pos: 0 }
+        Position(0)
     } else {
-        Position {
-            pos: orig_range.end - orig_range.start,
-        }
+        Position(orig_range.end - orig_range.start)
     };
     while let Some(c1) = ref_cursor.next(&mut ref_pos) {
         let mut matched = false;

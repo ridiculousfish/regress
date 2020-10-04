@@ -852,26 +852,26 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
         next_start: &mut Option<usize>,
         prefix_search: &PrefixSearch,
     ) -> Option<Match> {
-        let mut pos = Position { pos: upos };
+        let mut pos = Position(upos);
         loop {
             // Find the next start location.
             let rem = self.cursor.remaining_bytes(pos);
             if let Some(start_pos) = prefix_search.find_in(rem) {
-                pos.pos += start_pos
+                pos.0 += start_pos
             } else {
                 return None;
             }
             if let Some(end) = self.matcher.try_at_pos(0, pos, self.cursor) {
                 // If we matched the empty string, we have to increment.
                 if end != pos {
-                    *next_start = Some(end.pos)
+                    *next_start = Some(end.0)
                 } else {
-                    *next_start = self.cursor.input.index_after_inc(end.pos);
+                    *next_start = self.cursor.input.index_after_inc(end).map(|x| x.0);
                 }
-                return Some(self.successful_match(pos.pos, end.pos));
+                return Some(self.successful_match(pos.0, end.0));
             }
-            match self.cursor.input.index_after_inc(pos.pos) {
-                Some(nextpos) => pos.pos = nextpos,
+            match self.cursor.input.index_after_inc(pos) {
+                Some(nextpos) => pos = nextpos,
                 None => return None,
             }
         }

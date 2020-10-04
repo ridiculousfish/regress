@@ -201,7 +201,7 @@ fn try_match_state<Cursor: Cursorable>(
                 group.start = s.pos;
             }
             std::debug_assert!(
-                group.end.pos >= group.start.pos,
+                group.end >= group.start,
                 "Exit pos should be after start pos"
             );
             nextinsn_or_fail!(true)
@@ -318,7 +318,7 @@ fn try_match_state<Cursor: Cursorable>(
 fn successful_match(start: usize, state: &State) -> Match {
     let captures = state.groups.iter().map(GroupData::as_range).collect();
     Match {
-        range: start..state.pos.pos,
+        range: start..state.pos.0,
         captures,
     }
 }
@@ -394,24 +394,24 @@ impl<'a, Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'a, Input> 
     fn next_match(&mut self, mut pos: usize, next_start: &mut Option<usize>) -> Option<Match> {
         let re = &self.matcher.re;
         let mut state = State {
-            pos: Position { pos },
+            pos: Position(pos),
             ip: 0,
             loops: vec![LoopData::new(); re.loops as usize],
             groups: vec![GroupData::new(); re.groups as usize],
         };
         loop {
-            state.pos.pos = pos;
+            state.pos.0 = pos;
             if self.matcher.try_at_pos(&mut state, self.cursor) {
                 let end = state.pos;
-                *next_start = if end.pos != pos {
-                    Some(end.pos)
+                *next_start = if end.0 != pos {
+                    Some(end.0)
                 } else {
-                    self.cursor.input.index_after_inc(end.pos)
+                    self.cursor.input.index_after_inc(end).map(|x| x.0)
                 };
                 return Some(successful_match(pos, &state));
             }
-            match self.cursor.input.index_after_inc(pos) {
-                Some(nextpos) => pos = nextpos,
+            match self.cursor.input.index_after_inc(Position(pos)) {
+                Some(nextpos) => pos = nextpos.0,
                 None => break,
             }
         }

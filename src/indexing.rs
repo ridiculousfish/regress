@@ -6,9 +6,7 @@ use std::str;
 
 // A position in our input string.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Position {
-    pub pos: usize,
-}
+pub struct Position(pub usize);
 
 // A type which may be an Element.
 pub trait ElementType:
@@ -76,27 +74,27 @@ where
 
     /// \return the char to the right (starting at) \p idx, or None if we are at
     /// the end.
-    fn peek_right(&self, idx: usize) -> Option<Self::Element>;
+    fn peek_right(&self, idx: Position) -> Option<Self::Element>;
 
     /// \return the char to the left (ending just before) \p idx, or None if we
     /// are at the start.
-    fn peek_left(&self, idx: usize) -> Option<Self::Element>;
+    fn peek_left(&self, idx: Position) -> Option<Self::Element>;
 
     /// \return the byte to the right (starting at) \p idx, or None if we are at
     /// the end.
-    fn peek_byte_right(&self, idx: usize) -> Option<u8>;
+    fn peek_byte_right(&self, idx: Position) -> Option<u8>;
 
     /// \return the byte to the left (ending just before) \p idx, or None if we
     /// are at the start.
-    fn peek_byte_left(&self, idx: usize) -> Option<u8>;
+    fn peek_byte_left(&self, idx: Position) -> Option<u8>;
 
     /// \return the index of the char after \p idx, or None if none.
     /// This will return the one-past-the-last index.
-    fn index_after_inc(&self, idx: usize) -> Option<usize>;
+    fn index_after_inc(&self, idx: Position) -> Option<Position>;
 
     /// \return the index of the char before \p idx, or None if none.
     /// This will NOT return the one-past-the-last index.
-    fn index_after_exc(&self, idx: usize) -> Option<usize>;
+    fn index_after_exc(&self, idx: Position) -> Option<Position>;
 
     /// Create a sub-input from a Range.
     fn subinput(&self, r: Range) -> Self;
@@ -137,19 +135,19 @@ impl<'a> Utf8Input<'a> {
 
     /// \return a byte value at an index.
     #[inline(always)]
-    fn get_byte(&self, idx: usize) -> u8 {
+    fn get_byte(&self, idx: Position) -> u8 {
         debug_assert!(
-            idx < self.input.len() && is_seq_start(self.contents()[idx]),
+            idx.0 < self.input.len() && is_seq_start(self.contents()[idx.0]),
             "Invalid index"
         );
-        *self.contents().iat(idx)
+        *self.contents().iat(idx.0)
     }
 
     /// \return a slice as a str.
     #[inline(always)]
     fn str_slice(&self, range: Range) -> &'a str {
-        self.assert_is_boundary(range.start);
-        self.assert_is_boundary(range.end);
+        self.assert_is_boundary(Position(range.start));
+        self.assert_is_boundary(Position(range.end));
         if cfg!(feature = "prohibit-unsafe") {
             &self.input[range]
         } else {
@@ -158,8 +156,8 @@ impl<'a> Utf8Input<'a> {
     }
 
     #[inline(always)]
-    fn assert_is_boundary(&self, idx: usize) {
-        debug_assert!(idx == self.input.len() || is_seq_start(self.contents()[idx]))
+    fn assert_is_boundary(&self, idx: Position) {
+        debug_assert!(idx.0 == self.input.len() || is_seq_start(self.contents()[idx.0]))
     }
 }
 
@@ -179,62 +177,62 @@ impl<'a> InputIndexer for Utf8Input<'a> {
     }
 
     #[inline(always)]
-    fn peek_right(&self, idx: usize) -> Option<char> {
+    fn peek_right(&self, idx: Position) -> Option<char> {
         self.assert_is_boundary(idx);
-        self.str_slice(idx..self.bytelength()).chars().next()
+        self.str_slice(idx.0..self.bytelength()).chars().next()
     }
 
     #[inline(always)]
-    fn peek_left(&self, idx: usize) -> Option<char> {
+    fn peek_left(&self, idx: Position) -> Option<char> {
         self.assert_is_boundary(idx);
-        self.str_slice(0..idx).chars().rev().next()
+        self.str_slice(0..idx.0).chars().rev().next()
     }
 
     #[inline(always)]
-    fn peek_byte_right(&self, idx: usize) -> Option<u8> {
+    fn peek_byte_right(&self, idx: Position) -> Option<u8> {
         let c = self.contents();
-        debug_assert!(idx <= c.len(), "Index is out of bounds");
-        if idx == c.len() {
+        debug_assert!(idx.0 <= c.len(), "Index is out of bounds");
+        if idx.0 == c.len() {
             None
         } else {
-            Some(*c.iat(idx))
+            Some(*c.iat(idx.0))
         }
     }
 
     #[inline(always)]
-    fn peek_byte_left(&self, idx: usize) -> Option<u8> {
+    fn peek_byte_left(&self, idx: Position) -> Option<u8> {
         let c = self.contents();
-        debug_assert!(idx <= c.len(), "Index is out of bounds");
-        if idx == 0 {
+        debug_assert!(idx.0 <= c.len(), "Index is out of bounds");
+        if idx.0 == 0 {
             None
         } else {
-            Some(*c.iat(idx - 1))
+            Some(*c.iat(idx.0 - 1))
         }
     }
 
     #[inline(always)]
-    fn index_after_inc(&self, idx: usize) -> Option<usize> {
-        debug_assert!(idx <= self.input.len(), "Invalid index");
-        if idx == self.input.len() {
+    fn index_after_inc(&self, idx: Position) -> Option<Position> {
+        debug_assert!(idx.0 <= self.input.len(), "Invalid index");
+        if idx.0 == self.input.len() {
             None
         } else {
-            let res = idx + utf8_seq_len(self.get_byte(idx));
+            let res = idx.0 + utf8_seq_len(self.get_byte(idx));
             debug_assert!(res <= self.input.len(), "Should be in bounds");
-            Some(res)
+            Some(Position(res))
         }
     }
 
     #[inline(always)]
-    fn index_after_exc(&self, idx: usize) -> Option<usize> {
-        debug_assert!(idx <= self.input.len(), "Invalid index");
+    fn index_after_exc(&self, idx: Position) -> Option<Position> {
+        debug_assert!(idx.0 <= self.input.len(), "Invalid index");
         let len = self.input.len();
-        if idx == len {
+        if idx.0 == len {
             None
         } else {
-            let res = idx + utf8_seq_len(self.get_byte(idx));
+            let res = idx.0 + utf8_seq_len(self.get_byte(idx));
             debug_assert!(res <= self.input.len(), "Should be in bounds");
             if res < self.input.len() {
-                Some(res)
+                Some(Position(res))
             } else {
                 None
             }
@@ -280,45 +278,47 @@ impl<'a> InputIndexer for AsciiInput<'a> {
     }
 
     #[inline(always)]
-    fn peek_right(&self, idx: usize) -> Option<Self::Element> {
-        if idx == self.input.len() {
+    fn peek_right(&self, idx: Position) -> Option<Self::Element> {
+        if idx.0 == self.input.len() {
             None
         } else {
-            Some(*self.input.iat(idx))
+            Some(*self.input.iat(idx.0))
         }
     }
 
     #[inline(always)]
-    fn peek_left(&self, idx: usize) -> Option<Self::Element> {
-        if idx == 0 {
+    fn peek_left(&self, idx: Position) -> Option<Self::Element> {
+        if idx.0 == 0 {
             None
         } else {
-            Some(*self.input.iat(idx - 1))
+            Some(*self.input.iat(idx.0 - 1))
         }
     }
 
     #[inline(always)]
-    fn peek_byte_right(&self, idx: usize) -> Option<u8> {
+    fn peek_byte_right(&self, idx: Position) -> Option<u8> {
         self.peek_right(idx)
     }
 
     #[inline(always)]
-    fn peek_byte_left(&self, idx: usize) -> Option<u8> {
+    fn peek_byte_left(&self, idx: Position) -> Option<u8> {
         self.peek_left(idx)
     }
 
-    fn index_after_inc(&self, idx: usize) -> Option<usize> {
-        if idx < self.input.len() {
-            Some(idx + 1)
+    fn index_after_inc(&self, mut idx: Position) -> Option<Position> {
+        if idx.0 < self.input.len() {
+            idx.0 += 1;
+            Some(idx)
         } else {
             None
         }
     }
 
     #[inline(always)]
-    fn index_after_exc(&self, idx: usize) -> Option<usize> {
-        if idx + 1 < self.input.len() {
-            Some(idx + 1)
+    fn index_after_exc(&self, mut idx: Position) -> Option<Position> {
+        if idx.0 + 1 < self.input.len() {
+            idx.0 += 1;
+            Some(idx)
         } else {
             None
         }
