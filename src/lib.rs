@@ -114,6 +114,9 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 
 pub use crate::api::*;
 
+#[macro_use]
+mod util;
+
 mod api;
 mod bytesearch;
 mod charclasses;
@@ -133,7 +136,6 @@ mod parse;
 mod scm;
 mod startpredicate;
 mod types;
-mod util;
 
 #[cfg(feature = "backend-pikevm")]
 mod pikevm;

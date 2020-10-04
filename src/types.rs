@@ -1,7 +1,6 @@
 use crate::codepointset::CodePointSet;
-use crate::indexing::Position;
-
-pub type Range = std::ops::Range<usize>;
+use crate::indexing::PositionType;
+use std::ops;
 
 /// A group index is u16.
 /// CaptureGroupID 0 corresponds to the first capture group.
@@ -32,57 +31,52 @@ pub type IP = usize;
 
 /// Representation of a loop.
 #[derive(Debug, Copy, Clone)]
-pub struct LoopData {
+pub struct LoopData<Position: PositionType> {
     pub iters: usize,
     pub entry: Position,
 }
 
-impl LoopData {
-    pub fn new() -> LoopData {
-        LoopData {
-            iters: 0,
-            entry: Position(0),
-        }
+impl<Position: PositionType> LoopData<Position> {
+    pub fn new(entry: Position) -> LoopData<Position> {
+        LoopData { iters: 0, entry }
     }
 }
 
 /// Representation of a capture group.
 #[derive(Debug, Copy, Clone)]
-pub struct GroupData {
-    pub start: Position,
-    pub end: Position,
+pub struct GroupData<Position: PositionType> {
+    pub start: Option<Position>,
+    pub end: Option<Position>,
 }
 
-impl GroupData {
-    pub const NOT_MATCHED: usize = std::usize::MAX;
-
-    pub fn new() -> GroupData {
+impl<Position: PositionType> GroupData<Position> {
+    pub fn new() -> GroupData<Position> {
         GroupData {
-            start: Position(GroupData::NOT_MATCHED),
-            end: Position(GroupData::NOT_MATCHED),
+            start: None,
+            end: None,
         }
     }
 
     pub fn start_matched(&self) -> bool {
-        self.start.0 != GroupData::NOT_MATCHED
+        self.start.is_some()
     }
 
     pub fn end_matched(&self) -> bool {
-        self.end.0 != GroupData::NOT_MATCHED
+        self.end.is_some()
     }
 
-    pub fn as_range(&self) -> Option<Range> {
+    pub fn as_range(&self) -> Option<ops::Range<Position>> {
         // Note: we may have only start_matched (if forwards) or end_matched (if
         // backwards) set.
-        if self.start_matched() && self.end_matched() {
-            Some(self.start.0..self.end.0)
-        } else {
-            None
+        match (self.start, self.end) {
+            (Some(start), Some(end)) => Some(ops::Range { start, end }),
+            _ => None,
         }
     }
 
+    /// Reset the group to "not entered."
     pub fn reset(&mut self) {
-        self.start.0 = GroupData::NOT_MATCHED;
-        self.end.0 = GroupData::NOT_MATCHED;
+        self.start = None;
+        self.end = None;
     }
 }

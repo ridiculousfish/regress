@@ -1,19 +1,22 @@
 //! PikeVM regex execution engine
 
 use crate::api::Match;
-use crate::bytesearch::{charset_contains, ByteSet};
+use crate::bytesearch::charset_contains;
 use crate::cursor;
-use crate::cursor::{Cursor, Cursorable, Forward};
+use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
-use crate::indexing::{AsciiInput, ElementType, InputIndexer, Position, Utf8Input};
+use crate::indexing::{AsciiInput, ElementType, InputIndexer, PositionType, Utf8Input};
 use crate::insn::{CompiledRegex, Insn, LoopFields};
 use crate::matchers;
 use crate::matchers::CharProperties;
+use crate::scm;
+use crate::scm::SingleCharMatcher;
 use crate::types::{GroupData, LoopData};
 use crate::util::DebugCheckIndex;
+use std::ops::Range;
 
 #[derive(Debug, Clone)]
-struct State {
+struct State<Position: PositionType> {
     /// Position in the input string.
     pos: Position,
 
@@ -21,20 +24,24 @@ struct State {
     ip: usize,
 
     /// Loop datas.
-    loops: Vec<LoopData>,
+    loops: Vec<LoopData<Position>>,
 
     /// Group datas.
-    groups: Vec<GroupData>,
+    groups: Vec<GroupData<Position>>,
 }
 
-enum StateMatch {
+enum StateMatch<Position: PositionType> {
     Fail,
     Continue,
-    Split(State),
+    Split(State<Position>),
     Complete,
 }
 
-fn run_loop(s: &mut State, lf: &LoopFields, is_initial_entry: bool) -> StateMatch {
+fn run_loop<Position: PositionType>(
+    s: &mut State<Position>,
+    lf: &LoopFields,
+    is_initial_entry: bool,
+) -> StateMatch<Position> {
     debug_assert!(lf.max_iters >= lf.min_iters);
     let ld = &mut s.loops[lf.loop_id as usize];
     let exit = lf.exit as usize;
@@ -84,11 +91,12 @@ fn run_loop(s: &mut State, lf: &LoopFields, is_initial_entry: bool) -> StateMatc
     }
 }
 
-fn try_match_state<Cursor: Cursorable>(
+fn try_match_state<Input: InputIndexer, Dir: Direction>(
     re: &CompiledRegex,
-    cursor: Cursor,
-    s: &mut State,
-) -> StateMatch {
+    input: &Input,
+    s: &mut State<Input::Position>,
+    dir: Dir,
+) -> StateMatch<Input::Position> {
     macro_rules! nextinsn_or_fail {
         ($e:expr) => {
             if $e {
@@ -102,68 +110,68 @@ fn try_match_state<Cursor: Cursorable>(
     match &re.insns[s.ip] {
         Insn::Goal => StateMatch::Complete,
         Insn::JustFail => StateMatch::Fail,
-        &Insn::Char(c) => match cursor.next(&mut s.pos) {
+        &Insn::Char(c) => match cursor::next(input, dir, &mut s.pos) {
             Some(c2) => nextinsn_or_fail!(c == c2.as_char()),
             _ => StateMatch::Fail,
         },
         &Insn::CharICase(c) => {
-            let c = match Cursor::Element::try_from(c) {
+            let c = match Input::Element::try_from(c) {
                 Some(c) => c,
                 None => return StateMatch::Fail,
             };
-            match cursor.next(&mut s.pos) {
-                Some(c2) => nextinsn_or_fail!(c == c2 || Cursor::CharProps::fold(c2) == c),
+            match cursor::next(input, dir, &mut s.pos) {
+                Some(c2) => nextinsn_or_fail!(c == c2 || Input::CharProps::fold(c2) == c),
                 _ => StateMatch::Fail,
             }
         }
 
-        Insn::CharSet(v) => match cursor.next(&mut s.pos) {
+        Insn::CharSet(v) => match cursor::next(input, dir, &mut s.pos) {
             Some(c) => nextinsn_or_fail!(charset_contains(v, c.as_char())),
             _ => StateMatch::Fail,
         },
 
-        Insn::ByteSeq1(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq2(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq3(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq4(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq5(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq6(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq7(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq8(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq9(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq10(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq11(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq12(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq13(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq14(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq15(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
-        Insn::ByteSeq16(v) => nextinsn_or_fail!(cursor.try_match_lit(&mut s.pos, v)),
+        Insn::ByteSeq1(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq2(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq3(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq4(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq5(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq6(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq7(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq8(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq9(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq10(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq11(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq12(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq13(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq14(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq15(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq16(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
 
         Insn::StartOfLine => {
-            let matches = match cursor.peek_left(s.pos) {
+            let matches = match input.peek_left(s.pos) {
                 None => true,
-                Some(c) if re.flags.multiline && Cursor::CharProps::is_line_terminator(c) => true,
+                Some(c) if re.flags.multiline && Input::CharProps::is_line_terminator(c) => true,
                 _ => false,
             };
             nextinsn_or_fail!(matches)
         }
 
         Insn::EndOfLine => {
-            let matches = match cursor.peek_right(s.pos) {
+            let matches = match input.peek_right(s.pos) {
                 None => true, // we're at the right of the string
-                Some(c) if re.flags.multiline && Cursor::CharProps::is_line_terminator(c) => true,
+                Some(c) if re.flags.multiline && Input::CharProps::is_line_terminator(c) => true,
                 _ => false,
             };
             nextinsn_or_fail!(matches)
         }
 
-        Insn::MatchAny => match cursor.next(&mut s.pos) {
+        Insn::MatchAny => match cursor::next(input, dir, &mut s.pos) {
             Some(_) => nextinsn_or_fail!(true),
             _ => StateMatch::Fail,
         },
 
-        Insn::MatchAnyExceptLineTerminator => match cursor.next(&mut s.pos) {
-            Some(c2) => nextinsn_or_fail!(!Cursor::CharProps::is_line_terminator(c2)),
+        Insn::MatchAnyExceptLineTerminator => match cursor::next(input, dir, &mut s.pos) {
+            Some(c2) => nextinsn_or_fail!(!Input::CharProps::is_line_terminator(c2)),
             _ => StateMatch::Fail,
         },
 
@@ -181,24 +189,24 @@ fn try_match_state<Cursor: Cursorable>(
 
         &Insn::BeginCaptureGroup(group_idx) => {
             let group = &mut s.groups[group_idx as usize];
-            if Cursor::FORWARD {
+            if Dir::FORWARD {
                 std::debug_assert!(!group.start_matched(), "Group should not have been entered");
-                group.start = s.pos;
+                group.start = Some(s.pos);
             } else {
                 std::debug_assert!(!group.end_matched(), "Group should not have been entered");
-                group.end = s.pos;
+                group.end = Some(s.pos);
             }
             nextinsn_or_fail!(true)
         }
 
         &Insn::EndCaptureGroup(group_idx) => {
             let group = &mut s.groups[group_idx as usize];
-            if Cursor::FORWARD {
+            if Dir::FORWARD {
                 std::debug_assert!(group.start_matched(), "Group should have been entered");
-                group.end = s.pos;
+                group.end = Some(s.pos);
             } else {
                 std::debug_assert!(group.end_matched(), "Group should have been exited");
-                group.start = s.pos;
+                group.start = Some(s.pos);
             }
             std::debug_assert!(
                 group.end >= group.start,
@@ -217,9 +225,9 @@ fn try_match_state<Cursor: Cursorable>(
             let group = &mut s.groups[group_idx as usize];
             if let Some(orig_range) = group.as_range() {
                 if re.flags.icase {
-                    matched = matchers::backref_icase(orig_range, &mut s.pos, cursor);
+                    matched = matchers::backref_icase(input, dir, orig_range, &mut s.pos);
                 } else {
-                    matched = matchers::backref(orig_range, &mut s.pos, cursor)
+                    matched = matchers::backref(input, dir, orig_range, &mut s.pos)
                 }
             } else {
                 // This group has not been exited, and therefore the match succeeds
@@ -238,7 +246,8 @@ fn try_match_state<Cursor: Cursorable>(
             // Enter into the lookaround's instruction stream.
             s.ip += 1;
             let saved_pos = s.pos;
-            let attempt_succeeded = MatchAttempter::new(re).try_at_pos(s, cursor.as_forward());
+            let attempt_succeeded =
+                MatchAttempter::<Input>::new(re).try_at_pos(*input, s, Forward::new());
             let matched = attempt_succeeded != negate;
             if matched {
                 s.ip = continuation as usize;
@@ -258,7 +267,7 @@ fn try_match_state<Cursor: Cursorable>(
             // Enter into the lookaround's instruction stream.
             s.ip += 1;
             let saved_pos = s.pos;
-            let attempt_succeeded = MatchAttempter::new(re).try_at_pos(s, cursor.as_backward());
+            let attempt_succeeded = MatchAttempter::new(re).try_at_pos(*input, s, Backward::new());
             let matched = attempt_succeeded != negate;
             if matched {
                 s.ip = continuation as usize;
@@ -277,59 +286,62 @@ fn try_match_state<Cursor: Cursorable>(
             }
         }
         Insn::Loop1CharBody { .. } => panic!("Loop1CharBody unimplemented for pikevm"),
-        Insn::Bracket(bc) => match cursor.next(&mut s.pos) {
-            Some(c) => nextinsn_or_fail!(Cursor::CharProps::bracket(bc, c)),
+        Insn::Bracket(bc) => match cursor::next(input, dir, &mut s.pos) {
+            Some(c) => nextinsn_or_fail!(Input::CharProps::bracket(bc, c)),
             _ => StateMatch::Fail,
         },
 
-        Insn::AsciiBracket(bitmap) => match cursor.next_byte(&mut s.pos) {
-            Some(c) => nextinsn_or_fail!(bitmap.contains(c)),
-            _ => StateMatch::Fail,
-        },
-
-        &Insn::ByteSet2(bytes) => match cursor.next_byte(&mut s.pos) {
-            Some(c) => nextinsn_or_fail!(bytes.contains(c)),
-            _ => StateMatch::Fail,
-        },
-
-        &Insn::ByteSet3(bytes) => match cursor.next_byte(&mut s.pos) {
-            Some(c) => nextinsn_or_fail!(bytes.contains(c)),
-            _ => StateMatch::Fail,
-        },
-
-        &Insn::ByteSet4(bytes) => match cursor.next_byte(&mut s.pos) {
-            Some(c) => nextinsn_or_fail!(bytes.contains(c)),
-            _ => StateMatch::Fail,
-        },
+        Insn::AsciiBracket(bytes) => {
+            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(input, dir, &mut s.pos))
+        }
+        &Insn::ByteSet2(bytes) => {
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos))
+        }
+        &Insn::ByteSet3(bytes) => {
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos))
+        }
+        &Insn::ByteSet4(bytes) => {
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos))
+        }
 
         &Insn::WordBoundary { invert } => {
-            let prev_wordchar = cursor
+            let prev_wordchar = input
                 .peek_left(s.pos)
-                .map_or(false, Cursor::CharProps::is_word_char);
-            let curr_wordchar = cursor
+                .map_or(false, Input::CharProps::is_word_char);
+            let curr_wordchar = input
                 .peek_right(s.pos)
-                .map_or(false, Cursor::CharProps::is_word_char);
+                .map_or(false, Input::CharProps::is_word_char);
             let is_boundary = prev_wordchar != curr_wordchar;
             nextinsn_or_fail!(is_boundary != invert)
         }
     }
 }
 
-fn successful_match(start: usize, state: &State) -> Match {
-    let captures = state.groups.iter().map(GroupData::as_range).collect();
+fn successful_match<Input: InputIndexer>(
+    input: Input,
+    start: Input::Position,
+    state: &State<Input::Position>,
+) -> Match {
+    let group_to_offset = |mr: &GroupData<Input::Position>| -> Option<Range<usize>> {
+        mr.as_range().map(|r| Range {
+            start: input.pos_to_offset(r.start),
+            end: input.pos_to_offset(r.end),
+        })
+    };
+    let captures = state.groups.iter().map(group_to_offset).collect();
     Match {
-        range: start..state.pos.0,
+        range: input.pos_to_offset(start)..input.pos_to_offset(state.pos),
         captures,
     }
 }
 
 #[derive(Debug)]
-struct MatchAttempter<'a> {
-    states: Vec<State>,
+struct MatchAttempter<'a, Input: InputIndexer> {
+    states: Vec<State<Input::Position>>,
     re: &'a CompiledRegex,
 }
 
-impl<'a> MatchAttempter<'a> {
+impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
     fn new(re: &'a CompiledRegex) -> Self {
         Self {
             states: Vec::new(),
@@ -337,12 +349,17 @@ impl<'a> MatchAttempter<'a> {
         }
     }
 
-    fn try_at_pos<Cursor: Cursorable>(&mut self, init_state: &mut State, cursor: Cursor) -> bool {
+    fn try_at_pos<Dir: Direction>(
+        &mut self,
+        input: Input,
+        init_state: &mut State<Input::Position>,
+        dir: Dir,
+    ) -> bool {
         debug_assert!(self.states.is_empty(), "Should be no states");
         self.states.push(init_state.clone());
         while !self.states.is_empty() {
             let s = self.states.last_mut().unwrap();
-            match try_match_state(self.re, cursor, s) {
+            match try_match_state(self.re, &input, s, dir) {
                 StateMatch::Fail => {
                     self.states.pop();
                 }
@@ -362,8 +379,8 @@ impl<'a> MatchAttempter<'a> {
 
 #[derive(Debug)]
 pub struct PikeVMExecutor<'r, Input: InputIndexer> {
-    cursor: Cursor<Forward, Input>,
-    matcher: MatchAttempter<'r>,
+    input: Input,
+    matcher: MatchAttempter<'r, Input>,
 }
 
 impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, Utf8Input<'t>> {
@@ -372,7 +389,7 @@ impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, Utf8Input<'t>> {
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
         let input = Utf8Input::new(text);
         Self {
-            cursor: cursor::starting_cursor(input),
+            input,
             matcher: MatchAttempter::new(re),
         }
     }
@@ -384,34 +401,48 @@ impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, AsciiInput<'t>> {
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
         let input = AsciiInput::new(text);
         Self {
-            cursor: cursor::starting_cursor(input),
+            input,
             matcher: MatchAttempter::new(re),
         }
     }
 }
 
 impl<'a, Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'a, Input> {
-    fn next_match(&mut self, mut pos: usize, next_start: &mut Option<usize>) -> Option<Match> {
-        let re = &self.matcher.re;
+    type Position = Input::Position;
+
+    fn initial_position(&self, offset: usize) -> Option<Self::Position> {
+        self.input.try_move_right(self.input.left_end(), offset)
+    }
+
+    fn next_match(
+        &mut self,
+        pos: Self::Position,
+        next_start: &mut Option<Self::Position>,
+    ) -> Option<Match> {
+        let re = self.matcher.re;
+        // Note the "initial" loop position is ignored. Use whatever is most convenient.
         let mut state = State {
-            pos: Position(pos),
+            pos,
             ip: 0,
-            loops: vec![LoopData::new(); re.loops as usize],
+            loops: vec![LoopData::new(pos); re.loops as usize],
             groups: vec![GroupData::new(); re.groups as usize],
         };
         loop {
-            state.pos.0 = pos;
-            if self.matcher.try_at_pos(&mut state, self.cursor) {
+            let start = state.pos;
+            if self
+                .matcher
+                .try_at_pos(self.input, &mut state, Forward::new())
+            {
                 let end = state.pos;
-                *next_start = if end.0 != pos {
-                    Some(end.0)
+                if end != start {
+                    *next_start = Some(end)
                 } else {
-                    self.cursor.index_after_inc(end).map(|x| x.0)
-                };
-                return Some(successful_match(pos, &state));
+                    *next_start = self.input.next_right_pos(end)
+                }
+                return Some(successful_match(self.input, start, &state));
             }
-            match self.cursor.index_after_inc(Position(pos)) {
-                Some(nextpos) => pos = nextpos.0,
+            match self.input.next_right_pos(start) {
+                Some(nextpos) => state.pos = nextpos,
                 None => break,
             }
         }

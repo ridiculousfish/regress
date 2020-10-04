@@ -1,7 +1,8 @@
-use crate::cursor::Cursorable;
+use crate::cursor;
+use crate::cursor::Direction;
 use crate::folds;
-use crate::indexing::{ElementType, Position};
-use crate::types::{BracketContents, Range};
+use crate::indexing::{ElementType, InputIndexer};
+use crate::types::BracketContents;
 
 pub trait CharProperties {
     type Element: ElementType;
@@ -61,31 +62,32 @@ impl CharProperties for ASCIICharProperties {
     }
 }
 
-/// Check whether the reference to \p range within \p cursor matches position \p
-/// pos.
-pub fn backref<Cursor: Cursorable>(
-    orig_range: Range,
-    position: &mut Position,
-    cursor: Cursor,
+/// Check whether the \p orig_range within \p cursor matches position \p pos.
+pub fn backref<Input: InputIndexer, Dir: Direction>(
+    input: &Input,
+    dir: Dir,
+    orig_range: std::ops::Range<Input::Position>,
+    pos: &mut Input::Position,
 ) -> bool {
-    cursor.subrange_eq(position, orig_range)
+    cursor::subrange_eq(input, dir, pos, orig_range.start, orig_range.end)
 }
 
-pub fn backref_icase<Cursor: Cursorable>(
-    orig_range: Range,
-    position: &mut Position,
-    cursor: Cursor,
+pub fn backref_icase<Input: InputIndexer, Dir: Direction>(
+    input: &Input,
+    dir: Dir,
+    orig_range: std::ops::Range<Input::Position>,
+    pos: &mut Input::Position,
 ) -> bool {
-    let ref_cursor = cursor.subcursor(orig_range.clone());
-    let mut ref_pos = if Cursor::FORWARD {
-        Position(0)
+    let ref_input = input.subinput(orig_range);
+    let mut ref_pos = if Dir::FORWARD {
+        ref_input.left_end()
     } else {
-        Position(orig_range.end - orig_range.start)
+        ref_input.right_end()
     };
-    while let Some(c1) = ref_cursor.next(&mut ref_pos) {
+    while let Some(c1) = cursor::next(&ref_input, dir, &mut ref_pos) {
         let mut matched = false;
-        if let Some(c2) = cursor.next(position) {
-            matched = Cursor::CharProps::fold_equals(c1, c2)
+        if let Some(c2) = cursor::next(input, dir, pos) {
+            matched = Input::CharProps::fold_equals(c1, c2)
         }
         if !matched {
             return false;

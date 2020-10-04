@@ -1,12 +1,9 @@
+use crate::bytesearch;
 use crate::matchers;
-use crate::types::Range;
-use crate::util::DebugCheckIndex;
+use crate::util::{is_utf8_continuation, utf8_w2, utf8_w3, utf8_w4};
+use std::cmp::Eq;
 use std::convert::TryInto;
-use std::str;
-
-// A position in our input string.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Position(pub usize);
+use std::{ops, str};
 
 // A type which may be an Element.
 pub trait ElementType:
@@ -50,6 +47,104 @@ impl ElementType for u8 {
     }
 }
 
+/// A trait which references a position in the input string.
+/// The intent is that this may be satisfied via indexes or pointers.
+/// Positions must be subtractable, producing usize.
+pub trait PositionType: std::fmt::Debug + Copy + Clone + PartialEq + Eq + PartialOrd + Ord
+where
+    Self: ops::Add<usize, Output = Self>,
+    Self: ops::Sub<usize, Output = Self>,
+    Self: ops::Sub<Self, Output = usize>,
+    Self: ops::AddAssign<usize>,
+    Self: ops::SubAssign<usize>,
+{
+}
+
+/// A simple index-based position.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct IndexPosition(usize);
+
+impl ops::Add<usize> for IndexPosition {
+    type Output = Self;
+    fn add(self, rhs: usize) -> Self::Output {
+        debug_assert!(self.0 + rhs >= self.0, "Overflow");
+        IndexPosition(self.0 + rhs)
+    }
+}
+
+impl ops::AddAssign<usize> for IndexPosition {
+    fn add_assign(&mut self, rhs: usize) {
+        *self = *self + rhs;
+    }
+}
+
+impl ops::SubAssign<usize> for IndexPosition {
+    fn sub_assign(&mut self, rhs: usize) {
+        *self = *self - rhs;
+    }
+}
+
+impl ops::Sub<IndexPosition> for IndexPosition {
+    type Output = usize;
+    fn sub(self, rhs: Self) -> Self::Output {
+        debug_assert!(self.0 >= rhs.0, "Underflow");
+        self.0 - rhs.0
+    }
+}
+
+impl ops::Sub<usize> for IndexPosition {
+    type Output = IndexPosition;
+    fn sub(self, rhs: usize) -> Self::Output {
+        debug_assert!(self.0 >= rhs, "Underflow");
+        IndexPosition(self.0 - rhs)
+    }
+}
+
+impl PositionType for IndexPosition {}
+
+/// A reference position holds a reference to a byte and uses pointer arithmetic.
+/// This must use raw pointers because it must be capable of representing the one-past-the-end value.
+/// TODO: thread lifetimes through this.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RefPosition(*const u8);
+
+impl PositionType for RefPosition {}
+
+impl ops::Add<usize> for RefPosition {
+    type Output = Self;
+    fn add(self, rhs: usize) -> Self::Output {
+        Self(unsafe { self.0.add(rhs) })
+    }
+}
+
+impl ops::Sub<RefPosition> for RefPosition {
+    type Output = usize;
+    fn sub(self, rhs: Self) -> Self::Output {
+        debug_assert!(self.0 >= rhs.0, "Underflow");
+        unsafe { rhs.0.offset_from(self.0) as usize }
+    }
+}
+
+impl ops::Sub<usize> for RefPosition {
+    type Output = RefPosition;
+    fn sub(self, rhs: usize) -> Self::Output {
+        debug_assert!(self.0 as usize >= rhs, "Underflow");
+        Self(unsafe { self.0.sub(rhs) })
+    }
+}
+
+impl ops::AddAssign<usize> for RefPosition {
+    fn add_assign(&mut self, rhs: usize) {
+        *self = *self + rhs;
+    }
+}
+
+impl ops::SubAssign<usize> for RefPosition {
+    fn sub_assign(&mut self, rhs: usize) {
+        *self = *self - rhs;
+    }
+}
+
 // A helper type that holds a string and allows indexing into it.
 pub trait InputIndexer: std::fmt::Debug + Copy + Clone
 where
@@ -61,6 +156,9 @@ where
     /// The CharProperties to use for the given element.
     type CharProps: matchers::CharProperties<Element = Self::Element>;
 
+    /// A type which references a position in the input string.
+    type Position: PositionType;
+
     /// \return the byte contents.
     fn contents(&self) -> &[u8];
 
@@ -70,39 +168,74 @@ where
     }
 
     /// \return a slice of the contents.
-    fn slice(&self, range: Range) -> &[u8];
+    fn slice(&self, start: Self::Position, end: Self::Position) -> &[u8];
+
+    /// \return a sub-input. Note that positions in the original may no longer be valid in the sub-input.
+    fn subinput(&self, range: ops::Range<Self::Position>) -> Self;
 
     /// \return the char to the right (starting at) \p idx, or None if we are at
-    /// the end.
-    fn peek_right(&self, idx: Position) -> Option<Self::Element>;
+    /// the end. Advance the position by the amount.
+    fn next_right(&self, pos: &mut Self::Position) -> Option<Self::Element>;
 
-    /// \return the char to the left (ending just before) \p idx, or None if we
-    /// are at the start.
-    fn peek_left(&self, idx: Position) -> Option<Self::Element>;
+    /// \return the char to the left (ending just before) \p idx, or None if we are at
+    /// the end. Retreat the position by the amount.
+    fn next_left(&self, pos: &mut Self::Position) -> Option<Self::Element>;
+
+    // Like next_right, but does not decode the element.
+    fn next_right_pos(&self, pos: Self::Position) -> Option<Self::Position>;
+
+    // Like next_left, but does not decode the element.
+    fn next_left_pos(&self, pos: Self::Position) -> Option<Self::Position>;
 
     /// \return the byte to the right (starting at) \p idx, or None if we are at
     /// the end.
-    fn peek_byte_right(&self, idx: Position) -> Option<u8>;
+    fn peek_byte_right(&self, pos: Self::Position) -> Option<u8>;
 
     /// \return the byte to the left (ending just before) \p idx, or None if we
     /// are at the start.
-    fn peek_byte_left(&self, idx: Position) -> Option<u8>;
+    fn peek_byte_left(&self, pos: Self::Position) -> Option<u8>;
 
-    /// \return the index of the char after \p idx, or None if none.
-    /// This will return the one-past-the-last index.
-    fn index_after_inc(&self, idx: Position) -> Option<Position>;
+    /// \return a position at the left end of this input.
+    fn left_end(&self) -> Self::Position;
 
-    /// \return the index of the char before \p idx, or None if none.
-    /// This will NOT return the one-past-the-last index.
-    fn index_after_exc(&self, idx: Position) -> Option<Position>;
+    /// \return a position at the right end of this nput.
+    fn right_end(&self) -> Self::Position;
 
-    /// Create a sub-input from a Range.
-    fn subinput(&self, r: Range) -> Self;
+    /// Move a position right by a certain amount.
+    /// \return the new position, or None if it would exceed the length.
+    fn try_move_right(&self, pos: Self::Position, amt: usize) -> Option<Self::Position>;
+
+    /// Move a position left by a certain amount.
+    /// \return the new position, or None if it would underflow 0.
+    fn try_move_left(&self, pos: Self::Position, amt: usize) -> Option<Self::Position>;
+
+    /// Convert a position to an offset.
+    fn pos_to_offset(&self, pos: Self::Position) -> usize;
+
+    /// Apply a literal byte matcher, finding a literal byte sequence in a string.
+    /// \return the new position, or None on failure.
+    fn find_bytes<Search: bytesearch::ByteSearcher>(
+        &self,
+        pos: Self::Position,
+        search: &Search,
+    ) -> Option<Self::Position>;
+
+    /// Peek at the char to the right of a position, without changing that position.
+    #[inline(always)]
+    fn peek_right(&self, mut pos: Self::Position) -> Option<Self::Element> {
+        self.next_right(&mut pos)
+    }
+
+    /// Peek at the char to the left of a position, without changing that position.
+    #[inline(always)]
+    fn peek_left(&self, mut pos: Self::Position) -> Option<Self::Element> {
+        self.next_left(&mut pos)
+    }
 }
 
 /// \return the length of a UTF8 sequence starting with this byte.
 #[inline(always)]
-fn utf8_seq_len(b: u8) -> usize {
+const fn utf8_seq_len(b: u8) -> usize {
     if b < 128 {
         1
     } else {
@@ -133,35 +266,63 @@ impl<'a> Utf8Input<'a> {
         Self { input: s }
     }
 
-    /// \return a byte value at an index.
+    /// \return a byte at a given position.
+    /// This asserts that we are not at the right end.
     #[inline(always)]
-    fn get_byte(&self, idx: Position) -> u8 {
-        debug_assert!(
-            idx.0 < self.input.len() && is_seq_start(self.contents()[idx.0]),
-            "Invalid index"
-        );
-        *self.contents().iat(idx.0)
+    fn getb(&self, pos: <Self as InputIndexer>::Position) -> u8 {
+        debug_assert!(self.left_end() <= pos && pos < self.right_end());
+        if cfg!(feature = "prohibit-unsafe") {
+            self.contents()[self.pos_to_offset(pos)]
+        } else {
+            unsafe { *self.contents().get_unchecked(self.pos_to_offset(pos)) }
+        }
+    }
+
+    /// Helper to avoid annoying cast.
+    #[inline(always)]
+    fn pos_to_offset(&self, pos: <Self as InputIndexer>::Position) -> usize {
+        self.debug_assert_valid_pos(pos);
+        let res = pos.0;
+        debug_assert!(res <= self.contents().len(), "Position out of bounds");
+        res
     }
 
     /// \return a slice as a str.
     #[inline(always)]
-    fn str_slice(&self, range: Range) -> &'a str {
-        self.assert_is_boundary(Position(range.start));
-        self.assert_is_boundary(Position(range.end));
+    fn str_slice(&self, range: ops::Range<<Self as InputIndexer>::Position>) -> &'a str {
+        self.debug_assert_boundary(range.start);
+        self.debug_assert_boundary(range.end);
         if cfg!(feature = "prohibit-unsafe") {
-            &self.input[range]
+            &self.input[std::ops::Range {
+                start: self.pos_to_offset(range.start),
+                end: self.pos_to_offset(range.end),
+            }]
         } else {
-            unsafe { self.input.get_unchecked(range) }
+            unsafe {
+                self.input.get_unchecked(std::ops::Range {
+                    start: self.pos_to_offset(range.start),
+                    end: self.pos_to_offset(range.end),
+                })
+            }
         }
     }
 
+    /// Assert that a position is valid, i.e. between our left and right ends.
     #[inline(always)]
-    fn assert_is_boundary(&self, idx: Position) {
-        debug_assert!(idx.0 == self.input.len() || is_seq_start(self.contents()[idx.0]))
+    fn debug_assert_valid_pos(&self, pos: <Self as InputIndexer>::Position) {
+        debug_assert!(self.left_end() <= pos && pos <= self.right_end());
+    }
+
+    /// Assert that a position is a valid UTF8 character boundary.
+    #[inline(always)]
+    fn debug_assert_boundary(&self, pos: <Self as InputIndexer>::Position) {
+        self.debug_assert_valid_pos(pos);
+        debug_assert!(pos.0 == self.input.len() || is_seq_start(self.getb(pos)));
     }
 }
 
 impl<'a> InputIndexer for Utf8Input<'a> {
+    type Position = IndexPosition;
     type Element = char;
     type CharProps = matchers::UTF8CharProperties;
 
@@ -171,78 +332,206 @@ impl<'a> InputIndexer for Utf8Input<'a> {
     }
 
     #[inline(always)]
-    fn slice(&self, range: Range) -> &[u8] {
-        debug_assert!(range.start <= range.end && range.end <= self.contents().len());
-        self.contents().iat(range)
+    fn slice(&self, start: Self::Position, end: Self::Position) -> &[u8] {
+        self.debug_assert_valid_pos(start);
+        self.debug_assert_valid_pos(end);
+        debug_assert!(end >= start, "Slice start after end");
+        &self.contents()[std::ops::Range {
+            start: start.0,
+            end: end.0,
+        }]
     }
 
     #[inline(always)]
-    fn peek_right(&self, idx: Position) -> Option<char> {
-        self.assert_is_boundary(idx);
-        self.str_slice(idx.0..self.bytelength()).chars().next()
+    fn subinput(&self, range: ops::Range<Self::Position>) -> Self {
+        Self::new(self.str_slice(range))
     }
 
     #[inline(always)]
-    fn peek_left(&self, idx: Position) -> Option<char> {
-        self.assert_is_boundary(idx);
-        self.str_slice(0..idx.0).chars().rev().next()
-    }
+    fn next_right(&self, pos: &mut Self::Position) -> Option<Self::Element> {
+        self.debug_assert_boundary(*pos);
+        if *pos == self.right_end() {
+            return None;
+        }
 
-    #[inline(always)]
-    fn peek_byte_right(&self, idx: Position) -> Option<u8> {
-        let c = self.contents();
-        debug_assert!(idx.0 <= c.len(), "Index is out of bounds");
-        if idx.0 == c.len() {
-            None
+        let b0 = self.getb(*pos);
+        if b0 < 128 {
+            *pos += 1;
+            return Some(b0 as Self::Element);
+        }
+
+        // Multibyte case.
+        let len = utf8_seq_len(b0);
+        let codepoint = match len {
+            2 => utf8_w2(b0, self.getb(*pos + 1)),
+            3 => utf8_w3(b0, self.getb(*pos + 1), self.getb(*pos + 2)),
+            4 => utf8_w4(
+                b0,
+                self.getb(*pos + 1),
+                self.getb(*pos + 2),
+                self.getb(*pos + 3),
+            ),
+            _ => rs_unreachable!("Invalid utf8 sequence length"),
+        };
+        *pos += len;
+        if let Some(c) = std::char::from_u32(codepoint) {
+            Some(c)
         } else {
-            Some(*c.iat(idx.0))
+            rs_unreachable!("Should have decoded a valid char from utf8 sequence");
         }
     }
 
     #[inline(always)]
-    fn peek_byte_left(&self, idx: Position) -> Option<u8> {
-        let c = self.contents();
-        debug_assert!(idx.0 <= c.len(), "Index is out of bounds");
-        if idx.0 == 0 {
-            None
-        } else {
-            Some(*c.iat(idx.0 - 1))
+    fn next_right_pos(&self, mut pos: Self::Position) -> Option<Self::Position> {
+        self.debug_assert_boundary(pos);
+        if pos == self.right_end() {
+            return None;
         }
+
+        let b0 = self.getb(pos);
+        if b0 < 128 {
+            return Some(pos + 1);
+        }
+
+        // Multibyte case.
+        pos += utf8_seq_len(b0);
+        self.debug_assert_boundary(pos);
+        Some(pos)
     }
 
     #[inline(always)]
-    fn index_after_inc(&self, idx: Position) -> Option<Position> {
-        debug_assert!(idx.0 <= self.input.len(), "Invalid index");
-        if idx.0 == self.input.len() {
-            None
-        } else {
-            let res = idx.0 + utf8_seq_len(self.get_byte(idx));
-            debug_assert!(res <= self.input.len(), "Should be in bounds");
-            Some(Position(res))
+    fn next_left(&self, pos: &mut Self::Position) -> Option<Self::Element> {
+        self.debug_assert_boundary(*pos);
+        if *pos == self.left_end() {
+            return None;
         }
-    }
 
-    #[inline(always)]
-    fn index_after_exc(&self, idx: Position) -> Option<Position> {
-        debug_assert!(idx.0 <= self.input.len(), "Invalid index");
-        let len = self.input.len();
-        if idx.0 == len {
-            None
+        let z = self.getb(*pos - 1);
+        if z < 128 {
+            *pos -= 1;
+            return Some(z as Self::Element);
+        }
+
+        // Multibyte case.
+        // bytes are w x y z, with 'pos' pointing after z.
+        let codepoint;
+        let y = self.getb(*pos - 2);
+        if !is_utf8_continuation(y) {
+            codepoint = utf8_w2(y, z);
+            *pos -= 2;
         } else {
-            let res = idx.0 + utf8_seq_len(self.get_byte(idx));
-            debug_assert!(res <= self.input.len(), "Should be in bounds");
-            if res < self.input.len() {
-                Some(Position(res))
+            let x = self.getb(*pos - 3);
+            if !is_utf8_continuation(x) {
+                codepoint = utf8_w3(x, y, z);
+                *pos -= 3;
             } else {
-                None
+                let w = self.getb(*pos - 4);
+                codepoint = utf8_w4(w, x, y, z);
+                *pos -= 4;
             }
         }
+        self.debug_assert_boundary(*pos);
+        if let Some(c) = std::char::from_u32(codepoint) {
+            Some(c)
+        } else {
+            rs_unreachable!("Should have decoded a valid char from utf8 sequence");
+        }
     }
 
-    fn subinput(&self, r: Range) -> Self {
-        Self {
-            input: &self.input[r],
+    #[inline(always)]
+    fn next_left_pos(&self, mut pos: Self::Position) -> Option<Self::Position> {
+        self.debug_assert_boundary(pos);
+        if pos == self.left_end() {
+            return None;
         }
+
+        let z = self.getb(pos - 1);
+        if z < 128 {
+            pos -= 1;
+            self.debug_assert_valid_pos(pos);
+            return Some(pos);
+        }
+
+        if !is_utf8_continuation(self.getb(pos - 2)) {
+            pos -= 2;
+        } else if !is_utf8_continuation(self.getb(pos - 3)) {
+            pos -= 3;
+        } else {
+            debug_assert!(!is_utf8_continuation(self.getb(pos - 4)));
+            pos -= 4;
+        }
+        self.debug_assert_valid_pos(pos);
+        Some(pos)
+    }
+
+    #[inline(always)]
+    fn peek_byte_right(&self, pos: Self::Position) -> Option<u8> {
+        self.debug_assert_valid_pos(pos);
+        if pos == self.right_end() {
+            None
+        } else {
+            Some(self.getb(pos))
+        }
+    }
+
+    #[inline(always)]
+    fn peek_byte_left(&self, pos: Self::Position) -> Option<u8> {
+        self.debug_assert_valid_pos(pos);
+        if pos == self.left_end() {
+            None
+        } else {
+            Some(self.getb(pos - 1))
+        }
+    }
+
+    #[inline(always)]
+    fn try_move_right(&self, mut pos: Self::Position, amt: usize) -> Option<Self::Position> {
+        self.debug_assert_valid_pos(pos);
+        if self.right_end() - pos < amt {
+            None
+        } else {
+            pos += amt;
+            self.debug_assert_valid_pos(pos);
+            Some(pos)
+        }
+    }
+
+    #[inline(always)]
+    fn try_move_left(&self, mut pos: Self::Position, amt: usize) -> Option<Self::Position> {
+        self.debug_assert_valid_pos(pos);
+        if pos - self.left_end() < amt {
+            None
+        } else {
+            pos -= amt;
+            self.debug_assert_valid_pos(pos);
+            Some(pos)
+        }
+    }
+
+    #[inline(always)]
+    fn left_end(&self) -> Self::Position {
+        IndexPosition(0)
+    }
+
+    #[inline(always)]
+    fn right_end(&self) -> Self::Position {
+        IndexPosition(self.bytelength())
+    }
+
+    #[inline(always)]
+    fn pos_to_offset(&self, pos: Self::Position) -> usize {
+        pos.0
+    }
+
+    fn find_bytes<Search: bytesearch::ByteSearcher>(
+        &self,
+        mut pos: Self::Position,
+        search: &Search,
+    ) -> Option<Self::Position> {
+        let rem = self.slice(pos, self.right_end());
+        let idx = search.find_in(rem)?;
+        pos.0 += idx;
+        Some(pos)
     }
 }
 
@@ -257,9 +546,28 @@ impl<'a> AsciiInput<'a> {
             input: s.as_bytes(),
         }
     }
+
+    /// \return a byte at a given position.
+    /// This asserts that we are not at the right end.
+    #[inline(always)]
+    fn getb(&self, pos: <Self as InputIndexer>::Position) -> u8 {
+        debug_assert!(self.left_end() <= pos && pos < self.right_end());
+        if cfg!(feature = "prohibit-unsafe") {
+            self.contents()[self.pos_to_offset(pos)]
+        } else {
+            unsafe { *self.contents().get_unchecked(self.pos_to_offset(pos)) }
+        }
+    }
+
+    #[inline(always)]
+    fn debug_assert_valid_pos(&self, pos: <Self as InputIndexer>::Position) -> &Self {
+        debug_assert!(self.left_end() <= pos && pos <= self.right_end());
+        self
+    }
 }
 
 impl<'a> InputIndexer for AsciiInput<'a> {
+    type Position = IndexPosition;
     type Element = u8;
     type CharProps = matchers::ASCIICharProperties;
 
@@ -269,64 +577,115 @@ impl<'a> InputIndexer for AsciiInput<'a> {
     }
 
     #[inline(always)]
-    fn slice(&self, range: Range) -> &[u8] {
-        debug_assert!(
-            range.start <= range.end && range.end <= self.input.len(),
-            "Slice out of bounds"
-        );
-        self.input.iat(range)
+    fn slice(&self, start: Self::Position, end: Self::Position) -> &[u8] {
+        self.debug_assert_valid_pos(start);
+        self.debug_assert_valid_pos(end);
+        &self.contents()[std::ops::Range {
+            start: start.0,
+            end: end.0,
+        }]
     }
 
     #[inline(always)]
-    fn peek_right(&self, idx: Position) -> Option<Self::Element> {
-        if idx.0 == self.input.len() {
+    fn subinput(&self, range: ops::Range<Self::Position>) -> AsciiInput<'a> {
+        self.debug_assert_valid_pos(range.start);
+        self.debug_assert_valid_pos(range.end);
+        AsciiInput {
+            input: &self.input[std::ops::Range {
+                start: range.start.0,
+                end: range.end.0,
+            }],
+        }
+    }
+
+    #[inline(always)]
+    fn next_right(&self, pos: &mut Self::Position) -> Option<Self::Element> {
+        self.debug_assert_valid_pos(*pos);
+        if *pos == self.right_end() {
             None
         } else {
-            Some(*self.input.iat(idx.0))
+            let c = self.getb(*pos);
+            *pos += 1;
+            self.debug_assert_valid_pos(*pos);
+            Some(c)
         }
     }
 
     #[inline(always)]
-    fn peek_left(&self, idx: Position) -> Option<Self::Element> {
-        if idx.0 == 0 {
+    fn next_left(&self, pos: &mut Self::Position) -> Option<Self::Element> {
+        self.debug_assert_valid_pos(*pos);
+        if *pos == self.left_end() {
             None
         } else {
-            Some(*self.input.iat(idx.0 - 1))
+            *pos -= 1;
+            self.debug_assert_valid_pos(*pos);
+            let c = self.getb(*pos);
+            Some(c)
         }
     }
 
     #[inline(always)]
-    fn peek_byte_right(&self, idx: Position) -> Option<u8> {
-        self.peek_right(idx)
+    fn next_right_pos(&self, pos: Self::Position) -> Option<Self::Position> {
+        self.try_move_right(pos, 1)
     }
 
     #[inline(always)]
-    fn peek_byte_left(&self, idx: Position) -> Option<u8> {
-        self.peek_left(idx)
+    fn next_left_pos(&self, pos: Self::Position) -> Option<Self::Position> {
+        self.try_move_left(pos, 1)
     }
 
-    fn index_after_inc(&self, mut idx: Position) -> Option<Position> {
-        if idx.0 < self.input.len() {
-            idx.0 += 1;
-            Some(idx)
-        } else {
+    #[inline(always)]
+    fn peek_byte_right(&self, mut pos: Self::Position) -> Option<u8> {
+        self.next_right(&mut pos)
+    }
+
+    #[inline(always)]
+    fn peek_byte_left(&self, mut pos: Self::Position) -> Option<u8> {
+        self.next_left(&mut pos)
+    }
+
+    fn left_end(&self) -> Self::Position {
+        IndexPosition(0)
+    }
+
+    fn right_end(&self) -> Self::Position {
+        IndexPosition(self.bytelength())
+    }
+
+    fn try_move_right(&self, mut pos: Self::Position, amt: usize) -> Option<Self::Position> {
+        self.debug_assert_valid_pos(pos);
+        if self.right_end() - pos < amt {
             None
-        }
-    }
-
-    #[inline(always)]
-    fn index_after_exc(&self, mut idx: Position) -> Option<Position> {
-        if idx.0 + 1 < self.input.len() {
-            idx.0 += 1;
-            Some(idx)
         } else {
-            None
+            pos += amt;
+            self.debug_assert_valid_pos(pos);
+            Some(pos)
         }
     }
 
-    fn subinput(&self, r: Range) -> Self {
-        Self {
-            input: self.input.iat(r),
+    fn try_move_left(&self, mut pos: Self::Position, amt: usize) -> Option<Self::Position> {
+        self.debug_assert_valid_pos(pos);
+        if pos - self.left_end() < amt {
+            None
+        } else {
+            pos -= amt;
+            self.debug_assert_valid_pos(pos);
+            Some(pos)
         }
+    }
+
+    fn pos_to_offset(&self, pos: Self::Position) -> usize {
+        pos.0
+    }
+
+    fn find_bytes<Search: bytesearch::ByteSearcher>(
+        &self,
+        mut pos: Self::Position,
+        search: &Search,
+    ) -> Option<Self::Position> {
+        let rem = self.slice(pos, self.right_end());
+        let idx = search.find_in(rem)?;
+        pos.0 += idx;
+        Some(pos)
     }
 }
