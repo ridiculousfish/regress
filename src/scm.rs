@@ -1,6 +1,6 @@
 use crate::bytesearch::{charset_contains, ByteArraySet, ByteSeq, ByteSet, SmallArraySet};
-use crate::cursor::{Cursorable, Position};
-use crate::indexing::ElementType;
+use crate::cursor::Cursorable;
+use crate::indexing::{ElementType, Position};
 use crate::insn::MAX_CHAR_SET_LENGTH;
 use crate::matchers::CharProperties;
 use crate::types::BracketContents;

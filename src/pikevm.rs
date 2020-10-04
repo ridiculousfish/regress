@@ -3,9 +3,9 @@
 use crate::api::Match;
 use crate::bytesearch::{charset_contains, ByteSet};
 use crate::cursor;
-use crate::cursor::{Cursor, Cursorable, Forward, Position};
+use crate::cursor::{Cursor, Cursorable, Forward};
 use crate::exec;
-use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
+use crate::indexing::{AsciiInput, ElementType, InputIndexer, Position, Utf8Input};
 use crate::insn::{CompiledRegex, Insn, LoopFields};
 use crate::matchers;
 use crate::matchers::CharProperties;

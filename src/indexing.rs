@@ -4,6 +4,12 @@ use crate::util::DebugCheckIndex;
 use std::convert::TryInto;
 use std::str;
 
+// A position in our input string.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Position {
+    pub pos: usize,
+}
+
 // A type which may be an Element.
 pub trait ElementType:
     std::fmt::Debug

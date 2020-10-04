@@ -1,5 +1,5 @@
 use crate::codepointset::CodePointSet;
-use crate::cursor::Position;
+use crate::indexing::Position;
 
 pub type Range = std::ops::Range<usize>;
 

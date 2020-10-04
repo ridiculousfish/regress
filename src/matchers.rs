@@ -1,6 +1,6 @@
-use crate::cursor::{Cursorable, Position};
+use crate::cursor::Cursorable;
 use crate::folds;
-use crate::indexing::ElementType;
+use crate::indexing::{ElementType, Position};
 use crate::types::{BracketContents, Range};
 
 pub trait CharProperties {

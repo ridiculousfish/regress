@@ -1,14 +1,9 @@
 use crate::bytesearch::ByteSeq;
-use crate::indexing::{ElementType, InputIndexer};
+use crate::indexing::{ElementType, InputIndexer, Position};
 use crate::matchers::CharProperties;
 use crate::types::Range;
 use std::hint::unreachable_unchecked;
 use std::marker::PhantomData;
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Position {
-    pub pos: usize,
-}
 
 pub trait Cursorable: std::fmt::Debug + Copy + Clone {
     /// Whether this Cursor is tracking forward.
