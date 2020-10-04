@@ -406,11 +406,11 @@ impl<'a, Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'a, Input> 
                 *next_start = if end.0 != pos {
                     Some(end.0)
                 } else {
-                    self.cursor.input.index_after_inc(end).map(|x| x.0)
+                    self.cursor.index_after_inc(end).map(|x| x.0)
                 };
                 return Some(successful_match(pos, &state));
             }
-            match self.cursor.input.index_after_inc(Position(pos)) {
+            match self.cursor.index_after_inc(Position(pos)) {
                 Some(nextpos) => pos = nextpos.0,
                 None => break,
             }

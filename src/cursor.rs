@@ -1,22 +1,12 @@
 use crate::bytesearch::ByteSeq;
 use crate::indexing::{ElementType, InputIndexer, Position};
-use crate::matchers::CharProperties;
 use crate::types::Range;
 use std::hint::unreachable_unchecked;
 use std::marker::PhantomData;
 
-pub trait Cursorable: std::fmt::Debug + Copy + Clone {
+pub trait Cursorable: InputIndexer {
     /// Whether this Cursor is tracking forward.
     const FORWARD: bool;
-
-    /// The element type, typically char or u8.
-    type Element: ElementType;
-
-    /// The input indexer.
-    type Input: InputIndexer<Element = Self::Element>;
-
-    /// The CharProperties type.
-    type CharProps: CharProperties<Element = Self::Element>;
 
     /// This cursor, going forward.
     type ForwardForm: Cursorable;
@@ -26,12 +16,6 @@ pub trait Cursorable: std::fmt::Debug + Copy + Clone {
 
     /// \return a subcursor of this cursor.
     fn subcursor(&self, r: Range) -> Self;
-
-    /// \return the character to the right of the position.
-    fn peek_right(&self, pos: Position) -> Option<Self::Element>;
-
-    /// \return the character to the left of the position.
-    fn peek_left(&self, pos: Position) -> Option<Self::Element>;
 
     /// \return the next character, updating the position.
     fn next(&self, pos: &mut Position) -> Option<Self::Element>;
@@ -94,16 +78,13 @@ impl Direction for Backward {
 #[derive(Debug, Copy, Clone)]
 pub struct Cursor<Dir: Direction, Inp: InputIndexer> {
     /// The string contents.
-    pub input: Inp,
+    input: Inp,
     pd: PhantomData<Dir>,
 }
 
 impl<Dir: Direction, Inp: InputIndexer> Cursorable for Cursor<Dir, Inp> {
     const FORWARD: bool = Dir::FORWARD;
 
-    type Input = Inp;
-    type Element = Inp::Element;
-    type CharProps = Inp::CharProps;
     type ForwardForm = Cursor<Forward, Inp>;
     type BackwardForm = Cursor<Backward, Inp>;
 
@@ -113,14 +94,6 @@ impl<Dir: Direction, Inp: InputIndexer> Cursorable for Cursor<Dir, Inp> {
         } else {
             pos.0
         }
-    }
-
-    fn peek_right(&self, pos: Position) -> Option<Self::Element> {
-        self.input.peek_right(pos)
-    }
-
-    fn peek_left(&self, pos: Position) -> Option<Self::Element> {
-        self.input.peek_left(pos)
     }
 
     #[inline(always)]
@@ -271,6 +244,43 @@ impl<Dir: Direction, Inp: InputIndexer> Cursorable for Cursor<Dir, Inp> {
     fn as_backward(&self) -> Self::BackwardForm {
         Self::BackwardForm {
             input: self.input,
+            pd: PhantomData,
+        }
+    }
+}
+
+// Annoying delegation boilerplate since there's no inheritance.
+impl<Dir: Direction, Inp: InputIndexer> InputIndexer for Cursor<Dir, Inp> {
+    type Element = Inp::Element;
+    type CharProps = Inp::CharProps;
+
+    fn contents(&self) -> &[u8] {
+        self.input.contents()
+    }
+    fn slice(&self, range: Range) -> &[u8] {
+        self.input.slice(range)
+    }
+    fn peek_right(&self, idx: Position) -> Option<Self::Element> {
+        self.input.peek_right(idx)
+    }
+    fn peek_left(&self, idx: Position) -> Option<Self::Element> {
+        self.input.peek_left(idx)
+    }
+    fn peek_byte_right(&self, idx: Position) -> Option<u8> {
+        self.input.peek_byte_right(idx)
+    }
+    fn peek_byte_left(&self, idx: Position) -> Option<u8> {
+        self.input.peek_byte_left(idx)
+    }
+    fn index_after_inc(&self, idx: Position) -> Option<Position> {
+        self.input.index_after_inc(idx)
+    }
+    fn index_after_exc(&self, idx: Position) -> Option<Position> {
+        self.input.index_after_exc(idx)
+    }
+    fn subinput(&self, r: Range) -> Self {
+        Cursor {
+            input: self.input.subinput(r),
             pd: PhantomData,
         }
     }

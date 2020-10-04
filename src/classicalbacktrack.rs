@@ -866,11 +866,11 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
                 if end != pos {
                     *next_start = Some(end.0)
                 } else {
-                    *next_start = self.cursor.input.index_after_inc(end).map(|x| x.0);
+                    *next_start = self.cursor.index_after_inc(end).map(|x| x.0);
                 }
                 return Some(self.successful_match(pos.0, end.0));
             }
-            match self.cursor.input.index_after_inc(pos) {
+            match self.cursor.index_after_inc(pos) {
                 Some(nextpos) => pos = nextpos,
                 None => return None,
             }
