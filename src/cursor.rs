@@ -14,6 +14,7 @@ pub trait Direction: std::fmt::Debug + Copy + Clone {
 
 impl Direction for Forward {
     const FORWARD: bool = true;
+    #[inline(always)]
     fn new() -> Self {
         Forward {}
     }
@@ -21,6 +22,7 @@ impl Direction for Forward {
 
 impl Direction for Backward {
     const FORWARD: bool = false;
+    #[inline(always)]
     fn new() -> Self {
         Backward {}
     }

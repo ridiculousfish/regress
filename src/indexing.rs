@@ -66,6 +66,7 @@ pub struct IndexPosition(usize);
 
 impl ops::Add<usize> for IndexPosition {
     type Output = Self;
+    #[inline(always)]
     fn add(self, rhs: usize) -> Self::Output {
         debug_assert!(self.0 + rhs >= self.0, "Overflow");
         IndexPosition(self.0 + rhs)
@@ -73,12 +74,14 @@ impl ops::Add<usize> for IndexPosition {
 }
 
 impl ops::AddAssign<usize> for IndexPosition {
+    #[inline(always)]
     fn add_assign(&mut self, rhs: usize) {
         *self = *self + rhs;
     }
 }
 
 impl ops::SubAssign<usize> for IndexPosition {
+    #[inline(always)]
     fn sub_assign(&mut self, rhs: usize) {
         *self = *self - rhs;
     }
@@ -86,6 +89,7 @@ impl ops::SubAssign<usize> for IndexPosition {
 
 impl ops::Sub<IndexPosition> for IndexPosition {
     type Output = usize;
+    #[inline(always)]
     fn sub(self, rhs: Self) -> Self::Output {
         debug_assert!(self.0 >= rhs.0, "Underflow");
         self.0 - rhs.0
@@ -94,6 +98,7 @@ impl ops::Sub<IndexPosition> for IndexPosition {
 
 impl ops::Sub<usize> for IndexPosition {
     type Output = IndexPosition;
+    #[inline(always)]
     fn sub(self, rhs: usize) -> Self::Output {
         debug_assert!(self.0 >= rhs, "Underflow");
         IndexPosition(self.0 - rhs)
@@ -112,6 +117,7 @@ impl PositionType for RefPosition {}
 
 impl ops::Add<usize> for RefPosition {
     type Output = Self;
+    #[inline(always)]
     fn add(self, rhs: usize) -> Self::Output {
         Self(unsafe { self.0.add(rhs) })
     }
@@ -119,6 +125,7 @@ impl ops::Add<usize> for RefPosition {
 
 impl ops::Sub<RefPosition> for RefPosition {
     type Output = usize;
+    #[inline(always)]
     fn sub(self, rhs: Self) -> Self::Output {
         debug_assert!(self.0 >= rhs.0, "Underflow");
         unsafe { rhs.0.offset_from(self.0) as usize }
@@ -127,6 +134,7 @@ impl ops::Sub<RefPosition> for RefPosition {
 
 impl ops::Sub<usize> for RefPosition {
     type Output = RefPosition;
+    #[inline(always)]
     fn sub(self, rhs: usize) -> Self::Output {
         debug_assert!(self.0 as usize >= rhs, "Underflow");
         Self(unsafe { self.0.sub(rhs) })
@@ -134,12 +142,14 @@ impl ops::Sub<usize> for RefPosition {
 }
 
 impl ops::AddAssign<usize> for RefPosition {
+    #[inline(always)]
     fn add_assign(&mut self, rhs: usize) {
         *self = *self + rhs;
     }
 }
 
 impl ops::SubAssign<usize> for RefPosition {
+    #[inline(always)]
     fn sub_assign(&mut self, rhs: usize) {
         *self = *self - rhs;
     }
@@ -262,6 +272,7 @@ pub struct Utf8Input<'a> {
 }
 
 impl<'a> Utf8Input<'a> {
+    #[inline(always)]
     pub fn new(s: &'a str) -> Self {
         Self { input: s }
     }
@@ -523,6 +534,7 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         pos.0
     }
 
+    #[inline(always)]
     fn find_bytes<Search: bytesearch::ByteSearcher>(
         &self,
         mut pos: Self::Position,
@@ -644,14 +656,17 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         self.next_left(&mut pos)
     }
 
+    #[inline(always)]
     fn left_end(&self) -> Self::Position {
         IndexPosition(0)
     }
 
+    #[inline(always)]
     fn right_end(&self) -> Self::Position {
         IndexPosition(self.bytelength())
     }
 
+    #[inline(always)]
     fn try_move_right(&self, mut pos: Self::Position, amt: usize) -> Option<Self::Position> {
         self.debug_assert_valid_pos(pos);
         if self.right_end() - pos < amt {
@@ -663,6 +678,7 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         }
     }
 
+    #[inline(always)]
     fn try_move_left(&self, mut pos: Self::Position, amt: usize) -> Option<Self::Position> {
         self.debug_assert_valid_pos(pos);
         if pos - self.left_end() < amt {
@@ -674,10 +690,12 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         }
     }
 
+    #[inline(always)]
     fn pos_to_offset(&self, pos: Self::Position) -> usize {
         pos.0
     }
 
+    #[inline(always)]
     fn find_bytes<Search: bytesearch::ByteSearcher>(
         &self,
         mut pos: Self::Position,
