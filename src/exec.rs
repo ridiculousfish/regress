@@ -1,8 +1,8 @@
 //! Execution engine bits.
 
 use crate::api::Match;
-use crate::indexing::PositionType;
 use crate::insn::CompiledRegex;
+use crate::position::PositionType;
 
 /// A trait for finding the next match in a regex.
 /// This is broken out from Executor to avoid needing to thread lifetimes

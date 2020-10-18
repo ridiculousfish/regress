@@ -1,5 +1,5 @@
 use crate::codepointset::CodePointSet;
-use crate::indexing::PositionType;
+use crate::position::PositionType;
 use std::ops;
 
 /// A group index is u16.

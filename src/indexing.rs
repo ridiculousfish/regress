@@ -1,7 +1,7 @@
 use crate::bytesearch;
 use crate::matchers;
+use crate::position::{DefPosition, PositionType};
 use crate::util::{is_utf8_continuation, utf8_w2, utf8_w3, utf8_w4};
-use std::cmp::Eq;
 use std::convert::TryInto;
 use std::{ops, str};
 
@@ -44,149 +44,6 @@ impl ElementType for u8 {
     #[inline(always)]
     fn bytelength(self) -> usize {
         1
-    }
-}
-
-/// A trait which references a position in the input string.
-/// The intent is that this may be satisfied via indexes or pointers.
-/// Positions must be subtractable, producing usize.
-pub trait PositionType: std::fmt::Debug + Copy + Clone + PartialEq + Eq + PartialOrd + Ord
-where
-    Self: ops::Add<usize, Output = Self>,
-    Self: ops::Sub<usize, Output = Self>,
-    Self: ops::Sub<Self, Output = usize>,
-    Self: ops::AddAssign<usize>,
-    Self: ops::SubAssign<usize>,
-{
-}
-
-/// A simple index-based position.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct IndexPosition(usize);
-
-impl IndexPosition {
-    /// IndexPosition does not enforce its size.
-    fn check_size() {}
-}
-
-impl ops::Add<usize> for IndexPosition {
-    type Output = Self;
-    #[inline(always)]
-    fn add(self, rhs: usize) -> Self::Output {
-        debug_assert!(self.0 + rhs >= self.0, "Overflow");
-        IndexPosition(self.0 + rhs)
-    }
-}
-
-impl ops::AddAssign<usize> for IndexPosition {
-    #[inline(always)]
-    fn add_assign(&mut self, rhs: usize) {
-        *self = *self + rhs;
-    }
-}
-
-impl ops::SubAssign<usize> for IndexPosition {
-    #[inline(always)]
-    fn sub_assign(&mut self, rhs: usize) {
-        *self = *self - rhs;
-    }
-}
-
-impl ops::Sub<IndexPosition> for IndexPosition {
-    type Output = usize;
-    #[inline(always)]
-    fn sub(self, rhs: Self) -> Self::Output {
-        debug_assert!(self.0 >= rhs.0, "Underflow");
-        self.0 - rhs.0
-    }
-}
-
-impl ops::Sub<usize> for IndexPosition {
-    type Output = IndexPosition;
-    #[inline(always)]
-    fn sub(self, rhs: usize) -> Self::Output {
-        debug_assert!(self.0 >= rhs, "Underflow");
-        IndexPosition(self.0 - rhs)
-    }
-}
-
-impl PositionType for IndexPosition {}
-
-/// A reference position holds a reference to a byte and uses pointer arithmetic.
-/// This must use raw pointers because it must be capable of representing the one-past-the-end value.
-/// TODO: thread lifetimes through this.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct RefPosition(std::ptr::NonNull<u8>);
-
-impl RefPosition {
-    /// The big idea of RefPosition is that Option<RefPosition> becomes pointer-sized, by using nullptr as the None value.
-    /// Good candidate for const-panics when stabilized.
-    fn check_size() {
-        if std::mem::size_of::<Option<Self>>() > std::mem::size_of::<*const u8>() {
-            panic!("Option<RefPosition> should be pointer sized")
-        }
-    }
-
-    /// Access the underlying pointer.
-    #[inline(always)]
-    fn ptr(self) -> *const u8 {
-        self.0.as_ptr()
-    }
-
-    /// Construct from a pointer, which must never be null.
-    #[inline(always)]
-    fn new(ptr: *const u8) -> Self {
-        debug_assert!(!ptr.is_null(), "Pointer cannot be null");
-        // Annoyingly there's no *const NonNull.
-        let mutptr = ptr as *mut u8;
-        if cfg!(feature = "prohibit-unsafe") {
-            Self(std::ptr::NonNull::new(mutptr).expect("Pointer was null"))
-        } else {
-            Self(unsafe { std::ptr::NonNull::new_unchecked(mutptr) })
-        }
-    }
-}
-
-impl PositionType for RefPosition {}
-
-impl ops::Add<usize> for RefPosition {
-    type Output = Self;
-    #[inline(always)]
-    fn add(self, rhs: usize) -> Self::Output {
-        Self::new(unsafe { self.ptr().add(rhs) })
-    }
-}
-
-impl ops::Sub<RefPosition> for RefPosition {
-    type Output = usize;
-    #[inline(always)]
-    fn sub(self, rhs: Self) -> Self::Output {
-        debug_assert!(self.0 >= rhs.0, "Underflow");
-        // Note Rust has backwards naming here. The "origin" is self, not the param; the rhs is the offset value.
-        unsafe { self.ptr().offset_from(rhs.ptr()) as usize }
-    }
-}
-
-impl ops::Sub<usize> for RefPosition {
-    type Output = RefPosition;
-    #[inline(always)]
-    fn sub(self, rhs: usize) -> Self::Output {
-        debug_assert!(self.ptr() as usize >= rhs, "Underflow");
-        Self::new(unsafe { self.ptr().sub(rhs) })
-    }
-}
-
-impl ops::AddAssign<usize> for RefPosition {
-    #[inline(always)]
-    fn add_assign(&mut self, rhs: usize) {
-        *self = *self + rhs;
-    }
-}
-
-impl ops::SubAssign<usize> for RefPosition {
-    #[inline(always)]
-    fn sub_assign(&mut self, rhs: usize) {
-        *self = *self - rhs;
     }
 }
 
@@ -331,7 +188,7 @@ impl<'a> Utf8Input<'a> {
     #[inline(always)]
     fn pos_to_offset(&self, pos: <Self as InputIndexer>::Position) -> usize {
         self.debug_assert_valid_pos(pos);
-        let res = pos.0;
+        let res = pos.offset();
         debug_assert!(res <= self.contents().len(), "Position out of bounds");
         res
     }
@@ -371,12 +228,7 @@ impl<'a> Utf8Input<'a> {
 }
 
 impl<'a> InputIndexer for Utf8Input<'a> {
-    #[cfg(feature = "index-positions")]
-    type Position = IndexPosition;
-
-    #[cfg(not(feature = "index-positions"))]
-    type Position = RefPosition;
-
+    type Position = DefPosition<'a>;
     type Element = char;
     type CharProps = matchers::UTF8CharProperties;
 
@@ -573,31 +425,31 @@ impl<'a> InputIndexer for Utf8Input<'a> {
     #[cfg(feature = "index-positions")]
     #[inline(always)]
     fn left_end(&self) -> Self::Position {
-        IndexPosition(0)
+        Self::Position::new(0)
     }
 
     #[cfg(feature = "index-positions")]
     #[inline(always)]
     fn right_end(&self) -> Self::Position {
-        IndexPosition(self.bytelength())
+        Self::Position::new(self.bytelength())
     }
 
     #[cfg(feature = "index-positions")]
     #[inline(always)]
     fn pos_to_offset(&self, pos: Self::Position) -> usize {
-        pos.0
+        pos.offset()
     }
 
     #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn left_end(&self) -> Self::Position {
-        RefPosition::new(self.contents().as_ptr_range().start)
+        Self::Position::new(self.contents().as_ptr_range().start)
     }
 
     #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn right_end(&self) -> Self::Position {
-        RefPosition::new(self.contents().as_ptr_range().end)
+        Self::Position::new(self.contents().as_ptr_range().end)
     }
 
     #[cfg(not(feature = "index-positions"))]
@@ -654,7 +506,7 @@ impl<'a> AsciiInput<'a> {
 }
 
 impl<'a> InputIndexer for AsciiInput<'a> {
-    type Position = IndexPosition;
+    type Position = DefPosition<'a>;
     type Element = u8;
     type CharProps = matchers::ASCIICharProperties;
 
@@ -667,20 +519,29 @@ impl<'a> InputIndexer for AsciiInput<'a> {
     fn slice(&self, start: Self::Position, end: Self::Position) -> &[u8] {
         self.debug_assert_valid_pos(start);
         self.debug_assert_valid_pos(end);
-        &self.contents()[std::ops::Range {
-            start: start.0,
-            end: end.0,
-        }]
+
+        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
+        let res = &self.contents()[std::ops::Range {
+            start: self.pos_to_offset(start),
+            end: self.pos_to_offset(end),
+        }];
+
+        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        let res = unsafe { std::slice::from_raw_parts(start.ptr(), end - start) };
+
+        debug_assert!(res.len() <= self.bytelength() && res.len() == end - start);
+        res
     }
 
     #[inline(always)]
     fn subinput(&self, range: ops::Range<Self::Position>) -> AsciiInput<'a> {
         self.debug_assert_valid_pos(range.start);
         self.debug_assert_valid_pos(range.end);
+        debug_assert!(range.end >= range.start);
         AsciiInput {
             input: &self.input[std::ops::Range {
-                start: range.start.0,
-                end: range.end.0,
+                start: self.pos_to_offset(range.start),
+                end: self.pos_to_offset(range.end),
             }],
         }
     }
@@ -731,17 +592,43 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         self.next_left(&mut pos)
     }
 
+    #[cfg(feature = "index-positions")]
     #[inline(always)]
     fn left_end(&self) -> Self::Position {
-        IndexPosition(0)
+        Self::Position::new(0)
     }
 
+    #[cfg(feature = "index-positions")]
     #[inline(always)]
     fn right_end(&self) -> Self::Position {
-        IndexPosition(self.bytelength())
+        Self::Position::new(self.bytelength())
     }
 
+    #[cfg(feature = "index-positions")]
     #[inline(always)]
+    fn pos_to_offset(&self, pos: Self::Position) -> usize {
+        pos.offset()
+    }
+
+    #[cfg(not(feature = "index-positions"))]
+    #[inline(always)]
+    fn left_end(&self) -> Self::Position {
+        Self::Position::new(self.contents().as_ptr_range().start)
+    }
+
+    #[cfg(not(feature = "index-positions"))]
+    #[inline(always)]
+    fn right_end(&self) -> Self::Position {
+        Self::Position::new(self.contents().as_ptr_range().end)
+    }
+
+    #[cfg(not(feature = "index-positions"))]
+    #[inline(always)]
+    fn pos_to_offset(&self, pos: Self::Position) -> usize {
+        debug_assert!(self.left_end() <= pos && pos <= self.right_end());
+        pos - self.left_end()
+    }
+
     fn try_move_right(&self, mut pos: Self::Position, amt: usize) -> Option<Self::Position> {
         self.debug_assert_valid_pos(pos);
         if self.right_end() - pos < amt {
@@ -766,19 +653,13 @@ impl<'a> InputIndexer for AsciiInput<'a> {
     }
 
     #[inline(always)]
-    fn pos_to_offset(&self, pos: Self::Position) -> usize {
-        pos.0
-    }
-
-    #[inline(always)]
     fn find_bytes<Search: bytesearch::ByteSearcher>(
         &self,
-        mut pos: Self::Position,
+        pos: Self::Position,
         search: &Search,
     ) -> Option<Self::Position> {
         let rem = self.slice(pos, self.right_end());
         let idx = search.find_in(rem)?;
-        pos.0 += idx;
-        Some(pos)
+        Some(pos + idx)
     }
 }

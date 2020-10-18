@@ -133,6 +133,7 @@ mod ir;
 mod matchers;
 mod optimizer;
 mod parse;
+mod position;
 mod scm;
 mod startpredicate;
 mod types;
