@@ -19,6 +19,9 @@ cli = ["structopt"]
 # Enables the PikeVM backend.
 backend-pikevm = []
 
+# Prefers indexes to pointers for bytecode IP and string positions, for the paranoid.
+index-positions = []
+
 # Prohibits all uses of unsafe code, for the paranoid.
 prohibit-unsafe = []
 
