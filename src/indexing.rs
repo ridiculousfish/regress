@@ -66,7 +66,7 @@ pub struct IndexPosition(usize);
 
 impl IndexPosition {
     /// IndexPosition does not enforce its size.
-    const fn check_size() {}
+    fn check_size() {}
 }
 
 impl ops::Add<usize> for IndexPosition {
@@ -116,11 +116,35 @@ impl PositionType for IndexPosition {}
 /// This must use raw pointers because it must be capable of representing the one-past-the-end value.
 /// TODO: thread lifetimes through this.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct RefPosition(*const u8);
+pub struct RefPosition(std::ptr::NonNull<u8>);
 
 impl RefPosition {
     /// The big idea of RefPosition is that Option<RefPosition> becomes pointer-sized, by using nullptr as the None value.
-    fn check_size() {}
+    /// Good candidate for const-panics when stabilized.
+    fn check_size() {
+        if std::mem::size_of::<Option<Self>>() > std::mem::size_of::<*const u8>() {
+            panic!("Option<RefPosition> should be pointer sized")
+        }
+    }
+
+    /// Access the underlying pointer.
+    #[inline(always)]
+    fn ptr(self) -> *const u8 {
+        self.0.as_ptr()
+    }
+
+    /// Construct from a pointer, which must never be null.
+    #[inline(always)]
+    fn new(ptr: *const u8) -> Self {
+        debug_assert!(!ptr.is_null(), "Pointer cannot be null");
+        // Annoyingly there's no *const NonNull.
+        let mutptr = ptr as *mut u8;
+        if cfg!(feature = "prohibit-unsafe") {
+            Self(std::ptr::NonNull::new(mutptr).expect("Pointer was null"))
+        } else {
+            Self(unsafe { std::ptr::NonNull::new_unchecked(mutptr) })
+        }
+    }
 }
 
 impl PositionType for RefPosition {}
@@ -129,7 +153,7 @@ impl ops::Add<usize> for RefPosition {
     type Output = Self;
     #[inline(always)]
     fn add(self, rhs: usize) -> Self::Output {
-        Self(unsafe { self.0.add(rhs) })
+        Self::new(unsafe { self.ptr().add(rhs) })
     }
 }
 
@@ -138,8 +162,8 @@ impl ops::Sub<RefPosition> for RefPosition {
     #[inline(always)]
     fn sub(self, rhs: Self) -> Self::Output {
         debug_assert!(self.0 >= rhs.0, "Underflow");
-        // Note Rust has backwards naming here. The "origin" is self, the rhs is the offset value.
-        unsafe { self.0.offset_from(rhs.0) as usize }
+        // Note Rust has backwards naming here. The "origin" is self, not the param; the rhs is the offset value.
+        unsafe { self.ptr().offset_from(rhs.ptr()) as usize }
     }
 }
 
@@ -147,8 +171,8 @@ impl ops::Sub<usize> for RefPosition {
     type Output = RefPosition;
     #[inline(always)]
     fn sub(self, rhs: usize) -> Self::Output {
-        debug_assert!(self.0 as usize >= rhs, "Underflow");
-        Self(unsafe { self.0.sub(rhs) })
+        debug_assert!(self.ptr() as usize >= rhs, "Underflow");
+        Self::new(unsafe { self.ptr().sub(rhs) })
     }
 }
 
@@ -374,7 +398,7 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         }];
 
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
-        let res = unsafe { std::slice::from_raw_parts(start.0, end - start) };
+        let res = unsafe { std::slice::from_raw_parts(start.ptr(), end - start) };
 
         debug_assert!(res.len() <= self.bytelength() && res.len() == end - start);
         res
@@ -567,13 +591,13 @@ impl<'a> InputIndexer for Utf8Input<'a> {
     #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn left_end(&self) -> Self::Position {
-        RefPosition(self.contents().as_ptr_range().start)
+        RefPosition::new(self.contents().as_ptr_range().start)
     }
 
     #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn right_end(&self) -> Self::Position {
-        RefPosition(self.contents().as_ptr_range().end)
+        RefPosition::new(self.contents().as_ptr_range().end)
     }
 
     #[cfg(not(feature = "index-positions"))]
