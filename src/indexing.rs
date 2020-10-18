@@ -184,15 +184,6 @@ impl<'a> Utf8Input<'a> {
         }
     }
 
-    #[cfg(feature = "index-positions")]
-    #[inline(always)]
-    fn pos_to_offset(&self, pos: <Self as InputIndexer>::Position) -> usize {
-        self.debug_assert_valid_pos(pos);
-        let res = pos.offset();
-        debug_assert!(res <= self.contents().len(), "Position out of bounds");
-        res
-    }
-
     /// \return a slice as a str.
     #[inline(always)]
     fn str_slice(&self, range: ops::Range<<Self as InputIndexer>::Position>) -> &'a str {
@@ -434,12 +425,6 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         Self::Position::new(self.bytelength())
     }
 
-    #[cfg(feature = "index-positions")]
-    #[inline(always)]
-    fn pos_to_offset(&self, pos: Self::Position) -> usize {
-        pos.offset()
-    }
-
     #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn left_end(&self) -> Self::Position {
@@ -452,7 +437,6 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         Self::Position::new(self.contents().as_ptr_range().end)
     }
 
-    #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn pos_to_offset(&self, pos: Self::Position) -> usize {
         debug_assert!(self.left_end() <= pos && pos <= self.right_end());
@@ -604,12 +588,6 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         Self::Position::new(self.bytelength())
     }
 
-    #[cfg(feature = "index-positions")]
-    #[inline(always)]
-    fn pos_to_offset(&self, pos: Self::Position) -> usize {
-        pos.offset()
-    }
-
     #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn left_end(&self) -> Self::Position {
@@ -622,7 +600,6 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         Self::Position::new(self.contents().as_ptr_range().end)
     }
 
-    #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn pos_to_offset(&self, pos: Self::Position) -> usize {
         debug_assert!(self.left_end() <= pos && pos <= self.right_end());

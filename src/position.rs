@@ -35,10 +35,6 @@ impl<'a> IndexPosition<'a> {
     pub fn new(pos: usize) -> Self {
         Self(pos, PhantomData)
     }
-
-    pub fn offset(self) -> usize {
-        self.0
-    }
 }
 
 impl ops::Add<usize> for IndexPosition<'_> {
