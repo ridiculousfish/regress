@@ -50,7 +50,7 @@ struct Opt {
 }
 
 fn format_match(r: &regress::Match, input: &str) -> String {
-    let mut result = input[r.total()].to_string();
+    let mut result = input[r.range()].to_string();
     for cg in r.captures.iter() {
         result.push(',');
         if let Some(cg) = cg {

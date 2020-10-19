@@ -6,7 +6,7 @@ pub fn test_parse_fails(pattern: &str) {
 
 /// Format a Match by inserting commas between all capture groups.
 fn format_match(r: &regress::Match, input: &str) -> String {
-    let mut result = input[r.total()].to_string();
+    let mut result = input[r.range()].to_string();
     for cg in r.captures.iter() {
         result.push(',');
         if let Some(cg) = cg {
@@ -88,7 +88,7 @@ impl TestCompiledRegex {
     pub fn match1_vec<'a, 'b>(&'a self, input: &'b str) -> Vec<Option<&'b str>> {
         let mut result = Vec::new();
         let m: regress::Match = self.find(input).expect("Failed to match");
-        result.push(Some(&input[m.total()]));
+        result.push(Some(&input[m.range()]));
         for cr in m.captures {
             result.push(cr.map(|r| &input[r]));
         }
@@ -110,7 +110,7 @@ impl TestCompiledRegex {
     pub fn match_all_from<'a, 'b>(&'a self, input: &'b str, start: usize) -> Vec<regress::Range> {
         self.matches(input, start)
             .into_iter()
-            .map(move |m| m.total())
+            .map(move |m| m.range())
             .collect()
     }
 
@@ -118,7 +118,7 @@ impl TestCompiledRegex {
     pub fn match_all<'a, 'b>(&'a self, input: &'b str) -> Vec<&'b str> {
         self.matches(input, 0)
             .into_iter()
-            .map(move |m| &input[m.total()])
+            .map(move |m| &input[m.range()])
             .collect()
     }
 
