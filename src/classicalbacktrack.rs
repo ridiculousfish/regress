@@ -839,7 +839,7 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
             .map(GroupData::as_range)
             .collect();
         Match {
-            total_range: start..end,
+            range: start..end,
             captures,
         }
     }

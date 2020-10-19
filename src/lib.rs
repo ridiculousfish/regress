@@ -22,7 +22,7 @@ use regress::Regex;
 let re = Regex::new(r"(\w)\1").unwrap();
 let text = "Frankly, Miss Piggy, I don't give a hoot!";
 for m in re.find_iter(text) {
-    println!("{}", &text[m.total()])
+    println!("{}", &text[m.range()])
 }
 // Output: ss
 // Output: gg

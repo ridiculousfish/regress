@@ -318,7 +318,7 @@ fn try_match_state<Cursor: Cursorable>(
 fn successful_match(start: usize, state: &State) -> Match {
     let captures = state.groups.iter().map(GroupData::as_range).collect();
     Match {
-        total_range: start..state.pos.pos,
+        range: start..state.pos.pos,
         captures,
     }
 }

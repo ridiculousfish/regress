@@ -89,7 +89,7 @@ pub type AsciiMatches<'r, 't> = exec::Matches<backends::DefaultAsciiExecutor<'r,
 pub struct Match {
     /// The total range of the match. Note this may be empty, if the regex
     /// matched an empty string.
-    pub total_range: Range,
+    pub range: Range,
 
     /// The list of captures. This has length equal to the number of capturing
     /// groups in the regex. For each capture, if the value is None, that group
@@ -106,17 +106,31 @@ impl Match {
     #[inline]
     pub fn group(&self, idx: usize) -> Option<Range> {
         if idx == 0 {
-            Some(self.total_range.clone())
+            Some(self.range.clone())
         } else {
             self.captures[idx - 1].clone()
         }
     }
 
-    /// Return the total range. This is a convenience function to work around
+    /// Returns the range over the starting and ending byte offsets of the match in the haystack.
+    ///
+    /// This is a convenience function to work around
     /// the fact that Range does not support Copy.
     #[inline]
-    pub fn total(&self) -> Range {
-        self.total_range.clone()
+    pub fn range(&self) -> Range {
+        self.range.clone()
+    }
+
+    /// Returns the starting byte offset of the match in the haystack.
+    #[inline]
+    pub fn start(&self) -> usize {
+        self.range.start
+    }
+
+    /// Returns the ending byte offset of the match in the haystack.
+    #[inline]
+    pub fn end(&self) -> usize {
+        self.range.end
     }
 
     /// Return an iterator over a Match. The first returned value is the total
@@ -230,9 +244,9 @@ impl Regex {
     ///   use regress::Regex;
     ///   let text = "xyxy";
     ///   let re = Regex::new(r"(?<=x)y").unwrap();
-    ///   let t1 = re.find(&text[1..]).unwrap().total();
+    ///   let t1 = re.find(&text[1..]).unwrap().range();
     ///   assert!(t1 == (2..3));
-    ///   let t2 = re.find_from(text, 1).next().unwrap().total();
+    ///   let t2 = re.find_from(text, 1).next().unwrap().range();
     ///   assert!(t2 == (1..2));
     ///   ```
     #[inline]
