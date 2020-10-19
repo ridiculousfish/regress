@@ -201,7 +201,6 @@ impl CodePointSet {
                 last: CODE_POINT_MAX,
             })
         }
-        println!("Invert! {:?} -> {:?}", self.ivs.len(), inverted_ivs.len());
         CodePointSet::from_sorted_disjoint_intervals(inverted_ivs)
     }
 }
