@@ -30,8 +30,10 @@ pub struct IndexPosition<'a>(usize, PhantomData<&'a ()>);
 #[allow(dead_code)]
 impl<'a> IndexPosition<'a> {
     /// IndexPosition does not enforce its size.
+    #[inline(always)]
     pub fn check_size() {}
 
+    #[inline(always)]
     pub fn new(pos: usize) -> Self {
         Self(pos, PhantomData)
     }
@@ -39,6 +41,8 @@ impl<'a> IndexPosition<'a> {
 
 impl ops::Add<usize> for IndexPosition<'_> {
     type Output = Self;
+
+    #[inline(always)]
     fn add(self, rhs: usize) -> Self::Output {
         debug_assert!(self.0 + rhs >= self.0, "Overflow");
         IndexPosition(self.0 + rhs, PhantomData)
@@ -46,12 +50,14 @@ impl ops::Add<usize> for IndexPosition<'_> {
 }
 
 impl ops::AddAssign<usize> for IndexPosition<'_> {
+    #[inline(always)]
     fn add_assign(&mut self, rhs: usize) {
         *self = *self + rhs;
     }
 }
 
 impl ops::SubAssign<usize> for IndexPosition<'_> {
+    #[inline(always)]
     fn sub_assign(&mut self, rhs: usize) {
         *self = *self - rhs;
     }
@@ -59,6 +65,8 @@ impl ops::SubAssign<usize> for IndexPosition<'_> {
 
 impl<'a> ops::Sub<IndexPosition<'a>> for IndexPosition<'a> {
     type Output = usize;
+
+    #[inline(always)]
     fn sub(self, rhs: Self) -> Self::Output {
         debug_assert!(self.0 >= rhs.0, "Underflow");
         self.0 - rhs.0
@@ -67,6 +75,8 @@ impl<'a> ops::Sub<IndexPosition<'a>> for IndexPosition<'a> {
 
 impl ops::Sub<usize> for IndexPosition<'_> {
     type Output = Self;
+
+    #[inline(always)]
     fn sub(self, rhs: usize) -> Self::Output {
         debug_assert!(self.0 >= rhs, "Underflow");
         IndexPosition(self.0 - rhs, PhantomData)
@@ -85,6 +95,7 @@ pub struct RefPosition<'a>(std::ptr::NonNull<u8>, PhantomData<&'a ()>);
 impl RefPosition<'_> {
     /// The big idea of RefPosition is that Option<RefPosition> becomes pointer-sized, by using nullptr as the None value.
     /// Good candidate for const-panics when stabilized.
+    #[inline(always)]
     pub fn check_size() {
         if std::mem::size_of::<Option<Self>>() > std::mem::size_of::<*const u8>() {
             panic!("Option<RefPosition> should be pointer sized")
@@ -116,6 +127,8 @@ impl PositionType for RefPosition<'_> {}
 
 impl ops::Add<usize> for RefPosition<'_> {
     type Output = Self;
+
+    #[inline(always)]
     fn add(self, rhs: usize) -> Self::Output {
         Self::new(unsafe { self.ptr().add(rhs) })
     }
@@ -123,6 +136,8 @@ impl ops::Add<usize> for RefPosition<'_> {
 
 impl<'a> ops::Sub<RefPosition<'a>> for RefPosition<'a> {
     type Output = usize;
+
+    #[inline(always)]
     fn sub(self, rhs: Self) -> Self::Output {
         debug_assert!(self.0 >= rhs.0, "Underflow");
         // Note Rust has backwards naming here. The "origin" is self, not the param; the rhs is the offset value.
@@ -132,6 +147,8 @@ impl<'a> ops::Sub<RefPosition<'a>> for RefPosition<'a> {
 
 impl ops::Sub<usize> for RefPosition<'_> {
     type Output = Self;
+
+    #[inline(always)]
     fn sub(self, rhs: usize) -> Self::Output {
         debug_assert!(self.ptr() as usize >= rhs, "Underflow");
         Self::new(unsafe { self.ptr().sub(rhs) })
@@ -139,12 +156,14 @@ impl ops::Sub<usize> for RefPosition<'_> {
 }
 
 impl ops::AddAssign<usize> for RefPosition<'_> {
+    #[inline(always)]
     fn add_assign(&mut self, rhs: usize) {
         *self = *self + rhs;
     }
 }
 
 impl ops::SubAssign<usize> for RefPosition<'_> {
+    #[inline(always)]
     fn sub_assign(&mut self, rhs: usize) {
         *self = *self - rhs;
     }
