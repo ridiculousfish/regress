@@ -428,13 +428,13 @@ impl<'a> InputIndexer for Utf8Input<'a> {
     #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn left_end(&self) -> Self::Position {
-        Self::Position::new(self.contents().as_ptr_range().start)
+        Self::Position::new(self.contents().as_ptr())
     }
 
     #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn right_end(&self) -> Self::Position {
-        Self::Position::new(self.contents().as_ptr_range().end)
+        self.left_end() + self.bytelength()
     }
 
     #[inline(always)]
@@ -591,13 +591,13 @@ impl<'a> InputIndexer for AsciiInput<'a> {
     #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn left_end(&self) -> Self::Position {
-        Self::Position::new(self.contents().as_ptr_range().start)
+        Self::Position::new(self.contents().as_ptr())
     }
 
     #[cfg(not(feature = "index-positions"))]
     #[inline(always)]
     fn right_end(&self) -> Self::Position {
-        Self::Position::new(self.contents().as_ptr_range().end)
+        self.left_end() + self.bytelength()
     }
 
     #[inline(always)]
