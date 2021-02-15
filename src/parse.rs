@@ -350,8 +350,11 @@ impl<'a> Parser<'a> {
     /// ES6 21.2.2.13 CharacterClass.
     fn consume_bracket(&mut self) -> Result<ir::Node, Error> {
         self.consume('[');
-        let mut result = BracketContents::default();
-        result.invert = self.try_consume('^');
+        let invert = self.try_consume('^');
+        let mut result = BracketContents {
+            invert,
+            cps: CodePointSet::default(),
+        };
 
         loop {
             match self.peek() {

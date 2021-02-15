@@ -122,7 +122,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         let do_taken = iteration < loop_fields.max_iters;
         let do_not_taken = iteration >= loop_fields.min_iters;
 
-        let loop_taken_ip = ip + 1 as IP;
+        let loop_taken_ip = ip + 1;
         let loop_not_taken_ip = loop_fields.exit as IP;
 
         // If we have looped more than the minimum number of iterations, reject empty
@@ -208,6 +208,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
     // our position every iteration: we know that our loop body matches a single
     // character so we can backtrack by matching a character backwards.
     // \return the next IP, or None if the loop failed.
+    #[allow(clippy::too_many_arguments)]
     fn run_scm_loop<Dir: Direction>(
         &mut self,
         input: &Input,
@@ -543,7 +544,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                             break 'backtrack;
                         }
                     };
-                };
+                }
 
                 match re.insns.iat(ip) {
                     &Insn::Char(c) => {

@@ -105,9 +105,9 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
                 StateMatch::Continue
             } else {
                 StateMatch::Fail
-            };
+            }
         };
-    };
+    }
     match &re.insns[s.ip] {
         Insn::Goal => StateMatch::Complete,
         Insn::JustFail => StateMatch::Fail,
