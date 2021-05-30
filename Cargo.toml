@@ -1,6 +1,6 @@
 [package]
 name = "regress"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["ridiculousfish <corydoras@ridiculousfish.com>"]
 description = "A regular expression engine targeting EcmaScript syntax"
 license = "MIT OR Apache-2.0"
@@ -8,13 +8,15 @@ repository = "https://github.com/ridiculousfish/regress"
 keywords = ["regex", "regexp"]
 edition = "2018"
 readme = "README.md"
-default-run = "tester"
+
+[workspace]
+members = ["regress-tool", "gen-folds", "."]
+default-members = ["regress-tool", "."]
 
 [profile.release]
 
 [features]
-default = ["backend-pikevm", "cli"]
-cli = ["structopt"]
+default = ["backend-pikevm"]
 
 # Enables the PikeVM backend.
 backend-pikevm = []
@@ -27,11 +29,3 @@ prohibit-unsafe = []
 
 [dependencies]
 memchr = "2.3.3"
-
-# Optional dependencies
-structopt = { version = "0.3", optional = true}
-
-[[bin]]
-name = "tester"
-path = "src/bin/tester.rs"
-required-features = ["cli"]
