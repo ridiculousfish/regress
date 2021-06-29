@@ -1,5 +1,7 @@
 //! Bytecode instructions for a compiled regex
 
+use std::collections::HashMap;
+
 use crate::api;
 use crate::bytesearch::{AsciiBitmap, ByteArraySet, ByteBitmap};
 use crate::types::{BracketContents, CaptureGroupID};
@@ -177,5 +179,6 @@ pub struct CompiledRegex {
     pub start_pred: StartPredicate,
     pub loops: u32,
     pub groups: u32,
+    pub named_group_indices: HashMap<String, u16>,
     pub flags: api::Flags,
 }

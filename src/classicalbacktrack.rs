@@ -694,9 +694,11 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                             data: *cg,
                         });
                         if Dir::FORWARD {
-                            cg.start = Some(pos)
+                            cg.start = Some(pos);
+                            cg.end = None;
                         } else {
-                            cg.end = Some(pos)
+                            cg.end = Some(pos);
+                            cg.start = None;
                         }
                         next_or_bt!(true)
                     }
@@ -901,6 +903,7 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
         Match {
             range: self.input.pos_to_offset(start)..self.input.pos_to_offset(end),
             captures,
+            named_captures: self.matcher.re.named_group_indices.clone(),
         }
     }
 

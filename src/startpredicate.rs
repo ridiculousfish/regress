@@ -161,7 +161,9 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         Node::WordBoundary { .. } => arbitrary,
 
         // Capture groups delegate to their contents.
-        Node::CaptureGroup(child, _cgid) => compute_start_predicate(child),
+        Node::CaptureGroup(child, ..) | Node::NamedCaptureGroup(child, ..) => {
+            compute_start_predicate(child)
+        }
 
         // Zero-width assertions are one of the few instructions that impose no start predicate.
         Node::LookaroundAssertion { .. } => None,

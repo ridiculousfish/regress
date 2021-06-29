@@ -9,6 +9,8 @@ use crate::parse;
 #[cfg(feature = "backend-pikevm")]
 use crate::pikevm;
 
+use std::collections::hash_map::Iter;
+use std::collections::HashMap;
 use std::{fmt, str::FromStr};
 
 pub use parse::Error;
@@ -31,12 +33,16 @@ pub struct Flags {
 
     /// If set, disable regex IR passes.
     pub no_opt: bool,
+
+    /// If set, any invalid backreference produces a syntax error instead of being parsed as an escaped cahracter.
+    pub unicode: bool,
 }
 
 impl From<&str> for Flags {
     /// Construct a Flags from a string, using JavaScript field names.
     /// 'i' means to ignore case, 'm' means multiline.
     /// Note the 'g' flag implies a stateful regex and is not supported.
+    /// Note the 'u' flag currently only controlls if invalid backreferences should throw a syntax error.
     /// Other flags are not implemented and are ignored.
     #[inline]
     fn from(s: &str) -> Self {
@@ -51,6 +57,9 @@ impl From<&str> for Flags {
                 }
                 's' => {
                     result.dot_all = true;
+                }
+                'u' => {
+                    result.unicode = true;
                 }
                 _ => {
                     // Silently skip unsupported flags.
@@ -97,6 +106,8 @@ pub struct Match {
     /// alternation). If the value is Some, the group did match with the
     /// enclosed range.
     pub captures: Vec<Option<Range>>,
+
+    pub(crate) named_captures: HashMap<String, u16>,
 }
 
 impl Match {
@@ -110,6 +121,26 @@ impl Match {
         } else {
             self.captures[idx - 1].clone()
         }
+    }
+
+    /// Access a named group by name.
+    #[inline]
+    pub fn named_group(&self, name: &str) -> Option<Range> {
+        if let Some(idx) = self.named_captures.get(name) {
+            if let Some(range) = self.captures.get(*idx as usize) {
+                range.clone()
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Return an iterator over the named groups of a Match.
+    #[inline]
+    pub fn named_groups(&self) -> NamedGroups {
+        NamedGroups::new(self)
     }
 
     /// Returns the range over the starting and ending byte offsets of the match in the haystack.
@@ -174,6 +205,52 @@ impl<'m> Iterator for Groups<'m> {
         if i < self.max {
             self.i += 1;
             Some(self.mat.group(i))
+        } else {
+            None
+        }
+    }
+}
+
+/// An iterator over the named capture groups of a [`Match`]
+///
+/// This struct is created by the [`named_groups`] method on [`Match`].
+///
+/// [`Match`]: ../struct.Match.html
+/// [`named_groups`]: ../struct.Match.html#method.named_groups
+#[derive(Clone)]
+pub struct NamedGroups<'m> {
+    mat: &'m Match,
+    named_groups_iter: Iter<'m, String, u16>,
+    i: usize,
+    max: usize,
+}
+
+impl<'m> NamedGroups<'m> {
+    #[inline]
+    fn new(mat: &'m Match) -> Self {
+        Self {
+            mat,
+            named_groups_iter: mat.named_captures.iter(),
+            i: 0,
+            max: mat.captures.len() + 1,
+        }
+    }
+}
+
+impl<'m> Iterator for NamedGroups<'m> {
+    type Item = (&'m str, Option<Range>);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some((name, idx)) = self.named_groups_iter.next() {
+            if let Some(r) = self.mat.captures.get(*idx as usize) {
+                match r {
+                    Some(range) => Some((name.as_str(), Some(range.clone()))),
+                    None => Some((name.as_str(), None)),
+                }
+            } else {
+                Some((name.as_str(), None))
+            }
         } else {
             None
         }

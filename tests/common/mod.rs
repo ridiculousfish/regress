@@ -4,6 +4,12 @@ pub fn test_parse_fails(pattern: &str) {
     assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);
 }
 
+/// Test that \p pattern fails to parse with flags.
+pub fn test_parse_fails_flags(pattern: &str, flags: &str) {
+    let res = regress::Regex::with_flags(pattern, flags);
+    assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);
+}
+
 /// Format a Match by inserting commas between all capture groups.
 fn format_match(r: &regress::Match, input: &str) -> String {
     let mut result = input[r.range()].to_string();
@@ -48,7 +54,7 @@ pub struct TestCompiledRegex {
 
 impl TestCompiledRegex {
     /// Search for self in \p input, returning a list of all matches.
-    pub fn matches<'a, 'b>(&'a self, input: &'b str, start: usize) -> Vec<regress::Match> {
+    pub fn matches(&'_ self, input: &'_ str, start: usize) -> Vec<regress::Match> {
         use regress::backends as rbe;
         match (self.tc.use_ascii(input), self.tc.backend) {
             (true, Backend::PikeVM) => {
@@ -83,6 +89,20 @@ impl TestCompiledRegex {
         }
     }
 
+    /// Match against a string, returning the string of the named capture group given.
+    pub fn match1_named_group(&self, input: &str, group: &str) -> String {
+        match self.find(input) {
+            Some(m) => match m.named_group(group) {
+                Some(r) => match input.get(r.clone()) {
+                    Some(str) => str.to_string(),
+                    None => panic!("Cannot get range from string input {:?}", r),
+                },
+                None => panic!("Named capture group does not exist {}", group),
+            },
+            None => panic!("Failed to match {}", input),
+        }
+    }
+
     /// Match against a string, returning the match as a Vec containing None
     /// for unmatched groups, or the matched strings.
     pub fn match1_vec<'a, 'b>(&'a self, input: &'b str) -> Vec<Option<&'b str>> {
@@ -107,7 +127,7 @@ impl TestCompiledRegex {
 
     /// Return a list of all non-overlapping total match ranges from a given
     /// start.
-    pub fn match_all_from<'a, 'b>(&'a self, input: &'b str, start: usize) -> Vec<regress::Range> {
+    pub fn match_all_from(&'_ self, input: &'_ str, start: usize) -> Vec<regress::Range> {
         self.matches(input, start)
             .into_iter()
             .map(move |m| m.range())
