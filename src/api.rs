@@ -34,7 +34,7 @@ pub struct Flags {
     /// If set, disable regex IR passes.
     pub no_opt: bool,
 
-    /// If set, any invalid backreference produces a syntax error instead of being parsed as an escaped cahracter.
+    /// If set, any invalid backreference produces a syntax error instead of being parsed as an escaped character.
     pub unicode: bool,
 }
 
@@ -42,7 +42,7 @@ impl From<&str> for Flags {
     /// Construct a Flags from a string, using JavaScript field names.
     /// 'i' means to ignore case, 'm' means multiline.
     /// Note the 'g' flag implies a stateful regex and is not supported.
-    /// Note the 'u' flag currently only controlls if invalid backreferences should throw a syntax error.
+    /// Note the 'u' flag currently only controls if invalid backreferences should throw a syntax error.
     /// Other flags are not implemented and are ignored.
     #[inline]
     fn from(s: &str) -> Self {
@@ -221,8 +221,6 @@ impl<'m> Iterator for Groups<'m> {
 pub struct NamedGroups<'m> {
     mat: &'m Match,
     named_groups_iter: Iter<'m, String, u16>,
-    i: usize,
-    max: usize,
 }
 
 impl<'m> NamedGroups<'m> {
@@ -231,8 +229,6 @@ impl<'m> NamedGroups<'m> {
         Self {
             mat,
             named_groups_iter: mat.named_captures.iter(),
-            i: 0,
-            max: mat.captures.len() + 1,
         }
     }
 }

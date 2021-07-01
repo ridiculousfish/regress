@@ -132,7 +132,7 @@ struct Parser<'a> {
     group_count_max: u32,
 
     /// Named capture group references.
-    named_group_indicies: HashMap<CaptureGroupName, u32>,
+    named_group_indices: HashMap<CaptureGroupName, u32>,
 
     /// Maximum backreference encountered.
     /// Note that values larger than will fit are early errors.
@@ -821,7 +821,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        if let Some(index) = self.named_group_indicies.get(&group_name) {
+        if let Some(index) = self.named_group_indices.get(&group_name) {
             self.input = cursor;
             Ok(Some(*index))
         } else if self.flags.unicode {
@@ -852,7 +852,7 @@ impl<'a> Parser<'a> {
                 Some('(') => {
                     if self.try_consume_str("?") {
                         if let Some(name) = self.try_consume_named_capture_group_name() {
-                            self.named_group_indicies.insert(name, self.group_count_max);
+                            self.named_group_indices.insert(name, self.group_count_max);
                         }
                     }
                     self.group_count_max = if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
@@ -898,7 +898,7 @@ pub fn try_parse(pattern: &str, flags: api::Flags) -> Result<ir::Regex, Error> {
         flags,
         loop_count: 0,
         group_count: 0,
-        named_group_indicies: HashMap::new(),
+        named_group_indices: HashMap::new(),
         group_count_max: 0,
         max_backref: 0,
         has_lookbehind: false,
