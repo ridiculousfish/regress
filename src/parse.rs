@@ -657,18 +657,28 @@ impl<'a> Parser<'a> {
                 }
             }
 
+            '1'..='7' => {
+                // LegacyOctalEscapeSequence
+                if self.flags.unicode {
+                    error("Invalid character escape")
+                } else if let Some(c) = self.try_consume_legacy_octal_escape_sequence() {
+                    Ok(c)
+                } else {
+                    error("invalid octal escape")
+                }
+            }
+
             // Only syntax characters and / participate in IdentityEscape in Unicode regexp.
             '^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
             | '/' => Ok(self.consume(c)),
 
-            // TODO: currently we permit alphabetic characters in IdentityEscape to help some PCRE
-            // tests pass.
-            // Specifically a regex of the form [\p{Nd}]: in non-Unicode mode this is not a
-            // character property test and is expected to parse as just a bracket where \p is
-            // IdentityEscaped to p.
-            c if c.is_ascii_alphabetic() => Ok(self.consume(c)),
-
-            _ => error("Invalid character escape"),
+            c => {
+                if self.flags.unicode {
+                    error("Invalid character escape")
+                } else {
+                    Ok(self.consume(c))
+                }
+            }
         }
     }
 
@@ -714,33 +724,80 @@ impl<'a> Parser<'a> {
                     Ok(ir::Node::BackRef(group))
                 } else if self.flags.unicode {
                     error("Invalid character escape")
-                } else {
+                } else if c == '8' || c == '9' {
                     self.input = orig_input;
-                    self.consume(c);
                     Ok(ir::Node::Char {
-                        c,
+                        c: self.consume(c),
                         icase: self.flags.icase,
                     })
+                } else {
+                    self.input = orig_input;
+                    if let Some(c) = self.try_consume_legacy_octal_escape_sequence() {
+                        Ok(ir::Node::Char {
+                            c,
+                            icase: self.flags.icase,
+                        })
+                    } else {
+                        error("invalid octal escape")
+                    }
                 }
             }
 
             'k' => {
-                // This is the start of a a backreference to a named capture group.
                 self.consume(c);
-                if let Some(index) = self.try_consume_named_capture_group_backreference()? {
-                    Ok(ir::Node::BackRef(index as u32 + 1))
-                } else {
+
+                // The sequence `\k` must be the start of a backreference to a named capture group, when:
+                // 1. the `unicode` flag is set or
+                // 2. there exists no named capture group in the regexp
+                // Otherwise `\k` is parsed as the `k` literal character.
+                if !self.flags.unicode && self.named_group_indices.is_empty() {
                     Ok(ir::Node::Char {
                         c: 'k',
                         icase: self.flags.icase,
                     })
+                } else if let Some(group_name) = self.try_consume_named_capture_group_name() {
+                    if let Some(index) = self.named_group_indices.get(&group_name) {
+                        Ok(ir::Node::BackRef(*index + 1))
+                    } else {
+                        error(format!(
+                            "Backreference to invalid named capture group: {}",
+                            &group_name
+                        ))
+                    }
+                } else {
+                    error("Unexpected end of named backreference")
                 }
             }
-
             _ => Ok(ir::Node::Char {
                 c: self.consume_character_escape()?,
                 icase: self.flags.icase,
             }),
+        }
+    }
+
+    fn try_consume_legacy_octal_escape_sequence(&mut self) -> Option<char> {
+        let first = self.next()?;
+        let mut s = String::from(first);
+
+        if let Some(c) = self.peek() {
+            if ('0'..='7').contains(&c) {
+                self.consume(c);
+                s.push(c);
+
+                if ('0'..='3').contains(&first) {
+                    if let Some(c) = self.peek() {
+                        if ('0'..='7').contains(&c) {
+                            self.consume(c);
+                            s.push(c);
+                        }
+                    }
+                }
+            }
+        }
+
+        match u32::from_str_radix(&s, 8) {
+            Ok(i) => char::from_u32(i),
+            Err(_) => None,
         }
     }
 
@@ -783,55 +840,6 @@ impl<'a> Parser<'a> {
         self.input = cursor;
 
         Some(group_name)
-    }
-
-    fn try_consume_named_capture_group_backreference(&mut self) -> Result<Option<u32>, Error> {
-        let mut cursor = self.input.clone();
-
-        match cursor.next() {
-            Some('<') => {}
-            _ => return Ok(None),
-        }
-
-        let mut group_name = String::new();
-
-        if let Some(c) = cursor.next() {
-            if c.is_id_start() || c == '$' || c == '_' {
-                group_name.push(c);
-            } else {
-                return error(format!("Invalid character in capture group name: {}", c));
-            }
-        } else {
-            return Ok(None);
-        }
-
-        loop {
-            match cursor.next() {
-                Some('>') => break,
-                Some(c) => {
-                    if c.is_id_continue() || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
-                    /* <ZWJ> */
-                    {
-                        group_name.push(c);
-                    } else {
-                        return error(format!("Invalid character in capture group name: {}", c));
-                    }
-                }
-                None => return Ok(None),
-            }
-        }
-
-        if let Some(index) = self.named_group_indices.get(&group_name) {
-            self.input = cursor;
-            Ok(Some(*index))
-        } else if self.flags.unicode {
-            error(format!(
-                "Backreference to invalid named capture group: {}",
-                &group_name
-            ))
-        } else {
-            Ok(None)
-        }
     }
 
     // Quickly parse all capture groups.

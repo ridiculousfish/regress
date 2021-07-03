@@ -1124,6 +1124,35 @@ fn run_regexp_unicode_flag() {
 
 #[rustfmt::skip]
 fn run_regexp_unicode_flag_tc(tc: TestConfig) {
-    tc.compilef(r#"(?<a>a)\k<b>"#, "").match1f("ak<b>").test_eq("ak<b>,a");
-    test_parse_fails_flags(r#"(?<a>a)\k<b>"#, "u");
+    // From 262 test/annexB/built-ins/RegExp/named-groups/non-unicode-malformed-lookbehind.js
+    tc.compilef(r#"\k<a>(?<=>)a"#, "").match1f("k<a>a").test_eq("k<a>a");
+    test_parse_fails_flags(r#"\k<a>(?<=>)a"#, "u");
+    tc.compilef(r#"(?<=>)\k<a>"#, "").match1f(">k<a>").test_eq("k<a>");
+    test_parse_fails_flags(r#"(?<=>)\k<a>"#, "u");
+    tc.compilef(r#"\k<a>(?<!a)a"#, "").match1f("k<a>a").test_eq("k<a>a");
+    test_parse_fails_flags(r#"\k<a>(?<!a)a"#, "u");
+    tc.compilef(r#"(?<!a>)\k<a>"#, "").match1f("k<a>").test_eq("k<a>");
+    test_parse_fails_flags(r#"(?<!a>)\k<a>"#, "u");
+
+    // From 262 test/annexB/built-ins/RegExp/named-groups/non-unicode-malformed.js
+    tc.compilef(r#"\k<a>"#, "").match1f("k<a>").test_eq("k<a>");
+    test_parse_fails_flags(r#"\k<a>"#, "u");
+    tc.compilef(r#"\k<4>"#, "").match1f("k<4>").test_eq("k<4>");
+    test_parse_fails_flags(r#"\k<4>"#, "u");
+    tc.compilef(r#"\k<a"#, "").match1f("k<a").test_eq("k<a");
+    test_parse_fails_flags(r#"\k<a"#, "u");
+    tc.compilef(r#"\k"#, "").match1f("k").test_eq("k");
+    test_parse_fails_flags(r#"\k"#, "u");
+    tc.compilef(r#"(?<a>\a)"#, "").match1f("a").test_eq("a,a");
+     test_parse_fails_flags(r#"(?<a>\a)"#, "u");
+    tc.compilef(r#"\k<a>"#, "").match1f("xxxk<a>xxx").test_eq("k<a>");
+    test_parse_fails_flags(r#"\k<a>"#, "u");
+    tc.compilef(r#"\k<a"#, "").match1f("xxxk<a>xxx").test_eq("k<a");
+    test_parse_fails_flags(r#"\k<a"#, "u");
+    tc.compilef(r#"\k<a>(<a>x)"#, "").match1f("k<a><a>x").test_eq("k<a><a>x,<a>x");
+    test_parse_fails_flags(r#"\k<a>(<a>x)"#, "u");
+    tc.compilef(r#"\k<a>\1"#, "").match1f("k<a>\x01").test_eq("k<a>\x01");
+    test_parse_fails_flags(r#"\k<a>\1"#, "u");
+    tc.compilef(r#"\1(b)\k<a>"#, "").match1f("bk<a>").test_eq("bk<a>,b");
+    test_parse_fails_flags(r#"\1(b)\k<a>"#, "u");
 }
