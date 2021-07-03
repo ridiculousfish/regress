@@ -129,7 +129,6 @@ mod cursor;
 mod emit;
 mod exec;
 mod folds;
-mod foldtable;
 mod indexing;
 mod insn;
 mod ir;
@@ -140,6 +139,7 @@ mod position;
 mod scm;
 mod startpredicate;
 mod types;
+mod unicode;
 
 #[cfg(feature = "backend-pikevm")]
 mod pikevm;

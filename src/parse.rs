@@ -9,7 +9,7 @@ use crate::types::{
     BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
     MAX_LOOPS,
 };
-use boa_unicode::UnicodeProperties;
+use crate::unicode::{is_id_continue, is_id_start};
 use std::collections::HashMap;
 use std::{error::Error as StdError, fmt, iter::Peekable};
 
@@ -812,7 +812,7 @@ impl<'a> Parser<'a> {
         let mut group_name = String::new();
 
         if let Some(c) = cursor.next() {
-            if c.is_id_start() || c == '$' || c == '_' {
+            if is_id_start(c) || c == '$' || c == '_' {
                 group_name.push(c);
             } else {
                 return None;
@@ -825,7 +825,7 @@ impl<'a> Parser<'a> {
             match cursor.next() {
                 Some('>') => break,
                 Some(c) => {
-                    if c.is_id_continue() || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
+                    if is_id_continue(c) || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
                     /* <ZWJ> */
                     {
                         group_name.push(c);

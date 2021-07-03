@@ -1,5 +1,5 @@
 use crate::codepointset::{CodePointSet, Interval};
-use crate::foldtable::{FoldRange, FOLDS};
+use crate::unicode::{FoldRange, FOLDS};
 use crate::util::SliceHelp;
 use std::cmp::Ordering;
 

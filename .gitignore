@@ -4,6 +4,6 @@ Cargo.lock
 .vscode
 .vscode/*
 CaseFolding.txt
+DerivedCoreProperties.txt
 .DS_Store
 regexp-pcre.js
-
