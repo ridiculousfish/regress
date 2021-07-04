@@ -963,11 +963,17 @@ impl<'a> Parser<'a> {
         let orig_input = self.input.clone();
 
         loop {
-            let c = self.input.next();
-            match c {
+            match self.next() {
+                Some('\\') => {
+                    self.next();
+                    continue;
+                }
                 Some('[') => loop {
-                    let c = self.input.next();
-                    match c {
+                    match self.next() {
+                        Some('\\') => {
+                            self.next();
+                            continue;
+                        }
                         Some(']') => break,
                         Some(_) => continue,
                         None => break,

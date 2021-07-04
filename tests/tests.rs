@@ -1115,6 +1115,11 @@ fn run_regexp_named_capture_groups_tc(tc: TestConfig) {
     tc.compilef(r#"(?<b>b)\k<a>(?<a>a)\k<b>"#, "").match1f("bab").test_eq("bab,b,a");
     tc.compilef(r#"(?<a>a)(?<b>b)\k<a>"#, "").match1_named_group("aba", "a").test_eq("a");
     tc.compilef(r#"(?<a>a)(?<b>b)\k<a>"#, "").match1_named_group("aba", "b").test_eq("b");
+
+    // Make sure that escapes are parsed correctly in the fast capture group parser.
+    // This pattern should fail in unicode mode, because there is a backreference without a capture group.
+    // If the `\]` is not handled correctly in the parser, the following `(.)` may be parsed as a capture group.
+    test_parse_fails_flags(r#"/[\](.)]\1/"#, "u");
 }
 
 #[test]
@@ -1144,7 +1149,7 @@ fn run_regexp_unicode_flag_tc(tc: TestConfig) {
     tc.compilef(r#"\k"#, "").match1f("k").test_eq("k");
     test_parse_fails_flags(r#"\k"#, "u");
     tc.compilef(r#"(?<a>\a)"#, "").match1f("a").test_eq("a,a");
-     test_parse_fails_flags(r#"(?<a>\a)"#, "u");
+    test_parse_fails_flags(r#"(?<a>\a)"#, "u");
     tc.compilef(r#"\k<a>"#, "").match1f("xxxk<a>xxx").test_eq("k<a>");
     test_parse_fails_flags(r#"\k<a>"#, "u");
     tc.compilef(r#"\k<a"#, "").match1f("xxxk<a>xxx").test_eq("k<a");
