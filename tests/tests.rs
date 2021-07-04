@@ -1156,3 +1156,20 @@ fn run_regexp_unicode_flag_tc(tc: TestConfig) {
     tc.compilef(r#"\1(b)\k<a>"#, "").match1f("bk<a>").test_eq("bk<a>,b");
     test_parse_fails_flags(r#"\1(b)\k<a>"#, "u");
 }
+
+#[test]
+fn run_regexp_unicode_escape() {
+    test_with_configs(run_regexp_unicode_escape_tc)
+}
+
+#[rustfmt::skip]
+fn run_regexp_unicode_escape_tc(tc: TestConfig) {
+    // From 262 test/language/literals/regexp/u-unicode-esc.js
+    tc.compilef(r#"\u{0}"#, "u").test_succeeds("\u{0}");
+    tc.compilef(r#"\u{1}"#, "u").test_succeeds("\u{1}");
+    tc.compilef(r#"\u{1}"#, "u").test_fails("u");
+    tc.compilef(r#"\u{3f}"#, "u").test_succeeds("?");
+    tc.compilef(r#"\u{000000003f}"#, "u").test_succeeds("?");
+    tc.compilef(r#"\u{3F}"#, "u").test_succeeds("?");
+    tc.compilef(r#"\u{10ffff}"#, "u").test_succeeds("\u{10ffff}");
+}

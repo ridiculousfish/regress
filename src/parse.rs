@@ -644,6 +644,17 @@ impl<'a> Parser<'a> {
                 }
             }
 
+            '1'..='7' => {
+                // LegacyOctalEscapeSequence
+                if self.flags.unicode {
+                    error("Invalid character escape")
+                } else if let Some(c) = self.try_consume_legacy_octal_escape_sequence() {
+                    Ok(c)
+                } else {
+                    error("invalid octal escape")
+                }
+            }
+
             'x' => {
                 // HexEscapeSequence :: x HexDigit HexDigit
                 // See ES6 11.8.3 HexDigit
@@ -657,14 +668,15 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            '1'..='7' => {
-                // LegacyOctalEscapeSequence
-                if self.flags.unicode {
-                    error("Invalid character escape")
-                } else if let Some(c) = self.try_consume_legacy_octal_escape_sequence() {
+            'u' => {
+                // Unicode escape
+                self.consume('u');
+                if let Some(c) = self.try_escape_unicode_sequence() {
                     Ok(c)
+                } else if self.flags.unicode {
+                    error("Invalid unicode escape")
                 } else {
-                    error("invalid octal escape")
+                    Ok('u')
                 }
             }
 
@@ -775,6 +787,90 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn try_escape_unicode_sequence(&mut self) -> Option<char> {
+        let orig_input = self.input.clone();
+
+        // Support \u{X..X} (Unicode CodePoint)
+        if self.try_consume('{') {
+            let mut s = String::new();
+            loop {
+                match self.next() {
+                    Some('}') => break,
+                    Some(c) => s.push(c),
+                    None => {
+                        self.input = orig_input;
+                        return None;
+                    }
+                }
+            }
+
+            match u32::from_str_radix(&s, 16) {
+                Ok(u) => {
+                    if u > 0x10_FFFF {
+                        self.input = orig_input;
+                        None
+                    } else {
+                        char::from_u32(u as u32)
+                    }
+                }
+                _ => {
+                    self.input = orig_input;
+                    None
+                }
+            }
+        } else {
+            // Hex4Digits
+            let mut s = String::new();
+            for _ in 0..4 {
+                if let Some(c) = self.next() {
+                    s.push(c);
+                } else {
+                    self.input = orig_input;
+                    return None;
+                }
+            }
+            match u16::from_str_radix(&s, 16) {
+                Ok(u) => {
+                    if (0xDC00..=0xDFFF).contains(&u) || (0xD800..=0xDB7F).contains(&u) {
+                        // Low/High Surrogates
+                        if !self.try_consume_str("\\u") {
+                            return String::from_utf16_lossy(&[u]).chars().next();
+                        }
+
+                        let mut s = String::new();
+                        for _ in 0..4 {
+                            if let Some(c) = self.next() {
+                                s.push(c);
+                            } else {
+                                self.input = orig_input;
+                                return None;
+                            }
+                        }
+                        match u16::from_str_radix(&s, 16) {
+                            Ok(uu) => match String::from_utf16(&[u, uu]) {
+                                Ok(s) => s.chars().next(),
+                                _ => {
+                                    self.input = orig_input;
+                                    None
+                                }
+                            },
+                            _ => {
+                                self.input = orig_input;
+                                None
+                            }
+                        }
+                    } else {
+                        String::from_utf16_lossy(&[u]).chars().next()
+                    }
+                }
+                _ => {
+                    self.input = orig_input;
+                    None
+                }
+            }
+        }
+    }
+
     fn try_consume_legacy_octal_escape_sequence(&mut self) -> Option<char> {
         let first = self.next()?;
         let mut s = String::from(first);
@@ -802,42 +898,62 @@ impl<'a> Parser<'a> {
     }
 
     fn try_consume_named_capture_group_name(&mut self) -> Option<String> {
-        let mut cursor = self.input.clone();
-
-        match cursor.next() {
-            Some('<') => {}
-            _ => return None,
+        if !self.try_consume('<') {
+            return None;
         }
 
+        let orig_input = self.input.clone();
         let mut group_name = String::new();
 
-        if let Some(c) = cursor.next() {
+        if let Some(mut c) = self.next() {
+            if self.try_consume('u') {
+                if let Some(escaped) = self.try_escape_unicode_sequence() {
+                    c = escaped;
+                } else {
+                    self.input = orig_input;
+                    return None;
+                }
+            }
+
             if is_id_start(c) || c == '$' || c == '_' {
                 group_name.push(c);
             } else {
+                self.input = orig_input;
                 return None;
             }
         } else {
+            self.input = orig_input;
             return None;
         }
 
         loop {
-            match cursor.next() {
-                Some('>') => break,
-                Some(c) => {
-                    if is_id_continue(c) || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
-                    /* <ZWJ> */
-                    {
-                        group_name.push(c);
+            if let Some(mut c) = self.next() {
+                if self.try_consume('u') {
+                    if let Some(escaped) = self.try_escape_unicode_sequence() {
+                        c = escaped;
                     } else {
+                        self.input = orig_input;
                         return None;
                     }
                 }
-                None => return None,
+
+                if c == '>' {
+                    break;
+                }
+
+                if is_id_continue(c) || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
+                /* <ZWJ> */
+                {
+                    group_name.push(c);
+                } else {
+                    self.input = orig_input;
+                    return None;
+                }
+            } else {
+                self.input = orig_input;
+                return None;
             }
         }
-
-        self.input = cursor;
 
         Some(group_name)
     }
@@ -899,10 +1015,8 @@ pub fn try_parse(pattern: &str, flags: api::Flags) -> Result<ir::Regex, Error> {
     //     }
     // }
 
-    let input = escape_unicode(pattern)?;
-
     let mut p = Parser {
-        input: input.chars().peekable(),
+        input: pattern.chars().peekable(),
         flags,
         loop_count: 0,
         group_count: 0,
@@ -912,120 +1026,4 @@ pub fn try_parse(pattern: &str, flags: api::Flags) -> Result<ir::Regex, Error> {
         has_lookbehind: false,
     };
     p.try_parse()
-}
-
-fn escape_unicode(input: &str) -> Result<String, Error> {
-    let mut cursor = input.chars().peekable();
-
-    let mut s = String::new();
-
-    loop {
-        match cursor.next() {
-            Some('\\') => match cursor.next() {
-                Some('u') => {
-                    if let Some((c, iter)) = escape_unicode_sequence(cursor) {
-                        s.push(c);
-                        cursor = iter;
-                    } else {
-                        return error("Invalid unicode escape");
-                    }
-                }
-                Some(c) => {
-                    s.push('\\');
-                    s.push(c);
-                }
-                None => {
-                    s.push('\\');
-                    break;
-                }
-            },
-            Some(c) => s.push(c),
-            None => break,
-        }
-    }
-
-    Ok(s)
-}
-
-fn escape_unicode_sequence(
-    mut cursor: Peekable<std::str::Chars>,
-) -> Option<(char, Peekable<std::str::Chars>)> {
-    // Support \u{X..X} (Unicode CodePoint)
-    if cursor.peek() == Some(&'{') {
-        cursor.next();
-
-        let mut s = String::new();
-        loop {
-            match cursor.next() {
-                Some('}') => break,
-                Some(c) => s.push(c),
-                None => return None,
-            }
-        }
-
-        match u32::from_str_radix(&s, 16) {
-            Ok(u) => {
-                if u > 0x10_FFFF {
-                    None
-                } else {
-                    char::from_u32(u as u32).map(|c| (c, cursor))
-                }
-            }
-            _ => None,
-        }
-    } else {
-        // Hex4Digits
-        let mut s = String::new();
-        for _ in 0..4 {
-            if let Some(c) = cursor.next() {
-                s.push(c);
-            } else {
-                return None;
-            }
-        }
-        match u16::from_str_radix(&s, 16) {
-            Ok(u) => {
-                if (0xDC00..=0xDFFF).contains(&u) || (0xD800..=0xDB7F).contains(&u) {
-                    // Low/High Surrogates
-                    if cursor.peek() != Some(&'\\') {
-                        return String::from_utf16_lossy(&[u])
-                            .chars()
-                            .next()
-                            .map(|c| (c, cursor));
-                    }
-                    let mut p2 = cursor.clone();
-                    p2.next();
-                    if p2.next() != Some('u') {
-                        return String::from_utf16_lossy(&[u])
-                            .chars()
-                            .next()
-                            .map(|c| (c, cursor));
-                    }
-                    cursor.next();
-                    cursor.next();
-                    let mut s = String::new();
-                    for _ in 0..4 {
-                        if let Some(c) = cursor.next() {
-                            s.push(c);
-                        } else {
-                            return None;
-                        }
-                    }
-                    match u16::from_str_radix(&s, 16) {
-                        Ok(uu) => match String::from_utf16(&[u, uu]) {
-                            Ok(s) => s.chars().next().map(|c| (c, cursor)),
-                            _ => None,
-                        },
-                        _ => None,
-                    }
-                } else {
-                    String::from_utf16_lossy(&[u])
-                        .chars()
-                        .next()
-                        .map(|c| (c, cursor))
-                }
-            }
-            _ => None,
-        }
-    }
 }
