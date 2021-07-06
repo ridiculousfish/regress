@@ -882,22 +882,22 @@ pub struct BacktrackExecutor<'r, Input: InputIndexer> {
 
 impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
     fn successful_match(&mut self, start: Input::Position, end: Input::Position) -> Match {
+        // We want to simultaneously map our groups to offsets, and clear the groups.
+        // A for loop is the easiest way to do this while satisfying the borrow checker.
         // TODO: avoid allocating so much.
-        let range_to_offsets = |mr: Option<Range<Input::Position>>| -> Option<Range<usize>> {
-            mr.map(|r| Range {
-                start: self.input.pos_to_offset(r.start),
-                end: self.input.pos_to_offset(r.end),
-            })
-        };
-
-        let captures = self
-            .matcher
-            .s
-            .groups
-            .iter()
-            .map(GroupData::as_range)
-            .map(range_to_offsets)
-            .collect();
+        let mut captures = Vec::new();
+        captures.reserve_exact(self.matcher.s.groups.len());
+        for gd in self.matcher.s.groups.iter_mut() {
+            captures.push(match gd.as_range() {
+                Some(r) => Some(Range {
+                    start: self.input.pos_to_offset(r.start),
+                    end: self.input.pos_to_offset(r.end),
+                }),
+                None => None,
+            });
+            gd.start = None;
+            gd.end = None;
+        }
         Match {
             range: self.input.pos_to_offset(start)..self.input.pos_to_offset(end),
             captures,

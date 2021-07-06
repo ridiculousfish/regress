@@ -17,17 +17,13 @@ fn test_zero_length_matches() {
 }
 
 fn non_matching_captures_tc(tc: TestConfig) {
-    let re_match = tc
-        .compile("aa(b)?aa")
-        .find("aaaa")
-        .expect("Should have matched");
-    assert!(
-        re_match.captures.len() == 1,
-        "Capture list should have size 1"
+    assert_eq!(
+        tc.compile("aa(b)?aa").match1_vec("aaaa"),
+        &[Some("aaaa"), None]
     );
-    assert!(
-        re_match.captures[0] == None,
-        "Captured value should be missing"
+    assert_eq!(
+        tc.compile(r"(\1a)aa").match1_vec("aaa"),
+        &[Some("aaa"), Some("a")]
     );
 }
 
