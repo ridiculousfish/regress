@@ -33,9 +33,6 @@ pub struct Flags {
 
     /// If set, disable regex IR passes.
     pub no_opt: bool,
-
-    /// If set, any invalid backreference produces a syntax error instead of being parsed as an escaped character.
-    pub unicode: bool,
 }
 
 impl From<&str> for Flags {
@@ -57,9 +54,6 @@ impl From<&str> for Flags {
                 }
                 's' => {
                     result.dot_all = true;
-                }
-                'u' => {
-                    result.unicode = true;
                 }
                 _ => {
                     // Silently skip unsupported flags.

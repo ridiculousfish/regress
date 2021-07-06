@@ -695,10 +695,16 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         });
                         if Dir::FORWARD {
                             cg.start = Some(pos);
-                            cg.end = None;
+                            debug_assert!(
+                                cg.end.is_none(),
+                                "Should not have already exited capture group we are entering"
+                            )
                         } else {
                             cg.end = Some(pos);
-                            cg.start = None;
+                            debug_assert!(
+                                cg.start.is_none(),
+                                "Should not have already exited capture group we are entering"
+                            )
                         }
                         next_or_bt!(true)
                     }

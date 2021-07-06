@@ -644,17 +644,6 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            '1'..='7' => {
-                // LegacyOctalEscapeSequence
-                if self.flags.unicode {
-                    error("Invalid character escape")
-                } else if let Some(c) = self.try_consume_legacy_octal_escape_sequence() {
-                    Ok(c)
-                } else {
-                    error("invalid octal escape")
-                }
-            }
-
             'x' => {
                 // HexEscapeSequence :: x HexDigit HexDigit
                 // See ES6 11.8.3 HexDigit
@@ -673,10 +662,8 @@ impl<'a> Parser<'a> {
                 self.consume('u');
                 if let Some(c) = self.try_escape_unicode_sequence() {
                     Ok(c)
-                } else if self.flags.unicode {
-                    error("Invalid unicode escape")
                 } else {
-                    Ok('u')
+                    error("Invalid unicode escape")
                 }
             }
 
@@ -684,13 +671,14 @@ impl<'a> Parser<'a> {
             '^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
             | '/' => Ok(self.consume(c)),
 
-            c => {
-                if self.flags.unicode {
-                    error("Invalid character escape")
-                } else {
-                    Ok(self.consume(c))
-                }
-            }
+            // TODO: currently we permit alphabetic characters in IdentityEscape to help some PCRE
+            // tests pass.
+            // Specifically a regex of the form [\p{Nd}]: in non-Unicode mode this is not a
+            // character property test and is expected to parse as just a bracket where \p is
+            // IdentityEscaped to p.
+            c if c.is_ascii_alphabetic() => Ok(self.consume(c)),
+
+            _ => error("Invalid character escape"),
         }
     }
 
@@ -722,7 +710,6 @@ impl<'a> Parser<'a> {
             }
 
             '1'..='9' => {
-                let orig_input = self.input.clone();
                 let val = self.try_consume_decimal_integer_literal().unwrap();
 
                 // This is a backreference.
@@ -734,40 +721,16 @@ impl<'a> Parser<'a> {
                     let group = val as u32;
                     self.max_backref = std::cmp::max(self.max_backref, group);
                     Ok(ir::Node::BackRef(group))
-                } else if self.flags.unicode {
-                    error("Invalid character escape")
-                } else if c == '8' || c == '9' {
-                    self.input = orig_input;
-                    Ok(ir::Node::Char {
-                        c: self.consume(c),
-                        icase: self.flags.icase,
-                    })
                 } else {
-                    self.input = orig_input;
-                    if let Some(c) = self.try_consume_legacy_octal_escape_sequence() {
-                        Ok(ir::Node::Char {
-                            c,
-                            icase: self.flags.icase,
-                        })
-                    } else {
-                        error("invalid octal escape")
-                    }
+                    error("Invalid character escape")
                 }
             }
 
             'k' => {
                 self.consume(c);
 
-                // The sequence `\k` must be the start of a backreference to a named capture group, when:
-                // 1. the `unicode` flag is set or
-                // 2. there exists no named capture group in the regexp
-                // Otherwise `\k` is parsed as the `k` literal character.
-                if !self.flags.unicode && self.named_group_indices.is_empty() {
-                    Ok(ir::Node::Char {
-                        c: 'k',
-                        icase: self.flags.icase,
-                    })
-                } else if let Some(group_name) = self.try_consume_named_capture_group_name() {
+                // The sequence `\k` must be the start of a backreference to a named capture group.
+                if let Some(group_name) = self.try_consume_named_capture_group_name() {
                     if let Some(index) = self.named_group_indices.get(&group_name) {
                         Ok(ir::Node::BackRef(*index + 1))
                     } else {
@@ -868,32 +831,6 @@ impl<'a> Parser<'a> {
                     None
                 }
             }
-        }
-    }
-
-    fn try_consume_legacy_octal_escape_sequence(&mut self) -> Option<char> {
-        let first = self.next()?;
-        let mut s = String::from(first);
-
-        if let Some(c) = self.peek() {
-            if ('0'..='7').contains(&c) {
-                self.consume(c);
-                s.push(c);
-
-                if ('0'..='3').contains(&first) {
-                    if let Some(c) = self.peek() {
-                        if ('0'..='7').contains(&c) {
-                            self.consume(c);
-                            s.push(c);
-                        }
-                    }
-                }
-            }
-        }
-
-        match u32::from_str_radix(&s, 8) {
-            Ok(i) => char::from_u32(i),
-            Err(_) => None,
         }
     }
 

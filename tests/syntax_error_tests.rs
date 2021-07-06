@@ -48,4 +48,6 @@ fn test_syntax_errors() {
     test_1_error("${3}", "Quantifier not allowed here");
     test_1_error("(?=abc)*", "Quantifier not allowed here");
     test_1_error("(?!abc){3,}", "Quantifier not allowed here");
+
+    test_1_error(r"\2(a)", "Invalid character escape");
 }
