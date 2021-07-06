@@ -1,13 +1,7 @@
 [package]
-name = "gen-folds"
+name = "gen-unicode"
 version = "0.3.0"
 authors = ["ridiculousfish <corydoras@ridiculousfish.com>"]
 description = "Create Unicode fold tables"
 license = "MIT OR Apache-2.0"
 edition = "2018"
-default-run = "gen-folds"
-
-
-[[bin]]
-name = "gen-folds"
-path = "src/gen-folds.rs"

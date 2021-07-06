@@ -1,7 +1,7 @@
 //! Intermediate representation for a regex
 
 use crate::api;
-use crate::types::{BracketContents, CaptureGroupID};
+use crate::types::{BracketContents, CaptureGroupID, CaptureGroupName};
 use std::fmt;
 
 #[derive(Debug, Copy, Clone)]
@@ -66,6 +66,9 @@ pub enum Node {
 
     /// A capturing group.
     CaptureGroup(Box<Node>, CaptureGroupID),
+
+    /// A named capturing group.
+    NamedCaptureGroup(Box<Node>, CaptureGroupID, CaptureGroupName),
 
     /// A backreference.
     BackRef(u32),
@@ -172,7 +175,7 @@ impl Node {
                 quant: *quant,
             },
 
-            Node::CaptureGroup(..) => {
+            Node::CaptureGroup(..) | Node::NamedCaptureGroup(..) => {
                 panic!("Refusing to duplicate a capture group");
             }
             &Node::WordBoundary { invert } => Node::WordBoundary { invert },
@@ -251,7 +254,9 @@ where
             Node::Anchor { .. } => {}
             Node::Loop { loopee, .. } => self.process(loopee),
             Node::Loop1CharBody { loopee, .. } => self.process(loopee),
-            Node::CaptureGroup(contents, ..) => self.process(contents.as_ref()),
+            Node::CaptureGroup(contents, ..) | Node::NamedCaptureGroup(contents, ..) => {
+                self.process(contents.as_ref())
+            }
             Node::WordBoundary { .. } => {}
             Node::BackRef { .. } => {}
             Node::Bracket { .. } => {}
@@ -324,7 +329,9 @@ where
             Node::Loop1CharBody { loopee, .. } => {
                 self.process(loopee);
             }
-            Node::CaptureGroup(contents, ..) => self.process(contents.as_mut()),
+            Node::CaptureGroup(contents, ..) | Node::NamedCaptureGroup(contents, ..) => {
+                self.process(contents.as_mut())
+            }
             Node::WordBoundary { .. } => {}
             Node::BackRef { .. } => {}
             Node::Bracket { .. } => {}
@@ -464,6 +471,9 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
         }
         Node::CaptureGroup(_node, idx, ..) => {
             writeln!(f, "CaptureGroup {:?}", idx)?;
+        }
+        Node::NamedCaptureGroup(_node, _, name) => {
+            writeln!(f, "NamedCaptureGroup {:?}", name)?;
         }
         &Node::WordBoundary { invert } => {
             let kind = if invert { "\\B" } else { "\\b" };

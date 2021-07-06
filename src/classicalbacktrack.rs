@@ -694,9 +694,17 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                             data: *cg,
                         });
                         if Dir::FORWARD {
-                            cg.start = Some(pos)
+                            cg.start = Some(pos);
+                            debug_assert!(
+                                cg.end.is_none(),
+                                "Should not have already exited capture group we are entering"
+                            )
                         } else {
-                            cg.end = Some(pos)
+                            cg.end = Some(pos);
+                            debug_assert!(
+                                cg.start.is_none(),
+                                "Should not have already exited capture group we are entering"
+                            )
                         }
                         next_or_bt!(true)
                     }
@@ -901,6 +909,7 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
         Match {
             range: self.input.pos_to_offset(start)..self.input.pos_to_offset(end),
             captures,
+            named_captures: self.matcher.re.named_group_indices.clone(),
         }
     }
 

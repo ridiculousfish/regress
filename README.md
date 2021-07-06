@@ -17,8 +17,6 @@ Add this to your `Cargo.toml`:
 regress = "0.3"
 ```
 
-
-
 ### Fun Tools
 
 The `regress-tool` binary can be used for some fun.
@@ -31,7 +29,6 @@ You can run a little benchmark too, for example:
 
     > cargo run --release -- 'abcd' 'i' --bench ~/3200.txt
 
-
 ## Want to contribute?
 
 This was my first Rust program so no doubt there is room for improvement.
@@ -40,7 +37,6 @@ There's lots of stuff still missing, maybe you want to contribute?
 
 ### Currently Missing Syntax
 
-- Named capture groups like `(?<count>\d+)`
 - Unicode property escapes like `\p{Sc}`
 
 ### Currently Missing Features

@@ -10,7 +10,7 @@ edition = "2018"
 readme = "README.md"
 
 [workspace]
-members = ["regress-tool", "gen-folds", "."]
+members = ["regress-tool", "gen-unicode", "."]
 default-members = ["regress-tool", "."]
 
 [profile.release]

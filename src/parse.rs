@@ -6,8 +6,11 @@ use crate::codepointset::{CodePointSet, Interval};
 use crate::folds;
 use crate::ir;
 use crate::types::{
-    BracketContents, CaptureGroupID, CharacterClassType, MAX_CAPTURE_GROUPS, MAX_LOOPS,
+    BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
+    MAX_LOOPS,
 };
+use crate::unicode::{is_id_continue, is_id_start};
+use std::collections::HashMap;
 use std::{error::Error as StdError, fmt, iter::Peekable};
 
 /// Represents an error encountered during regex compilation.
@@ -125,6 +128,12 @@ struct Parser<'a> {
     /// Number of capturing groups.
     group_count: CaptureGroupID,
 
+    /// Maximum number of capturing groups.
+    group_count_max: u32,
+
+    /// Named capture group references.
+    named_group_indices: HashMap<CaptureGroupName, u32>,
+
     /// Maximum backreference encountered.
     /// Note that values larger than will fit are early errors.
     max_backref: u32,
@@ -177,6 +186,8 @@ impl<'a> Parser<'a> {
     }
 
     fn try_parse(&mut self) -> Result<ir::Regex, Error> {
+        self.parse_capture_groups();
+
         // Parse a catenation. If we consume everything, it's success. If there's
         // something left, it's an error (for example, an excess closing paren).
         let body = self.consume_disjunction()?;
@@ -281,11 +292,26 @@ impl<'a> Parser<'a> {
                             return error("Capture group count limit exceeded");
                         }
                         self.group_count += 1;
-                        let contents = self.consume_disjunction()?;
-                        result.push(ir::Node::CaptureGroup(
-                            Box::new(contents),
-                            group as CaptureGroupID,
-                        ))
+
+                        // Parse capture group name.
+                        if self.try_consume_str("?") {
+                            let group_name = if let Some(group_name) =
+                                self.try_consume_named_capture_group_name()
+                            {
+                                group_name
+                            } else {
+                                return error("Invalid token at named capture group identifier");
+                            };
+                            let contents = self.consume_disjunction()?;
+                            result.push(ir::Node::NamedCaptureGroup(
+                                Box::new(contents),
+                                group,
+                                group_name,
+                            ))
+                        } else {
+                            let contents = self.consume_disjunction()?;
+                            result.push(ir::Node::CaptureGroup(Box::new(contents), group))
+                        }
                     }
                     if !self.try_consume(')') {
                         return error("Unbalanced parenthesis");
@@ -631,6 +657,16 @@ impl<'a> Parser<'a> {
                 }
             }
 
+            'u' => {
+                // Unicode escape
+                self.consume('u');
+                if let Some(c) = self.try_escape_unicode_sequence() {
+                    Ok(c)
+                } else {
+                    error("Invalid unicode escape")
+                }
+            }
+
             // Only syntax characters and / participate in IdentityEscape in Unicode regexp.
             '^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
             | '/' => Ok(self.consume(c)),
@@ -674,17 +710,39 @@ impl<'a> Parser<'a> {
             }
 
             '1'..='9' => {
+                let val = self.try_consume_decimal_integer_literal().unwrap();
+
                 // This is a backreference.
                 // Note we limit backreferences to u32 but the value may exceed that.
-                let val = self.try_consume_decimal_integer_literal().unwrap();
-                if val > MAX_CAPTURE_GROUPS {
-                    return error(format!("Backreference \\{} too large", val));
+                if val <= self.group_count_max as usize {
+                    if val > MAX_CAPTURE_GROUPS {
+                        return error(format!("Backreference \\{} too large", val));
+                    }
+                    let group = val as u32;
+                    self.max_backref = std::cmp::max(self.max_backref, group);
+                    Ok(ir::Node::BackRef(group))
+                } else {
+                    error("Invalid character escape")
                 }
-                let group = val as u32;
-                self.max_backref = std::cmp::max(self.max_backref, group);
-                Ok(ir::Node::BackRef(group))
             }
 
+            'k' => {
+                self.consume(c);
+
+                // The sequence `\k` must be the start of a backreference to a named capture group.
+                if let Some(group_name) = self.try_consume_named_capture_group_name() {
+                    if let Some(index) = self.named_group_indices.get(&group_name) {
+                        Ok(ir::Node::BackRef(*index + 1))
+                    } else {
+                        error(format!(
+                            "Backreference to invalid named capture group: {}",
+                            &group_name
+                        ))
+                    }
+                } else {
+                    error("Unexpected end of named backreference")
+                }
+            }
             _ => Ok(ir::Node::Char {
                 c: self.consume_character_escape()?,
                 icase: self.flags.icase,
@@ -692,15 +750,195 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn try_escape_unicode_sequence(&mut self) -> Option<char> {
+        let orig_input = self.input.clone();
+
+        // Support \u{X..X} (Unicode CodePoint)
+        if self.try_consume('{') {
+            let mut s = String::new();
+            loop {
+                match self.next() {
+                    Some('}') => break,
+                    Some(c) => s.push(c),
+                    None => {
+                        self.input = orig_input;
+                        return None;
+                    }
+                }
+            }
+
+            match u32::from_str_radix(&s, 16) {
+                Ok(u) => {
+                    if u > 0x10_FFFF {
+                        self.input = orig_input;
+                        None
+                    } else {
+                        char::from_u32(u as u32)
+                    }
+                }
+                _ => {
+                    self.input = orig_input;
+                    None
+                }
+            }
+        } else {
+            // Hex4Digits
+            let mut s = String::new();
+            for _ in 0..4 {
+                if let Some(c) = self.next() {
+                    s.push(c);
+                } else {
+                    self.input = orig_input;
+                    return None;
+                }
+            }
+            match u16::from_str_radix(&s, 16) {
+                Ok(u) => {
+                    if (0xDC00..=0xDFFF).contains(&u) || (0xD800..=0xDB7F).contains(&u) {
+                        // Low/High Surrogates
+                        if !self.try_consume_str("\\u") {
+                            return String::from_utf16_lossy(&[u]).chars().next();
+                        }
+
+                        let mut s = String::new();
+                        for _ in 0..4 {
+                            if let Some(c) = self.next() {
+                                s.push(c);
+                            } else {
+                                self.input = orig_input;
+                                return None;
+                            }
+                        }
+                        match u16::from_str_radix(&s, 16) {
+                            Ok(uu) => match String::from_utf16(&[u, uu]) {
+                                Ok(s) => s.chars().next(),
+                                _ => {
+                                    self.input = orig_input;
+                                    None
+                                }
+                            },
+                            _ => {
+                                self.input = orig_input;
+                                None
+                            }
+                        }
+                    } else {
+                        String::from_utf16_lossy(&[u]).chars().next()
+                    }
+                }
+                _ => {
+                    self.input = orig_input;
+                    None
+                }
+            }
+        }
+    }
+
+    fn try_consume_named_capture_group_name(&mut self) -> Option<String> {
+        if !self.try_consume('<') {
+            return None;
+        }
+
+        let orig_input = self.input.clone();
+        let mut group_name = String::new();
+
+        if let Some(mut c) = self.next() {
+            if self.try_consume('u') {
+                if let Some(escaped) = self.try_escape_unicode_sequence() {
+                    c = escaped;
+                } else {
+                    self.input = orig_input;
+                    return None;
+                }
+            }
+
+            if is_id_start(c) || c == '$' || c == '_' {
+                group_name.push(c);
+            } else {
+                self.input = orig_input;
+                return None;
+            }
+        } else {
+            self.input = orig_input;
+            return None;
+        }
+
+        loop {
+            if let Some(mut c) = self.next() {
+                if self.try_consume('u') {
+                    if let Some(escaped) = self.try_escape_unicode_sequence() {
+                        c = escaped;
+                    } else {
+                        self.input = orig_input;
+                        return None;
+                    }
+                }
+
+                if c == '>' {
+                    break;
+                }
+
+                if is_id_continue(c) || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
+                /* <ZWJ> */
+                {
+                    group_name.push(c);
+                } else {
+                    self.input = orig_input;
+                    return None;
+                }
+            } else {
+                self.input = orig_input;
+                return None;
+            }
+        }
+
+        Some(group_name)
+    }
+
+    // Quickly parse all capture groups.
+    fn parse_capture_groups(&mut self) {
+        let orig_input = self.input.clone();
+
+        loop {
+            match self.next() {
+                Some('\\') => {
+                    self.next();
+                    continue;
+                }
+                Some('[') => loop {
+                    match self.next() {
+                        Some('\\') => {
+                            self.next();
+                            continue;
+                        }
+                        Some(']') => break,
+                        Some(_) => continue,
+                        None => break,
+                    }
+                },
+                Some('(') => {
+                    if self.try_consume_str("?") {
+                        if let Some(name) = self.try_consume_named_capture_group_name() {
+                            self.named_group_indices.insert(name, self.group_count_max);
+                        }
+                    }
+                    self.group_count_max = if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
+                        MAX_CAPTURE_GROUPS as u32
+                    } else {
+                        self.group_count_max + 1
+                    };
+                }
+                Some(_) => continue,
+                None => break,
+            }
+        }
+
+        self.input = orig_input;
+    }
+
     fn finalize(&self, mut re: ir::Regex) -> Result<ir::Regex, Error> {
         debug_assert!(self.loop_count <= MAX_LOOPS as u32);
         debug_assert!(self.group_count as usize <= MAX_CAPTURE_GROUPS);
-        if self.max_backref > self.group_count as u32 {
-            return error(format!(
-                "Backreference \\{} exceeds number of capture groups",
-                self.max_backref
-            ));
-        }
         if self.has_lookbehind {
             ir::walk_mut(false, &mut re.node, &mut ir::Node::reverse_cats);
         }
@@ -725,6 +963,8 @@ pub fn try_parse(pattern: &str, flags: api::Flags) -> Result<ir::Regex, Error> {
         flags,
         loop_count: 0,
         group_count: 0,
+        named_group_indices: HashMap::new(),
+        group_count_max: 0,
         max_backref: 0,
         has_lookbehind: false,
     };

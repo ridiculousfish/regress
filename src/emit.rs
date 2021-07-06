@@ -7,6 +7,7 @@ use crate::ir;
 use crate::ir::Node;
 use crate::startpredicate;
 use crate::types::{BracketContents, CaptureGroupID};
+use std::collections::HashMap;
 use std::convert::TryInto;
 
 /// \return an anchor instruction for a given IR anchor.
@@ -177,6 +178,14 @@ impl Emitter {
                 self.emit_node(contents);
                 self.emit_insn(Insn::EndCaptureGroup(group));
             }
+            Node::NamedCaptureGroup(contents, group, name) => {
+                let group = *group as CaptureGroupID;
+                self.result.groups += 1;
+                self.result.named_group_indices.insert(name.clone(), group);
+                self.emit_insn(Insn::BeginCaptureGroup(group));
+                self.emit_node(contents);
+                self.emit_insn(Insn::EndCaptureGroup(group));
+            }
             Node::LookaroundAssertion {
                 negate,
                 backwards,
@@ -274,6 +283,7 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
             insns: Vec::new(),
             loops: 0,
             groups: 0,
+            named_group_indices: HashMap::new(),
             flags: n.flags,
             start_pred: startpredicate::predicate_for_re(n),
         },

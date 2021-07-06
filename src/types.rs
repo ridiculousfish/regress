@@ -6,6 +6,9 @@ use std::ops;
 /// CaptureGroupID 0 corresponds to the first capture group.
 pub type CaptureGroupID = u16;
 
+/// The name of a named capture group.
+pub type CaptureGroupName = String;
+
 /// The maximum number of capture groups supported.
 pub const MAX_CAPTURE_GROUPS: usize = 65535;
 

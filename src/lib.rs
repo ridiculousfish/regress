@@ -51,7 +51,6 @@ regress targets ES 2018 syntax. You can refer to the many resources about JavaSc
 
 There are some features which have yet to be implemented:
 
-- Named capture groups like `(?<count>\d+)`
 - Named character classes liks `[[:alpha:]]`
 - Unicode property escapes like `\p{Sc}`
 
@@ -129,7 +128,6 @@ mod cursor;
 mod emit;
 mod exec;
 mod folds;
-mod foldtable;
 mod indexing;
 mod insn;
 mod ir;
@@ -140,6 +138,7 @@ mod position;
 mod scm;
 mod startpredicate;
 mod types;
+mod unicode;
 
 #[cfg(feature = "backend-pikevm")]
 mod pikevm;

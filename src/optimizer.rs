@@ -151,7 +151,7 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
             }
         }
         Node::Loop1CharBody { .. } => PassAction::Keep,
-        Node::CaptureGroup(..) => {
+        Node::CaptureGroup(..) | Node::NamedCaptureGroup(..) => {
             // Capture groups could in principle be optimized if they only match empties.
             PassAction::Keep
         }

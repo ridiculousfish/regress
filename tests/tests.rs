@@ -994,3 +994,162 @@ fn run_regexp_regexp_tc(tc: TestConfig) {
     // Skipping Unicode-unsavvy ^[\d-X-Z]*$
     tc.compilef("\\uDB88|\\uDBEC|aa", "").test_fails("");
 }
+
+#[test]
+fn run_regexp_named_capture_groups() {
+    test_with_configs(run_regexp_named_capture_groups_tc)
+}
+
+#[rustfmt::skip]
+fn run_regexp_named_capture_groups_tc(tc: TestConfig) {
+    // From 262 test/built-ins/RegExp/named-groups/lookbehind.js
+    tc.compilef(r#"(?<=(?<a>\w){3})f"#, "").match1f("abcdef").test_eq("f,c");
+    tc.compilef(r#"(?<=(?<a>\w){4})f"#, "").match1f("abcdef").test_eq("f,b");
+    tc.compilef(r#"(?<=(?<a>\w)+)f"#, "").match1f("abcdef").test_eq("f,a");
+    tc.compilef(r#"(?<=(?<a>\w){6})f"#, "").test_fails("abcdef");
+    tc.compilef(r#"((?<=\w{3}))f"#, "").match1f("abcdef").test_eq("f,");
+    tc.compilef(r#"(?<a>(?<=\w{3}))f"#, "").match1f("abcdef").test_eq("f,");
+    tc.compilef(r#"(?<!(?<a>\d){3})f"#, "").match1f("abcdef").test_eq("f,");
+    tc.compilef(r#"(?<!(?<a>\D){3})f"#, "").test_fails("abcdef");
+    tc.compilef(r#"(?<!(?<a>\D){3})f|f"#, "").match1f("abcdef").test_eq("f,");
+    tc.compilef(r#"(?<a>(?<!\D{3}))f|f"#, "").match1f("abcdef").test_eq("f,");
+
+    // From 262 test/built-ins/RegExp/named-groups/non-unicode-match.js
+    tc.compilef(r#"(?<a>a)"#, "").match1f("bab").test_eq("a,a");
+    tc.compilef(r#"(?<a42>a)"#, "").match1f("bab").test_eq("a,a");
+    tc.compilef(r#"(?<_>a)"#, "").match1f("bab").test_eq("a,a");
+    tc.compilef(r#"(?<$>a)"#, "").match1f("bab").test_eq("a,a");
+    tc.compilef(r#".(?<$>a)."#, "").match1f("bab").test_eq("bab,a");
+    tc.compilef(r#".(?<a>a)(.)"#, "").match1f("bab").test_eq("bab,a,b");
+    tc.compilef(r#".(?<a>a)(?<b>.)"#, "").match1f("bab").test_eq("bab,a,b");
+    tc.compilef(r#".(?<a>\w\w)"#, "").match1f("bab").test_eq("bab,ab");
+    tc.compilef(r#"(?<a>\w\w\w)"#, "").match1f("bab").test_eq("bab,bab");
+    tc.compilef(r#"(?<a>\w\w)(?<b>\w)"#, "").match1f("bab").test_eq("bab,ba,b");
+    tc.compilef(r#"(?<a>.)(?<b>.)(?<c>.)\k<c>\k<b>\k<a>"#, "").match1_named_group("abccba", "a").test_eq("a");
+    tc.compilef(r#"(?<a>.)(?<b>.)(?<c>.)\k<c>\k<b>\k<a>"#, "").match1_named_group("abccba", "b").test_eq("b");
+    tc.compilef(r#"(?<a>.)(?<b>.)(?<c>.)\k<c>\k<b>\k<a>"#, "").match1_named_group("abccba", "c").test_eq("c");
+    tc.compilef(r#"(?<b>b).\1"#, "").match1f("bab").test_eq("bab,b");
+    tc.compilef(r#"(.)(?<a>a)\1\2"#, "").match1f("baba").test_eq("baba,b,a");
+    tc.compilef(r#"(.)(?<a>a)(?<b>\1)(\2)"#, "").match1f("baba").test_eq("baba,b,a,b,a");
+    tc.compilef(r#"(?<lt><)a"#, "").match1f("<a").test_eq("<a,<");
+    tc.compilef(r#"(?<gt>>)a"#, "").match1f(">a").test_eq(">a,>");
+
+    // From 262 test/built-ins/RegExp/named-groups/unicode-property-names-invalid.js
+    test_parse_fails(r#"(?<🦊>fox)"#);
+    test_parse_fails(r#"(?<\u{1f98a}>fox)"#);
+    test_parse_fails(r#"(?<\ud83e\udd8a>fox)"#);
+    test_parse_fails(r#"(?<🐕>dog)"#);
+    test_parse_fails(r#"(?<\u{1f415}>dog)"#);
+    test_parse_fails(r#"(?<\ud83d \udc15>dog)"#);
+    test_parse_fails(r#"(?<𝟚the>the)"#);
+    test_parse_fails(r#"(?<\u{1d7da}the>the)"#);
+    test_parse_fails(r#"(?<\ud835\udfdathe>the)"#);
+
+    // From 262 test/built-ins/RegExp/named-groups/unicode-property-names-valid.js
+    let input = "The quick brown fox jumped over the lazy dog's back".to_string();
+    tc.compilef(r#"(?<animal>fox|dog)"#, "").match1_named_group(&input, "animal").test_eq("fox");
+    tc.compilef(r#"(?<the2>the)"#, "").match1_named_group(&input, "the2").test_eq("the");
+    tc.compilef(r#"(?<𝑓𝑜𝑥>fox).*(?<𝓓𝓸𝓰>dog)"#, "").match1_named_group(&input, "𝑓𝑜𝑥").test_eq("fox");
+    tc.compilef(r#"(?<𝑓𝑜𝑥>fox).*(?<𝓓𝓸𝓰>dog)"#, "").match1_named_group(&input, "𝓓𝓸𝓰").test_eq("dog");
+    tc.compilef(r#"(?<𝑓𝑜𝑥>fox).*(?<𝓓𝓸𝓰>dog)"#, "").match1f(&input).test_eq("fox jumped over the lazy dog,fox,dog");
+    tc.compilef(r#"(?<狸>fox).*(?<狗>dog)"#, "").match1_named_group(&input, "狸").test_eq("fox");
+    tc.compilef(r#"(?<狸>fox).*(?<狗>dog)"#, "").match1_named_group(&input, "狗").test_eq("dog");
+    tc.compilef(r#"(?<狸>fox).*(?<狗>dog)"#, "").match1f(&input).test_eq("fox jumped over the lazy dog,fox,dog");
+    tc.compilef(r#"(?<𝓑𝓻𝓸𝔀𝓷>brown)"#, "").match1_named_group(&input, "𝓑𝓻𝓸𝔀𝓷").test_eq("brown");
+    tc.compilef(r#"(?<\u{1d4d1}\u{1d4fb}\u{1d4f8}\u{1d500}\u{1d4f7}>brown)"#, "").match1_named_group(&input, "𝓑𝓻𝓸𝔀𝓷").test_eq("brown");
+    tc.compilef(r#"(?<\ud835\udcd1\ud835\udcfb\ud835\udcf8\ud835\udd00\ud835\udcf7>brown)"#, "").match1_named_group(&input, "𝓑𝓻𝓸𝔀𝓷").test_eq("brown");
+    tc.compilef(r#"(?<𝖰𝖡𝖥>q\w*\W\w*\W\w*)"#, "").match1_named_group(&input, "𝖰𝖡𝖥").test_eq("quick brown fox");
+    tc.compilef(r#"(?<𝖰𝖡\u{1d5a5}>q\w*\W\w*\W\w*)"#, "").match1_named_group(&input, "𝖰𝖡𝖥").test_eq("quick brown fox");
+    tc.compilef(r#"(?<𝖰\u{1d5a1}𝖥>q\w*\W\w*\W\w*)"#, "").match1_named_group(&input, "𝖰𝖡𝖥").test_eq("quick brown fox");
+    tc.compilef(r#"(?<𝖰\u{1d5a1}\u{1d5a5}>q\w*\W\w*\W\w*)"#, "").match1_named_group(&input, "𝖰𝖡𝖥").test_eq("quick brown fox");
+    tc.compilef(r#"(?<\u{1d5b0}𝖡𝖥>q\w*\W\w*\W\w*)"#, "").match1_named_group(&input, "𝖰𝖡𝖥").test_eq("quick brown fox");
+    tc.compilef(r#"(?<\u{1d5b0}𝖡\u{1d5a5}>q\w*\W\w*\W\w*)"#, "").match1_named_group(&input, "𝖰𝖡𝖥").test_eq("quick brown fox");
+    tc.compilef(r#"(?<\u{1d5b0}\u{1d5a1}𝖥>q\w*\W\w*\W\w*)"#, "").match1_named_group(&input, "𝖰𝖡𝖥").test_eq("quick brown fox");
+    tc.compilef(r#"(?<\u{1d5b0}\u{1d5a1}\u{1d5a5}>q\w*\W\w*\W\w*)"#, "").match1_named_group(&input, "𝖰𝖡𝖥").test_eq("quick brown fox");
+    tc.compilef(r#"(?<the𝟚>the)"#, "").match1_named_group(&input, "the𝟚").test_eq("the");
+    tc.compilef(r#"(?<the\u{1d7da}>the)"#, "").match1_named_group(&input, "the𝟚").test_eq("the");
+    tc.compilef(r#"(?<the\ud835\udfda>the)"#, "").match1_named_group(&input, "the𝟚").test_eq("the");
+    let input = "It is a dog eat dog world.".to_string();
+    tc.compilef(r#"(?<dog>dog)(.*?)(\k<dog>)"#, "").match1_named_group(&input, "dog").test_eq("dog");
+    tc.compilef(r#"(?<dog>dog)(.*?)(\k<dog>)"#, "").match1f(&input).test_eq("dog eat dog,dog, eat ,dog");
+    tc.compilef(r#"(?<𝓓𝓸𝓰>dog)(.*?)(\k<𝓓𝓸𝓰>)"#, "").match1_named_group(&input, "𝓓𝓸𝓰").test_eq("dog");
+    tc.compilef(r#"(?<𝓓𝓸𝓰>dog)(.*?)(\k<𝓓𝓸𝓰>)"#, "").match1f(&input).test_eq("dog eat dog,dog, eat ,dog");
+    tc.compilef(r#"(?<狗>dog)(.*?)(\k<狗>)"#, "").match1_named_group(&input, "狗").test_eq("dog");
+    tc.compilef(r#"(?<狗>dog)(.*?)(\k<狗>)"#, "").match1f(&input).test_eq("dog eat dog,dog, eat ,dog");
+
+    // From 262 test/built-ins/RegExp/named-groups/unicode-property-names.js
+    tc.compilef(r#"(?<π>a)"#, "").match1_named_group("bab", "π").test_eq("a");
+    tc.compilef(r#"(?<\u{03C0}>a)"#, "").match1_named_group("bab", "π").test_eq("a");
+    tc.compilef(r#"(?<$>a)"#, "").match1_named_group("bab", "$").test_eq("a");
+    tc.compilef(r#"(?<_>a)"#, "").match1_named_group("bab", "_").test_eq("a");
+    tc.compilef(r#"(?<$𐒤>a)"#, "").match1_named_group("bab", "$𐒤").test_eq("a");
+    tc.compilef(r#"(?<_\u200C>a)"#, "").match1_named_group("bab", "_\u{200C}").test_eq("a");
+    tc.compilef(r#"(?<_\u200D>a)"#, "").match1_named_group("bab", "_\u{200D}").test_eq("a");
+    tc.compilef(r#"(?<ಠ_ಠ>a)"#, "").match1_named_group("bab", "ಠ_ಠ").test_eq("a");
+    tc.compilef(r#"(?<a\uD801\uDCA4>.)"#, "").match1f("a").test_eq("a,a");
+    tc.compilef(r#"(?<\u0041>.)"#, "").match1f("a").test_eq("a,a");
+    tc.compilef(r#"(?<\u{0041}>.)"#, "").match1f("a").test_eq("a,a");
+    tc.compilef(r#"(?<a\u{104A4}>.)"#, "").match1f("a").test_eq("a,a");
+
+    // From 262 test/built-ins/RegExp/named-groups/unicode-references.js
+    tc.compilef(r#"(?<b>.).\k<b>"#, "").match1f("bab").test_eq("bab,b");
+    tc.compilef(r#"(?<b>.).\k<b>"#, "").test_fails("baa");
+    tc.compilef(r#"(?<a>\k<a>\w).."#, "").match1f("bab").test_eq("bab,b");
+    tc.compilef(r#"(?<a>\k<a>\w).."#, "").match1_named_group("bab", "a").test_eq("b");
+    tc.compilef(r#"\k<a>(?<a>b)\w\k<a>"#, "").match1f("bab").test_eq("bab,b");
+    tc.compilef(r#"\k<a>(?<a>b)\w\k<a>"#, "").match1_named_group("bab", "a").test_eq("b");
+    tc.compilef(r#"(?<b>b)\k<a>(?<a>a)\k<b>"#, "").match1f("bab").test_eq("bab,b,a");
+    tc.compilef(r#"(?<b>b)\k<a>(?<a>a)\k<b>"#, "").match1_named_group("bab", "a").test_eq("a");
+    tc.compilef(r#"(?<b>b)\k<a>(?<a>a)\k<b>"#, "").match1_named_group("bab", "b").test_eq("b");
+    tc.compilef(r#"\k<a>(?<a>b)\w\k<a>"#, "").match1f("bab").test_eq("bab,b");
+    tc.compilef(r#"(?<b>b)\k<a>(?<a>a)\k<b>"#, "").match1f("bab").test_eq("bab,b,a");
+    tc.compilef(r#"(?<a>a)(?<b>b)\k<a>"#, "").match1_named_group("aba", "a").test_eq("a");
+    tc.compilef(r#"(?<a>a)(?<b>b)\k<a>"#, "").match1_named_group("aba", "b").test_eq("b");
+
+    // Make sure that escapes are parsed correctly in the fast capture group parser.
+    // This pattern should fail in unicode mode, because there is a backreference without a capture group.
+    // If the `\]` is not handled correctly in the parser, the following `(.)` may be parsed as a capture group.
+    test_parse_fails(r#"/[\](.)]\1/"#);
+}
+
+#[test]
+#[rustfmt::skip]
+fn run_regexp_named_groups_unicode_malformed_tc() {
+    // From 262 test/annexB/built-ins/RegExp/named-groups/non-unicode-malformed-lookbehind.js
+    test_parse_fails(r#"\k<a>(?<=>)a"#);
+    test_parse_fails(r#"(?<=>)\k<a>"#);
+    test_parse_fails(r#"\k<a>(?<!a)a"#);
+    test_parse_fails(r#"(?<!a>)\k<a>"#);
+
+    // From 262 test/annexB/built-ins/RegExp/named-groups/non-unicode-malformed.js
+    test_parse_fails(r#"\k<a>"#);
+    test_parse_fails(r#"\k<4>"#);
+    test_parse_fails(r#"\k<a"#);
+    test_parse_fails(r#"\k"#);
+
+    // TODO: This test fails, because we accept alphabetic ascii characters in otherwise invalid escapes, due to PCRE tests.
+    //test_parse_fails(r#"(?<a>\a)"#);
+
+    test_parse_fails(r#"\k<a>"#);
+    test_parse_fails(r#"\k<a"#);
+    test_parse_fails(r#"\k<a>(<a>x)"#);
+    test_parse_fails(r#"\k<a>\1"#);
+    test_parse_fails(r#"\1(b)\k<a>"#);
+}
+
+#[test]
+fn run_regexp_unicode_escape() {
+    test_with_configs(run_regexp_unicode_escape_tc)
+}
+
+#[rustfmt::skip]
+fn run_regexp_unicode_escape_tc(tc: TestConfig) {
+    // From 262 test/language/literals/regexp/u-unicode-esc.js
+    tc.compilef(r#"\u{0}"#, "").test_succeeds("\u{0}");
+    tc.compilef(r#"\u{1}"#, "").test_succeeds("\u{1}");
+    tc.compilef(r#"\u{1}"#, "").test_fails("u");
+    tc.compilef(r#"\u{3f}"#, "").test_succeeds("?");
+    tc.compilef(r#"\u{000000003f}"#, "").test_succeeds("?");
+    tc.compilef(r#"\u{3F}"#, "").test_succeeds("?");
+    tc.compilef(r#"\u{10ffff}"#, "").test_succeeds("\u{10ffff}");
+}
