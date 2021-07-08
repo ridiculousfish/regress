@@ -38,24 +38,11 @@ pub(crate) fn generate_id_start() -> String {
     }
 
     let result = format!(
-        r#"pub(crate) fn is_id_start(c: char) -> bool {{
-    let i = c as u32;
-    ID_START
-        .binary_search_by(|&(start, end)| {{
-            if i < start {{
-                core::cmp::Ordering::Greater
-            }} else if i > end {{
-                core::cmp::Ordering::Less
-            }} else {{
-                core::cmp::Ordering::Equal
-            }}
-        }})
-        .is_ok()
-}}
-
-const ID_START: &[(u32, u32)] = &[
+        r#"
+pub(crate) const ID_START: [(u32, u32); {}] = [
     {}
 ];"#,
+        chars.len(),
         chars.join("\n    ")
     );
 
@@ -73,24 +60,11 @@ pub(crate) fn generate_id_continue() -> String {
     }
 
     let result = format!(
-        r#"pub(crate) fn is_id_continue(c: char) -> bool {{
-    let i = c as u32;
-    ID_CONTINUE
-        .binary_search_by(|&(start, end)| {{
-            if i < start {{
-                core::cmp::Ordering::Greater
-            }} else if i > end {{
-                core::cmp::Ordering::Less
-            }} else {{
-                core::cmp::Ordering::Equal
-            }}
-        }})
-        .is_ok()
-}}
-
-const ID_CONTINUE: &[(u32, u32)] = &[
+        r#"
+pub(crate) const ID_CONTINUE: [(u32, u32); {}] = [
     {}
 ];"#,
+        chars.len(),
         chars.join("\n    ")
     );
 

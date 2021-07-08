@@ -1,12 +1,12 @@
 //! Regex compiler back-end: transforms IR into a CompiledRegex
 
 use crate::bytesearch::{AsciiBitmap, ByteArraySet};
-use crate::folds;
 use crate::insn::{CompiledRegex, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR_SET_LENGTH};
 use crate::ir;
 use crate::ir::Node;
 use crate::startpredicate;
 use crate::types::{BracketContents, CaptureGroupID};
+use crate::unicode;
 use std::collections::HashMap;
 use std::convert::TryInto;
 
@@ -94,7 +94,7 @@ impl Emitter {
                 if !*icase {
                     self.emit_insn(Insn::Char(c))
                 } else {
-                    std::debug_assert!(folds::fold(c) == c, "Char should be folded");
+                    std::debug_assert!(unicode::fold(c) == c, "Char should be folded");
                     self.emit_insn(Insn::CharICase(c))
                 }
             }

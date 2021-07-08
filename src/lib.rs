@@ -127,7 +127,6 @@ mod codepointset;
 mod cursor;
 mod emit;
 mod exec;
-mod folds;
 mod indexing;
 mod insn;
 mod ir;
@@ -139,6 +138,7 @@ mod scm;
 mod startpredicate;
 mod types;
 mod unicode;
+mod unicodetables;
 
 #[cfg(feature = "backend-pikevm")]
 mod pikevm;

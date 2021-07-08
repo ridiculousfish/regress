@@ -3,13 +3,12 @@
 use crate::api;
 use crate::charclasses;
 use crate::codepointset::{CodePointSet, Interval};
-use crate::folds;
 use crate::ir;
 use crate::types::{
     BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
     MAX_LOOPS,
 };
-use crate::unicode::{is_id_continue, is_id_start};
+use crate::unicode::{self, is_id_continue, is_id_start};
 use std::collections::HashMap;
 use std::{error::Error as StdError, fmt, iter::Peekable};
 
@@ -337,7 +336,7 @@ impl<'a> Parser<'a> {
 
                     let mut cc = self.consume(c);
                     if self.flags.icase {
-                        cc = folds::fold(cc)
+                        cc = unicode::fold(cc)
                     }
                     result.push(ir::Node::Char {
                         c: cc,
@@ -390,7 +389,7 @@ impl<'a> Parser<'a> {
                 Some(']') => {
                     self.consume(']');
                     if self.flags.icase {
-                        result.cps = folds::fold_code_points(result.cps);
+                        result.cps = unicode::fold_code_points(result.cps);
                     }
                     return Ok(ir::Node::Bracket(result));
                 }

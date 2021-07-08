@@ -1,8 +1,8 @@
 use crate::cursor;
 use crate::cursor::Direction;
-use crate::folds;
 use crate::indexing::{ElementType, InputIndexer};
 use crate::types::BracketContents;
+use crate::unicode;
 
 pub trait CharProperties {
     type Element: ElementType;
@@ -49,7 +49,7 @@ impl CharProperties for UTF8CharProperties {
     type Element = char;
 
     fn fold(c: Self::Element) -> Self::Element {
-        folds::fold(c)
+        unicode::fold(c)
     }
 }
 

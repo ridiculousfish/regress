@@ -14,5 +14,5 @@ This crate generates unicode tables and code specific for regress.
 2. Run this crate and redirect the output in the specific rs file in the regress crate:
 
     ```sh
-    cargo run > ../src/unicode.rs
+    cargo run > ../src/unicodetables.rs
     ```

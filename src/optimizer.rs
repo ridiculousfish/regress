@@ -1,9 +1,9 @@
 //! Optimizations on regex IR
 
-use crate::folds;
 use crate::insn::{MAX_BYTE_SET_LENGTH, MAX_CHAR_SET_LENGTH};
 use crate::ir::*;
 use crate::types::BracketContents;
+use crate::unicode;
 
 /// When unrolling a loop, the largest minimum count we will unroll.
 const LOOP_UNROLL_THRESHOLD: usize = 5;
@@ -214,7 +214,7 @@ fn decat(n: &mut Node, _w: &Walk) -> PassAction {
 fn unfold_icase_chars(n: &mut Node, _w: &Walk) -> PassAction {
     match *n {
         Node::Char { c, icase } if icase => {
-            let unfolded = folds::unfold_char(c);
+            let unfolded = unicode::unfold_char(c);
             debug_assert!(
                 unfolded.contains(&c),
                 "Char should always unfold to at least itself"
