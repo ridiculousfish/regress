@@ -3,6 +3,49 @@ use crate::unicodetables::{FoldRange, FOLDS, ID_CONTINUE, ID_START};
 use crate::util::SliceHelp;
 use std::cmp::Ordering;
 
+// CodePointRange packs a code point and a length together into a u32.
+// The code point is stored as the 24 most-significant bits, the length as the low 8.
+// The maximum range length is 255.
+// The range is inclusive.
+#[derive(Copy, Clone, Debug)]
+pub struct CodePointRange(u32);
+
+impl CodePointRange {
+    #[inline(always)]
+    pub const fn from(start: u32, len: u8) -> Self {
+        CodePointRange((start << 8) | (len as u32))
+    }
+
+    #[inline(always)]
+    pub const fn len(self) -> u8 {
+        (self.0 & 0xFF) as u8
+    }
+
+    // \return the first codepoint in the range.
+    #[inline(always)]
+    pub const fn first(self) -> u32 {
+        self.0 >> 8
+    }
+
+    // \return the last codepoint in the range.
+    #[inline(always)]
+    pub const fn last(self) -> u32 {
+        self.first() + self.len() as u32
+    }
+
+    /// \return whether this range is strictly less than, contains, or strictly greater than a given code point.
+    #[inline(always)]
+    pub fn compare(self, cp: u32) -> Ordering {
+        if self.first() > cp {
+            Ordering::Greater
+        } else if self.last() < cp {
+            Ordering::Less
+        } else {
+            Ordering::Equal
+        }
+    }
+}
+
 impl FoldRange {
     fn first(&self) -> u32 {
         self.start as u32
@@ -169,31 +212,11 @@ pub fn fold_code_points(mut input: CodePointSet) -> CodePointSet {
 /// \return whether c has the 'ID_Start' Unicode property.
 pub(crate) fn is_id_start(c: char) -> bool {
     let i = c as u32;
-    ID_START
-        .binary_search_by(|&(start, end)| {
-            if i < start {
-                core::cmp::Ordering::Greater
-            } else if i > end {
-                core::cmp::Ordering::Less
-            } else {
-                core::cmp::Ordering::Equal
-            }
-        })
-        .is_ok()
+    ID_START.binary_search_by(|&cpr| cpr.compare(i)).is_ok()
 }
 
 /// \return whether c has the 'ID_Continue' Unicode property.
 pub(crate) fn is_id_continue(c: char) -> bool {
     let i = c as u32;
-    ID_CONTINUE
-        .binary_search_by(|&(start, end)| {
-            if i < start {
-                core::cmp::Ordering::Greater
-            } else if i > end {
-                core::cmp::Ordering::Less
-            } else {
-                core::cmp::Ordering::Equal
-            }
-        })
-        .is_ok()
+    ID_CONTINUE.binary_search_by(|&cpr| cpr.compare(i)).is_ok()
 }

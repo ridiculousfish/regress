@@ -4,7 +4,7 @@ use std::io::{self, BufRead};
 // Parse line from `DerivedCoreProperties.txt` with the following syntax:
 // `0061..007A    ; ID_Start # L&  [26] LATIN SMALL LETTER A..LATIN SMALL LETTER Z`
 // `00AA          ; ID_Start # Lo       FEMININE ORDINAL INDICATOR`
-fn parse_line(line: &str, chars: &mut Vec<String>, property: &str) {
+fn parse_line(line: &str, chars: &mut Vec<(u32, u32)>, property: &str) {
     let split_str = format!("; {}", property);
     let mut line_iter = line.split(&split_str);
 
@@ -18,13 +18,34 @@ fn parse_line(line: &str, chars: &mut Vec<String>, property: &str) {
             if let Some(second_hex) = iter.next() {
                 let first_int = u32::from_str_radix(first_hex.trim(), 16).unwrap();
                 let second_int = u32::from_str_radix(second_hex.trim(), 16).unwrap();
-                chars.push(format!("({}, {}),", first_int, second_int));
+                chars.push((first_int, second_int));
             } else {
                 let i = u32::from_str_radix(first_hex.trim(), 16).unwrap();
-                chars.push(format!("({}, {}),", i, i));
+                chars.push((i, i))
             }
         }
     }
+}
+
+// Given a list of inclusive ranges of code points, return a list of strings creating corresponding CodePointRange.
+// If a range is too big, it is split into smaller abutting ranges.
+fn chars_to_code_point_ranges(chars: &[(u32, u32)]) -> Vec<String> {
+    chars
+        .iter()
+        .flat_map(|p| {
+            let (mut start, end) = *p;
+            assert!(end >= start, "Range out of order");
+            let mut res = Vec::new();
+            let mut len = end - start;
+            while len > 0 {
+                let amt = std::cmp::min(len, 255);
+                res.push(format!("CodePointRange::from({}, {}),", start, amt));
+                start += amt;
+                len -= amt;
+            }
+            res
+        })
+        .collect()
 }
 
 pub(crate) fn generate_id_start() -> String {
@@ -36,14 +57,16 @@ pub(crate) fn generate_id_start() -> String {
     for line in lines {
         parse_line(&line.unwrap(), &mut chars, "ID_Start");
     }
+    let ranges = chars_to_code_point_ranges(&chars);
 
     let result = format!(
         r#"
-pub(crate) const ID_START: [(u32, u32); {}] = [
+pub(crate) const ID_START: [CodePointRange; {}] = [
     {}
-];"#,
-        chars.len(),
-        chars.join("\n    ")
+];
+"#,
+        ranges.len(),
+        ranges.join("\n    ")
     );
 
     result
@@ -58,14 +81,16 @@ pub(crate) fn generate_id_continue() -> String {
     for line in lines {
         parse_line(&line.unwrap(), &mut chars, "ID_Continue");
     }
+    let ranges = chars_to_code_point_ranges(&chars);
 
     let result = format!(
         r#"
-pub(crate) const ID_CONTINUE: [(u32, u32); {}] = [
+pub(crate) const ID_CONTINUE: [CodePointRange; {}] = [
     {}
-];"#,
-        chars.len(),
-        chars.join("\n    ")
+];
+"#,
+        ranges.len(),
+        ranges.join("\n    ")
     );
 
     result
