@@ -49,7 +49,6 @@ There's lots of stuff still missing, maybe you want to contribute?
 
 - Anchored matches like `^abc` still perform a string search. We should compute whether the whole regex is anchored, and optimize matching if so.
 - Non-greedy loops like `.*?` will eagerly compute their maximum match. This doesn't affect correctness but it does mean they may match more than they should.
-- Case-insensitive literals should compute the "preimage" (i.e. characters which fold together) instead of folding. In particular if the preimage is only that character this will accelerate matching.
 - Pure literal searches should use Boyer-Moore or etc.
 - The fold table should be bitpacked more tightly, e.g. using 24 bits for a code point.
 - There are lots of vectorization opportunities.
