@@ -120,15 +120,8 @@ impl Match {
     /// Access a named group by name.
     #[inline]
     pub fn named_group(&self, name: &str) -> Option<Range> {
-        if let Some(idx) = self.named_captures.get(name) {
-            if let Some(range) = self.captures.get(*idx as usize) {
-                range.clone()
-            } else {
-                None
-            }
-        } else {
-            None
-        }
+        let idx = *self.named_captures.get(name)?;
+        self.captures[idx as usize].clone()
     }
 
     /// Return an iterator over the named groups of a Match.
