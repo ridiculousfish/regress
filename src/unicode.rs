@@ -4,33 +4,47 @@ use crate::util::SliceHelp;
 use std::cmp::Ordering;
 
 // CodePointRange packs a code point and a length together into a u32.
-// The code point is stored as the 24 most-significant bits, the length as the low 8.
-// The maximum range length is 255.
-// The range is inclusive.
+// We currently do not need to store any information about code points in plane 16 (U+100000),
+// which are private use, so we only need 20 bits of code point storage;
+// the remaining 12 can be the length.
+// The length is stored with a bias of -1, so the last codepoint may be obtained by adding the "length" and the first code point.
+const CODE_POINT_BITS: u32 = 20;
+const LENGTH_BITS: u32 = 32 - CODE_POINT_BITS;
+
 #[derive(Copy, Clone, Debug)]
 pub struct CodePointRange(u32);
 
+// This will trigger an error in const functions if $x is false.
+macro_rules! const_assert_true {
+    ($x:expr $(,)*) => {
+        let _ = [()][!$x as usize];
+    };
+}
+
 impl CodePointRange {
     #[inline(always)]
-    pub const fn from(start: u32, len: u8) -> Self {
-        CodePointRange((start << 8) | (len as u32))
+    pub const fn from(start: u32, len: u32) -> Self {
+        const_assert_true!(start < (1 << CODE_POINT_BITS));
+        const_assert_true!(len > 0 && len < (1 << LENGTH_BITS));
+        const_assert_true!((start + len - 1) < ((1 << CODE_POINT_BITS) - 1));
+        CodePointRange((start << LENGTH_BITS) | (len - 1))
     }
 
     #[inline(always)]
-    pub const fn len(self) -> u8 {
-        (self.0 & 0xFF) as u8
+    const fn len_minus_1(self) -> u32 {
+        self.0 & ((1 << LENGTH_BITS) - 1)
     }
 
     // \return the first codepoint in the range.
     #[inline(always)]
     pub const fn first(self) -> u32 {
-        self.0 >> 8
+        self.0 >> LENGTH_BITS
     }
 
     // \return the last codepoint in the range.
     #[inline(always)]
     pub const fn last(self) -> u32 {
-        self.first() + self.len() as u32
+        self.first() + self.len_minus_1() as u32
     }
 
     /// \return whether this range is strictly less than, contains, or strictly greater than a given code point.

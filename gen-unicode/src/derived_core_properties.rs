@@ -1,6 +1,10 @@
 use std::fs::File;
 use std::io::{self, BufRead};
 
+// Should match unicode.rs.
+const CODE_POINT_BITS: u32 = 20;
+const LENGTH_BITS: u32 = 32 - CODE_POINT_BITS;
+
 // Parse line from `DerivedCoreProperties.txt` with the following syntax:
 // `0061..007A    ; ID_Start # L&  [26] LATIN SMALL LETTER A..LATIN SMALL LETTER Z`
 // `00AA          ; ID_Start # Lo       FEMININE ORDINAL INDICATOR`
@@ -35,10 +39,15 @@ fn chars_to_code_point_ranges(chars: &[(u32, u32)]) -> Vec<String> {
         .flat_map(|p| {
             let (mut start, end) = *p;
             assert!(end >= start, "Range out of order");
+            assert!(
+                end < (1 << CODE_POINT_BITS),
+                "end exceeds bits allocated for code point"
+            );
+            let max_len = (1 << LENGTH_BITS) - 1; // max values in one range
             let mut res = Vec::new();
-            let mut len = end - start;
+            let mut len = end - start + 1;
             while len > 0 {
-                let amt = std::cmp::min(len, 255);
+                let amt = std::cmp::min(len, max_len);
                 res.push(format!("CodePointRange::from({}, {}),", start, amt));
                 start += amt;
                 len -= amt;
