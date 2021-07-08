@@ -1,5 +1,5 @@
 use crate::codepointset::{CodePointSet, Interval};
-use crate::unicodetables::{FoldRange, FOLDS, ID_CONTINUE, ID_START};
+use crate::unicodetables::{FOLDS, ID_CONTINUE, ID_START};
 use crate::util::SliceHelp;
 use std::cmp::Ordering;
 
@@ -60,13 +60,35 @@ impl CodePointRange {
     }
 }
 
+pub(crate) struct FoldRange {
+    /// The range of codepoints.
+    pub(crate) range: CodePointRange,
+
+    /// The (signed) delta amount.
+    /// Folds are performed by adding this (signed) value to a code point.
+    pub(crate) delta: i32,
+
+    /// The modulo amount.
+    /// Folds are only performed if the code point is a multiple of this value.
+    pub(crate) modulo: u8,
+}
+
 impl FoldRange {
+    #[inline(always)]
+    pub const fn from(start: u32, length: u32, delta: i32, modulo: u8) -> Self {
+        FoldRange {
+            range: CodePointRange::from(start, length),
+            delta,
+            modulo,
+        }
+    }
+
     fn first(&self) -> u32 {
-        self.start as u32
+        self.range.first()
     }
 
     fn last(&self) -> u32 {
-        self.start as u32 + self.length as u32 - 1
+        self.range.last()
     }
 
     fn add_delta(&self, cu: u32) -> u32 {

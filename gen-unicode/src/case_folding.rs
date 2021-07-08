@@ -94,7 +94,7 @@ fn format_delta_blocks(dbs: &[DeltaBlock]) -> String {
     let mut lines = Vec::new();
     for db in dbs {
         lines.push(format!(
-            "fr({start:#04X}, {length}, {delta}, {modulo}),",
+            "FoldRange::from({start:#04X}, {length}, {delta}, {modulo}),",
             start = db.first().orig,
             length = db.length(),
             delta = db.delta(),
@@ -104,30 +104,6 @@ fn format_delta_blocks(dbs: &[DeltaBlock]) -> String {
 
     format!(
         r#"
-pub(crate) struct FoldRange {{
-    /// The first codepoint in the range.
-    pub(crate) start: u32,
-
-    /// The length of the range, in code points.
-    pub(crate) length: u8,
-
-    /// The (signed) delta amount.
-    /// Folds are performed by adding this (signed) value to a code point.
-    pub(crate) delta: i32,
-
-    /// The modulo amount.
-    /// Folds are only performed if the code point is a multiple of this value.
-    pub(crate) modulo: u8,
-}}
-
-const fn fr(start: u32, length: u8, delta: i32, modulo: u8) -> FoldRange {{
-    FoldRange {{
-        start,
-        length,
-        delta,
-        modulo,
-    }}
-}}
 
 pub(crate) const FOLDS: [FoldRange; {count}] = [
     {lines}
