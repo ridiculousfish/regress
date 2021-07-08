@@ -15,7 +15,7 @@ pub(crate) fn is_id_start(c: char) -> bool {
         .is_ok()
 }
 
-static ID_START: &[(u32, u32)] = &[
+const ID_START: &[(u32, u32)] = &[
     (65, 90),
     (97, 122),
     (170, 170),
@@ -729,7 +729,7 @@ pub(crate) fn is_id_continue(c: char) -> bool {
         .is_ok()
 }
 
-static ID_CONTINUE: &[(u32, u32)] = &[
+const ID_CONTINUE: &[(u32, u32)] = &[
     (48, 57),
     (65, 90),
     (95, 95),
@@ -2025,7 +2025,7 @@ const fn fr(start: u32, length: u8, delta: i32, modulo: u8) -> FoldRange {
     }
 }
 
-pub(crate) static FOLDS: [FoldRange; 194] = [
+pub(crate) const FOLDS: [FoldRange; 194] = [
     fr(0x41, 26, 32, 1),
     fr(0xB5, 1, 775, 1),
     fr(0xC0, 23, 32, 1),

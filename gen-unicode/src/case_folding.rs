@@ -129,7 +129,7 @@ const fn fr(start: u32, length: u8, delta: i32, modulo: u8) -> FoldRange {{
     }}
 }}
 
-pub(crate) static FOLDS: [FoldRange; {count}] = [
+pub(crate) const FOLDS: [FoldRange; {count}] = [
     {lines}
 ];
 "#,

@@ -21,13 +21,13 @@ const fn r1(c: char) -> Interval {
 // Note all of these are sorted.
 
 /// ES9 21.2.2.6.1.
-pub static WORD_CHARS: [Interval; 4] = [r('0', '9'), r('A', 'Z'), r1('_'), r('a', 'z')];
+pub const WORD_CHARS: [Interval; 4] = [r('0', '9'), r('A', 'Z'), r1('_'), r('a', 'z')];
 
 /// ES9 21.2.2.12
-pub static DIGITS: [Interval; 1] = [r('0', '9')];
+pub const DIGITS: [Interval; 1] = [r('0', '9')];
 
 /// ES9 11.2
-pub static WHITESPACE: [Interval; 8] = [
+pub const WHITESPACE: [Interval; 8] = [
     r('\u{0009}', '\u{000C}'),
     r1('\u{0020}'),
     r1('\u{1680}'),
@@ -39,5 +39,5 @@ pub static WHITESPACE: [Interval; 8] = [
 ];
 
 /// ES9 11.3
-pub static LINE_TERMINATOR: [Interval; 3] =
+pub const LINE_TERMINATOR: [Interval; 3] =
     [r1('\u{000A}'), r1('\u{000D}'), r('\u{2028}', '\u{2029}')];

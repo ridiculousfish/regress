@@ -53,7 +53,7 @@ pub(crate) fn generate_id_start() -> String {
         .is_ok()
 }}
 
-static ID_START: &[(u32, u32)] = &[
+const ID_START: &[(u32, u32)] = &[
     {}
 ];"#,
         chars.join("\n    ")
@@ -88,7 +88,7 @@ pub(crate) fn generate_id_continue() -> String {
         .is_ok()
 }}
 
-static ID_CONTINUE: &[(u32, u32)] = &[
+const ID_CONTINUE: &[(u32, u32)] = &[
     {}
 ];"#,
         chars.join("\n    ")
