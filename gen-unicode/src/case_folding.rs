@@ -1,3 +1,4 @@
+use crate::MAX_LENGTH;
 use std::fs::File;
 use std::io::{self, BufRead};
 
@@ -58,18 +59,19 @@ impl DeltaBlock {
         if self.folds.is_empty() {
             // New block.
             true
-        } else if fp.orig - self.first().orig >= 256 {
+        } else if fp.orig - self.first().orig > MAX_LENGTH {
             // Length would be too big.
             false
         } else if self.delta() != fp.delta() {
             // Different deltas in this block.
             false
         } else if let Some(stride) = self.stride() {
-            // Strides must match.
+            // Strides must match and be power of 2.
             stride == self.last().stride_to(fp)
         } else {
             // No stride yet.
-            true
+            // Stride must be power of 2.
+            self.last().stride_to(fp).is_power_of_two()
         }
     }
 

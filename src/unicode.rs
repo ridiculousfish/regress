@@ -25,7 +25,7 @@ impl CodePointRange {
     #[inline(always)]
     pub const fn from(start: u32, len: u32) -> Self {
         const_assert_true!(start < (1 << CODE_POINT_BITS));
-        const_assert_true!(len > 0 && len < (1 << LENGTH_BITS));
+        const_assert_true!(len > 0 && len <= (1 << LENGTH_BITS));
         const_assert_true!((start + len - 1) < ((1 << CODE_POINT_BITS) - 1));
         CodePointRange((start << LENGTH_BITS) | (len - 1))
     }
@@ -60,39 +60,52 @@ impl CodePointRange {
     }
 }
 
+// The "extra" field contains a predicate mask in the low bits and a signed delta amount in the high bits.
+// A code point only transforms if its difference from the range base is 0 once masked.
+const PREDICATE_MASK_BITS: u32 = 4;
+
 pub(crate) struct FoldRange {
     /// The range of codepoints.
     pub(crate) range: CodePointRange,
 
-    /// The (signed) delta amount.
-    /// Folds are performed by adding this (signed) value to a code point.
-    pub(crate) delta: i32,
-
-    /// The modulo amount.
-    /// Folds are only performed if the code point is a multiple of this value.
-    pub(crate) modulo: u8,
+    /// Combination of the signed delta amount and predicate mask.
+    pub(crate) extra: i32,
 }
 
 impl FoldRange {
     #[inline(always)]
     pub const fn from(start: u32, length: u32, delta: i32, modulo: u8) -> Self {
+        let mask = (1 << modulo) - 1;
+        const_assert_true!(mask < (1 << PREDICATE_MASK_BITS));
+        const_assert_true!(((delta << PREDICATE_MASK_BITS) >> PREDICATE_MASK_BITS) == delta);
+        let extra = mask | (delta << PREDICATE_MASK_BITS);
         FoldRange {
             range: CodePointRange::from(start, length),
-            delta,
-            modulo,
+            extra,
         }
     }
-
+    #[inline(always)]
     fn first(&self) -> u32 {
         self.range.first()
     }
 
+    #[inline(always)]
     fn last(&self) -> u32 {
         self.range.last()
     }
 
+    #[inline(always)]
+    fn delta(&self) -> i32 {
+        self.extra >> PREDICATE_MASK_BITS
+    }
+
+    #[inline(always)]
+    fn predicate_mask(&self) -> u32 {
+        (self.extra as u32) & PREDICATE_MASK_BITS
+    }
+
     fn add_delta(&self, cu: u32) -> u32 {
-        let cs = (cu as i32) + self.delta;
+        let cs = (cu as i32) + self.delta();
         std::debug_assert!(0 <= cs && cs <= 0x10FFFF);
         cs as u32
     }
@@ -120,10 +133,10 @@ impl FoldRange {
     fn apply(&self, cu: u32) -> u32 {
         debug_assert!(self.can_apply(cu), "Cannot apply to this code point");
         let offset = cu - self.first();
-        if offset % (self.modulo as u32) != 0 {
-            cu
-        } else {
+        if (offset & self.predicate_mask()) == 0 {
             self.add_delta(cu)
+        } else {
+            cu
         }
     }
 }
