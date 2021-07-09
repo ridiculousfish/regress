@@ -285,6 +285,7 @@ impl ByteBitmap {
     }
 
     /// \return all set bytes, as a vec.
+    #[allow(clippy::wrong_self_convention)]
     pub fn to_vec(&self) -> Vec<u8> {
         (0..=255).filter(|b| self.contains(*b)).collect()
     }

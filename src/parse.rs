@@ -749,6 +749,7 @@ impl<'a> Parser<'a> {
         }
     }
 
+    #[allow(clippy::branches_sharing_code)]
     fn try_escape_unicode_sequence(&mut self) -> Option<char> {
         let orig_input = self.input.clone();
 
