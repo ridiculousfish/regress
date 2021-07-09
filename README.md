@@ -14,7 +14,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-regress = "0.3"
+regress = "0.4"
 ```
 
 ### Fun Tools
