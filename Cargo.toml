@@ -28,4 +28,4 @@ index-positions = []
 prohibit-unsafe = []
 
 [dependencies]
-memchr = "2.3.3"
+memchr = "2.4.0"
