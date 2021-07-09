@@ -89,8 +89,7 @@ pub(crate) fn generate_id_continue() -> String {
     let ranges = chars_to_code_point_ranges(&chars);
 
     let result = format!(
-        r#"
-pub(crate) const ID_CONTINUE: [CodePointRange; {}] = [
+        r#"pub(crate) const ID_CONTINUE: [CodePointRange; {}] = [
     {}
 ];
 "#,
