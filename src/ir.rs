@@ -2,6 +2,7 @@
 
 use crate::api;
 use crate::types::{BracketContents, CaptureGroupID, CaptureGroupName};
+use crate::unicode::PropertyEscape;
 use std::fmt;
 
 #[derive(Debug, Copy, Clone)]
@@ -97,6 +98,12 @@ pub enum Node {
     Loop1CharBody {
         loopee: Box<Node>,
         quant: Quantifier,
+    },
+
+    // TODO: doc comment
+    UnicodePropertyEscape {
+        property_escape: PropertyEscape,
+        negate: bool,
     },
 }
 
@@ -201,6 +208,13 @@ impl Node {
                     contents: Box::new((*contents).duplicate()),
                 }
             }
+            Node::UnicodePropertyEscape {
+                property_escape,
+                negate: negated,
+            } => Node::UnicodePropertyEscape {
+                property_escape: property_escape.clone(),
+                negate: *negated,
+            },
         }
     }
 }
@@ -270,6 +284,7 @@ where
                 self.process(contents.as_ref());
                 self.walk.in_lookbehind = saved;
             }
+            Node::UnicodePropertyEscape { .. } => {}
         }
     }
 
@@ -345,6 +360,7 @@ where
                 self.process(contents.as_mut());
                 self.walk.in_lookbehind = saved;
             }
+            Node::UnicodePropertyEscape { .. } => {}
         }
     }
 
@@ -499,6 +515,18 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
                 f,
                 "LookaroundAssertion {} {} {:?} {:?}",
                 sense, direction, start_group, end_group
+            )?;
+        }
+        Node::UnicodePropertyEscape {
+            property_escape,
+            negate,
+        } => {
+            let sense = if *negate { "negative" } else { "" };
+
+            writeln!(
+                f,
+                "UnicodePropertyEscape {} {:?} {:?}",
+                sense, property_escape.name, property_escape.value
             )?;
         }
     }

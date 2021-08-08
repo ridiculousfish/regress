@@ -316,6 +316,20 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             let is_boundary = prev_wordchar != curr_wordchar;
             nextinsn_or_fail!(is_boundary != invert)
         }
+
+        Insn::UnicodePropertyEscape {
+            property_escape,
+            negate,
+        } => {
+            let m = if (scm::UnicodePropertyEscape { property_escape })
+                .matches(input, dir, &mut s.pos)
+            {
+                !*negate
+            } else {
+                *negate
+            };
+            nextinsn_or_fail!(m)
+        }
     }
 }
 

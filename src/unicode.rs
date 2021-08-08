@@ -1,5 +1,5 @@
 use crate::codepointset::{CodePointSet, Interval};
-use crate::unicodetables::{FOLDS, ID_CONTINUE, ID_START};
+use crate::unicodetables::{self, FOLDS, ID_CONTINUE, ID_START};
 use crate::util::SliceHelp;
 use std::cmp::Ordering;
 
@@ -56,6 +56,29 @@ impl CodePointRange {
             Ordering::Less
         } else {
             Ordering::Equal
+        }
+    }
+}
+
+/// CodePointRangeUnpacked is used when the max of CodePointRange would be exceeded.
+#[derive(Copy, Clone, Debug)]
+pub struct CodePointRangeUnpacked(u32, u32);
+
+impl CodePointRangeUnpacked {
+    #[inline(always)]
+    pub const fn from(start: u32, end: u32) -> Self {
+        CodePointRangeUnpacked(start, end)
+    }
+
+    // Compares the range to a single codepoint.
+    #[inline(always)]
+    pub fn compare(self, cp: u32) -> Ordering {
+        if cp < self.0 {
+            core::cmp::Ordering::Greater
+        } else if cp > self.1 {
+            core::cmp::Ordering::Less
+        } else {
+            core::cmp::Ordering::Equal
         }
     }
 }
@@ -268,4 +291,71 @@ pub(crate) fn is_id_start(c: char) -> bool {
 pub(crate) fn is_id_continue(c: char) -> bool {
     let i = c as u32;
     ID_CONTINUE.binary_search_by(|&cpr| cpr.compare(i)).is_ok()
+}
+
+#[derive(Debug, Clone)]
+pub struct PropertyEscape {
+    pub name: Option<UnicodePropertyName>,
+    pub value: UnicodePropertyValue,
+}
+
+#[derive(Debug, Clone)]
+pub enum UnicodePropertyName {
+    GeneralCategory,
+    Script,
+    ScriptExtensions,
+}
+
+pub fn unicode_property_name_from_str(s: &str) -> Option<UnicodePropertyName> {
+    use UnicodePropertyName::*;
+
+    match s {
+        "General_Category" | "gc" => Some(GeneralCategory),
+        "Script" | "sc" => Some(Script),
+        "Script_Extensions" | "scx" => Some(ScriptExtensions),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum UnicodePropertyValue {
+    Binary(unicodetables::UnicodePropertyBinary),
+    GeneralCategory(unicodetables::UnicodePropertyValueGeneralCategory),
+    Script(unicodetables::UnicodePropertyValueScript),
+}
+
+pub fn unicode_property_value_from_str(s: &str) -> Option<UnicodePropertyValue> {
+    if let Some(t) = unicodetables::unicode_property_binary_from_str(s) {
+        Some(UnicodePropertyValue::Binary(t))
+    } else if let Some(t) = unicodetables::unicode_property_value_general_category_from_str(s) {
+        Some(UnicodePropertyValue::GeneralCategory(t))
+    } else {
+        unicodetables::unicode_property_value_script_from_str(s).map(UnicodePropertyValue::Script)
+    }
+}
+
+pub(crate) fn is_character_class(c: char, property_escape: &PropertyEscape) -> bool {
+    match property_escape.name {
+        Some(UnicodePropertyName::GeneralCategory) => match &property_escape.value {
+            UnicodePropertyValue::GeneralCategory(t) => {
+                unicodetables::is_property_value_general_category(c, t)
+            }
+            _ => false,
+        },
+        Some(UnicodePropertyName::Script) => match &property_escape.value {
+            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
+            _ => false,
+        },
+        Some(UnicodePropertyName::ScriptExtensions) => match &property_escape.value {
+            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
+            _ => false,
+        },
+        None => match &property_escape.value {
+            UnicodePropertyValue::Binary(t) => unicodetables::is_property_binary(c, t),
+            UnicodePropertyValue::GeneralCategory(t) => {
+                unicodetables::is_property_value_general_category(c, t)
+            }
+            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
+        },
+    }
 }

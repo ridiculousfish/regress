@@ -1153,3 +1153,14 @@ fn run_regexp_unicode_escape_tc(tc: TestConfig) {
     tc.compilef(r#"\u{3F}"#, "").test_succeeds("?");
     tc.compilef(r#"\u{10ffff}"#, "").test_succeeds("\u{10ffff}");
 }
+
+#[test]
+fn run_regexp_unicode_property_classes() {
+    test_with_configs(run_regexp_unicode_property_classes_tc)
+}
+
+#[rustfmt::skip]
+fn run_regexp_unicode_property_classes_tc(tc: TestConfig) {
+    // TODO: tests
+    tc.compilef(r#"\p{Script=Buhid}"#, "").test_succeeds("ᝀᝁᝂᝃᝄᝅᝆᝇᝈᝉᝊᝋᝌᝍᝎᝏᝐᝑ\u{1752}\u{1753}ᝀᝁᝂᝃᝄᝅᝆᝇᝈᝉᝊᝋᝌᝍᝎᝏᝐᝑ\u{1752}\u{1753}");
+}

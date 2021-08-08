@@ -169,6 +169,7 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
                 PassAction::Keep
             }
         }
+        Node::UnicodePropertyEscape { .. } => PassAction::Keep,
     }
 }
 
