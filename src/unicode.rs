@@ -293,13 +293,13 @@ pub(crate) fn is_id_continue(c: char) -> bool {
     ID_CONTINUE.binary_search_by(|&cpr| cpr.compare(i)).is_ok()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct PropertyEscape {
     pub name: Option<UnicodePropertyName>,
     pub value: UnicodePropertyValue,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum UnicodePropertyName {
     GeneralCategory,
     Script,
@@ -317,7 +317,7 @@ pub fn unicode_property_name_from_str(s: &str) -> Option<UnicodePropertyName> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub enum UnicodePropertyValue {
     Binary(unicodetables::UnicodePropertyBinary),
     GeneralCategory(unicodetables::UnicodePropertyValueGeneralCategory),

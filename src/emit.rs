@@ -275,7 +275,7 @@ impl Emitter {
                 property_escape,
                 negate,
             } => self.emit_insn(Insn::UnicodePropertyEscape {
-                property_escape: property_escape.clone(),
+                property_escape: *property_escape,
                 negate: *negate,
             }),
         }

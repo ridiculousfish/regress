@@ -13317,7 +13317,7 @@ pub(crate) fn is_property_binary(c: char, value: &UnicodePropertyBinary) -> bool
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum UnicodePropertyBinary {
     Alphabetic,
     CaseIgnorable,
@@ -17393,7 +17393,7 @@ pub(crate) fn is_property_value_script(c: char, value: &UnicodePropertyValueScri
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum UnicodePropertyValueScript {
     Adlam,
     Ahom,
@@ -22004,7 +22004,7 @@ pub(crate) fn is_property_value_general_category(
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum UnicodePropertyValueGeneralCategory {
     ClosePunctuation,
     ConnectorPunctuation,

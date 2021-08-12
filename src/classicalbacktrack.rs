@@ -854,14 +854,9 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         property_escape,
                         negate,
                     } => {
-                        let m = if (scm::UnicodePropertyEscape { property_escape })
-                            .matches(input, dir, &mut pos)
-                        {
-                            !*negate
-                        } else {
-                            *negate
-                        };
-                        next_or_bt!(m)
+                        let m = scm::UnicodePropertyEscape { property_escape }
+                            .matches(input, dir, &mut pos);
+                        next_or_bt!(m != *negate);
                     }
 
                     Insn::Goal => {

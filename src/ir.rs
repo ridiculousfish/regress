@@ -212,7 +212,7 @@ impl Node {
                 property_escape,
                 negate: negated,
             } => Node::UnicodePropertyEscape {
-                property_escape: property_escape.clone(),
+                property_escape: *property_escape,
                 negate: *negated,
             },
         }

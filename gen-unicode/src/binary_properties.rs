@@ -6,7 +6,11 @@ use codegen::{Block, Enum, Function, Scope};
 
 pub(crate) fn generate(scope: &mut Scope) {
     let mut property_enum = Enum::new("UnicodePropertyBinary");
-    property_enum.vis("pub").derive("Debug").derive("Clone");
+    property_enum
+        .vis("pub")
+        .derive("Debug")
+        .derive("Clone")
+        .derive("Copy");
 
     let mut is_property_fn = Function::new("is_property_binary");
     is_property_fn
