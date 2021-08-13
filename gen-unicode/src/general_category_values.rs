@@ -132,6 +132,86 @@ pub(crate) fn generate(scope: &mut Scope) {
         .push_fn(property_from_str_fn);
 }
 
+pub(crate) fn generate_tests(scope: &mut Scope) {
+    for (alias0, alias1, orig_name, name) in GENERAL_CATEGORY_VALUES {
+        // We skip surrogates, as rust does not allow them as chars.
+        if *name == "Surrogate" {
+            continue;
+        }
+
+        let file = File::open("DerivedGeneralCategory.txt").unwrap();
+        let lines = io::BufReader::new(file).lines();
+        let mut chars = Vec::new();
+
+        for line in lines {
+            parse_line(&line.unwrap(), &mut chars, alias1);
+        }
+
+        scope
+            .new_fn(&format!(
+                "unicode_escape_property_gc_{}",
+                name.to_lowercase()
+            ))
+            .attr("test")
+            .line(format!(
+                "test_with_configs(unicode_escape_property_gc_{}_tc)",
+                name.to_lowercase()
+            ));
+
+        let f = scope.new_fn(&format!(
+            "unicode_escape_property_gc_{}_tc",
+            name.to_lowercase()
+        ));
+
+        f.arg("tc", "TestConfig");
+
+        let code_points: Vec<String> = chars
+            .iter()
+            .map(|c| format!("\"\\u{{{:x}}}\"", c.0))
+            .collect();
+
+        f.line(format!(
+            "const CODE_POINTS: [&str; {}] = [\n    {},\n];",
+            code_points.len(),
+            code_points.join(",\n    ")
+        ));
+
+        let mut regexes = vec![
+            format!(r#""^\\p{{General_Category={}}}+$""#, orig_name),
+            format!(r#""^\\p{{gc={}}}+$""#, orig_name),
+            format!(r#""^\\p{{{}}}+$""#, orig_name),
+        ];
+
+        if !alias0.is_empty() {
+            regexes.push(format!(r#""^\\p{{General_Category={}}}+$""#, alias0));
+            regexes.push(format!(r#""^\\p{{gc={}}}+$""#, alias0));
+            regexes.push(format!(r#""^\\p{{{}}}+$""#, alias0));
+        }
+
+        if !alias1.is_empty() {
+            regexes.push(format!(r#""^\\p{{General_Category={}}}+$""#, alias1));
+            regexes.push(format!(r#""^\\p{{gc={}}}+$""#, alias1));
+            regexes.push(format!(r#""^\\p{{{}}}+$""#, alias1));
+        }
+
+        f.line(format!(
+            "const REGEXES: [&str; {}] = [\n    {},\n];",
+            regexes.len(),
+            regexes.join(",\n    ")
+        ));
+
+        let mut b = Block::new("for regex in REGEXES");
+        b.line("let regex = tc.compile(regex);");
+
+        let mut bb = Block::new("for code_point in CODE_POINTS");
+        bb.line("regex.test_succeeds(code_point);");
+
+        b.push_block(bb);
+
+        f.push_block(b);
+    }
+}
+
 // Structure: (Alias, Alias, Name, CamelCaseName, CommaSeparatedValueNames)
 const GENERAL_CATEGORY_VALUES_DERIVED: &[(&str, &str,&str, &str, &str); 8] = &[
     ("", "LC", "Cased_Letter", "CasedLetter", "Lowercase_Letter,Titlecase_Letter,Uppercase_Letter"),

@@ -1,5 +1,5 @@
 use crate::codepointset::{CodePointSet, Interval};
-use crate::unicodetables::{self, FOLDS, ID_CONTINUE, ID_START};
+use crate::unicodetables::{self, FOLDS};
 use crate::util::SliceHelp;
 use std::cmp::Ordering;
 
@@ -279,18 +279,6 @@ pub fn fold_code_points(mut input: CodePointSet) -> CodePointSet {
         unfold_interval(*iv, &mut input);
     }
     input
-}
-
-/// \return whether c has the 'ID_Start' Unicode property.
-pub(crate) fn is_id_start(c: char) -> bool {
-    let i = c as u32;
-    ID_START.binary_search_by(|&cpr| cpr.compare(i)).is_ok()
-}
-
-/// \return whether c has the 'ID_Continue' Unicode property.
-pub(crate) fn is_id_continue(c: char) -> bool {
-    let i = c as u32;
-    ID_CONTINUE.binary_search_by(|&cpr| cpr.compare(i)).is_ok()
 }
 
 #[derive(Debug, Copy, Clone)]

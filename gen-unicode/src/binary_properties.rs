@@ -142,6 +142,69 @@ pub(crate) fn generate(scope: &mut Scope) {
         .push_fn(property_from_str_fn);
 }
 
+pub(crate) fn generate_tests(scope: &mut Scope) {
+    for (alias, orig_name, name, ucd_file_name) in BINARY_PROPERTIES {
+        let file = File::open(ucd_file_name).unwrap();
+        let lines = io::BufReader::new(file).lines();
+        let mut chars = Vec::new();
+
+        for line in lines {
+            parse_line(&line.unwrap(), &mut chars, orig_name);
+        }
+
+        scope
+            .new_fn(&format!(
+                "unicode_escape_property_binary_{}",
+                name.to_lowercase()
+            ))
+            .attr("test")
+            .line(format!(
+                "test_with_configs(unicode_escape_property_binary_{}_tc)",
+                name.to_lowercase()
+            ));
+
+        let f = scope.new_fn(&format!(
+            "unicode_escape_property_binary_{}_tc",
+            name.to_lowercase()
+        ));
+
+        f.arg("tc", "TestConfig");
+
+        let code_points: Vec<String> = chars
+            .iter()
+            .map(|c| format!("\"\\u{{{:x}}}\"", c.0))
+            .collect();
+
+        f.line(format!(
+            "const CODE_POINTS: [&str; {}] = [\n    {},\n];",
+            code_points.len(),
+            code_points.join(",\n    ")
+        ));
+
+        let mut regexes = vec![format!(r#""^\\p{{{}}}+$""#, orig_name)];
+
+        if !alias.is_empty() {
+            regexes.push(format!(r#""^\\p{{{}}}+$""#, alias));
+        }
+
+        f.line(format!(
+            "const REGEXES: [&str; {}] = [\n    {},\n];",
+            regexes.len(),
+            regexes.join(",\n    ")
+        ));
+
+        let mut b = Block::new("for regex in REGEXES");
+        b.line("let regex = tc.compile(regex);");
+
+        let mut bb = Block::new("for code_point in CODE_POINTS");
+        bb.line("regex.test_succeeds(code_point);");
+
+        b.push_block(bb);
+
+        f.push_block(b);
+    }
+}
+
 // Structure: (Alias, Name, CamelCaseName, UCDFileName)
 const BINARY_PROPERTIES: &[(&str, &str, &str, &str); 50] = &[
     (
@@ -247,7 +310,12 @@ const BINARY_PROPERTIES: &[(&str, &str, &str, &str); 50] = &[
         "LogicalOrderException",
         "PropList.txt",
     ),
-    ("Lower", "Lowercase", "Lowercase", "PropList.txt"),
+    (
+        "Lower",
+        "Lowercase",
+        "Lowercase",
+        "DerivedCoreProperties.txt",
+    ),
     (
         "NChar",
         "Noncharacter_Code_Point",
@@ -288,7 +356,12 @@ const BINARY_PROPERTIES: &[(&str, &str, &str, &str); 50] = &[
         "UnifiedIdeograph",
         "PropList.txt",
     ),
-    ("Upper", "Uppercase", "Uppercase", "PropList.txt"),
+    (
+        "Upper",
+        "Uppercase",
+        "Uppercase",
+        "DerivedCoreProperties.txt",
+    ),
     (
         "VS",
         "Variation_Selector",

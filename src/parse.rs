@@ -1,18 +1,17 @@
 //! Parser from regex patterns to IR
 
-use crate::api;
-use crate::charclasses;
-use crate::codepointset::{CodePointSet, Interval};
-use crate::ir;
-use crate::types::{
-    BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
-    MAX_LOOPS,
+use crate::{
+    api, charclasses,
+    codepointset::{CodePointSet, Interval},
+    ir,
+    types::{
+        BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
+        MAX_LOOPS,
+    },
+    unicode::{self, unicode_property_value_from_str, PropertyEscape},
+    unicodetables::{is_id_continue, is_id_start},
 };
-use crate::unicode::unicode_property_value_from_str;
-use crate::unicode::PropertyEscape;
-use crate::unicode::{self, is_id_continue, is_id_start};
-use std::collections::HashMap;
-use std::{error::Error as StdError, fmt, iter::Peekable};
+use std::{collections::HashMap, error::Error as StdError, fmt, iter::Peekable};
 
 /// Represents an error encountered during regex compilation.
 ///
@@ -983,13 +982,12 @@ impl<'a> Parser<'a> {
                     self.consume(c);
                     break;
                 }
+                c if c.is_ascii_alphanumeric() || c == '_' => {
+                    self.consume(c);
+                    name.push(c);
+                }
                 _ => {
-                    if c.is_ascii_alphanumeric() {
-                        self.consume(c);
-                        name.push(c);
-                    } else {
-                        return error("Invalid property name");
-                    }
+                    return error("Invalid property name");
                 }
             }
         }
@@ -1016,13 +1014,12 @@ impl<'a> Parser<'a> {
                         value,
                     });
                 }
-                c => {
-                    if c.is_ascii_alphanumeric() {
-                        self.consume(c);
-                        value.push(c);
-                    } else {
-                        return error("Invalid property name");
-                    }
+                c if c.is_ascii_alphanumeric() || c == '_' => {
+                    self.consume(c);
+                    value.push(c);
+                }
+                _ => {
+                    return error("Invalid property name");
                 }
             }
         }
