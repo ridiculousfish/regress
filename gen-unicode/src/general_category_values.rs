@@ -1,4 +1,4 @@
-use crate::{chars_to_code_point_ranges, parse_line};
+use crate::{chars_to_code_point_ranges, pack_adjacent_chars, parse_line};
 use std::fs::File;
 use std::io::{self, BufRead};
 
@@ -39,6 +39,8 @@ pub(crate) fn generate(scope: &mut Scope) {
         for line in lines {
             parse_line(&line.unwrap(), &mut chars, alias1);
         }
+
+        pack_adjacent_chars(&mut chars);
 
         // Some properties cannot be packed into a CodePointRange.
         if ["Unassigned", "Private_Use"].contains(orig_name) {

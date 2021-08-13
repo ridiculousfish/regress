@@ -115,6 +115,27 @@ pub(crate) fn parse_line(line: &str, chars: &mut Vec<(u32, u32)>, property: &str
     }
 }
 
+// Combine unicode code point ranges, if they are adjacent.
+pub(crate) fn pack_adjacent_chars(chars: &mut Vec<(u32, u32)>) {
+    let chars_orig = chars.clone();
+    let mut chars_iter = chars_orig.iter().cloned().peekable();
+
+    chars.clear();
+
+    while let Some((start, mut end)) = chars_iter.next() {
+        while let Some((next_start, next_end)) = chars_iter.peek() {
+            if end + 1 == *next_start {
+                end = *next_end;
+                chars_iter.next();
+            } else {
+                break;
+            }
+        }
+
+        chars.push((start, end));
+    }
+}
+
 // Given a list of inclusive ranges of code points, return a list of strings creating corresponding CodePointRange.
 // If a range is too big, it is split into smaller abutting ranges.
 pub(crate) fn chars_to_code_point_ranges(chars: &[(u32, u32)]) -> Vec<String> {
