@@ -1,4 +1,5 @@
 use crate::{chars_to_code_point_ranges, pack_adjacent_chars, parse_line};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead};
 
@@ -135,6 +136,8 @@ pub(crate) fn generate(scope: &mut Scope) {
 }
 
 pub(crate) fn generate_tests(scope: &mut Scope) {
+    let mut char_map: HashMap<&str, Vec<(u32, u32)>> = HashMap::new();
+
     for (alias0, alias1, orig_name, name) in GENERAL_CATEGORY_VALUES {
         // We skip surrogates, as rust does not allow them as chars.
         if *name == "Surrogate" {
@@ -147,6 +150,81 @@ pub(crate) fn generate_tests(scope: &mut Scope) {
 
         for line in lines {
             parse_line(&line.unwrap(), &mut chars, alias1);
+        }
+
+        char_map.insert(orig_name, chars.clone());
+
+        scope
+            .new_fn(&format!(
+                "unicode_escape_property_gc_{}",
+                name.to_lowercase()
+            ))
+            .attr("test")
+            .line(format!(
+                "test_with_configs(unicode_escape_property_gc_{}_tc)",
+                name.to_lowercase()
+            ));
+
+        let f = scope.new_fn(&format!(
+            "unicode_escape_property_gc_{}_tc",
+            name.to_lowercase()
+        ));
+
+        f.arg("tc", "TestConfig");
+
+        let code_points: Vec<String> = chars
+            .iter()
+            .map(|c| format!("\"\\u{{{:x}}}\"", c.0))
+            .collect();
+
+        f.line(format!(
+            "const CODE_POINTS: [&str; {}] = [\n    {},\n];",
+            code_points.len(),
+            code_points.join(",\n    ")
+        ));
+
+        let mut regexes = vec![
+            format!(r#""^\\p{{General_Category={}}}+$""#, orig_name),
+            format!(r#""^\\p{{gc={}}}+$""#, orig_name),
+            format!(r#""^\\p{{{}}}+$""#, orig_name),
+        ];
+
+        if !alias0.is_empty() {
+            regexes.push(format!(r#""^\\p{{General_Category={}}}+$""#, alias0));
+            regexes.push(format!(r#""^\\p{{gc={}}}+$""#, alias0));
+            regexes.push(format!(r#""^\\p{{{}}}+$""#, alias0));
+        }
+
+        if !alias1.is_empty() {
+            regexes.push(format!(r#""^\\p{{General_Category={}}}+$""#, alias1));
+            regexes.push(format!(r#""^\\p{{gc={}}}+$""#, alias1));
+            regexes.push(format!(r#""^\\p{{{}}}+$""#, alias1));
+        }
+
+        f.line(format!(
+            "const REGEXES: [&str; {}] = [\n    {},\n];",
+            regexes.len(),
+            regexes.join(",\n    ")
+        ));
+
+        let mut b = Block::new("for regex in REGEXES");
+        b.line("let regex = tc.compile(regex);");
+
+        let mut bb = Block::new("for code_point in CODE_POINTS");
+        bb.line("regex.test_succeeds(code_point);");
+
+        b.push_block(bb);
+
+        f.push_block(b);
+    }
+
+    for (alias0, alias1, orig_name, name, value_names_str) in GENERAL_CATEGORY_VALUES_DERIVED {
+        let mut chars = Vec::new();
+
+        for value_name in value_names_str.split(',') {
+            if let Some(cs) = char_map.get(value_name) {
+                chars.append(&mut cs.clone());
+            }
         }
 
         scope

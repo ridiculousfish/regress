@@ -1314,3 +1314,68 @@ fn property_escapes_invalid() {
     test_parse_fails(r#"\p{Line_Break=Alphabetic}"#);
     test_parse_fails(r#"\p{Line_Break}"#);
 }
+
+#[test]
+fn unicode_escape_property_binary_ascii() {
+    test_with_configs(unicode_escape_property_binary_ascii_tc)
+}
+
+fn unicode_escape_property_binary_ascii_tc(tc: TestConfig) {
+    const CODE_POINTS: [&str; 7] = [
+        "\u{0}", "\u{A}", "\u{17}", "\u{2A}", "\u{3C}", "\u{63}", "\u{7F}",
+    ];
+    const REGEXES: [&str; 1] = ["^\\p{ASCII}+$"];
+    for regex in REGEXES {
+        let regex = tc.compile(regex);
+        for code_point in CODE_POINTS {
+            regex.test_succeeds(code_point);
+        }
+    }
+}
+
+#[test]
+fn unicode_escape_property_binary_any() {
+    test_with_configs(unicode_escape_property_binary_any_tc)
+}
+
+fn unicode_escape_property_binary_any_tc(tc: TestConfig) {
+    const CODE_POINTS: [&str; 7] = [
+        "\u{0}",
+        "\u{F}",
+        "\u{FF}",
+        "\u{FFF}",
+        "\u{FFFF}",
+        "\u{FFFFF}",
+        "\u{10FFFF}",
+    ];
+    const REGEXES: [&str; 1] = ["^\\p{Any}+$"];
+    for regex in REGEXES {
+        let regex = tc.compile(regex);
+        for code_point in CODE_POINTS {
+            regex.test_succeeds(code_point);
+        }
+    }
+}
+
+#[test]
+fn unicode_escape_property_binary_assigned() {
+    test_with_configs(unicode_escape_property_binary_assigned_tc)
+}
+
+fn unicode_escape_property_binary_assigned_tc(tc: TestConfig) {
+    const CODE_POINTS: [&str; 6] = [
+        "\u{377}",
+        "\u{c69}",
+        "\u{2d96}",
+        "\u{11a47}",
+        "\u{1d51c}",
+        "\u{10fffd}",
+    ];
+    const REGEXES: [&str; 1] = ["^\\p{Assigned}+$"];
+    for regex in REGEXES {
+        let regex = tc.compile(regex);
+        for code_point in CODE_POINTS {
+            regex.test_succeeds(code_point);
+        }
+    }
+}
