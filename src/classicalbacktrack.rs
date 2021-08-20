@@ -849,6 +849,16 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                             break 'backtrack;
                         }
                     }
+
+                    Insn::UnicodePropertyEscape {
+                        property_escape,
+                        negate,
+                    } => {
+                        let m = scm::UnicodePropertyEscape { property_escape }
+                            .matches(input, dir, &mut pos);
+                        next_or_bt!(m != *negate);
+                    }
+
                     Insn::Goal => {
                         // Keep all but the initial give-up bts.
                         self.bts.truncate(1);

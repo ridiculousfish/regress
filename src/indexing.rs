@@ -100,7 +100,7 @@ where
     /// \return a position at the left end of this input.
     fn left_end(&self) -> Self::Position;
 
-    /// \return a position at the right end of this nput.
+    /// \return a position at the right end of this input.
     fn right_end(&self) -> Self::Position;
 
     /// Move a position right by a certain amount.

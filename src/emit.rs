@@ -271,6 +271,13 @@ impl Emitter {
                     self.emit_insn(insn)
                 }
             }
+            Node::UnicodePropertyEscape {
+                property_escape,
+                negate,
+            } => self.emit_insn(Insn::UnicodePropertyEscape {
+                property_escape: *property_escape,
+                negate: *negate,
+            }),
         }
     }
 }

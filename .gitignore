@@ -3,7 +3,15 @@
 Cargo.lock
 .vscode
 .vscode/*
-CaseFolding.txt
-DerivedCoreProperties.txt
 .DS_Store
 regexp-pcre.js
+
+# Unicode Database Files
+DerivedCoreProperties.txt
+DerivedBinaryProperties.txt
+DerivedGeneralCategory.txt
+DerivedNormalizationProps.txt
+CaseFolding.txt
+emoji-data.txt
+PropList.txt
+Scripts.txt

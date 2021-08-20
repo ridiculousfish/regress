@@ -1,4 +1,5 @@
 use crate::MAX_LENGTH;
+use codegen::Scope;
 use std::fs::File;
 use std::io::{self, BufRead};
 
@@ -92,7 +93,7 @@ fn create_delta_blocks(fps: &[FoldPair]) -> Vec<DeltaBlock> {
     blocks
 }
 
-fn format_delta_blocks(dbs: &[DeltaBlock]) -> String {
+fn format_delta_blocks(scope: &mut Scope, dbs: &[DeltaBlock]) {
     let mut lines = Vec::new();
     for db in dbs {
         lines.push(format!(
@@ -104,16 +105,11 @@ fn format_delta_blocks(dbs: &[DeltaBlock]) -> String {
         ));
     }
 
-    format!(
-        r#"
-
-pub(crate) const FOLDS: [FoldRange; {count}] = [
-    {lines}
-];
-"#,
-        count = dbs.len(),
-        lines = lines.join("\n    ")
-    )
+    scope.raw(&format!(
+        "pub(crate) const FOLDS: [FoldRange; {}] = [\n    {}\n];",
+        dbs.len(),
+        lines.join("\n    ")
+    ));
 }
 
 /// Parse a CaseFolding line if it is of Common type.
@@ -136,19 +132,19 @@ fn process_simple_fold(s: &str) -> Option<FoldPair> {
     None
 }
 
-pub(crate) fn generate_folds() -> String {
+pub(crate) fn generate_folds(scope: &mut Scope) {
     let file = File::open("CaseFolding.txt").expect("could not open CaseFolding.txt");
     let lines = io::BufReader::new(file).lines();
 
-    let mut foldpairs = Vec::new();
+    let mut fold_pairs = Vec::new();
     for line in lines {
         if let Some(s) = line.unwrap().as_str().trim().split('#').next() {
             if let Some(fp) = process_simple_fold(s) {
-                foldpairs.push(fp);
+                fold_pairs.push(fp);
             }
         }
     }
-    let dblocks = create_delta_blocks(&foldpairs);
+    let delta_blocks = create_delta_blocks(&fold_pairs);
 
-    format_delta_blocks(&dblocks).trim().to_string()
+    format_delta_blocks(scope, &delta_blocks)
 }

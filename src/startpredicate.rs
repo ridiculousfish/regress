@@ -144,7 +144,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
 
         // We assume that most char nodes have been optimized to ByteSeq or AnyBytes2, so skip
         // these.
-        // TODO: we could support icase through bitmap of defolded first bytes.
+        // TODO: we could support icase through bitmap of de-folded first bytes.
         Node::Char { .. } => arbitrary,
 
         // Cats return the first non-None value, if any.
@@ -212,6 +212,9 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
             let bitmap = cps_to_first_byte_bitmap(&cps);
             Some(AbstractStartPredicate::Set(bitmap))
         }
+
+        // TODO: not sure if we can do something here
+        Node::UnicodePropertyEscape { .. } => arbitrary,
     }
 }
 

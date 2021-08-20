@@ -1,16 +1,17 @@
 //! Parser from regex patterns to IR
 
-use crate::api;
-use crate::charclasses;
-use crate::codepointset::{CodePointSet, Interval};
-use crate::ir;
-use crate::types::{
-    BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
-    MAX_LOOPS,
+use crate::{
+    api, charclasses,
+    codepointset::{CodePointSet, Interval},
+    ir,
+    types::{
+        BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
+        MAX_LOOPS,
+    },
+    unicode::{self, unicode_property_value_from_str, PropertyEscape},
+    unicodetables::{is_id_continue, is_id_start},
 };
-use crate::unicode::{self, is_id_continue, is_id_start};
-use std::collections::HashMap;
-use std::{error::Error as StdError, fmt, iter::Peekable};
+use std::{collections::HashMap, error::Error as StdError, fmt, iter::Peekable};
 
 /// Represents an error encountered during regex compilation.
 ///
@@ -479,6 +480,18 @@ impl<'a> Parser<'a> {
                         Ok(Some(ClassAtom::CodePoint('-')))
                     }
 
+                    // TODO: implement property escape in brackets
+                    //                    'p' | 'P' => {
+                    //                        self.consume(ec);
+                    //
+                    //                        let property_escape = self.try_consume_unicode_property_escape()?;
+                    //                        let negate = ec == 'P';
+                    //
+                    //                        Ok(Some(ClassAtom::UnicodePropertyEscape {
+                    //                            property_escape,
+                    //                            negate,
+                    //                        }))
+                    //                    }
                     _ => {
                         let cc = self.consume_character_escape()?;
                         Ok(Some(ClassAtom::CodePoint(cc)))
@@ -708,6 +721,18 @@ impl<'a> Parser<'a> {
                 Ok(make_bracket_class(CharacterClassType::Words, c == 'w'))
             }
 
+            'p' | 'P' => {
+                self.consume(c);
+
+                let property_escape = self.try_consume_unicode_property_escape()?;
+                let negate = c == 'P';
+
+                Ok(ir::Node::UnicodePropertyEscape {
+                    property_escape,
+                    negate,
+                })
+            }
+
             '1'..='9' => {
                 let val = self.try_consume_decimal_integer_literal().unwrap();
 
@@ -934,6 +959,72 @@ impl<'a> Parser<'a> {
         }
 
         self.input = orig_input;
+    }
+
+    fn try_consume_unicode_property_escape(&mut self) -> Result<PropertyEscape, Error> {
+        if !self.try_consume('{') {
+            return error("Invalid character at property escape start");
+        }
+
+        let mut name = String::new();
+
+        while let Some(c) = self.peek() {
+            match c {
+                '}' => {
+                    self.consume(c);
+                    if let Some(value) = unicode_property_value_from_str(&name) {
+                        return Ok(PropertyEscape { name: None, value });
+                    } else {
+                        return error("Invalid property name");
+                    }
+                }
+                '=' => {
+                    self.consume(c);
+                    break;
+                }
+                c if c.is_ascii_alphanumeric() || c == '_' => {
+                    self.consume(c);
+                    name.push(c);
+                }
+                _ => {
+                    return error("Invalid property name");
+                }
+            }
+        }
+
+        let mut value = String::new();
+
+        while let Some(c) = self.peek() {
+            match c {
+                '}' => {
+                    self.consume(c);
+                    let name = if let Some(name) = unicode::unicode_property_name_from_str(&name) {
+                        name
+                    } else {
+                        return error("Invalid property name");
+                    };
+                    let value =
+                        if let Some(value) = unicode::unicode_property_value_from_str(&value) {
+                            value
+                        } else {
+                            return error("Invalid property name");
+                        };
+                    return Ok(PropertyEscape {
+                        name: Some(name),
+                        value,
+                    });
+                }
+                c if c.is_ascii_alphanumeric() || c == '_' => {
+                    self.consume(c);
+                    value.push(c);
+                }
+                _ => {
+                    return error("Invalid property name");
+                }
+            }
+        }
+
+        error("Invalid property name")
     }
 
     fn finalize(&self, mut re: ir::Regex) -> Result<ir::Regex, Error> {
