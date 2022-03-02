@@ -757,7 +757,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         next_or_bt!(matched)
                     }
 
-                    &Insn::LookaheadInsn {
+                    &Insn::Lookahead {
                         negate,
                         start_group,
                         end_group,
@@ -778,7 +778,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         }
                     }
 
-                    &Insn::LookbehindInsn {
+                    &Insn::Lookbehind {
                         negate,
                         start_group,
                         end_group,
@@ -810,7 +810,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     Insn::EnterLoop(fields) => {
                         // Entering a loop, not re-entering it.
                         self.s.loops.mat(fields.loop_id as usize).iters = 0;
-                        match self.run_loop(&fields, pos, ip) {
+                        match self.run_loop(fields, pos, ip) {
                             Some(next_ip) => {
                                 ip = next_ip;
                                 continue 'nextinsn;

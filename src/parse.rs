@@ -30,7 +30,7 @@ impl fmt::Display for Error {
 impl StdError for Error {}
 
 enum ClassAtom {
-    CodePoint(char),
+    CodePoint(u32),
     CharacterClass {
         class_type: CharacterClassType,
         positive: bool,
@@ -115,9 +115,12 @@ struct LookaroundParams {
 }
 
 /// Represents the state used to parse a regex.
-struct Parser<'a> {
+struct Parser<I>
+where
+    I: Iterator<Item = u32>,
+{
     /// The remaining input.
-    input: Peekable<std::str::Chars<'a>>,
+    input: Peekable<I>,
 
     /// Flags used.
     flags: api::Flags,
@@ -142,9 +145,12 @@ struct Parser<'a> {
     has_lookbehind: bool,
 }
 
-impl<'a> Parser<'a> {
+impl<I> Parser<I>
+where
+    I: Iterator<Item = u32> + Clone,
+{
     /// Consume a character, returning it.
-    fn consume(&mut self, c: char) -> char {
+    fn consume(&mut self, c: u32) -> u32 {
         let nc = self.input.next();
         std::debug_assert!(nc == Some(c), "char was not next");
         nc.unwrap()
@@ -152,21 +158,15 @@ impl<'a> Parser<'a> {
 
     /// If our contents begin with the char c, consume it from our contents
     /// and return true. Otherwise return false.
-    fn try_consume(&mut self, c: char) -> bool {
-        let mut cursor = self.input.clone();
-        if cursor.next() == Some(c) {
-            self.input = cursor;
-            true
-        } else {
-            false
-        }
+    fn try_consume(&mut self, c: u32) -> bool {
+        self.input.next_if_eq(&c).is_some()
     }
 
     /// If our contents begin with the string \p s, consume it from our contents
     /// and return true. Otherwise return false.
     fn try_consume_str(&mut self, s: &str) -> bool {
         let mut cursor = self.input.clone();
-        for c1 in s.chars() {
+        for c1 in s.chars().map(|c| c as u32) {
             if cursor.next() != Some(c1) {
                 return false;
             }
@@ -176,12 +176,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Peek at the next character.
-    fn peek(&mut self) -> Option<char> {
+    fn peek(&mut self) -> Option<u32> {
         self.input.peek().copied()
     }
 
     /// \return the next character.
-    fn next(&mut self) -> Option<char> {
+    fn next(&mut self) -> Option<u32> {
         self.input.next()
     }
 
@@ -191,9 +191,14 @@ impl<'a> Parser<'a> {
         // Parse a catenation. If we consume everything, it's success. If there's
         // something left, it's an error (for example, an excess closing paren).
         let body = self.consume_disjunction()?;
-        match self.input.peek() {
-            Some(')') => error("Unbalanced parenthesis"),
-            Some(c) => error(format!("Unexpected char: {}", c)),
+        match self.input.peek().copied() {
+            Some(c) if c == ')' as u32 => error("Unbalanced parenthesis"),
+            Some(c) => error(format!(
+                "Unexpected char: {}",
+                char::from_u32(c)
+                    .map(String::from)
+                    .unwrap_or_else(|| format!("\\u{c:04X}"))
+            )),
             None => self.finalize(ir::Regex {
                 node: make_cat(vec![body, ir::Node::Goal]),
                 flags: self.flags,
@@ -204,7 +209,7 @@ impl<'a> Parser<'a> {
     /// ES6 21.2.2.3 Disjunction.
     fn consume_disjunction(&mut self) -> Result<ir::Node, Error> {
         let mut terms = vec![self.consume_term()?];
-        while self.try_consume('|') {
+        while self.try_consume('|' as u32) {
             terms.push(self.consume_term()?)
         }
         Ok(make_alt(terms))
@@ -223,28 +228,28 @@ impl<'a> Parser<'a> {
                 return Ok(make_cat(result));
             }
             let c = nc.unwrap();
-            match c {
+            match char::from_u32(c) {
                 // A concatenation is terminated by closing parens or vertical bar (alternations).
-                ')' | '|' => break,
-                '^' => {
-                    self.consume('^');
+                Some(')') | Some('|') => break,
+                Some('^') => {
+                    self.consume('^' as u32);
                     result.push(ir::Node::Anchor(ir::AnchorType::StartOfLine));
                     quantifier_allowed = false;
                 }
 
-                '$' => {
-                    self.consume('$');
+                Some('$') => {
+                    self.consume('$' as u32);
                     result.push(ir::Node::Anchor(ir::AnchorType::EndOfLine));
                     quantifier_allowed = false;
                 }
 
-                '\\' => {
-                    self.consume('\\');
+                Some('\\') => {
+                    self.consume('\\' as u32);
                     result.push(self.consume_atom_escape()?);
                 }
 
-                '.' => {
-                    self.consume('.');
+                Some('.') => {
+                    self.consume('.' as u32);
                     result.push(if self.flags.dot_all {
                         ir::Node::MatchAny
                     } else {
@@ -252,7 +257,7 @@ impl<'a> Parser<'a> {
                     });
                 }
 
-                '(' => {
+                Some('(') => {
                     if self.try_consume_str("(?=") {
                         // Positive lookahead.
                         quantifier_allowed = false;
@@ -286,7 +291,7 @@ impl<'a> Parser<'a> {
                         result.push(self.consume_disjunction()?);
                     } else {
                         // Capturing group.
-                        self.consume('(');
+                        self.consume('(' as u32);
                         let group = self.group_count;
                         if self.group_count as usize >= MAX_CAPTURE_GROUPS {
                             return error("Capture group count limit exceeded");
@@ -313,20 +318,20 @@ impl<'a> Parser<'a> {
                             result.push(ir::Node::CaptureGroup(Box::new(contents), group))
                         }
                     }
-                    if !self.try_consume(')') {
+                    if !self.try_consume(')' as u32) {
                         return error("Unbalanced parenthesis");
                     }
                 }
 
-                '[' => {
+                Some('[') => {
                     result.push(self.consume_bracket()?);
                 }
 
-                ']' => {
+                Some(']') => {
                     return error("Unbalanced bracket");
                 }
 
-                c => {
+                _ => {
                     // It's an error if this parses successfully as a quantifier.
                     // Note this covers *, +, ? as well.
                     let saved = self.input.clone();
@@ -334,8 +339,8 @@ impl<'a> Parser<'a> {
                         return error("Nothing to repeat");
                     }
                     self.input = saved;
-
-                    let mut cc = self.consume(c);
+                    let mut cc = c;
+                    self.consume(cc);
                     if self.flags.icase {
                         cc = unicode::fold(cc)
                     }
@@ -375,20 +380,20 @@ impl<'a> Parser<'a> {
 
     /// ES6 21.2.2.13 CharacterClass.
     fn consume_bracket(&mut self) -> Result<ir::Node, Error> {
-        self.consume('[');
-        let invert = self.try_consume('^');
+        self.consume('[' as u32);
+        let invert = self.try_consume('^' as u32);
         let mut result = BracketContents {
             invert,
             cps: CodePointSet::default(),
         };
 
         loop {
-            match self.peek() {
+            match self.peek().and_then(char::from_u32) {
                 None => {
                     return error("Unbalanced bracket");
                 }
                 Some(']') => {
-                    self.consume(']');
+                    self.consume(']' as u32);
                     if self.flags.icase {
                         result.cps = unicode::fold_code_points(result.cps);
                     }
@@ -404,7 +409,7 @@ impl<'a> Parser<'a> {
             }
 
             // Check for a dash; we may have a range.
-            if !self.try_consume('-') {
+            if !self.try_consume('-' as u32) {
                 add_class_atom(&mut result, first.unwrap());
                 continue;
             }
@@ -413,7 +418,7 @@ impl<'a> Parser<'a> {
             if second.is_none() {
                 // No second atom. For example: [a-].
                 add_class_atom(&mut result, first.unwrap());
-                add_class_atom(&mut result, ClassAtom::CodePoint('-'));
+                add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
                 continue;
             }
 
@@ -439,22 +444,23 @@ impl<'a> Parser<'a> {
         if c.is_none() {
             return Ok(None);
         }
-        match c.unwrap() {
+        let c = c.unwrap();
+        match char::from_u32(c) {
             // End of bracket.
-            ']' => Ok(None),
+            Some(']') => Ok(None),
 
             // Escape sequence.
-            '\\' => {
-                self.consume('\\');
+            Some('\\') => {
+                self.consume('\\' as u32);
                 let next = self.peek();
                 if next.is_none() {
                     return error("Unterminated escape");
                 }
                 let ec = next.unwrap();
-                match ec {
+                match char::from_u32(ec) {
                     // ES6 21.2.2.12 CharacterClassEscape.
-                    'd' | 'D' | 's' | 'S' | 'w' | 'W' => {
-                        self.consume(ec);
+                    Some(ec @ ('d' | 'D' | 's' | 'S' | 'w' | 'W')) => {
+                        self.consume(ec as u32);
                         let class_type = match ec {
                             'd' | 'D' => CharacterClassType::Digits,
                             's' | 'S' => CharacterClassType::Spaces,
@@ -466,18 +472,18 @@ impl<'a> Parser<'a> {
                             positive: (ec == 'd' || ec == 's' || ec == 'w'),
                         }))
                     }
-                    'b' => {
+                    Some('b') => {
                         // "Return the CharSet containing the single character <BS> U+0008
                         // (BACKSPACE)"
-                        self.consume('b');
-                        Ok(Some(ClassAtom::CodePoint('\x08')))
+                        self.consume('b' as u32);
+                        Ok(Some(ClassAtom::CodePoint(u32::from('\x08'))))
                     }
 
-                    '-' => {
+                    Some('-') => {
                         // ES6 21.2.1 ClassEscape: \- escapes - in Unicode
                         // expressions.
-                        self.consume('-');
-                        Ok(Some(ClassAtom::CodePoint('-')))
+                        self.consume('-' as u32);
+                        Ok(Some(ClassAtom::CodePoint(u32::from('-'))))
                     }
 
                     // TODO: implement property escape in brackets
@@ -499,13 +505,13 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            c => Ok(Some(ClassAtom::CodePoint(self.consume(c)))),
+            _ => Ok(Some(ClassAtom::CodePoint(self.consume(c)))),
         }
     }
 
     fn try_consume_quantifier(&mut self) -> Result<Option<ir::Quantifier>, Error> {
         if let Some(mut quant) = self.try_consume_quantifier_prefix()? {
-            quant.greedy = !self.try_consume('?');
+            quant.greedy = !self.try_consume('?' as u32);
             Ok(Some(quant))
         } else {
             Ok(None)
@@ -518,33 +524,33 @@ impl<'a> Parser<'a> {
             return Ok(None);
         }
         let c = nc.unwrap();
-        match c {
-            '+' => {
-                self.consume('+');
+        match char::from_u32(c) {
+            Some('+') => {
+                self.consume('+' as u32);
                 Ok(Some(ir::Quantifier {
                     min: 1,
                     max: std::usize::MAX,
                     greedy: true,
                 }))
             }
-            '*' => {
-                self.consume('*');
+            Some('*') => {
+                self.consume('*' as u32);
                 Ok(Some(ir::Quantifier {
                     min: 0,
                     max: std::usize::MAX,
                     greedy: true,
                 }))
             }
-            '?' => {
-                self.consume('?');
+            Some('?') => {
+                self.consume('?' as u32);
                 Ok(Some(ir::Quantifier {
                     min: 0,
                     max: 1,
                     greedy: true,
                 }))
             }
-            '{' => {
-                self.consume('{');
+            Some('{') => {
+                self.consume('{' as u32);
                 let optmin = self.try_consume_decimal_integer_literal();
                 if optmin.is_none() {
                     return error("Invalid quantifier");
@@ -554,7 +560,7 @@ impl<'a> Parser<'a> {
                     max: optmin.unwrap(),
                     greedy: true,
                 };
-                if self.try_consume(',') {
+                if self.try_consume(',' as u32) {
                     if let Some(max) = self.try_consume_decimal_integer_literal() {
                         // Like {3,4}
                         quant.max = max;
@@ -565,7 +571,7 @@ impl<'a> Parser<'a> {
                 } else {
                     // Like {3}.
                 }
-                if !self.try_consume('}') {
+                if !self.try_consume('}' as u32) {
                     return error("Invalid quantifier");
                 }
                 Ok(Some(quant))
@@ -581,7 +587,7 @@ impl<'a> Parser<'a> {
         let mut result: usize = 0;
         let mut char_count = 0;
         while let Some(c) = self.peek() {
-            if let Some(digit) = char::to_digit(c, 10) {
+            if let Some(digit) = char::from_u32(c).and_then(|c| char::to_digit(c, 10)) {
                 self.consume(c);
                 char_count += 1;
                 result = result.saturating_mul(10);
@@ -613,65 +619,64 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn consume_character_escape(&mut self) -> Result<char, Error> {
-        let u2c = |c| Ok(std::char::from_u32(c).expect("Invalid char"));
+    fn consume_character_escape(&mut self) -> Result<u32, Error> {
         let c = self.peek().expect("Should have a character");
-        match c {
-            'f' => {
-                self.consume('f');
-                u2c(0xC)
+        match char::from_u32(c) {
+            Some('f') => {
+                self.consume('f' as u32);
+                Ok(0xC)
             }
-            'n' => {
-                self.consume('n');
-                u2c(0xA)
+            Some('n') => {
+                self.consume('n' as u32);
+                Ok(0xA)
             }
-            'r' => {
-                self.consume('r');
-                u2c(0xD)
+            Some('r') => {
+                self.consume('r' as u32);
+                Ok(0xD)
             }
-            't' => {
-                self.consume('t');
-                u2c(0x9)
+            Some('t') => {
+                self.consume('t' as u32);
+                Ok(0x9)
             }
-            'v' => {
-                self.consume('v');
-                u2c(0xB)
+            Some('v') => {
+                self.consume('v' as u32);
+                Ok(0xB)
             }
-            'c' => {
+            Some('c') => {
                 // Control escape.
-                self.consume('c');
-                if let Some(nc) = self.next() {
-                    if ('a' <= nc && nc <= 'z') || ('A' <= nc && nc <= 'Z') {
-                        return u2c((nc as u32) % 32);
+                self.consume('c' as u32);
+                if let Some(nc) = self.next().and_then(char::from_u32) {
+                    if ('a'..='z').contains(&nc) || ('A'..='Z').contains(&nc) {
+                        return Ok((nc as u32) % 32);
                     }
                 }
                 error("Invalid character escape")
             }
-            '0' => {
+            Some('0') => {
                 // CharacterEscape :: "0 [lookahead != DecimalDigit]"
-                self.consume('0');
-                match self.peek() {
+                self.consume('0' as u32);
+                match self.peek().and_then(char::from_u32) {
                     Some(c) if ('0'..='9').contains(&c) => error("Invalid character escape"),
-                    _ => u2c(0x0),
+                    _ => Ok(0x0),
                 }
             }
 
-            'x' => {
+            Some('x') => {
                 // HexEscapeSequence :: x HexDigit HexDigit
                 // See ES6 11.8.3 HexDigit
                 let hex_to_digit = |c: char| c.to_digit(16);
-                self.consume('x');
-                let x1 = self.next().and_then(hex_to_digit);
-                let x2 = self.next().and_then(hex_to_digit);
+                self.consume('x' as u32);
+                let x1 = self.next().and_then(char::from_u32).and_then(hex_to_digit);
+                let x2 = self.next().and_then(char::from_u32).and_then(hex_to_digit);
                 match (x1, x2) {
-                    (Some(x1), Some(x2)) => u2c(x1 * 16 + x2),
+                    (Some(x1), Some(x2)) => Ok(x1 * 16 + x2),
                     _ => error("Invalid character escape"),
                 }
             }
 
-            'u' => {
+            Some('u') => {
                 // Unicode escape
-                self.consume('u');
+                self.consume('u' as u32);
                 if let Some(c) = self.try_escape_unicode_sequence() {
                     Ok(c)
                 } else {
@@ -680,15 +685,17 @@ impl<'a> Parser<'a> {
             }
 
             // Only syntax characters and / participate in IdentityEscape in Unicode regexp.
-            '^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
-            | '/' => Ok(self.consume(c)),
+            Some(
+                c @ ('^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}'
+                | '|' | '/'),
+            ) => Ok(self.consume(c as u32)),
 
             // TODO: currently we permit alphabetic characters in IdentityEscape to help some PCRE
             // tests pass.
             // Specifically a regex of the form [\p{Nd}]: in non-Unicode mode this is not a
             // character property test and is expected to parse as just a bracket where \p is
             // IdentityEscaped to p.
-            c if c.is_ascii_alphabetic() => Ok(self.consume(c)),
+            Some(c) if c.is_ascii_alphabetic() => Ok(self.consume(c as u32)),
 
             _ => error("Invalid character escape"),
         }
@@ -700,29 +707,29 @@ impl<'a> Parser<'a> {
             return error("Incomplete escape");
         }
         let c = nc.unwrap();
-        match c {
-            'b' | 'B' => {
-                self.consume(c);
+        match char::from_u32(c) {
+            Some(c @ ('b' | 'B')) => {
+                self.consume(c as u32);
                 Ok(ir::Node::WordBoundary { invert: c == 'B' })
             }
 
-            'd' | 'D' => {
-                self.consume(c);
+            Some(c @ ('d' | 'D')) => {
+                self.consume(c as u32);
                 Ok(make_bracket_class(CharacterClassType::Digits, c == 'd'))
             }
 
-            's' | 'S' => {
-                self.consume(c);
+            Some(c @ ('s' | 'S')) => {
+                self.consume(c as u32);
                 Ok(make_bracket_class(CharacterClassType::Spaces, c == 's'))
             }
 
-            'w' | 'W' => {
-                self.consume(c);
+            Some(c @ ('w' | 'W')) => {
+                self.consume(c as u32);
                 Ok(make_bracket_class(CharacterClassType::Words, c == 'w'))
             }
 
-            'p' | 'P' => {
-                self.consume(c);
+            Some(c @ ('p' | 'P')) => {
+                self.consume(c as u32);
 
                 let property_escape = self.try_consume_unicode_property_escape()?;
                 let negate = c == 'P';
@@ -733,7 +740,7 @@ impl<'a> Parser<'a> {
                 })
             }
 
-            '1'..='9' => {
+            Some('1'..='9') => {
                 let val = self.try_consume_decimal_integer_literal().unwrap();
 
                 // This is a backreference.
@@ -750,8 +757,8 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            'k' => {
-                self.consume(c);
+            Some('k') => {
+                self.consume('k' as u32);
 
                 // The sequence `\k` must be the start of a backreference to a named capture group.
                 if let Some(group_name) = self.try_consume_named_capture_group_name() {
@@ -775,14 +782,14 @@ impl<'a> Parser<'a> {
     }
 
     #[allow(clippy::branches_sharing_code)]
-    fn try_escape_unicode_sequence(&mut self) -> Option<char> {
+    fn try_escape_unicode_sequence(&mut self) -> Option<u32> {
         let orig_input = self.input.clone();
 
         // Support \u{X..X} (Unicode CodePoint)
-        if self.try_consume('{') {
+        if self.try_consume('{' as u32) {
             let mut s = String::new();
             loop {
-                match self.next() {
+                match self.next().and_then(char::from_u32) {
                     Some('}') => break,
                     Some(c) => s.push(c),
                     None => {
@@ -798,7 +805,7 @@ impl<'a> Parser<'a> {
                         self.input = orig_input;
                         None
                     } else {
-                        char::from_u32(u as u32)
+                        Some(u)
                     }
                 }
                 _ => {
@@ -810,7 +817,7 @@ impl<'a> Parser<'a> {
             // Hex4Digits
             let mut s = String::new();
             for _ in 0..4 {
-                if let Some(c) = self.next() {
+                if let Some(c) = self.next().and_then(char::from_u32) {
                     s.push(c);
                 } else {
                     self.input = orig_input;
@@ -822,12 +829,12 @@ impl<'a> Parser<'a> {
                     if (0xDC00..=0xDFFF).contains(&u) || (0xD800..=0xDB7F).contains(&u) {
                         // Low/High Surrogates
                         if !self.try_consume_str("\\u") {
-                            return String::from_utf16_lossy(&[u]).chars().next();
+                            return Some(u as u32);
                         }
 
                         let mut s = String::new();
                         for _ in 0..4 {
-                            if let Some(c) = self.next() {
+                            if let Some(c) = self.next().and_then(char::from_u32) {
                                 s.push(c);
                             } else {
                                 self.input = orig_input;
@@ -836,7 +843,7 @@ impl<'a> Parser<'a> {
                         }
                         match u16::from_str_radix(&s, 16) {
                             Ok(uu) => match String::from_utf16(&[u, uu]) {
-                                Ok(s) => s.chars().next(),
+                                Ok(s) => s.chars().next().map(u32::from),
                                 _ => {
                                     self.input = orig_input;
                                     None
@@ -848,7 +855,7 @@ impl<'a> Parser<'a> {
                             }
                         }
                     } else {
-                        String::from_utf16_lossy(&[u]).chars().next()
+                        Some(u as u32)
                     }
                 }
                 _ => {
@@ -860,16 +867,16 @@ impl<'a> Parser<'a> {
     }
 
     fn try_consume_named_capture_group_name(&mut self) -> Option<String> {
-        if !self.try_consume('<') {
+        if !self.try_consume('<' as u32) {
             return None;
         }
 
         let orig_input = self.input.clone();
         let mut group_name = String::new();
 
-        if let Some(mut c) = self.next() {
-            if self.try_consume('u') {
-                if let Some(escaped) = self.try_escape_unicode_sequence() {
+        if let Some(mut c) = self.next().and_then(char::from_u32) {
+            if self.try_consume('u' as u32) {
+                if let Some(escaped) = self.try_escape_unicode_sequence().and_then(char::from_u32) {
                     c = escaped;
                 } else {
                     self.input = orig_input;
@@ -889,9 +896,11 @@ impl<'a> Parser<'a> {
         }
 
         loop {
-            if let Some(mut c) = self.next() {
-                if self.try_consume('u') {
-                    if let Some(escaped) = self.try_escape_unicode_sequence() {
+            if let Some(mut c) = self.next().and_then(char::from_u32) {
+                if self.try_consume('u' as u32) {
+                    if let Some(escaped) =
+                        self.try_escape_unicode_sequence().and_then(char::from_u32)
+                    {
                         c = escaped;
                     } else {
                         self.input = orig_input;
@@ -925,23 +934,23 @@ impl<'a> Parser<'a> {
         let orig_input = self.input.clone();
 
         loop {
-            match self.next() {
-                Some('\\') => {
+            match self.next().map(char::from_u32) {
+                Some(Some('\\')) => {
                     self.next();
                     continue;
                 }
-                Some('[') => loop {
-                    match self.next() {
-                        Some('\\') => {
+                Some(Some('[')) => loop {
+                    match self.next().map(char::from_u32) {
+                        Some(Some('\\')) => {
                             self.next();
                             continue;
                         }
-                        Some(']') => break,
+                        Some(Some(']')) => break,
                         Some(_) => continue,
                         None => break,
                     }
                 },
-                Some('(') => {
+                Some(Some('(')) => {
                     if self.try_consume_str("?") {
                         if let Some(name) = self.try_consume_named_capture_group_name() {
                             self.named_group_indices.insert(name, self.group_count_max);
@@ -962,16 +971,16 @@ impl<'a> Parser<'a> {
     }
 
     fn try_consume_unicode_property_escape(&mut self) -> Result<PropertyEscape, Error> {
-        if !self.try_consume('{') {
+        if !self.try_consume('{' as u32) {
             return error("Invalid character at property escape start");
         }
 
         let mut name = String::new();
 
-        while let Some(c) = self.peek() {
+        while let Some(c) = self.peek().and_then(char::from_u32) {
             match c {
                 '}' => {
-                    self.consume(c);
+                    self.consume(c as u32);
                     if let Some(value) = unicode_property_value_from_str(&name) {
                         return Ok(PropertyEscape { name: None, value });
                     } else {
@@ -979,11 +988,11 @@ impl<'a> Parser<'a> {
                     }
                 }
                 '=' => {
-                    self.consume(c);
+                    self.consume(c as u32);
                     break;
                 }
                 c if c.is_ascii_alphanumeric() || c == '_' => {
-                    self.consume(c);
+                    self.consume(c as u32);
                     name.push(c);
                 }
                 _ => {
@@ -994,10 +1003,10 @@ impl<'a> Parser<'a> {
 
         let mut value = String::new();
 
-        while let Some(c) = self.peek() {
+        while let Some(c) = self.peek().and_then(char::from_u32) {
             match c {
                 '}' => {
-                    self.consume(c);
+                    self.consume(c as u32);
                     let name = if let Some(name) = unicode::unicode_property_name_from_str(&name) {
                         name
                     } else {
@@ -1015,7 +1024,7 @@ impl<'a> Parser<'a> {
                     });
                 }
                 c if c.is_ascii_alphanumeric() || c == '_' => {
-                    self.consume(c);
+                    self.consume(c as u32);
                     value.push(c);
                 }
                 _ => {
@@ -1050,7 +1059,7 @@ pub fn try_parse(pattern: &str, flags: api::Flags) -> Result<ir::Regex, Error> {
     // }
 
     let mut p = Parser {
-        input: pattern.chars().peekable(),
+        input: pattern.chars().map(u32::from).peekable(),
         flags,
         loop_count: 0,
         group_count: 0,

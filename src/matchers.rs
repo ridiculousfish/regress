@@ -18,19 +18,22 @@ pub trait CharProperties {
     /// \return whether this is a word char.
     /// ES9 21.2.2.6.2.
     fn is_word_char(c: Self::Element) -> bool {
-        match c.as_char() {
-            'a'..='z' => true,
-            'A'..='Z' => true,
-            '0'..='9' => true,
-            '_' => true,
+        match char::from_u32(c.as_u32()) {
+            Some('a'..='z') => true,
+            Some('A'..='Z') => true,
+            Some('0'..='9') => true,
+            Some('_') => true,
             _ => false,
         }
     }
 
     /// ES9 11.3
     fn is_line_terminator(c: Self::Element) -> bool {
-        let c = c.as_char();
-        c == '\u{000A}' || c == '\u{000D}' || c == '\u{2028}' || c == '\u{2029}'
+        if let Some(c) = char::from_u32(c.as_u32()) {
+            c == '\u{000A}' || c == '\u{000D}' || c == '\u{2028}' || c == '\u{2029}'
+        } else {
+            false
+        }
     }
 
     /// \return whether the bracket \p bc matches the given character \p c,
@@ -49,7 +52,7 @@ impl CharProperties for UTF8CharProperties {
     type Element = char;
 
     fn fold(c: Self::Element) -> Self::Element {
-        unicode::fold(c)
+        char::from_u32(unicode::fold(c.as_u32())).unwrap()
     }
 }
 

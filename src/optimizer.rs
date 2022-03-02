@@ -325,16 +325,18 @@ fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
     }
     match n {
         Node::Char { c, icase } if !*icase => {
-            let mut buff = [0; 4];
-            PassAction::Replace(Node::ByteSequence(
-                c.encode_utf8(&mut buff).as_bytes().to_vec(),
-            ))
+            if let Some(c) = char::from_u32(*c) {
+                let mut buff = [0; 4];
+                PassAction::Replace(Node::ByteSequence(
+                    c.encode_utf8(&mut buff).as_bytes().to_vec(),
+                ))
+            } else {
+                PassAction::Keep
+            }
         }
-        Node::CharSet(chars) if chars.iter().all(char::is_ascii) => {
+        Node::CharSet(chars) if chars.iter().all(|&c| c <= 0x7F) => {
             // All of our chars are ASCII; use a byte set instead.
-            PassAction::Replace(Node::ByteSet(
-                chars.iter().map(|&c| c as u32 as u8).collect(),
-            ))
+            PassAction::Replace(Node::ByteSet(chars.iter().map(|&c| c as u8).collect()))
         }
         Node::Cat(nodes) => {
             // Find and merge adjacent ByteSeq.
@@ -396,7 +398,7 @@ fn try_reduce_bracket(bc: &BracketContents) -> Option<Node> {
     let mut res = Vec::new();
     for iv in bc.cps.intervals() {
         for cp in iv.codepoints() {
-            res.push(std::char::from_u32(cp)?);
+            res.push(cp);
         }
     }
     debug_assert!(res.len() <= MAX_CHAR_SET_LENGTH, "Unexpectedly many chars");

@@ -164,8 +164,7 @@ impl FoldRange {
     }
 }
 
-pub fn fold(c: char) -> char {
-    let cu = c as u32;
+pub fn fold(cu: u32) -> u32 {
     let searched = FOLDS.binary_search_by(|fr| {
         if fr.first() > cu {
             Ordering::Greater
@@ -181,14 +180,9 @@ pub fn fold(c: char) -> char {
         } else {
             FOLDS.get(index).expect("Invalid index")
         };
-        let cs = fr.apply(cu);
-        if cfg!(feature = "prohibit-unsafe") {
-            unsafe { std::char::from_u32_unchecked(cs) }
-        } else {
-            std::char::from_u32(cs).expect("Char should have been in bounds")
-        }
+        fr.apply(cu)
     } else {
-        c
+        cu
     }
 }
 
@@ -241,14 +235,13 @@ fn unfold_interval(iv: Interval, recv: &mut CodePointSet) {
 
 /// \return all the characters which fold to c's fold.
 /// This is a slow linear search across all ranges.
-pub fn unfold_char(c: char) -> Vec<char> {
+pub fn unfold_char(c: u32) -> Vec<u32> {
     let mut res = vec![c];
-    let fc = fold(c);
-    if fc != c {
-        res.push(fc)
+    let fcp = fold(c);
+    if fcp != c {
+        res.push(fcp);
     }
     // TODO: optimize ASCII case.
-    let fcp = fc as u32;
     for tr in FOLDS.iter() {
         if !tr.transformed_to().contains(fcp) {
             continue;
@@ -257,7 +250,7 @@ pub fn unfold_char(c: char) -> Vec<char> {
             // TODO: this can be optimized.
             let tcp = tr.apply(cp);
             if tcp == fcp {
-                res.push(std::char::from_u32(cp).unwrap());
+                res.push(cp);
             }
         }
     }
@@ -322,28 +315,32 @@ pub fn unicode_property_value_from_str(s: &str) -> Option<UnicodePropertyValue> 
     }
 }
 
-pub(crate) fn is_character_class(c: char, property_escape: &PropertyEscape) -> bool {
-    match property_escape.name {
-        Some(UnicodePropertyName::GeneralCategory) => match &property_escape.value {
-            UnicodePropertyValue::GeneralCategory(t) => {
-                unicodetables::is_property_value_general_category(c, t)
-            }
-            _ => false,
-        },
-        Some(UnicodePropertyName::Script) => match &property_escape.value {
-            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
-            _ => false,
-        },
-        Some(UnicodePropertyName::ScriptExtensions) => match &property_escape.value {
-            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
-            _ => false,
-        },
-        None => match &property_escape.value {
-            UnicodePropertyValue::Binary(t) => unicodetables::is_property_binary(c, t),
-            UnicodePropertyValue::GeneralCategory(t) => {
-                unicodetables::is_property_value_general_category(c, t)
-            }
-            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
-        },
+pub(crate) fn is_character_class(c: u32, property_escape: &PropertyEscape) -> bool {
+    if let Some(c) = char::from_u32(c) {
+        match property_escape.name {
+            Some(UnicodePropertyName::GeneralCategory) => match &property_escape.value {
+                UnicodePropertyValue::GeneralCategory(t) => {
+                    unicodetables::is_property_value_general_category(c, t)
+                }
+                _ => false,
+            },
+            Some(UnicodePropertyName::Script) => match &property_escape.value {
+                UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
+                _ => false,
+            },
+            Some(UnicodePropertyName::ScriptExtensions) => match &property_escape.value {
+                UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
+                _ => false,
+            },
+            None => match &property_escape.value {
+                UnicodePropertyValue::Binary(t) => unicodetables::is_property_binary(c, t),
+                UnicodePropertyValue::GeneralCategory(t) => {
+                    unicodetables::is_property_value_general_category(c, t)
+                }
+                UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
+            },
+        }
+    } else {
+        false
     }
 }

@@ -12,7 +12,6 @@ pub trait ElementType:
     + Clone
     + std::cmp::Eq
     + std::cmp::Ord
-    + std::convert::Into<char>
     + std::convert::Into<u32>
     + std::convert::TryFrom<u32>
 {
@@ -28,8 +27,15 @@ pub trait ElementType:
     }
 
     #[inline(always)]
-    fn as_char(self) -> char {
+    fn as_u32(self) -> u32 {
         self.into()
+    }
+}
+
+impl ElementType for u32 {
+    #[inline(always)]
+    fn bytelength(self) -> usize {
+        4
     }
 }
 

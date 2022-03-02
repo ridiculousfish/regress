@@ -59,11 +59,11 @@ fn main() {
     general_category_values::generate_tests(&mut scope_tests);
 
     file_unicode_tables
-        .write_all(&scope.to_string().as_bytes())
+        .write_all(scope.to_string().as_bytes())
         .expect("Failed to write to unicode tables file");
 
     file_tests
-        .write_all(&scope_tests.to_string().as_bytes())
+        .write_all(scope_tests.to_string().as_bytes())
         .expect("Failed to write to tests file");
 
     std::process::Command::new("cargo")

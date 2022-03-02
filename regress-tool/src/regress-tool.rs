@@ -64,7 +64,7 @@ fn exec_re_on_string(re: &Regex, input: &str) {
     let mut matches = re.find_iter(input);
     if let Some(res) = matches.next() {
         let count = 1 + matches.count();
-        println!("Match: {}, total: {}", format_match(&res, &input), count);
+        println!("Match: {}, total: {}", format_match(&res, input), count);
     } else {
         println!("No match");
     }
@@ -116,7 +116,7 @@ fn main() -> Result<(), Error> {
             Err(err) => println!("{}: {}", err, path.display()),
         };
     } else if let Some(ref path) = args.bench {
-        bench_re_on_path(&re, &path);
+        bench_re_on_path(&re, path);
     } else {
         for input in args.inputs {
             exec_re_on_string(&re, &input);

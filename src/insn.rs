@@ -36,10 +36,10 @@ pub enum Insn {
     Goal,
 
     /// Match a single char.
-    Char(char),
+    Char(u32),
 
     /// Match a single char, case-insensitive.
-    CharICase(char),
+    CharICase(u32),
 
     /// Match the start of a line (if multiline); emitted by '^'
     StartOfLine,
@@ -102,7 +102,7 @@ pub enum Insn {
     AsciiBracket(AsciiBitmap),
 
     /// Perform a lookahead assertion.
-    LookaheadInsn {
+    Lookahead {
         negate: bool,
         start_group: CaptureGroupID,
         end_group: CaptureGroupID,
@@ -110,7 +110,7 @@ pub enum Insn {
     },
 
     /// Perform a lookbehind assertion.
-    LookbehindInsn {
+    Lookbehind {
         negate: bool,
         start_group: CaptureGroupID,
         end_group: CaptureGroupID,
@@ -124,7 +124,7 @@ pub enum Insn {
 
     /// Match any of the contained chars
     /// There is no length field; characters are simply duplicated as necessary.
-    CharSet([char; MAX_CHAR_SET_LENGTH]),
+    CharSet([u32; MAX_CHAR_SET_LENGTH]),
 
     /// Match the next byte against some possibilities.
     ByteSet2(ByteArraySet<[u8; 2]>),

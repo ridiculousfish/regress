@@ -44,14 +44,14 @@ impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Char
 
 /// Insn::CharSet
 pub struct CharSet<'a> {
-    pub chars: &'a [char; MAX_CHAR_SET_LENGTH],
+    pub chars: &'a [u32; MAX_CHAR_SET_LENGTH],
 }
 
 impl<'a, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for CharSet<'a> {
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
-            Some(c) => charset_contains(self.chars, c.as_char()),
+            Some(c) => charset_contains(self.chars, c.as_u32()),
             None => false,
         }
     }
