@@ -194,14 +194,14 @@ impl Emitter {
                 contents,
             } => {
                 let lookaround = if *backwards {
-                    self.emit_insn_offset(Insn::LookbehindInsn {
+                    self.emit_insn_offset(Insn::Lookbehind {
                         negate: *negate,
                         start_group: *start_group,
                         end_group: *end_group,
                         continuation: 0,
                     })
                 } else {
-                    self.emit_insn_offset(Insn::LookaheadInsn {
+                    self.emit_insn_offset(Insn::Lookahead {
                         negate: *negate,
                         start_group: *start_group,
                         end_group: *end_group,
@@ -215,11 +215,11 @@ impl Emitter {
                 // Fix up the continuation.
                 let next_insn = self.next_offset();
                 match self.get_insn(lookaround) {
-                    Insn::LookbehindInsn {
+                    Insn::Lookbehind {
                         ref mut continuation,
                         ..
                     } => *continuation = next_insn,
-                    Insn::LookaheadInsn {
+                    Insn::Lookahead {
                         ref mut continuation,
                         ..
                     } => *continuation = next_insn,

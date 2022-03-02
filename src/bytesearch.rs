@@ -153,7 +153,7 @@ impl SmallArraySet for [u8; 4] {
 // CharSet helper. Avoid branching in the loop to get good unrolling.
 #[allow(unused_parens)]
 #[inline(always)]
-pub fn charset_contains(set: &[char; MAX_CHAR_SET_LENGTH], c: char) -> bool {
+pub fn charset_contains(set: &[u32; MAX_CHAR_SET_LENGTH], c: u32) -> bool {
     let mut result = false;
     for &v in set.iter() {
         result |= (v == c);

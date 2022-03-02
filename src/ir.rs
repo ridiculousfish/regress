@@ -34,7 +34,7 @@ pub enum Node {
     Goal,
 
     /// Match a literal character.
-    Char { c: char, icase: bool },
+    Char { c: u32, icase: bool },
 
     /// Match a literal sequence of bytes.
     ByteSequence(Vec<u8>),
@@ -45,7 +45,7 @@ pub enum Node {
 
     /// Match any of a sequence of *chars*, case-insensitive.
     /// This may not exceed length MAX_CHAR_SET_LENGTH.
-    CharSet(Vec<char>),
+    CharSet(Vec<u32>),
 
     /// Match the catenation of multiple nodes.
     Cat(Vec<Node>),

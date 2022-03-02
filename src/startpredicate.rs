@@ -209,7 +209,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
             } else {
                 &bc.cps
             };
-            let bitmap = cps_to_first_byte_bitmap(&cps);
+            let bitmap = cps_to_first_byte_bitmap(cps);
             Some(AbstractStartPredicate::Set(bitmap))
         }
 

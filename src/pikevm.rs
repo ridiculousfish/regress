@@ -113,22 +113,18 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         Insn::Goal => StateMatch::Complete,
         Insn::JustFail => StateMatch::Fail,
         &Insn::Char(c) => match cursor::next(input, dir, &mut s.pos) {
-            Some(c2) => nextinsn_or_fail!(c == c2.as_char()),
+            Some(c2) => nextinsn_or_fail!(c == c2.as_u32()),
             _ => StateMatch::Fail,
         },
-        &Insn::CharICase(c) => {
-            let c = match Input::Element::try_from(c) {
-                Some(c) => c,
-                None => return StateMatch::Fail,
-            };
-            match cursor::next(input, dir, &mut s.pos) {
-                Some(c2) => nextinsn_or_fail!(c == c2 || Input::CharProps::fold(c2) == c),
-                _ => StateMatch::Fail,
+        &Insn::CharICase(c) => match cursor::next(input, dir, &mut s.pos) {
+            Some(c2) => {
+                nextinsn_or_fail!(c == c2.as_u32() || Input::CharProps::fold(c2).as_u32() == c)
             }
-        }
+            _ => StateMatch::Fail,
+        },
 
         Insn::CharSet(v) => match cursor::next(input, dir, &mut s.pos) {
-            Some(c) => nextinsn_or_fail!(charset_contains(v, c.as_char())),
+            Some(c) => nextinsn_or_fail!(charset_contains(v, c.as_u32())),
             _ => StateMatch::Fail,
         },
 
@@ -239,7 +235,7 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             nextinsn_or_fail!(matched)
         }
 
-        &Insn::LookaheadInsn {
+        &Insn::Lookahead {
             negate,
             start_group: _,
             end_group: _,
@@ -260,7 +256,7 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             }
         }
 
-        &Insn::LookbehindInsn {
+        &Insn::Lookbehind {
             negate,
             start_group: _,
             end_group: _,
@@ -283,7 +279,7 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         &Insn::LoopAgain { begin } => {
             s.ip = begin as usize;
             match re.insns.iat(s.ip) {
-                Insn::EnterLoop(ref lf) => run_loop(s, &lf, false),
+                Insn::EnterLoop(ref lf) => run_loop(s, lf, false),
                 _ => panic!("LoopAgain does not point at EnterLoop"),
             }
         }
