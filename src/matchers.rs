@@ -18,21 +18,18 @@ pub trait CharProperties {
     /// \return whether this is a word char.
     /// ES9 21.2.2.6.2.
     fn is_word_char(c: Self::Element) -> bool {
-        match char::from_u32(c.as_u32()) {
-            Some('a'..='z') => true,
-            Some('A'..='Z') => true,
-            Some('0'..='9') => true,
-            Some('_') => true,
-            _ => false,
-        }
+        let c = c.as_u32();
+        'a' as u32 <= c && c <= 'z' as u32
+            || 'A' as u32 <= c && c <= 'Z' as u32
+            || '0' as u32 <= c && c <= '9' as u32
+            || c == '_' as u32
     }
 
     /// ES9 11.3
     fn is_line_terminator(c: Self::Element) -> bool {
-        if let Some(c) = char::from_u32(c.as_u32()) {
-            c == '\u{000A}' || c == '\u{000D}' || c == '\u{2028}' || c == '\u{2029}'
-        } else {
-            false
+        match c.as_u32() {
+            0x000A | 0x000D | 0x2028 | 0x2029 => true,
+            _ => false,
         }
     }
 
