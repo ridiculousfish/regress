@@ -15,9 +15,6 @@ pub trait ByteSeq: ByteSearcher + std::fmt::Debug + Copy + Clone {
     /// Number of bytes.
     const LENGTH: usize;
 
-    /// Get the bytes as a slice.
-    fn as_slice(&self) -> &[u8];
-
     /// Test if a slice is equal.
     /// The slice must have exactly LENGTH bytes.
     fn equals_known_len(&self, rhs: &[u8]) -> bool;
@@ -27,53 +24,40 @@ extern "C" {
     fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32;
 }
 
-macro_rules! literal_bytes_impl {
-    ($($N:literal)+) => {
-        $(
-            impl ByteSeq for [u8; $N] {
-                const LENGTH: usize = $N;
+impl<const N: usize> ByteSeq for [u8; N] {
+    const LENGTH: usize = N;
 
-                #[inline(always)]
-                fn as_slice(&self) -> &[u8] {
-                    self
-                }
-
-                #[inline(always)]
-                fn equals_known_len(&self, rhs: &[u8]) -> bool {
-                    debug_assert!(rhs.len() == Self::LENGTH, "Slice has wrong length");
-                    if cfg!(feature = "prohibit-unsafe") {
-                        // Here's what we would like to do. However this will emit an unnecessary length compare, and an unnecessary pointer compare.
-                        self == rhs
-                    } else {
-                        // Warning: this is delicate. We intend for the compiler to emit optimized bytewise comparisons of unaligned LENGTH bytes,
-                        // where LENGTH is a compile-time constant. Rust's default == on slices will perform a pointer comparison which will always be false,
-                        // and kill any vectorization.
-                        // memcmp() will be optimized to the builtin.
-                        unsafe { memcmp(self.as_ptr(), rhs.as_ptr(), Self::LENGTH) == 0}
-                    }
-                }
-            }
-
-            impl ByteSearcher for [u8; $N] {
-                #[inline(always)]
-                fn find_in(&self, rhs: &[u8]) -> Option<usize> {
-                    if $N == 1 {
-                        return memchr::memchr(self[0], rhs)
-                    }
-                    for win in rhs.windows(Self::LENGTH) {
-                        if self.equals_known_len(win) {
-                            // Black magic?
-                            return Some((win.as_ptr() as usize) - (rhs.as_ptr() as usize));
-                        }
-                    }
-                    None
-                }
-            }
-        )+
+    #[inline(always)]
+    fn equals_known_len(&self, rhs: &[u8]) -> bool {
+        debug_assert!(rhs.len() == Self::LENGTH, "Slice has wrong length");
+        if cfg!(feature = "prohibit-unsafe") {
+            // Here's what we would like to do. However this will emit an unnecessary length compare, and an unnecessary pointer compare.
+            self == rhs
+        } else {
+            // Warning: this is delicate. We intend for the compiler to emit optimized bytewise comparisons of unaligned LENGTH bytes,
+            // where LENGTH is a compile-time constant. Rust's default == on slices will perform a pointer comparison which will always be false,
+            // and kill any vectorization.
+            // memcmp() will be optimized to the builtin.
+            unsafe { memcmp(self.as_ptr(), rhs.as_ptr(), Self::LENGTH) == 0 }
+        }
     }
 }
 
-literal_bytes_impl! {1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24}
+impl<const N: usize> ByteSearcher for [u8; N] {
+    #[inline(always)]
+    fn find_in(&self, rhs: &[u8]) -> Option<usize> {
+        if N == 1 {
+            return memchr::memchr(self[0], rhs);
+        }
+        for win in rhs.windows(Self::LENGTH) {
+            if self.equals_known_len(win) {
+                // Black magic?
+                return Some((win.as_ptr() as usize) - (rhs.as_ptr() as usize));
+            }
+        }
+        None
+    }
+}
 
 /// A ByteSet is any set of bytes.
 pub trait ByteSet {
