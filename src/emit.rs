@@ -127,7 +127,9 @@ impl Emitter {
                 if let Some(ascii_contents) = bracket_as_ascii(contents) {
                     self.emit_insn(Insn::AsciiBracket(ascii_contents))
                 } else {
-                    self.emit_insn(Insn::Bracket(contents.clone()))
+                    let idx = self.result.brackets.len();
+                    self.result.brackets.push(contents.clone());
+                    self.emit_insn(Insn::Bracket(idx))
                 }
             }
             Node::MatchAny => self.emit_insn(Insn::MatchAny),
@@ -288,6 +290,7 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
         next_loop_id: 0,
         result: CompiledRegex {
             insns: Vec::new(),
+            brackets: Vec::new(),
             loops: 0,
             groups: 0,
             named_group_indices: HashMap::new(),

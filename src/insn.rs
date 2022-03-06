@@ -93,9 +93,8 @@ pub enum Insn {
     /// Perform a backreference match.
     BackRef(u32),
 
-    /// Match the next character against a bracket.
-    /// TODO: this is a very heavyweight instruction, consider breaking it up.
-    Bracket(BracketContents),
+    /// Match the next character against the bracket contents, stored at the given index in the CompiledRegex.
+    Bracket(usize),
 
     /// A simple bitmap bracket for ASCII.
     /// It contains a bitmap of the range [0, 127].
@@ -183,6 +182,7 @@ pub enum StartPredicate {
 #[derive(Debug, Clone)]
 pub struct CompiledRegex {
     pub insns: Vec<Insn>,
+    pub brackets: Vec<BracketContents>,
     pub start_pred: StartPredicate,
     pub loops: u32,
     pub groups: u32,

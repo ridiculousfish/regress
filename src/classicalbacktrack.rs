@@ -231,7 +231,8 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 let c = Input::Element::try_from(c)?;
                 Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::CharICase { c })
             }
-            Insn::Bracket(bc) => {
+            &Insn::Bracket(idx) => {
+                let bc = &self.re.brackets[idx];
                 Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::Bracket { bc })
             }
             Insn::AsciiBracket(bitmap) => Self::run_scm_loop_impl(
@@ -631,8 +632,11 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         scm::MatchByteSet { bytes: bitmap }.matches(input, dir, &mut pos)
                     ),
 
-                    Insn::Bracket(bc) => {
-                        next_or_bt!(scm::Bracket { bc }.matches(input, dir, &mut pos))
+                    &Insn::Bracket(idx) => {
+                        next_or_bt!(scm::Bracket {
+                            bc: &self.re.brackets[idx]
+                        }
+                        .matches(input, dir, &mut pos))
                     }
 
                     Insn::MatchAny => {

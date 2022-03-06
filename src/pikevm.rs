@@ -284,8 +284,8 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             }
         }
         Insn::Loop1CharBody { .. } => panic!("Loop1CharBody unimplemented for pikevm"),
-        Insn::Bracket(bc) => match cursor::next(input, dir, &mut s.pos) {
-            Some(c) => nextinsn_or_fail!(Input::CharProps::bracket(bc, c)),
+        &Insn::Bracket(idx) => match cursor::next(input, dir, &mut s.pos) {
+            Some(c) => nextinsn_or_fail!(Input::CharProps::bracket(&re.brackets[idx], c)),
             _ => StateMatch::Fail,
         },
 
