@@ -12,7 +12,7 @@ use crate::matchers::CharProperties;
 use crate::position::PositionType;
 use crate::scm;
 use crate::scm::SingleCharMatcher;
-use crate::types::{CaptureGroupID, GroupData, LoopData, IP, MAX_CAPTURE_GROUPS};
+use crate::types::{CaptureGroupID, GroupData, LoopData, LoopID, IP, MAX_CAPTURE_GROUPS};
 use crate::util::DebugCheckIndex;
 use std::ops::Range;
 
@@ -26,7 +26,7 @@ enum BacktrackInsn<Input: InputIndexer> {
     SetPosition { ip: IP, pos: Input::Position },
 
     SetLoopData {
-        id: u32,
+        id: LoopID,
         data: LoopData<Input::Position>,
     },
 

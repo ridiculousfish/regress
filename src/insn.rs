@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use crate::api;
 use crate::bytesearch::{AsciiBitmap, ByteArraySet, ByteBitmap};
-use crate::types::{BracketContents, CaptureGroupID};
+use crate::types::{BracketContents, CaptureGroupID, LoopID};
 use crate::unicode::PropertyEscape;
 
 type JumpTarget = u32;
@@ -22,7 +22,7 @@ pub const MAX_CHAR_SET_LENGTH: usize = 4;
 
 #[derive(Debug, Clone)]
 pub struct LoopFields {
-    pub loop_id: u32,
+    pub loop_id: LoopID,
     pub min_iters: usize,
     pub max_iters: usize,
     pub greedy: bool,

@@ -14,6 +14,7 @@ pub const MAX_CAPTURE_GROUPS: usize = 65535;
 
 /// The maximum number of loops supported.
 pub const MAX_LOOPS: usize = 65535;
+pub type LoopID = u16;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CharacterClassType {

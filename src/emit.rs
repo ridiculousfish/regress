@@ -5,7 +5,7 @@ use crate::insn::{CompiledRegex, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR
 use crate::ir;
 use crate::ir::Node;
 use crate::startpredicate;
-use crate::types::{BracketContents, CaptureGroupID};
+use crate::types::{BracketContents, CaptureGroupID, LoopID};
 use crate::unicode;
 use std::collections::HashMap;
 use std::convert::TryInto;
@@ -44,7 +44,7 @@ struct Emitter {
     result: CompiledRegex,
 
     // Number of loops seen so far.
-    next_loop_id: u32,
+    next_loop_id: LoopID,
 }
 
 impl Emitter {
