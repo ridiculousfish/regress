@@ -7,7 +7,7 @@ pub struct Forward;
 #[derive(Debug, Copy, Clone)]
 pub struct Backward;
 
-pub trait Direction: std::fmt::Debug + Copy + Clone {
+pub trait Direction: core::fmt::Debug + Copy + Clone {
     const FORWARD: bool;
     fn new() -> Self;
 }

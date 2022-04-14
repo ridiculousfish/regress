@@ -4,8 +4,10 @@ use crate::insn::StartPredicate;
 use crate::ir;
 use crate::ir::Node;
 use crate::util::utf8_first_byte;
-use std::cmp;
-use std::convert::TryInto;
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, vec::Vec};
+use core::cmp;
+use core::convert::TryInto;
 
 /// Support for quickly finding potential match locations.
 

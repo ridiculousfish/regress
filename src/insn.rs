@@ -1,6 +1,12 @@
 //! Bytecode instructions for a compiled regex
 
+#[cfg(feature = "std")]
 use std::collections::HashMap;
+#[cfg(not(feature = "std"))]
+use {
+    alloc::{string::String, vec::Vec},
+    hashbrown::HashMap,
+};
 
 use crate::api;
 use crate::bytesearch::{AsciiBitmap, ByteArraySet, ByteBitmap};

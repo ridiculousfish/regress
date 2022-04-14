@@ -16,7 +16,9 @@ default-members = ["regress-tool", "."]
 [profile.release]
 
 [features]
-default = ["backend-pikevm"]
+default = ["backend-pikevm", "std"]
+
+std = ["memchr/std"]
 
 # Enables the PikeVM backend.
 backend-pikevm = []
@@ -28,4 +30,5 @@ index-positions = []
 prohibit-unsafe = []
 
 [dependencies]
-memchr = "2.4.0"
+hashbrown = "0.12.0"
+memchr = { version = "2.4.0", default-features = false }

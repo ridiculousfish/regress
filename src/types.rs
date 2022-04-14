@@ -1,6 +1,8 @@
 use crate::codepointset::CodePointSet;
 use crate::position::PositionType;
-use std::ops;
+#[cfg(not(feature = "std"))]
+use alloc::string::String;
+use core::ops;
 
 /// A group index is u16.
 /// CaptureGroupID 0 corresponds to the first capture group.

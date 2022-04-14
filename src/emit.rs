@@ -7,8 +7,11 @@ use crate::ir::Node;
 use crate::startpredicate;
 use crate::types::{BracketContents, CaptureGroupID, LoopID};
 use crate::unicode;
+use core::convert::TryInto;
+#[cfg(feature = "std")]
 use std::collections::HashMap;
-use std::convert::TryInto;
+#[cfg(not(feature = "std"))]
+use {alloc::vec::Vec, hashbrown::HashMap};
 
 /// \return an anchor instruction for a given IR anchor.
 fn make_anchor(anchor_type: ir::AnchorType) -> Insn {
@@ -94,7 +97,7 @@ impl Emitter {
                 if !*icase {
                     self.emit_insn(Insn::Char(c))
                 } else {
-                    std::debug_assert!(unicode::fold(c) == c, "Char should be folded");
+                    core::debug_assert!(unicode::fold(c) == c, "Char should be folded");
                     self.emit_insn(Insn::CharICase(c))
                 }
             }

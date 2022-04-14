@@ -14,8 +14,14 @@ use crate::scm;
 use crate::scm::SingleCharMatcher;
 use crate::types::{GroupData, LoopData};
 use crate::util::DebugCheckIndex;
+use core::ops::Range;
+#[cfg(feature = "std")]
 use std::collections::HashMap;
-use std::ops::Range;
+#[cfg(not(feature = "std"))]
+use {
+    alloc::{string::String, vec::Vec},
+    hashbrown::HashMap,
+};
 
 #[derive(Debug, Clone)]
 struct State<Position: PositionType> {
@@ -188,10 +194,10 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         &Insn::BeginCaptureGroup(group_idx) => {
             let group = &mut s.groups[group_idx as usize];
             if Dir::FORWARD {
-                std::debug_assert!(!group.start_matched(), "Group should not have been entered");
+                core::debug_assert!(!group.start_matched(), "Group should not have been entered");
                 group.start = Some(s.pos);
             } else {
-                std::debug_assert!(!group.end_matched(), "Group should not have been entered");
+                core::debug_assert!(!group.end_matched(), "Group should not have been entered");
                 group.end = Some(s.pos);
             }
             nextinsn_or_fail!(true)
@@ -200,13 +206,13 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         &Insn::EndCaptureGroup(group_idx) => {
             let group = &mut s.groups[group_idx as usize];
             if Dir::FORWARD {
-                std::debug_assert!(group.start_matched(), "Group should have been entered");
+                core::debug_assert!(group.start_matched(), "Group should have been entered");
                 group.end = Some(s.pos);
             } else {
-                std::debug_assert!(group.end_matched(), "Group should have been exited");
+                core::debug_assert!(group.end_matched(), "Group should have been exited");
                 group.start = Some(s.pos);
             }
-            std::debug_assert!(
+            core::debug_assert!(
                 group.end >= group.start,
                 "Exit pos should be after start pos"
             );
@@ -380,7 +386,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 StateMatch::Continue => {}
                 StateMatch::Complete => {
                     // Give the successful state to the caller.
-                    std::mem::swap(init_state, s);
+                    core::mem::swap(init_state, s);
                     self.states.clear();
                     return true;
                 }

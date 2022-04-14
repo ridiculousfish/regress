@@ -11,7 +11,18 @@ use crate::{
     unicode::{self, unicode_property_value_from_str, PropertyEscape},
     unicodetables::{is_id_continue, is_id_start},
 };
-use std::{collections::HashMap, error::Error as StdError, fmt, iter::Peekable};
+use core::{fmt, iter::Peekable};
+#[cfg(feature = "std")]
+use std::collections::HashMap;
+#[cfg(not(feature = "std"))]
+use {
+    alloc::{
+        boxed::Box,
+        string::{String, ToString},
+        vec::Vec,
+    },
+    hashbrown::HashMap,
+};
 
 /// Represents an error encountered during regex compilation.
 ///
@@ -27,7 +38,8 @@ impl fmt::Display for Error {
     }
 }
 
-impl StdError for Error {}
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 enum ClassAtom {
     CodePoint(u32),
@@ -51,7 +63,7 @@ where
 // Convert a u32 to a char, except if the conversion fails, return the largest char.
 // Be careful to not use the result of this conversion except to pattern match against literals.
 fn to_char_sat(c: u32) -> char {
-    char::from_u32(c).unwrap_or(std::char::MAX)
+    char::from_u32(c).unwrap_or(core::char::MAX)
 }
 
 fn make_cat(nodes: ir::NodeList) -> ir::Node {
@@ -160,7 +172,7 @@ where
     /// Consume a character, returning it.
     fn consume<C: Into<u32>>(&mut self, c: C) -> u32 {
         let nc = self.input.next();
-        std::debug_assert!(nc == Some(c.into()), "char was not next");
+        core::debug_assert!(nc == Some(c.into()), "char was not next");
         nc.unwrap()
     }
 
@@ -537,7 +549,7 @@ where
                 self.consume('+');
                 Ok(Some(ir::Quantifier {
                     min: 1,
-                    max: std::usize::MAX,
+                    max: core::usize::MAX,
                     greedy: true,
                 }))
             }
@@ -545,7 +557,7 @@ where
                 self.consume('*');
                 Ok(Some(ir::Quantifier {
                     min: 0,
-                    max: std::usize::MAX,
+                    max: core::usize::MAX,
                     greedy: true,
                 }))
             }
@@ -767,7 +779,7 @@ where
                         return error(format!("Backreference \\{} too large", val));
                     }
                     let group = val as u32;
-                    self.max_backref = std::cmp::max(self.max_backref, group);
+                    self.max_backref = core::cmp::max(self.max_backref, group);
                     Ok(ir::Node::BackRef(group))
                 } else {
                     error("Invalid character escape")
@@ -1069,7 +1081,7 @@ where
 /// Return the resulting IR regex, or an error.
 pub fn try_parse(pattern: &str, flags: api::Flags) -> Result<ir::Regex, Error> {
     // for q in 0..=0x10FFFF {
-    //     if let Some(c) = std::char::from_u32(q) {
+    //     if let Some(c) = core::char::from_u32(q) {
     //         let cc = folds::fold(c);
     //         if (c as u32) > 127 && (cc as u32) < 127 {
     //             println!("Bad CP: {}", q);

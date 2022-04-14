@@ -1,6 +1,8 @@
 use crate::util::SliceHelp;
-use std::cmp::Ordering;
-use std::iter::once;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+use core::cmp::Ordering;
+use core::iter::once;
 
 pub type CodePoint = u32;
 
@@ -59,7 +61,7 @@ impl Interval {
     }
 
     /// Return the interval of codepoints.
-    pub fn codepoints(self) -> std::ops::Range<u32> {
+    pub fn codepoints(self) -> core::ops::Range<u32> {
         debug_assert!(self.last + 1 > self.last, "Overflow");
         self.first..(self.last + 1)
     }
@@ -74,8 +76,8 @@ impl Interval {
 fn merge_intervals(x: Interval, y: &Interval) -> Interval {
     debug_assert!(x.mergeable(*y), "Ranges not mergeable");
     Interval {
-        first: std::cmp::min(x.first, y.first),
-        last: std::cmp::max(x.last, y.last),
+        first: core::cmp::min(x.first, y.first),
+        last: core::cmp::max(x.last, y.last),
     }
 }
 
@@ -150,7 +152,7 @@ impl CodePointSet {
     pub fn add_set(&mut self, mut rhs: CodePointSet) {
         // Prefer to add to the set with more intervals.
         if self.ivs.len() < rhs.ivs.len() {
-            std::mem::swap(self, &mut rhs);
+            core::mem::swap(self, &mut rhs);
         }
         for iv in rhs.intervals() {
             self.add(*iv)

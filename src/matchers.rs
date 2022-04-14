@@ -66,7 +66,7 @@ impl CharProperties for ASCIICharProperties {
 pub fn backref<Input: InputIndexer, Dir: Direction>(
     input: &Input,
     dir: Dir,
-    orig_range: std::ops::Range<Input::Position>,
+    orig_range: core::ops::Range<Input::Position>,
     pos: &mut Input::Position,
 ) -> bool {
     cursor::subrange_eq(input, dir, pos, orig_range.start, orig_range.end)
@@ -75,7 +75,7 @@ pub fn backref<Input: InputIndexer, Dir: Direction>(
 pub fn backref_icase<Input: InputIndexer, Dir: Direction>(
     input: &Input,
     dir: Dir,
-    orig_range: std::ops::Range<Input::Position>,
+    orig_range: core::ops::Range<Input::Position>,
     pos: &mut Input::Position,
 ) -> bool {
     let ref_input = input.subinput(orig_range);

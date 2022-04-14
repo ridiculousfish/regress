@@ -9,9 +9,14 @@ use crate::parse;
 #[cfg(feature = "backend-pikevm")]
 use crate::pikevm;
 
-use std::collections::hash_map::Iter;
-use std::collections::HashMap;
-use std::{fmt, str::FromStr};
+use core::{fmt, str::FromStr};
+#[cfg(feature = "std")]
+use std::collections::{hash_map::Iter, HashMap};
+#[cfg(not(feature = "std"))]
+use {
+    alloc::{string::String, vec::Vec},
+    hashbrown::{hash_map::Iter, HashMap},
+};
 
 pub use parse::Error;
 
@@ -78,7 +83,7 @@ impl fmt::Display for Flags {
 
 /// Range is used to express the extent of a match, as indexes into the input
 /// string.
-pub type Range = std::ops::Range<usize>;
+pub type Range = core::ops::Range<usize>;
 
 /// An iterator type which yields `Match`es found in a string.
 pub type Matches<'r, 't> = exec::Matches<backends::DefaultExecutor<'r, 't>>;

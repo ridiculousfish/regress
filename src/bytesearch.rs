@@ -1,6 +1,8 @@
 use crate::insn::MAX_CHAR_SET_LENGTH;
-use std::fmt;
+use core::fmt;
 extern crate memchr;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 /// Facilities for searching bytes.
 pub trait ByteSearcher {
@@ -11,7 +13,7 @@ pub trait ByteSearcher {
 }
 
 /// Helper trait that describes matching against literal bytes.
-pub trait ByteSeq: ByteSearcher + std::fmt::Debug + Copy + Clone {
+pub trait ByteSeq: ByteSearcher + core::fmt::Debug + Copy + Clone {
     /// Number of bytes.
     const LENGTH: usize;
 

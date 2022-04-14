@@ -1,7 +1,9 @@
 use crate::codepointset::CODE_POINT_MAX;
-use std::cmp::Ordering;
-use std::ops::{Index, IndexMut};
-use std::slice::SliceIndex;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+use core::cmp::Ordering;
+use core::ops::{Index, IndexMut};
+use core::slice::SliceIndex;
 
 // A macro which expresses either checked or unchecked reachability, depending on prohibit-unsafe.
 macro_rules! rs_unreachable {
@@ -9,14 +11,14 @@ macro_rules! rs_unreachable {
         if cfg!(feature = "prohibit-unsafe") {
             unreachable!();
         } else {
-            unsafe { std::hint::unreachable_unchecked() }
+            unsafe { core::hint::unreachable_unchecked() }
         }
     }};
     ($msg:expr) => {
         if cfg!(feature = "prohibit-unsafe") {
             unreachable!($msg);
         } else {
-            unsafe { std::hint::unreachable_unchecked() }
+            unsafe { core::hint::unreachable_unchecked() }
         }
     };
 }
@@ -101,14 +103,14 @@ pub trait SliceHelp {
 
     /// Given that self is sorted according to f, returns the range of indexes
     /// where f indicates equal elements.
-    fn equal_range_by<'a, F>(&'a self, f: F) -> std::ops::Range<usize>
+    fn equal_range_by<'a, F>(&'a self, f: F) -> core::ops::Range<usize>
     where
         F: FnMut(&'a Self::Item) -> Ordering;
 }
 
 impl<T> SliceHelp for [T] {
     type Item = T;
-    fn equal_range_by<'a, F>(&'a self, mut f: F) -> std::ops::Range<usize>
+    fn equal_range_by<'a, F>(&'a self, mut f: F) -> core::ops::Range<usize>
     where
         F: FnMut(&'a Self::Item) -> Ordering,
     {
@@ -216,7 +218,7 @@ mod tests {
         ] {
             use super::{utf8_w2, utf8_w3, utf8_w4};
             let mut buff = [0; 4];
-            let s = std::char::from_u32(cp).unwrap().encode_utf8(&mut buff);
+            let s = core::char::from_u32(cp).unwrap().encode_utf8(&mut buff);
             let bytes = s.as_bytes();
             assert_eq!(bytes[0], super::utf8_first_byte(cp));
 

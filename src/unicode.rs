@@ -1,7 +1,9 @@
 use crate::codepointset::{CodePointSet, Interval};
 use crate::unicodetables::{self, FOLDS};
 use crate::util::SliceHelp;
-use std::cmp::Ordering;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 
 // CodePointRange packs a code point and a length together into a u32.
 // We currently do not need to store any information about code points in plane 16 (U+100000),
@@ -129,7 +131,7 @@ impl FoldRange {
 
     fn add_delta(&self, cu: u32) -> u32 {
         let cs = (cu as i32) + self.delta();
-        std::debug_assert!(0 <= cs && cs <= 0x10FFFF);
+        core::debug_assert!(0 <= cs && cs <= 0x10FFFF);
         cs as u32
     }
 
@@ -205,8 +207,8 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
         // Find the (inclusive) range of our interval that this transform covers.
         // TODO: could walk by modulo amount.
         // TODO: optimize for cases when modulo is 1.
-        let first_trans = std::cmp::max(fr.first(), iv.first);
-        let last_trans = std::cmp::min(fr.last(), iv.last);
+        let first_trans = core::cmp::max(fr.first(), iv.first);
+        let last_trans = core::cmp::min(fr.last(), iv.last);
         for cu in first_trans..(last_trans + 1) {
             let cs = fr.apply(cu);
             if cs != cu {

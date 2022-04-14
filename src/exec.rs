@@ -7,7 +7,7 @@ use crate::position::PositionType;
 /// A trait for finding the next match in a regex.
 /// This is broken out from Executor to avoid needing to thread lifetimes
 /// around.
-pub trait MatchProducer: std::fmt::Debug {
+pub trait MatchProducer: core::fmt::Debug {
     /// The position type of our indexer.
     type Position: PositionType;
 

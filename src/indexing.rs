@@ -2,18 +2,18 @@ use crate::bytesearch;
 use crate::matchers;
 use crate::position::{DefPosition, PositionType};
 use crate::util::{is_utf8_continuation, utf8_w2, utf8_w3, utf8_w4};
-use std::convert::TryInto;
-use std::{ops, str};
+use core::convert::TryInto;
+use core::{ops, str};
 
 // A type which may be an Element.
 pub trait ElementType:
-    std::fmt::Debug
+    core::fmt::Debug
     + Copy
     + Clone
-    + std::cmp::Eq
-    + std::cmp::Ord
-    + std::convert::Into<u32>
-    + std::convert::TryFrom<u32>
+    + core::cmp::Eq
+    + core::cmp::Ord
+    + core::convert::Into<u32>
+    + core::convert::TryFrom<u32>
 {
     /// Return the length of ourself in bytes.
     fn bytelength(self) -> usize;
@@ -54,7 +54,7 @@ impl ElementType for u8 {
 }
 
 // A helper type that holds a string and allows indexing into it.
-pub trait InputIndexer: std::fmt::Debug + Copy + Clone
+pub trait InputIndexer: core::fmt::Debug + Copy + Clone
 where
     Self::CharProps: matchers::CharProperties<Element = Self::Element>,
 {
@@ -196,13 +196,13 @@ impl<'a> Utf8Input<'a> {
         self.debug_assert_boundary(range.start);
         self.debug_assert_boundary(range.end);
         if cfg!(feature = "prohibit-unsafe") {
-            &self.input[std::ops::Range {
+            &self.input[core::ops::Range {
                 start: self.pos_to_offset(range.start),
                 end: self.pos_to_offset(range.end),
             }]
         } else {
             unsafe {
-                self.input.get_unchecked(std::ops::Range {
+                self.input.get_unchecked(core::ops::Range {
                     start: self.pos_to_offset(range.start),
                     end: self.pos_to_offset(range.end),
                 })
@@ -241,13 +241,13 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         debug_assert!(end >= start, "Slice start after end");
 
         #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
-        let res = &self.contents()[std::ops::Range {
+        let res = &self.contents()[core::ops::Range {
             start: self.pos_to_offset(start),
             end: self.pos_to_offset(end),
         }];
 
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
-        let res = unsafe { std::slice::from_raw_parts(start.ptr(), end - start) };
+        let res = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
 
         debug_assert!(res.len() <= self.bytelength() && res.len() == end - start);
         res
@@ -285,7 +285,7 @@ impl<'a> InputIndexer for Utf8Input<'a> {
             _ => rs_unreachable!("Invalid utf8 sequence length"),
         };
         *pos += len;
-        if let Some(c) = std::char::from_u32(codepoint) {
+        if let Some(c) = core::char::from_u32(codepoint) {
             Some(c)
         } else {
             rs_unreachable!("Should have decoded a valid char from utf8 sequence");
@@ -342,7 +342,7 @@ impl<'a> InputIndexer for Utf8Input<'a> {
             }
         }
         self.debug_assert_boundary(*pos);
-        if let Some(c) = std::char::from_u32(codepoint) {
+        if let Some(c) = core::char::from_u32(codepoint) {
             Some(c)
         } else {
             rs_unreachable!("Should have decoded a valid char from utf8 sequence");
@@ -511,13 +511,13 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         self.debug_assert_valid_pos(end);
 
         #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
-        let res = &self.contents()[std::ops::Range {
+        let res = &self.contents()[core::ops::Range {
             start: self.pos_to_offset(start),
             end: self.pos_to_offset(end),
         }];
 
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
-        let res = unsafe { std::slice::from_raw_parts(start.ptr(), end - start) };
+        let res = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
 
         debug_assert!(res.len() <= self.bytelength() && res.len() == end - start);
         res
@@ -529,7 +529,7 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         self.debug_assert_valid_pos(range.end);
         debug_assert!(range.end >= range.start);
         AsciiInput {
-            input: &self.input[std::ops::Range {
+            input: &self.input[core::ops::Range {
                 start: self.pos_to_offset(range.start),
                 end: self.pos_to_offset(range.end),
             }],

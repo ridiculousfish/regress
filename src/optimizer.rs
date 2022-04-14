@@ -4,6 +4,8 @@ use crate::insn::{MAX_BYTE_SET_LENGTH, MAX_CHAR_SET_LENGTH};
 use crate::ir::*;
 use crate::types::BracketContents;
 use crate::unicode;
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, vec::Vec};
 
 /// When unrolling a loop, the largest minimum count we will unroll.
 const LOOP_UNROLL_THRESHOLD: usize = 5;
@@ -187,7 +189,7 @@ fn decat(n: &mut Node, _w: &Walk) -> PassAction {
                 // we can return.
                 // Avoid copying nodes by switching them into owned vec.
                 let mut catted = Vec::new();
-                std::mem::swap(nodes, &mut catted);
+                core::mem::swap(nodes, &mut catted);
 
                 // Decat them.
                 let mut decatted = Vec::new();
@@ -269,7 +271,7 @@ fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
             if quant.max > 0 {
                 // Move the loop to the end of unrolled.
                 let mut loop_node = Node::Empty;
-                std::mem::swap(&mut loop_node, n);
+                core::mem::swap(&mut loop_node, n);
                 unrolled.push(loop_node);
             }
             *n = Node::Cat(unrolled);
@@ -300,7 +302,7 @@ fn promote_1char_loops(n: &mut Node, _w: &Walk) -> PassAction {
 
             // This feels hackish?
             let mut new_loopee = Box::new(Node::Empty);
-            std::mem::swap(&mut new_loopee, loopee);
+            core::mem::swap(&mut new_loopee, loopee);
 
             *n = Node::Loop1CharBody {
                 loopee: new_loopee,
@@ -358,7 +360,7 @@ fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
                             curr_bytes.append(prev_bytes);
                         } else {
                             prev_bytes.append(curr_bytes);
-                            std::mem::swap(prev_bytes, curr_bytes);
+                            core::mem::swap(prev_bytes, curr_bytes);
                         }
                         modified = true;
                     }

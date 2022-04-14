@@ -109,10 +109,15 @@ regress has a parser, intermediate representation, optimizer which acts on the I
 The major interpreter is the "classical backtracking" which uses an explicit backtracking stack, similar to JS implementations. There is also the "PikeVM" pseudo-toy backend which is mainly used for testing and verification.
 */
 
+#![cfg_attr(not(feature = "std"), no_std)]
 #![warn(clippy::all)]
 #![allow(clippy::upper_case_acronyms, clippy::match_like_matches_macro)]
 // Clippy's manual_range_contains suggestion produces worse codegen.
 #![allow(clippy::manual_range_contains)]
+
+#[cfg(not(feature = "std"))]
+#[macro_use]
+extern crate alloc;
 
 pub use crate::api::*;
 

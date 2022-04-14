@@ -1,11 +1,11 @@
-use std::cmp::Eq;
-use std::marker::PhantomData;
-use std::ops;
+use core::cmp::Eq;
+use core::marker::PhantomData;
+use core::ops;
 
 /// A trait which references a position in an input string.
 /// The intent is that this may be satisfied via indexes or pointers.
 /// Positions must be subtractable, producing usize; they also obey other "pointer arithmetic" ideas.
-pub trait PositionType: std::fmt::Debug + Copy + Clone + PartialEq + Eq + PartialOrd + Ord
+pub trait PositionType: core::fmt::Debug + Copy + Clone + PartialEq + Eq + PartialOrd + Ord
 where
     Self: ops::Add<usize, Output = Self>,
     Self: ops::Sub<usize, Output = Self>,
@@ -89,7 +89,7 @@ impl PositionType for IndexPosition<'_> {}
 /// This must use raw pointers because it must be capable of representing the one-past-the-end value.
 /// TODO: thread lifetimes through this.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct RefPosition<'a>(std::ptr::NonNull<u8>, PhantomData<&'a ()>);
+pub struct RefPosition<'a>(core::ptr::NonNull<u8>, PhantomData<&'a ()>);
 
 #[allow(dead_code)]
 impl RefPosition<'_> {
@@ -97,7 +97,7 @@ impl RefPosition<'_> {
     /// Good candidate for const-panics when stabilized.
     #[inline(always)]
     pub fn check_size() {
-        if std::mem::size_of::<Option<Self>>() > std::mem::size_of::<*const u8>() {
+        if core::mem::size_of::<Option<Self>>() > core::mem::size_of::<*const u8>() {
             panic!("Option<RefPosition> should be pointer sized")
         }
     }
@@ -115,9 +115,9 @@ impl RefPosition<'_> {
         // Annoyingly there's no *const NonNull.
         let mutp = ptr as *mut u8;
         let nonnullp = if cfg!(feature = "prohibit-unsafe") {
-            std::ptr::NonNull::new(mutp).expect("Pointer was null")
+            core::ptr::NonNull::new(mutp).expect("Pointer was null")
         } else {
-            unsafe { std::ptr::NonNull::new_unchecked(mutp) }
+            unsafe { core::ptr::NonNull::new_unchecked(mutp) }
         };
         Self(nonnullp, PhantomData)
     }

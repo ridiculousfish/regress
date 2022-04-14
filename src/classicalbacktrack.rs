@@ -14,7 +14,9 @@ use crate::scm;
 use crate::scm::SingleCharMatcher;
 use crate::types::{CaptureGroupID, GroupData, LoopData, LoopID, IP, MAX_CAPTURE_GROUPS};
 use crate::util::DebugCheckIndex;
-use std::ops::Range;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+use core::ops::Range;
 
 #[derive(Clone, Debug)]
 enum BacktrackInsn<Input: InputIndexer> {
@@ -366,13 +368,13 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         // Start with an "empty" backtrack stack.
         // TODO: consider using a stack-allocated array.
         let mut saved_bts = vec![BacktrackInsn::Exhausted];
-        std::mem::swap(&mut self.bts, &mut saved_bts);
+        core::mem::swap(&mut self.bts, &mut saved_bts);
 
         // Enter into the lookaround's instruction stream.
         let matched = self.try_at_pos(*input, ip, pos, Dir::new()).is_some();
 
         // Put back our bts.
-        std::mem::swap(&mut self.bts, &mut saved_bts);
+        core::mem::swap(&mut self.bts, &mut saved_bts);
 
         // If we are a positive lookahead that successfully matched, retain the
         // capture groups (but we need to set up backtracking). Otherwise restore

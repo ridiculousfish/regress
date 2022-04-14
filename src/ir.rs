@@ -3,7 +3,9 @@
 use crate::api;
 use crate::types::{BracketContents, CaptureGroupID, CaptureGroupName};
 use crate::unicode::PropertyEscape;
-use std::fmt;
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, string::ToString, vec::Vec};
+use core::fmt;
 
 #[derive(Debug, Copy, Clone)]
 pub enum AnchorType {
@@ -90,7 +92,7 @@ pub enum Node {
     Loop {
         loopee: Box<Node>,
         quant: Quantifier,
-        enclosed_groups: std::ops::Range<u16>,
+        enclosed_groups: core::ops::Range<u16>,
     },
 
     /// A loop whose body matches exactly one character.
