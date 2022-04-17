@@ -5,7 +5,8 @@ use core::ops;
 /// A trait which references a position in an input string.
 /// The intent is that this may be satisfied via indexes or pointers.
 /// Positions must be subtractable, producing usize; they also obey other "pointer arithmetic" ideas.
-pub trait PositionType: core::fmt::Debug + Copy + Clone + PartialEq + Eq + PartialOrd + Ord
+pub trait PositionType:
+    core::fmt::Debug + Copy + Clone + PartialEq + Eq + PartialOrd + Ord
 where
     Self: ops::Add<usize, Output = Self>,
     Self: ops::Sub<usize, Output = Self>,
