@@ -10,6 +10,7 @@ use crate::{
     },
     unicode::{self, unicode_property_value_from_str, PropertyEscape},
     unicodetables::{is_id_continue, is_id_start},
+    util::to_char_sat,
 };
 use core::{fmt, iter::Peekable};
 #[cfg(feature = "std")]
@@ -56,14 +57,6 @@ where
     Err(Error {
         text: text.to_string(),
     })
-}
-
-// Helper function for matching u32s against chars.
-// It would be pleasant if you could pattern-match u32s against chars, but Rust does not allow this.
-// Convert a u32 to a char, except if the conversion fails, return the largest char.
-// Be careful to not use the result of this conversion except to pattern match against literals.
-fn to_char_sat(c: u32) -> char {
-    char::from_u32(c).unwrap_or(core::char::MAX)
 }
 
 fn make_cat(nodes: ir::NodeList) -> ir::Node {
@@ -1079,7 +1072,10 @@ where
 
 /// Try parsing a given pattern.
 /// Return the resulting IR regex, or an error.
-pub fn try_parse(pattern: &str, flags: api::Flags) -> Result<ir::Regex, Error> {
+pub fn try_parse<I>(pattern: I, flags: api::Flags) -> Result<ir::Regex, Error>
+where
+    I: Iterator<Item = u32> + Clone,
+{
     // for q in 0..=0x10FFFF {
     //     if let Some(c) = core::char::from_u32(q) {
     //         let cc = folds::fold(c);
@@ -1090,7 +1086,7 @@ pub fn try_parse(pattern: &str, flags: api::Flags) -> Result<ir::Regex, Error> {
     // }
 
     let mut p = Parser {
-        input: pattern.chars().map(u32::from).peekable(),
+        input: pattern.peekable(),
         flags,
         loop_count: 0,
         group_count: 0,

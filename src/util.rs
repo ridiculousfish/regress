@@ -79,6 +79,14 @@ where
     }
 }
 
+// Helper function for matching u32s against chars.
+// It would be pleasant if you could pattern-match u32s against chars, but Rust does not allow this.
+// Convert a u32 to a char, except if the conversion fails, return the largest char.
+// Be careful to not use the result of this conversion except to pattern match against literals.
+pub fn to_char_sat(c: u32) -> char {
+    char::from_u32(c).unwrap_or(core::char::MAX)
+}
+
 /// \return the first byte of a UTF-8 encoded code point.
 /// We do not use char because we don't want to deal with failing on surrogates.
 pub fn utf8_first_byte(cp: u32) -> u8 {

@@ -93,7 +93,7 @@ fn main() -> Result<(), Error> {
     let args = Opt::from_args();
 
     let flags = args.flags.unwrap_or_default();
-    let mut ire = backends::try_parse(&args.pattern, flags)?;
+    let mut ire = backends::try_parse(args.pattern.chars().map(u32::from), flags)?;
     if args.dump_phases || args.dump_unoptimized_ir {
         println!("Unoptimized IR:\n{}", ire);
     }
