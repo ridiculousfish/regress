@@ -8,6 +8,7 @@ use crate::parse;
 
 #[cfg(feature = "backend-pikevm")]
 use crate::pikevm;
+use crate::util::to_char_sat;
 
 use core::{fmt, str::FromStr};
 #[cfg(feature = "std")]
@@ -40,17 +41,17 @@ pub struct Flags {
     pub no_opt: bool,
 }
 
-impl From<&str> for Flags {
-    /// Construct a Flags from a string, using JavaScript field names.
+impl Flags {
+    /// Construct a Flags from a Unicode codepoints iterator, using JavaScript field names.
     /// 'i' means to ignore case, 'm' means multiline.
     /// Note the 'g' flag implies a stateful regex and is not supported.
     /// Note the 'u' flag currently only controls if invalid backreferences should throw a syntax error.
     /// Other flags are not implemented and are ignored.
     #[inline]
-    fn from(s: &str) -> Self {
+    pub fn new<T: Iterator<Item = u32>>(chars: T) -> Self {
         let mut result = Self::default();
-        for c in s.chars() {
-            match c {
+        for c in chars {
+            match to_char_sat(c) {
                 'm' => {
                     result.multiline = true;
                 }
@@ -66,6 +67,16 @@ impl From<&str> for Flags {
             }
         }
         result
+    }
+}
+
+impl From<&str> for Flags {
+    /// Construct a Flags from a string, using JavaScript field names.
+    ///
+    /// See also: [`Flags::new`].
+    #[inline]
+    fn from(s: &str) -> Self {
+        Self::new(s.chars().map(u32::from))
     }
 }
 
@@ -275,6 +286,19 @@ impl Regex {
     #[inline]
     pub fn with_flags<F>(pattern: &str, flags: F) -> Result<Regex, Error>
     where
+        F: Into<Flags>,
+    {
+        Self::from_unicode(pattern.chars().map(u32::from), flags)
+    }
+
+    /// Construct a regex by parsing `pattern` with `flags`, where
+    /// `pattern` is an iterator of `u32` Unicode codepoints.
+    /// An Error may be returned if the syntax is invalid.
+    /// This allows parsing regular expressions from exotic strings in
+    /// other encodings, such as UTF-16 or UTF-32.
+    pub fn from_unicode<I, F>(pattern: I, flags: F) -> Result<Regex, Error>
+    where
+        I: Iterator<Item = u32> + Clone,
         F: Into<Flags>,
     {
         let flags = flags.into();
