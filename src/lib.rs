@@ -163,6 +163,8 @@ pub use crate::api::*;
 mod util;
 
 mod api;
+#[cfg(feature = "nfa")]
+pub mod automata;
 mod bytesearch;
 mod charclasses;
 mod classicalbacktrack;

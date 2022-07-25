@@ -16,7 +16,7 @@ default-members = ["regress-tool", "."]
 [profile.release]
 
 [features]
-default = ["backend-pikevm", "std"]
+default = ["backend-pikevm", "std", "nfa"]
 
 std = ["memchr/std"]
 
@@ -35,6 +35,10 @@ utf16 = []
 # Enables Pattern trait implementation for str::find, str::contains, etc.
 pattern = []
 
+# Enables NFA backend with optimized data structures.
+nfa = ["smallvec"]
+
 [dependencies]
 hashbrown = "0.15.0"
 memchr = { version = "2.4.0", default-features = false }
+smallvec = { version = "1.13", optional = true }

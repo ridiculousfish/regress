@@ -233,6 +233,30 @@ impl ByteSet for AsciiBitmap {
 #[repr(align(4))]
 pub struct ByteBitmap([u16; 16]);
 
+// An iterator over the indexes of bytes.
+pub struct ByteBitmapIter<'a> {
+    bm: &'a ByteBitmap,
+    idx: u8,
+    current: u16,
+}
+
+impl Iterator for ByteBitmapIter<'_> {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.current == 0 {
+            self.idx += 1;
+            if self.idx >= self.bm.0.len() as u8 {
+                return None;
+            }
+            self.current = self.bm.0[self.idx as usize];
+        }
+        let bit = self.current.trailing_zeros() as u8;
+        self.current &= !(1 << bit);
+        Some((self.idx << 4) | bit)
+    }
+}
+
 // TODO: the codegen here is pretty horrible; LLVM is emitting a sequence of
 // halfword instructions. Consider using a union?
 impl ByteBitmap {
@@ -243,6 +267,22 @@ impl ByteBitmap {
             bb.set(b)
         }
         bb
+    }
+
+    /// Construct from a single byte.
+    pub fn from_byte(byte: u8) -> ByteBitmap {
+        let mut bb = ByteBitmap::default();
+        bb.set(byte);
+        bb
+    }
+
+    /// Iterate over the bytes.
+    pub fn iter(&'_ self) -> ByteBitmapIter<'_> {
+        ByteBitmapIter {
+            bm: self,
+            idx: 0,
+            current: self.0[0],
+        }
     }
 
     /// \return whether this bitmap contains a given byte val.
@@ -418,5 +458,19 @@ mod tests {
     fn literal_search() {
         assert_eq!([0, 1, 2, 3].find_in(&[4, 5, 6, 7]), None);
         assert_eq!([0, 1, 2, 3].find_in(&[]), None);
+    }
+
+    #[test]
+    fn test_byte_bitmap_iter() {
+        let mut bm = ByteBitmap::default();
+        bm.set(0b0000_0001);
+        bm.set(0b0000_0010);
+        bm.set(0b0100_0000);
+
+        let mut iter = bm.iter();
+        assert_eq!(iter.next(), Some(0b0000_0001));
+        assert_eq!(iter.next(), Some(0b0000_0010));
+        assert_eq!(iter.next(), Some(0b0100_0000));
+        assert_eq!(iter.next(), None);
     }
 }

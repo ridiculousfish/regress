@@ -7,9 +7,13 @@ license = "MIT OR Apache-2.0"
 edition = "2024"
 default-run = "regress-tool"
 
+[features]
+default = ["nfa"]
+nfa = ["regress/nfa"]
+
 [dependencies]
 structopt = "0.3"
-regress = {path = "../"}
+regress = { path = "../" }
 
 [[bin]]
 name = "regress-tool"

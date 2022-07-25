@@ -882,6 +882,10 @@ pub mod backends {
     use super::exec;
     use super::indexing;
     use super::Regex;
+    #[cfg(feature = "nfa")]
+    pub use crate::automata::dfa::Dfa;
+    #[cfg(feature = "nfa")]
+    pub use crate::automata::nfa::{Error as NfaError, Nfa};
     pub use crate::emit::emit;
     pub use crate::optimizer::optimize;
     pub use crate::parse::try_parse;

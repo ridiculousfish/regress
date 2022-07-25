@@ -1,6 +1,10 @@
 #![allow(clippy::uninlined_format_args)]
 
+use regress::backends::Nfa;
 use regress::{backends, Error, Flags, Regex};
+
+#[cfg(feature = "nfa")]
+use regress::automata::nfa_backend;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -38,6 +42,14 @@ struct Opt {
     #[structopt(long)]
     dump_phases: bool,
 
+    /// Dump the NFA to stdout.
+    #[structopt(long)]
+    dump_nfa: bool,
+
+    /// Use NFA backend for execution.
+    #[structopt(long)]
+    nfa: bool,
+
     /// The input values to match against.
     #[structopt(conflicts_with_all = &["bench", "file"])]
     inputs: Vec<String>,
@@ -49,6 +61,17 @@ struct Opt {
     /// Benchmark the matches of the specified file.
     #[structopt(long, conflicts_with_all = &["file", "inputs"])]
     bench: Option<PathBuf>,
+}
+
+fn format_nfa_error(err: &regress::backends::NfaError) -> String {
+    match err {
+        regress::backends::NfaError::UnsupportedInstruction(desc) => {
+            format!("Unsupported instruction: {}", desc)
+        }
+        regress::backends::NfaError::BudgetExceeded => {
+            "Budget exceeded (too many states)".to_string()
+        }
+    }
 }
 
 fn format_match(r: &regress::Match, input: &str) -> String {
@@ -69,6 +92,19 @@ fn exec_re_on_string(re: &Regex, input: &str) {
         println!("Match: {}, total: {}", format_match(&res, input), count);
     } else {
         println!("No match");
+    }
+}
+
+#[cfg(feature = "nfa")]
+fn exec_nfa_on_string(nfa: &Nfa, input: &str) {
+    match nfa_backend::execute_nfa(nfa, input.as_bytes()) {
+        Some(nfa_match) => {
+            let matched_text = &input[nfa_match.range];
+            println!("Match: {}, total: 1", matched_text);
+        }
+        None => {
+            println!("No match");
+        }
     }
 }
 
@@ -100,12 +136,44 @@ fn main() -> Result<(), Error> {
         println!("Unoptimized IR:\n{}", ire);
     }
 
-    if args.optimize {
+    if args.nfa || args.optimize {
         backends::optimize(&mut ire);
         if args.dump_phases || args.dump_optimized_ir {
             println!("Optimized IR:\n{}", ire);
         }
     }
+
+    if args.nfa && !cfg!(feature = "nfa") {
+        println!("NFA backend not available. Compile with --features nfa");
+        std::process::exit(1);
+    }
+
+    #[cfg(feature = "nfa")]
+    if args.nfa {
+        let nfa = Nfa::try_from(&ire);
+        let nfa = match nfa {
+            Ok(nfa) => nfa,
+            Err(err) => {
+                println!("Failed to generate NFA: {}", format_nfa_error(&err));
+                std::process::exit(1);
+            }
+        };
+        if args.dump_nfa {
+            println!("NFA:\n{}", nfa.to_readable_string());
+        }
+        if let Some(ref path) = args.file {
+            match fs::read_to_string(path) {
+                Ok(contents) => exec_nfa_on_string(&nfa, contents.as_str()),
+                Err(err) => println!("{}: {}", err, path.display()),
+            };
+        } else {
+            for input in args.inputs {
+                exec_nfa_on_string(&nfa, &input);
+            }
+        }
+        return Ok(());
+    }
+
     let cr = backends::emit(&ire);
     if args.dump_phases || args.dump_bytecode {
         println!("Bytecode:\n{:#?}", cr);
