@@ -1,5 +1,5 @@
 fn test_1_error(pattern: &str, expected_err: &str) {
-    let res = regress::Regex::new(pattern);
+    let res = regress::Regex::with_flags(pattern, "u");
     assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);
 
     let err = res.err().unwrap().text;
