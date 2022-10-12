@@ -39,13 +39,16 @@ pub struct Flags {
 
     /// If set, disable regex IR passes.
     pub no_opt: bool,
+
+    /// If set, the regex is interpreted as a Unicode regex.
+    /// Equivalent to the 'u' flag in JavaScript.
+    pub unicode: bool,
 }
 
 impl Flags {
     /// Construct a Flags from a Unicode codepoints iterator, using JavaScript field names.
-    /// 'i' means to ignore case, 'm' means multiline.
+    /// 'i' means to ignore case, 'm' means multiline, 'u' means unicode.
     /// Note the 'g' flag implies a stateful regex and is not supported.
-    /// Note the 'u' flag currently only controls if invalid backreferences should throw a syntax error.
     /// Other flags are not implemented and are ignored.
     #[inline]
     pub fn new<T: Iterator<Item = u32>>(chars: T) -> Self {
@@ -60,6 +63,9 @@ impl Flags {
                 }
                 's' => {
                     result.dot_all = true;
+                }
+                'u' => {
+                    result.unicode = true;
                 }
                 _ => {
                     // Silently skip unsupported flags.
@@ -87,6 +93,12 @@ impl fmt::Display for Flags {
         }
         if self.icase {
             f.write_str("i")?;
+        }
+        if self.dot_all {
+            f.write_str("s")?;
+        }
+        if self.unicode {
+            f.write_str("u")?;
         }
         Ok(())
     }
