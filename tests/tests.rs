@@ -303,6 +303,11 @@ fn run_misc_tests_tc(tc: TestConfig) {
         vec![Some("baaabaac"), Some("ba"), None, Some("abaac")]
     );
     tc.compilef(r"\0", "").match1f("abc\0def").test_eq("\0");
+
+    assert_eq!(
+        tc.compilef(r";'()([/,-6,/])()]", "").match1_vec(";'/]"),
+        vec![Some(";'/]"), Some(""), Some("/"), Some("")]
+    );
 }
 
 #[test]
