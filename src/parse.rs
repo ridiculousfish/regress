@@ -340,7 +340,7 @@ where
                     result.push(self.consume_bracket()?);
                 }
 
-                ']' => {
+                ']' if self.flags.unicode => {
                     return error("Unbalanced bracket");
                 }
 
