@@ -27,10 +27,7 @@ pub trait CharProperties {
 
     /// ES9 11.3
     fn is_line_terminator(c: Self::Element) -> bool {
-        match c.as_u32() {
-            0x000A | 0x000D | 0x2028 | 0x2029 => true,
-            _ => false,
-        }
+        matches!(c.as_u32(), 0x000A | 0x000D | 0x2028 | 0x2029)
     }
 
     /// \return whether the bracket \p bc matches the given character \p c,

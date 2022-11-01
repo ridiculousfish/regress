@@ -19,7 +19,7 @@ pub struct CodePointRange(u32);
 // This will trigger an error in const functions if $x is false.
 macro_rules! const_assert_true {
     ($x:expr $(,)*) => {
-        let _ = [()][!$x as usize];
+        [()][!$x as usize];
     };
 }
 

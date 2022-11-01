@@ -6,7 +6,7 @@ description = "A regular expression engine targeting EcmaScript syntax"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/ridiculousfish/regress"
 keywords = ["regex", "regexp"]
-edition = "2018"
+edition = "2021"
 readme = "README.md"
 
 [workspace]
