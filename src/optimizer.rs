@@ -97,9 +97,7 @@ where
 // Remove empty Nodes.
 fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
     match n {
-        Node::Empty => PassAction::Keep,
-        Node::Goal => PassAction::Keep,
-        Node::Char { .. } => PassAction::Keep,
+        Node::Empty | Node::Goal | Node::Char { .. } => PassAction::Keep,
         Node::ByteSequence(v) => {
             if v.is_empty() {
                 PassAction::Remove
@@ -110,8 +108,7 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
 
         // Note: do not remove empty sets. These always match against one character; an empty set
         // should just fail.
-        Node::ByteSet(..) => PassAction::Keep,
-        Node::CharSet(..) => PassAction::Keep,
+        Node::ByteSet(..) | Node::CharSet(..) => PassAction::Keep,
         Node::Cat(nodes) => {
             let blen = nodes.len();
             nodes.retain(|nn| !nn.is_empty());
@@ -135,9 +132,9 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
                 PassAction::Keep
             }
         }
-        Node::MatchAny => PassAction::Keep,
-        Node::MatchAnyExceptLineTerminator => PassAction::Keep,
-        Node::Anchor { .. } => PassAction::Keep,
+        Node::MatchAny | Node::MatchAnyExceptLineTerminator | Node::Anchor { .. } => {
+            PassAction::Keep
+        }
         Node::Loop {
             quant,
             loopee,
@@ -157,9 +154,7 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
             // Capture groups could in principle be optimized if they only match empties.
             PassAction::Keep
         }
-        Node::WordBoundary { .. } => PassAction::Keep,
-        Node::BackRef { .. } => PassAction::Keep,
-        Node::Bracket { .. } => PassAction::Keep,
+        Node::WordBoundary { .. } | Node::BackRef { .. } | Node::Bracket { .. } => PassAction::Keep,
         Node::LookaroundAssertion {
             negate, contents, ..
         } => {

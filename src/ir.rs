@@ -250,12 +250,19 @@ where
 {
     fn process_children(&mut self, n: &Node) {
         match n {
-            Node::Empty => {}
-            Node::Goal => {}
-            Node::Char { .. } => {}
-            Node::ByteSequence(..) => {}
-            Node::ByteSet(..) => {}
-            Node::CharSet(..) => {}
+            Node::Empty
+            | Node::Goal
+            | Node::Char { .. }
+            | Node::ByteSequence(..)
+            | Node::ByteSet(..)
+            | Node::CharSet(..)
+            | Node::WordBoundary { .. }
+            | Node::BackRef { .. }
+            | Node::Bracket { .. }
+            | Node::UnicodePropertyEscape { .. }
+            | Node::MatchAny
+            | Node::MatchAnyExceptLineTerminator
+            | Node::Anchor { .. } => {}
             Node::Cat(nodes) => {
                 for node in nodes {
                     self.process(node);
@@ -265,17 +272,12 @@ where
                 self.process(left.as_ref());
                 self.process(right.as_ref());
             }
-            Node::MatchAny => {}
-            Node::MatchAnyExceptLineTerminator => {}
-            Node::Anchor { .. } => {}
-            Node::Loop { loopee, .. } => self.process(loopee),
-            Node::Loop1CharBody { loopee, .. } => self.process(loopee),
+
+            Node::Loop { loopee, .. } | Node::Loop1CharBody { loopee, .. } => self.process(loopee),
             Node::CaptureGroup(contents, ..) | Node::NamedCaptureGroup(contents, ..) => {
                 self.process(contents.as_ref())
             }
-            Node::WordBoundary { .. } => {}
-            Node::BackRef { .. } => {}
-            Node::Bracket { .. } => {}
+
             Node::LookaroundAssertion {
                 backwards,
                 contents,
@@ -286,7 +288,6 @@ where
                 self.process(contents.as_ref());
                 self.walk.in_lookbehind = saved;
             }
-            Node::UnicodePropertyEscape { .. } => {}
         }
     }
 
@@ -322,36 +323,34 @@ where
 {
     fn process_children(&mut self, n: &mut Node) {
         match n {
-            Node::Empty => {}
-            Node::Goal => {}
-            Node::Char { .. } => {}
-            Node::ByteSequence(..) => {}
-            Node::ByteSet(..) => {}
-            Node::CharSet(..) => {}
+            Node::Empty
+            | Node::Goal
+            | Node::Char { .. }
+            | Node::ByteSequence(..)
+            | Node::ByteSet(..)
+            | Node::CharSet(..)
+            | Node::MatchAny
+            | Node::MatchAnyExceptLineTerminator
+            | Node::Anchor { .. }
+            | Node::WordBoundary { .. }
+            | Node::BackRef { .. }
+            | Node::Bracket { .. }
+            | Node::UnicodePropertyEscape { .. } => {}
             Node::Cat(nodes) => {
-                for node in nodes {
-                    self.process(node);
-                }
+                nodes.iter_mut().for_each(|node| self.process(node));
             }
             Node::Alt(left, right) => {
                 self.process(left.as_mut());
                 self.process(right.as_mut());
             }
-            Node::MatchAny => {}
-            Node::MatchAnyExceptLineTerminator => {}
-            Node::Anchor { .. } => {}
-            Node::Loop { loopee, .. } => {
-                self.process(loopee);
-            }
-            Node::Loop1CharBody { loopee, .. } => {
+
+            Node::Loop { loopee, .. } | Node::Loop1CharBody { loopee, .. } => {
                 self.process(loopee);
             }
             Node::CaptureGroup(contents, ..) | Node::NamedCaptureGroup(contents, ..) => {
                 self.process(contents.as_mut())
             }
-            Node::WordBoundary { .. } => {}
-            Node::BackRef { .. } => {}
-            Node::Bracket { .. } => {}
+
             Node::LookaroundAssertion {
                 backwards,
                 contents,
@@ -362,7 +361,6 @@ where
                 self.process(contents.as_mut());
                 self.walk.in_lookbehind = saved;
             }
-            Node::UnicodePropertyEscape { .. } => {}
         }
     }
 

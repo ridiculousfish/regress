@@ -5,6 +5,7 @@ use crate::bytesearch;
 use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
+use crate::indexing;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
 use crate::insn::{CompiledRegex, Insn, LoopFields, StartPredicate};
 use crate::matchers;
@@ -226,11 +227,11 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
             &Insn::Char(c) => {
                 // Note this try_from may fail, for example if our char is outside ASCII.
                 // In this case we wish to not match.
-                let c = Input::Element::try_from(c)?;
+                let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
                 Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::Char { c })
             }
             &Insn::CharICase(c) => {
-                let c = Input::Element::try_from(c)?;
+                let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
                 Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::CharICase { c })
             }
             &Insn::Bracket(idx) => {
@@ -551,7 +552,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
 
                 match re.insns.iat(ip) {
                     &Insn::Char(c) => {
-                        let m = match Input::Element::try_from(c) {
+                        let m = match <<Input as InputIndexer>::Element as ElementType>::try_from(c) {
                             Some(c) => scm::Char { c }.matches(input, dir, &mut pos),
                             None => false,
                         };
@@ -623,7 +624,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     }
 
                     &Insn::CharICase(c) => {
-                        let m = match Input::Element::try_from(c) {
+                        let m = match <<Input as indexing::InputIndexer>::Element as indexing::ElementType>::try_from(c) {
                             Some(c) => scm::CharICase { c }.matches(input, dir, &mut pos),
                             None => false,
                         };

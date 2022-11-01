@@ -80,10 +80,10 @@ fn bench_re_on_path(re: &Regex, path: &Path) {
     };
     let input = contents.as_str();
     // Warmup
-    let _ = re.find_iter(input).count();
+    re.find_iter(input).count();
     let start = Instant::now();
     for _ in 0..25 {
-        let _ = re.find_iter(input).count();
+        re.find_iter(input).count();
     }
     let duration = start.elapsed();
     println!("{} ms", duration.as_millis());
