@@ -303,11 +303,33 @@ fn run_misc_tests_tc(tc: TestConfig) {
         vec![Some("baaabaac"), Some("ba"), None, Some("abaac")]
     );
     tc.compilef(r"\0", "").match1f("abc\0def").test_eq("\0");
+}
 
-    assert_eq!(
-        tc.compilef(r";'()([/,-6,/])()]", "").match1_vec(";'/]"),
-        vec![Some(";'/]"), Some(""), Some("/"), Some("")]
-    );
+#[test]
+fn run_nonunicode_tests() {
+    test_with_configs(run_nonunicode_test_tc)
+}
+
+fn run_nonunicode_test_tc(tc: TestConfig) {
+    // no unbalanced bracket ']'
+    tc.compilef(r"a]", "").match1f(r"a]").test_eq(r"a]");
+    tc.compilef(r"]a", "").match1f(r"]a").test_eq(r"]a");
+    tc.compilef(r"]", "").match1f(r"]").test_eq(r"]");
+
+    // no invalid quantifier ('{')
+    tc.compilef(r"a{", "").match1f(r"a{").test_eq(r"a{");
+    tc.compilef(r"{a", "").match1f(r"{a").test_eq(r"{a");
+    tc.compilef(r"{1", "").match1f(r"{1").test_eq(r"{1");
+    tc.compilef(r"{1,2", "").match1f(r"{1,2").test_eq(r"{1,2");
+    tc.compilef(r"{1,2 ", "")
+        .match1f(r"{1,2 ")
+        .test_eq(r"{1,2 ");
+    tc.compilef(r"{1,2 }", "")
+        .match1f(r"{1,2 }")
+        .test_eq(r"{1,2 }");
+    tc.compilef(r"{1,a", "").match1f(r"{1,a").test_eq(r"{1,a");
+    tc.compilef(r"{1 }", "").match1f(r"{1 }").test_eq(r"{1 }");
+    tc.compilef(r"}1", "").match1f(r"}1").test_eq(r"}1");
 }
 
 #[test]
@@ -1268,12 +1290,12 @@ fn property_escapes_invalid() {
     test_parse_fails(r#"\p{Line_Breakz=WAT}"#);
     test_parse_fails(r#"\P{Line_Breakz=Alphabetic}"#);
     test_parse_fails(r#"\p{Line_Breakz=Alphabetic}"#);
-    test_parse_fails(r#"\\P{General_Category=WAT}"#);
-    test_parse_fails(r#"\\p{General_Category=WAT}"#);
-    test_parse_fails(r#"\\P{Script_Extensions=H_e_h}"#);
-    test_parse_fails(r#"\\p{Script_Extensions=H_e_h}"#);
-    test_parse_fails(r#"\\P{Script=FooBarBazInvalid}"#);
-    test_parse_fails(r#"\\p{Script=FooBarBazInvalid}"#);
+    test_parse_fails_flags(r#"\\P{General_Category=WAT}"#, "u");
+    test_parse_fails_flags(r#"\\p{General_Category=WAT}"#, "u");
+    test_parse_fails_flags(r#"\\P{Script_Extensions=H_e_h}"#, "u");
+    test_parse_fails_flags(r#"\\p{Script_Extensions=H_e_h}"#, "u");
+    test_parse_fails_flags(r#"\\P{Script=FooBarBazInvalid}"#, "u");
+    test_parse_fails_flags(r#"\\p{Script=FooBarBazInvalid}"#, "u");
     test_parse_fails(r#"\P{Composition_Exclusion}"#);
     test_parse_fails(r#"\p{Composition_Exclusion}"#);
     test_parse_fails(r#"\P{Expands_On_NFC}"#);
