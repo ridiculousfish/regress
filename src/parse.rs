@@ -563,34 +563,52 @@ where
                 }))
             }
             Some('{') => {
-                self.consume('{');
-                let optmin = self.try_consume_decimal_integer_literal();
-                if optmin.is_none() {
-                    return error("Invalid quantifier");
-                }
-                let mut quant = ir::Quantifier {
-                    min: optmin.unwrap(),
-                    max: optmin.unwrap(),
-                    greedy: true,
-                };
-                if self.try_consume(',') {
-                    if let Some(max) = self.try_consume_decimal_integer_literal() {
-                        // Like {3,4}
-                        quant.max = max;
-                    } else {
-                        // Like {3,}
-                        quant.max = usize::max_value();
-                    }
+                if let Some(quantifier) = self.try_consume_braced_quantifier() {
+                    Ok(Some(quantifier))
+                } else if self.flags.unicode {
+                    // if there was a brace '{' that doesn't parse into a valid quantifier,
+                    // it's not valid with the unicode flag
+                    error("Invalid quantifier")
                 } else {
-                    // Like {3}.
+                    Ok(None)
                 }
-                if !self.try_consume('}') {
-                    return error("Invalid quantifier");
-                }
-                Ok(Some(quant))
             }
             _ => Ok(None),
         }
+    }
+
+    fn try_consume_braced_quantifier(&mut self) -> Option<ir::Quantifier> {
+        // if parsed input is actually invalid, keep the previous one for rollback
+        let pre_input = self.input.clone();
+        self.consume('{');
+        let optmin = self.try_consume_decimal_integer_literal();
+        if optmin.is_none() {
+            // not a valid quantifier, rollback consumption
+            self.input = pre_input;
+            return None;
+        }
+        let mut quant = ir::Quantifier {
+            min: optmin.unwrap(),
+            max: optmin.unwrap(),
+            greedy: true,
+        };
+        if self.try_consume(',') {
+            if let Some(max) = self.try_consume_decimal_integer_literal() {
+                // Like {3,4}
+                quant.max = max;
+            } else {
+                // Like {3,}
+                quant.max = usize::max_value();
+            }
+        } else {
+            // Like {3}.
+        }
+        if !self.try_consume('}') {
+            // not a valid quantifier, rollback consumption
+            self.input = pre_input;
+            return None;
+        }
+        Some(quant)
     }
 
     /// ES6 11.8.3 DecimalIntegerLiteral.
