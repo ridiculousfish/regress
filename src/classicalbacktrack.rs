@@ -552,7 +552,8 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
 
                 match re.insns.iat(ip) {
                     &Insn::Char(c) => {
-                        let m = match <<Input as InputIndexer>::Element as ElementType>::try_from(c) {
+                        let m = match <<Input as InputIndexer>::Element as ElementType>::try_from(c)
+                        {
                             Some(c) => scm::Char { c }.matches(input, dir, &mut pos),
                             None => false,
                         };
