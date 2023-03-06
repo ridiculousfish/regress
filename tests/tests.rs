@@ -311,6 +311,11 @@ fn run_nonunicode_tests() {
 }
 
 fn run_nonunicode_test_tc(tc: TestConfig) {
+    // escaping unrecognised chars
+    tc.compilef(r"\ ", "").match1f(r" ").test_eq(r" ");
+    tc.compilef(r"\ a", "").match1f(r" a").test_eq(r" a");
+    tc.compilef(r"a\ ", "").match1f(r"a ").test_eq(r"a ");
+
     // no unbalanced bracket ']'
     tc.compilef(r"a]", "").match1f(r"a]").test_eq(r"a]");
     tc.compilef(r"]a", "").match1f(r"]a").test_eq(r"]a");
