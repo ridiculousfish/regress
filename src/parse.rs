@@ -719,12 +719,14 @@ where
             '^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
             | '/' => Ok(self.consume(c)),
 
-            // TODO: currently we permit alphabetic characters in IdentityEscape to help some PCRE
+            // TODO: currently we reject numeric characters in IdentityEscape to help some PCRE
             // tests pass.
             // Specifically a regex of the form [\p{Nd}]: in non-Unicode mode this is not a
             // character property test and is expected to parse as just a bracket where \p is
             // IdentityEscaped to p.
-            c if c.is_ascii_alphabetic() => Ok(self.consume(c)),
+            c if (!self.flags.unicode && !c.is_ascii_digit()) || c.is_ascii_alphabetic() => {
+                Ok(self.consume(c))
+            }
 
             _ => error("Invalid character escape"),
         }
