@@ -35,10 +35,6 @@ This was my first Rust program so no doubt there is room for improvement.
 
 There's lots of stuff still missing, maybe you want to contribute?
 
-### Currently Missing Syntax
-
-- Unicode property escapes like `\p{Sc}`
-
 ### Currently Missing Features
 
 - An API for replacing a string while substituting in capture groups (e.g. with `$1`)
