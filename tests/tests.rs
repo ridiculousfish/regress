@@ -338,6 +338,23 @@ fn run_nonunicode_test_tc(tc: TestConfig) {
 }
 
 #[test]
+fn run_unicode_tests() {
+    // escaping unrecognised chars
+    test_parse_fails_flags(r"\ ", "u");
+    test_parse_fails_flags(r"\ a", "u");
+    test_parse_fails_flags(r"a\ ", "u");
+
+    // no unbalanced bracket ']'
+    test_parse_fails_flags(r"a]", "u");
+    test_parse_fails_flags(r"]a", "u");
+    test_parse_fails_flags(r"]", "u");
+
+    // no invalid quantifier ('{')
+    test_parse_fails_flags(r"a{", "u");
+    test_parse_fails_flags(r"{a", "u");
+}
+
+#[test]
 fn run_regexp_capture_test() {
     test_with_configs(run_regexp_capture_test_tc)
 }
