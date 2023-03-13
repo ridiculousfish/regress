@@ -346,9 +346,10 @@ where
 
                 _ => {
                     // It's an error if this parses successfully as a quantifier.
+                    // It's also an error if this is an invalid quantifier (with 'u' flag).
                     // Note this covers *, +, ? as well.
                     let saved = self.input.clone();
-                    if let Ok(Some(_)) = self.try_consume_quantifier() {
+                    if self.try_consume_quantifier()?.is_some() {
                         return error("Nothing to repeat");
                     }
                     self.input = saved;
