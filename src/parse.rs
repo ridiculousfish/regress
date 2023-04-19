@@ -825,7 +825,7 @@ where
 
     #[allow(clippy::branches_sharing_code)]
     fn try_escape_unicode_sequence(&mut self) -> Option<u32> {
-        let orig_input = self.input.clone();
+        let mut orig_input = self.input.clone();
 
         // Support \u{X..X} (Unicode CodePoint)
         if self.try_consume('{') {
@@ -870,34 +870,29 @@ where
             }
             match u16::from_str_radix(&s, 16) {
                 Ok(u) => {
-                    if (0xDC00..=0xDFFF).contains(&u) || (0xD800..=0xDB7F).contains(&u) {
-                        // Low/High Surrogates
+                    if (0xD800..=0xDBFF).contains(&u) {
+                        // Low Surrogates
                         if !self.try_consume_str("\\u") {
                             return Some(u as u32);
                         }
+                        orig_input = self.input.clone();
 
-                        let mut s = String::new();
-                        for _ in 0..4 {
-                            if let Some(c) = self.next().and_then(char::from_u32) {
+                        let result = (|| {
+                            let mut s = String::new();
+                            for _ in 0..4 {
+                                let c = self.next().and_then(char::from_u32)?;
                                 s.push(c);
-                            } else {
-                                self.input = orig_input;
-                                return None;
                             }
-                        }
-                        match u16::from_str_radix(&s, 16) {
-                            Ok(uu) => match String::from_utf16(&[u, uu]) {
-                                Ok(s) => s.chars().next().map(u32::from),
-                                _ => {
-                                    self.input = orig_input;
-                                    None
-                                }
-                            },
-                            _ => {
-                                self.input = orig_input;
-                                None
-                            }
-                        }
+
+                            let uu = u16::from_str_radix(&s, 16).ok()?;
+                            let ch = char::decode_utf16([u, uu]).next()?.ok()?;
+                            Some(u32::from(ch))
+                        })();
+
+                        result.or_else(|| {
+                            self.input = orig_input;
+                            Some(u as u32)
+                        })
                     } else {
                         Some(u as u32)
                     }
