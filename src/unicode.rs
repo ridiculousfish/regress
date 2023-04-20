@@ -46,7 +46,7 @@ impl CodePointRange {
     // \return the last codepoint in the range.
     #[inline(always)]
     pub const fn last(self) -> u32 {
-        self.first() + self.len_minus_1() as u32
+        self.first() + self.len_minus_1()
     }
 
     /// \return whether this range is strictly less than, contains, or strictly greater than a given code point.

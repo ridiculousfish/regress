@@ -456,7 +456,7 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
         Node::CharSet(chars) => {
             write!(f, "CharSet 0x")?;
             for &c in chars {
-                write!(f, "{:x}", c as u32)?;
+                write!(f, "{:x}", { c })?;
             }
             writeln!(f)?;
         }
