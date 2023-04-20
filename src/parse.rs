@@ -871,12 +871,18 @@ where
             match u16::from_str_radix(&s, 16) {
                 Ok(u) => {
                     if (0xD800..=0xDBFF).contains(&u) {
-                        // Low Surrogates
+                        // Found a high surrogate. Try to parse a low surrogate next
+                        // to see if we can rebuild the original `char`
+
                         if !self.try_consume_str("\\u") {
                             return Some(u as u32);
                         }
                         orig_input = self.input.clone();
 
+                        // A poor man's try block to handle the backtracking
+                        // in a single place instead of every time we want to return.
+                        // This allows us to use `?` within the inner block without returning
+                        // from the entire parent function.
                         let result = (|| {
                             let mut s = String::new();
                             for _ in 0..4 {
@@ -894,6 +900,8 @@ where
                             Some(u as u32)
                         })
                     } else {
+                        // If `u` is not a surrogate or is a low surrogate we can directly return it,
+                        // since all paired low surrogates should have been handled above.
                         Some(u as u32)
                     }
                 }
