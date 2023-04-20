@@ -105,7 +105,7 @@ impl TestCompiledRegex {
 
     /// Match against a string, returning the match as a Vec containing None
     /// for unmatched groups, or the matched strings.
-    pub fn match1_vec<'a, 'b>(&'a self, input: &'b str) -> Vec<Option<&'b str>> {
+    pub fn match1_vec<'b>(&self, input: &'b str) -> Vec<Option<&'b str>> {
         let mut result = Vec::new();
         let m: regress::Match = self.find(input).expect("Failed to match");
         result.push(Some(&input[m.range()]));
@@ -135,7 +135,7 @@ impl TestCompiledRegex {
     }
 
     /// Return a list of all non-overlapping matches.
-    pub fn match_all<'a, 'b>(&'a self, input: &'b str) -> Vec<&'b str> {
+    pub fn match_all<'b>(&self, input: &'b str) -> Vec<&'b str> {
         self.matches(input, 0)
             .into_iter()
             .map(move |m| &input[m.range()])

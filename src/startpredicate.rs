@@ -19,7 +19,7 @@ fn cps_to_first_byte_bitmap(input: &codepointset::CodePointSet) -> Box<ByteBitma
     // expensive, we perform searches over all bytes.
     // Note that UTF-8 first-bytes increase monotone and contiguously.
     // Increasing a code point will either increase the first byte by 1 or 0.
-    let mut bitmap = Box::new(ByteBitmap::default());
+    let mut bitmap = Box::<ByteBitmap>::default();
     let mut ivs = input.intervals();
     for target_byte in 0..=255 {
         let search = ivs.binary_search_by(|iv| {
@@ -137,7 +137,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
             // Pick the first bytes out.
             let bytes = chars
                 .iter()
-                .map(|&c| utf8_first_byte(c as u32))
+                .map(|&c| utf8_first_byte(c))
                 .collect::<Vec<_>>();
             Some(AbstractStartPredicate::Set(Box::new(ByteBitmap::new(
                 &bytes,

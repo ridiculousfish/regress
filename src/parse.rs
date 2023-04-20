@@ -112,7 +112,7 @@ fn make_bracket_class(ct: CharacterClassType, positive: bool) -> ir::Node {
 
 fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom) {
     match atom {
-        ClassAtom::CodePoint(c) => bc.cps.add_one(c as u32),
+        ClassAtom::CodePoint(c) => bc.cps.add_one(c),
         ClassAtom::CharacterClass {
             class_type,
             positive,
@@ -441,8 +441,8 @@ where
             match (first.unwrap(), second.unwrap()) {
                 (ClassAtom::CodePoint(c1), ClassAtom::CodePoint(c2)) if c1 <= c2 => {
                     result.cps.add(Interval {
-                        first: c1 as u32,
-                        last: c2 as u32,
+                        first: c1,
+                        last: c2,
                     })
                 }
                 _ => {
@@ -677,7 +677,7 @@ where
                 // Control escape.
                 self.consume('c');
                 if let Some(nc) = self.next().and_then(char::from_u32) {
-                    if ('a'..='z').contains(&nc) || ('A'..='Z').contains(&nc) {
+                    if nc.is_ascii_lowercase() || nc.is_ascii_uppercase() {
                         return Ok((nc as u32) % 32);
                     }
                 }
@@ -687,7 +687,7 @@ where
                 // CharacterEscape :: "0 [lookahead != DecimalDigit]"
                 self.consume('0');
                 match self.peek().and_then(char::from_u32) {
-                    Some(c) if ('0'..='9').contains(&c) => error("Invalid character escape"),
+                    Some(c) if c.is_ascii_digit() => error("Invalid character escape"),
                     _ => Ok(0x0),
                 }
             }
