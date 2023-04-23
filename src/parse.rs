@@ -416,39 +416,46 @@ where
             }
 
             // Parse a code point or character class.
-            let first = self.try_consume_bracket_class_atom()?;
-            if first.is_none() {
+            let Some(first) = self.try_consume_bracket_class_atom()? else {
                 continue;
-            }
+            };
 
             // Check for a dash; we may have a range.
             if !self.try_consume('-') {
-                add_class_atom(&mut result, first.unwrap());
+                add_class_atom(&mut result, first);
                 continue;
             }
 
-            let second = self.try_consume_bracket_class_atom()?;
-            if second.is_none() {
+            let Some(second) = self.try_consume_bracket_class_atom()? else {
                 // No second atom. For example: [a-].
-                add_class_atom(&mut result, first.unwrap());
+                add_class_atom(&mut result, first);
                 add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
                 continue;
-            }
+            };
 
-            // Ranges can't contain character classes: [\d-z] is invalid.
             // Ranges must also be in order: z-a is invalid.
             // ES6 21.2.2.15.1 "If i > j, throw a SyntaxError exception"
-            match (first.unwrap(), second.unwrap()) {
-                (ClassAtom::CodePoint(c1), ClassAtom::CodePoint(c2)) if c1 <= c2 => {
-                    result.cps.add(Interval {
-                        first: c1,
-                        last: c2,
-                    })
+            if let (ClassAtom::CodePoint(c1), ClassAtom::CodePoint(c2)) = (&first, &second) {
+                if c1 > c2 {
+                    return error(
+                        "Range values reversed, start char code is greater than end char code.",
+                    );
                 }
-                _ => {
-                    return error("Invalid character range");
-                }
+                result.cps.add(Interval {
+                    first: *c1,
+                    last: *c2,
+                });
+                continue;
             }
+
+            if self.flags.unicode {
+                return error("Invalid character range");
+            }
+
+            // If it does not match a range treat as any match single characters.
+            add_class_atom(&mut result, first);
+            add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
+            add_class_atom(&mut result, second);
         }
     }
 

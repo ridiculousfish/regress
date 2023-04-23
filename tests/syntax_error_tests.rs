@@ -1,3 +1,4 @@
+#[track_caller]
 fn test_1_error(pattern: &str, expected_err: &str) {
     let res = regress::Regex::with_flags(pattern, "u");
     assert!(res.is_err(), "Pattern should not have parsed: {}", pattern);
@@ -39,8 +40,13 @@ fn test_syntax_errors() {
     test_1_error(r"(?!", "Unbalanced parenthesis");
     test_1_error(r"abc)", "Unbalanced parenthesis");
 
-    test_1_error(r"[z-a]", "Invalid character range");
-    test_1_error(r"[\d-z]", "Invalid character range");
+    test_1_error(
+        r"[z-a]",
+        "Range values reversed, start char code is greater than end char code.",
+    );
+
+    // In unicode mode this is not allowed.
+    test_1_error(r"[a-\s]", "Invalid character range");
 
     test_1_error("\\", "Incomplete escape");
 

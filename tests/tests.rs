@@ -1451,3 +1451,27 @@ fn unicode_escape_id_continue_tc(tc: TestConfig) {
         }
     }
 }
+
+#[test]
+fn test_valid_character_sets_in_annex_b() {
+    test_with_configs(test_valid_character_sets_in_annex_b_tc)
+}
+
+fn test_valid_character_sets_in_annex_b_tc(tc: TestConfig) {
+    // From: https://github.com/boa-dev/boa/issues/2794
+    let regexp = r"[a-\s]";
+    tc.test_match_succeeds(regexp, "", "a");
+    tc.test_match_succeeds(regexp, "", "-");
+    tc.test_match_succeeds(regexp, "", " ");
+    tc.test_match_fails(regexp, "", "s");
+    tc.test_match_fails(regexp, "", "$");
+
+    let regexp = r"[\d-z]";
+    tc.test_match_succeeds(regexp, "", "z");
+    tc.test_match_succeeds(regexp, "", "1");
+    tc.test_match_succeeds(regexp, "", "7");
+    tc.test_match_succeeds(regexp, "", "9");
+    tc.test_match_fails(regexp, "", "a");
+    tc.test_match_fails(regexp, "", "f");
+    tc.test_match_fails(regexp, "", " ");
+}

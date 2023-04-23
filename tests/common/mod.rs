@@ -82,6 +82,7 @@ impl TestCompiledRegex {
     }
 
     /// Match against a string, returning the first formatted match.
+    #[track_caller]
     pub fn match1f(&self, input: &str) -> String {
         match self.find(input) {
             Some(m) => format_match(&m, input),
@@ -116,11 +117,13 @@ impl TestCompiledRegex {
     }
 
     /// Test that matching against \p input fails.
+    #[track_caller]
     pub fn test_fails(&self, input: &str) {
         assert!(self.find(input).is_none(), "Should not have matched")
     }
 
     /// Test that matching against \p input succeeds.
+    #[track_caller]
     pub fn test_succeeds(&self, input: &str) {
         assert!(self.find(input).is_some(), "Should have matched")
     }
@@ -184,6 +187,7 @@ impl TestConfig {
     }
 
     /// Compile a pattern to a regex, with given flags.
+    #[track_caller]
     pub fn compilef(&self, pattern: &str, flags_str: &str) -> TestCompiledRegex {
         let mut flags = regress::Flags::from(flags_str);
         flags.no_opt = !self.optimize;
@@ -204,6 +208,7 @@ impl TestConfig {
 
     /// Test that \p pattern and \p flags successfully parses, and matches
     /// \p input.
+    #[track_caller]
     pub fn test_match_succeeds(&self, pattern: &str, flags_str: &str, input: &str) {
         let cr = self.compilef(pattern, flags_str);
         cr.test_succeeds(input)
