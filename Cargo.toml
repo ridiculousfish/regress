@@ -1,6 +1,6 @@
 [package]
 name = "regress"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["ridiculousfish <corydoras@ridiculousfish.com>"]
 description = "A regular expression engine targeting EcmaScript syntax"
 license = "MIT OR Apache-2.0"
