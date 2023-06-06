@@ -30,5 +30,5 @@ index-positions = []
 prohibit-unsafe = []
 
 [dependencies]
-hashbrown = "0.13.2"
+hashbrown = "0.14.0"
 memchr = { version = "2.4.0", default-features = false }
