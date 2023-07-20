@@ -287,6 +287,7 @@ where
                         })?);
                     } else if self.try_consume_str("(?<=") {
                         // Positive lookbehind.
+                        quantifier_allowed = false;
                         self.has_lookbehind = true;
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: false,
@@ -294,6 +295,7 @@ where
                         })?);
                     } else if self.try_consume_str("(?<!") {
                         // Negative lookbehind.
+                        quantifier_allowed = false;
                         self.has_lookbehind = true;
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: true,
