@@ -135,7 +135,19 @@ fn test_lookbehinds_tc(tc: TestConfig) {
 
 #[test]
 fn test_lookbehinds() {
-    test_with_configs(test_lookbehinds_tc)
+    test_with_configs(test_lookbehinds_tc);
+
+    // From 262 test/language/literals/regexp/invalid-range-negative-lookbehind.js
+    test_parse_fails(".(?<!.){2,3}");
+
+    // From 262 test/language/literals/regexp/invalid-range-lookbehind.js
+    test_parse_fails(".(?<=.){2,3}");
+
+    // From 262 test/language/literals/regexp/invalid-optional-negative-lookbehind.js
+    test_parse_fails(".(?<!.)?");
+
+    // From 262 test/language/literals/regexp/invalid-optional-lookbehind.js
+    test_parse_fails(".(?<=.)?");
 }
 
 #[test]
