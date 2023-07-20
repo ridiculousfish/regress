@@ -1184,6 +1184,12 @@ fn run_regexp_named_groups_unicode_malformed_tc() {
     test_parse_fails(r#"\k<a>(<a>x)"#);
     test_parse_fails(r#"\k<a>\1"#);
     test_parse_fails(r#"\1(b)\k<a>"#);
+
+    // From 262 test/language/literals/regexp/named-groups/invalid-duplicate-groupspecifier.js
+    test_parse_fails(r#"(?<a>a)(?<a>a)"#);
+
+    // From 262 test/language/literals/regexp/named-groups/invalid-duplicate-groupspecifier-2.js
+    test_parse_fails(r#"(?<a>a)(?<b>b)(?<a>a)"#);
 }
 
 #[test]
