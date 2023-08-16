@@ -932,7 +932,7 @@ where
         let mut group_name = String::new();
 
         if let Some(mut c) = self.next().and_then(char::from_u32) {
-            if self.try_consume('u') {
+            if c == '\\' && self.try_consume('u') {
                 if let Some(escaped) = self.try_escape_unicode_sequence().and_then(char::from_u32) {
                     c = escaped;
                 } else {
@@ -954,7 +954,7 @@ where
 
         loop {
             if let Some(mut c) = self.next().and_then(char::from_u32) {
-                if self.try_consume('u') {
+                if c == '\\' && self.try_consume('u') {
                     if let Some(escaped) =
                         self.try_escape_unicode_sequence().and_then(char::from_u32)
                     {

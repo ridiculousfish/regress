@@ -1167,6 +1167,10 @@ fn run_regexp_named_capture_groups_tc(tc: TestConfig) {
     tc.compilef(r#"(?<a>a)(?<b>b)\k<a>"#, "").match1_named_group("aba", "a").test_eq("a");
     tc.compilef(r#"(?<a>a)(?<b>b)\k<a>"#, "").match1_named_group("aba", "b").test_eq("b");
 
+    // regression test for
+    // https://github.com/ridiculousfish/regress/issues/41
+    tc.compilef(r#"(?<au>.)"#, "").match1_named_group("a", "au").test_eq("a");
+
     // Make sure that escapes are parsed correctly in the fast capture group parser.
     // This pattern should fail in unicode mode, because there is a backreference without a capture group.
     // If the `\]` is not handled correctly in the parser, the following `(.)` may be parsed as a capture group.
