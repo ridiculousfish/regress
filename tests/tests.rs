@@ -1169,7 +1169,12 @@ fn run_regexp_named_capture_groups_tc(tc: TestConfig) {
 
     // regression test for
     // https://github.com/ridiculousfish/regress/issues/41
-    tc.compilef(r#"(?<au>.)"#, "").match1_named_group("a", "au").test_eq("a");
+    tc.compilef(r#"(?<u>.)"#, "").match1_named_group("xxx", "u").test_eq("x");
+    tc.compilef(r#"(?<au>.)"#, "").match1_named_group("xxx", "au").test_eq("x");
+    tc.compilef(r#"(?<aau>.)"#, "").match1_named_group("xxx", "aau").test_eq("x");
+
+    // Escapes are valid in group names.
+    tc.compilef(r#"(?<\u0041\u0042>c+)"#, "").match1_named_group("aabbccddeeff", "AB").test_eq("cc");
 
     // Make sure that escapes are parsed correctly in the fast capture group parser.
     // This pattern should fail in unicode mode, because there is a backreference without a capture group.
