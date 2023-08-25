@@ -199,7 +199,7 @@ where
     }
 
     fn try_parse(&mut self) -> Result<ir::Regex, Error> {
-        self.parse_capture_groups();
+        self.parse_capture_groups()?;
 
         // Parse a catenation. If we consume everything, it's success. If there's
         // something left, it's an error (for example, an excess closing paren).
@@ -287,6 +287,7 @@ where
                         })?);
                     } else if self.try_consume_str("(?<=") {
                         // Positive lookbehind.
+                        quantifier_allowed = false;
                         self.has_lookbehind = true;
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: false,
@@ -294,6 +295,7 @@ where
                         })?);
                     } else if self.try_consume_str("(?<!") {
                         // Negative lookbehind.
+                        quantifier_allowed = false;
                         self.has_lookbehind = true;
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: true,
@@ -346,9 +348,10 @@ where
 
                 _ => {
                     // It's an error if this parses successfully as a quantifier.
+                    // It's also an error if this is an invalid quantifier (with 'u' flag).
                     // Note this covers *, +, ? as well.
                     let saved = self.input.clone();
-                    if let Ok(Some(_)) = self.try_consume_quantifier() {
+                    if self.try_consume_quantifier()?.is_some() {
                         return error("Nothing to repeat");
                     }
                     self.input = saved;
@@ -929,7 +932,7 @@ where
         let mut group_name = String::new();
 
         if let Some(mut c) = self.next().and_then(char::from_u32) {
-            if self.try_consume('u') {
+            if c == '\\' && self.try_consume('u') {
                 if let Some(escaped) = self.try_escape_unicode_sequence().and_then(char::from_u32) {
                     c = escaped;
                 } else {
@@ -951,7 +954,7 @@ where
 
         loop {
             if let Some(mut c) = self.next().and_then(char::from_u32) {
-                if self.try_consume('u') {
+                if c == '\\' && self.try_consume('u') {
                     if let Some(escaped) =
                         self.try_escape_unicode_sequence().and_then(char::from_u32)
                     {
@@ -984,7 +987,7 @@ where
     }
 
     // Quickly parse all capture groups.
-    fn parse_capture_groups(&mut self) {
+    fn parse_capture_groups(&mut self) -> Result<(), Error> {
         let orig_input = self.input.clone();
 
         loop {
@@ -1007,7 +1010,13 @@ where
                 Some('(') => {
                     if self.try_consume_str("?") {
                         if let Some(name) = self.try_consume_named_capture_group_name() {
-                            self.named_group_indices.insert(name, self.group_count_max);
+                            if self
+                                .named_group_indices
+                                .insert(name, self.group_count_max)
+                                .is_some()
+                            {
+                                return error("Duplicate capture group name");
+                            }
                         }
                     }
                     self.group_count_max = if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
@@ -1022,6 +1031,8 @@ where
         }
 
         self.input = orig_input;
+
+        Ok(())
     }
 
     fn try_consume_unicode_property_escape(&mut self) -> Result<PropertyEscape, Error> {

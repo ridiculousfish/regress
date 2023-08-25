@@ -1,7 +1,8 @@
-// Work around dead code warnings: rust-lang issue #46379
-pub mod common;
+// We like hashes around raw string literals.
+#![allow(clippy::needless_raw_string_hashes)]
 
 // Work around dead code warnings: rust-lang issue #46379
+pub mod common;
 use common::*;
 
 fn test_zero_length_matches_tc(tc: TestConfig) {
@@ -135,7 +136,19 @@ fn test_lookbehinds_tc(tc: TestConfig) {
 
 #[test]
 fn test_lookbehinds() {
-    test_with_configs(test_lookbehinds_tc)
+    test_with_configs(test_lookbehinds_tc);
+
+    // From 262 test/language/literals/regexp/invalid-range-negative-lookbehind.js
+    test_parse_fails(".(?<!.){2,3}");
+
+    // From 262 test/language/literals/regexp/invalid-range-lookbehind.js
+    test_parse_fails(".(?<=.){2,3}");
+
+    // From 262 test/language/literals/regexp/invalid-optional-negative-lookbehind.js
+    test_parse_fails(".(?<!.)?");
+
+    // From 262 test/language/literals/regexp/invalid-optional-lookbehind.js
+    test_parse_fails(".(?<=.)?");
 }
 
 #[test]
@@ -335,6 +348,23 @@ fn run_nonunicode_test_tc(tc: TestConfig) {
     tc.compilef(r"{1,a", "").match1f(r"{1,a").test_eq(r"{1,a");
     tc.compilef(r"{1 }", "").match1f(r"{1 }").test_eq(r"{1 }");
     tc.compilef(r"}1", "").match1f(r"}1").test_eq(r"}1");
+}
+
+#[test]
+fn run_unicode_tests() {
+    // escaping unrecognised chars
+    test_parse_fails_flags(r"\ ", "u");
+    test_parse_fails_flags(r"\ a", "u");
+    test_parse_fails_flags(r"a\ ", "u");
+
+    // no unbalanced bracket ']'
+    test_parse_fails_flags(r"a]", "u");
+    test_parse_fails_flags(r"]a", "u");
+    test_parse_fails_flags(r"]", "u");
+
+    // no invalid quantifier ('{')
+    test_parse_fails_flags(r"a{", "u");
+    test_parse_fails_flags(r"{a", "u");
 }
 
 #[test]
@@ -1138,6 +1168,15 @@ fn run_regexp_named_capture_groups_tc(tc: TestConfig) {
     tc.compilef(r#"(?<a>a)(?<b>b)\k<a>"#, "").match1_named_group("aba", "a").test_eq("a");
     tc.compilef(r#"(?<a>a)(?<b>b)\k<a>"#, "").match1_named_group("aba", "b").test_eq("b");
 
+    // regression test for
+    // https://github.com/ridiculousfish/regress/issues/41
+    tc.compilef(r#"(?<u>.)"#, "").match1_named_group("xxx", "u").test_eq("x");
+    tc.compilef(r#"(?<au>.)"#, "").match1_named_group("xxx", "au").test_eq("x");
+    tc.compilef(r#"(?<aau>.)"#, "").match1_named_group("xxx", "aau").test_eq("x");
+
+    // Escapes are valid in group names.
+    tc.compilef(r#"(?<\u0041\u0042>c+)"#, "").match1_named_group("aabbccddeeff", "AB").test_eq("cc");
+
     // Make sure that escapes are parsed correctly in the fast capture group parser.
     // This pattern should fail in unicode mode, because there is a backreference without a capture group.
     // If the `\]` is not handled correctly in the parser, the following `(.)` may be parsed as a capture group.
@@ -1167,6 +1206,12 @@ fn run_regexp_named_groups_unicode_malformed_tc() {
     test_parse_fails(r#"\k<a>(<a>x)"#);
     test_parse_fails(r#"\k<a>\1"#);
     test_parse_fails(r#"\1(b)\k<a>"#);
+
+    // From 262 test/language/literals/regexp/named-groups/invalid-duplicate-groupspecifier.js
+    test_parse_fails(r#"(?<a>a)(?<a>a)"#);
+
+    // From 262 test/language/literals/regexp/named-groups/invalid-duplicate-groupspecifier-2.js
+    test_parse_fails(r#"(?<a>a)(?<b>b)(?<a>a)"#);
 }
 
 #[test]
