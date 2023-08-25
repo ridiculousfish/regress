@@ -8,15 +8,6 @@ regress is a backtracking regular expression engine implemented in Rust, which t
 
 It's fast, Unicode-aware, has few dependencies, and has a big test suite. It makes fewer guarantees than the `regex` crate but it enables more syntactic features, such as backreferences and lookaround assertions.
 
-## Usage
-
-Add this to your `Cargo.toml`:
-
-```toml
-[dependencies]
-regress = "0.5"
-```
-
 ### Fun Tools
 
 The `regress-tool` binary can be used for some fun.
