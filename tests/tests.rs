@@ -1,7 +1,8 @@
-// Work around dead code warnings: rust-lang issue #46379
-pub mod common;
+// We like hashes around raw string literals.
+#![allow(clippy::needless_raw_string_hashes)]
 
 // Work around dead code warnings: rust-lang issue #46379
+pub mod common;
 use common::*;
 
 fn test_zero_length_matches_tc(tc: TestConfig) {
