@@ -1,9 +1,11 @@
 use crate::codepointset::{CodePointSet, Interval};
-use crate::unicodetables::{self, FOLDS};
+use crate::indexing::ElementType;
+use crate::unicodetables::{self, UnicodePropertyBinary, FOLDS};
 use crate::util::SliceHelp;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::cmp::Ordering;
+use icu_properties::{GeneralCategory, GeneralCategoryGroup, Script};
 
 // CodePointRange packs a code point and a length together into a u32.
 // We currently do not need to store any information about code points in plane 16 (U+100000),
@@ -14,7 +16,7 @@ const CODE_POINT_BITS: u32 = 20;
 const LENGTH_BITS: u32 = 32 - CODE_POINT_BITS;
 
 #[derive(Copy, Clone, Debug)]
-pub struct CodePointRange(u32);
+struct CodePointRange(u32);
 
 // This will trigger an error in const functions if $x is false.
 macro_rules! const_assert_true {
@@ -25,7 +27,7 @@ macro_rules! const_assert_true {
 
 impl CodePointRange {
     #[inline(always)]
-    pub const fn from(start: u32, len: u32) -> Self {
+    const fn from(start: u32, len: u32) -> Self {
         const_assert_true!(start < (1 << CODE_POINT_BITS));
         const_assert_true!(len > 0 && len <= (1 << LENGTH_BITS));
         const_assert_true!((start + len - 1) < ((1 << CODE_POINT_BITS) - 1));
@@ -39,49 +41,14 @@ impl CodePointRange {
 
     // \return the first codepoint in the range.
     #[inline(always)]
-    pub const fn first(self) -> u32 {
+    const fn first(self) -> u32 {
         self.0 >> LENGTH_BITS
     }
 
     // \return the last codepoint in the range.
     #[inline(always)]
-    pub const fn last(self) -> u32 {
+    const fn last(self) -> u32 {
         self.first() + self.len_minus_1()
-    }
-
-    /// \return whether this range is strictly less than, contains, or strictly greater than a given code point.
-    #[inline(always)]
-    pub fn compare(self, cp: u32) -> Ordering {
-        if self.first() > cp {
-            Ordering::Greater
-        } else if self.last() < cp {
-            Ordering::Less
-        } else {
-            Ordering::Equal
-        }
-    }
-}
-
-/// CodePointRangeUnpacked is used when the max of CodePointRange would be exceeded.
-#[derive(Copy, Clone, Debug)]
-pub struct CodePointRangeUnpacked(u32, u32);
-
-impl CodePointRangeUnpacked {
-    #[inline(always)]
-    pub const fn from(start: u32, end: u32) -> Self {
-        CodePointRangeUnpacked(start, end)
-    }
-
-    // Compares the range to a single codepoint.
-    #[inline(always)]
-    pub fn compare(self, cp: u32) -> Ordering {
-        if cp < self.0 {
-            core::cmp::Ordering::Greater
-        } else if cp > self.1 {
-            core::cmp::Ordering::Less
-        } else {
-            core::cmp::Ordering::Equal
-        }
     }
 }
 
@@ -91,15 +58,15 @@ const PREDICATE_MASK_BITS: u32 = 4;
 
 pub(crate) struct FoldRange {
     /// The range of codepoints.
-    pub(crate) range: CodePointRange,
+    range: CodePointRange,
 
     /// Combination of the signed delta amount and predicate mask.
-    pub(crate) extra: i32,
+    extra: i32,
 }
 
 impl FoldRange {
     #[inline(always)]
-    pub const fn from(start: u32, length: u32, delta: i32, modulo: u8) -> Self {
+    pub(crate) const fn from(start: u32, length: u32, delta: i32, modulo: u8) -> Self {
         let mask = (1 << modulo) - 1;
         const_assert_true!(mask < (1 << PREDICATE_MASK_BITS));
         const_assert_true!(((delta << PREDICATE_MASK_BITS) >> PREDICATE_MASK_BITS) == delta);
@@ -166,7 +133,7 @@ impl FoldRange {
     }
 }
 
-pub fn fold(cu: u32) -> u32 {
+pub(crate) fn fold(cu: u32) -> u32 {
     let searched = FOLDS.binary_search_by(|fr| {
         if fr.first() > cu {
             Ordering::Greater
@@ -237,7 +204,7 @@ fn unfold_interval(iv: Interval, recv: &mut CodePointSet) {
 
 /// \return all the characters which fold to c's fold.
 /// This is a slow linear search across all ranges.
-pub fn unfold_char(c: u32) -> Vec<u32> {
+pub(crate) fn unfold_char(c: u32) -> Vec<u32> {
     let mut res = vec![c];
     let fcp = fold(c);
     if fcp != c {
@@ -262,7 +229,7 @@ pub fn unfold_char(c: u32) -> Vec<u32> {
 }
 
 // Fold every character in \p input, then find all the prefolds.
-pub fn fold_code_points(mut input: CodePointSet) -> CodePointSet {
+pub(crate) fn fold_code_points(mut input: CodePointSet) -> CodePointSet {
     let mut folded = input.clone();
     for iv in input.intervals() {
         fold_interval(*iv, &mut folded)
@@ -278,18 +245,18 @@ pub fn fold_code_points(mut input: CodePointSet) -> CodePointSet {
 
 #[derive(Debug, Copy, Clone)]
 pub struct PropertyEscape {
-    pub name: Option<UnicodePropertyName>,
-    pub value: UnicodePropertyValue,
+    pub(crate) name: Option<UnicodePropertyName>,
+    pub(crate) value: UnicodePropertyValue,
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum UnicodePropertyName {
+pub(crate) enum UnicodePropertyName {
     GeneralCategory,
     Script,
     ScriptExtensions,
 }
 
-pub fn unicode_property_name_from_str(s: &str) -> Option<UnicodePropertyName> {
+pub(crate) fn unicode_property_name_from_str(s: &str) -> Option<UnicodePropertyName> {
     use UnicodePropertyName::*;
 
     match s {
@@ -301,19 +268,21 @@ pub fn unicode_property_name_from_str(s: &str) -> Option<UnicodePropertyName> {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum UnicodePropertyValue {
-    Binary(unicodetables::UnicodePropertyBinary),
-    GeneralCategory(unicodetables::UnicodePropertyValueGeneralCategory),
-    Script(unicodetables::UnicodePropertyValueScript),
+pub(crate) enum UnicodePropertyValue {
+    Binary(UnicodePropertyBinary),
+    GeneralCategory(GeneralCategoryGroup),
+    Script(Script),
 }
 
-pub fn unicode_property_value_from_str(s: &str) -> Option<UnicodePropertyValue> {
+pub(crate) fn unicode_property_value_from_str(s: &str) -> Option<UnicodePropertyValue> {
     if let Some(t) = unicodetables::unicode_property_binary_from_str(s) {
         Some(UnicodePropertyValue::Binary(t))
-    } else if let Some(t) = unicodetables::unicode_property_value_general_category_from_str(s) {
+    } else if let Some(t) = GeneralCategoryGroup::name_to_enum_mapper().get_strict(s) {
         Some(UnicodePropertyValue::GeneralCategory(t))
     } else {
-        unicodetables::unicode_property_value_script_from_str(s).map(UnicodePropertyValue::Script)
+        Script::name_to_enum_mapper()
+            .get_strict(s)
+            .map(UnicodePropertyValue::Script)
     }
 }
 
@@ -322,27 +291,133 @@ pub(crate) fn is_character_class(c: u32, property_escape: &PropertyEscape) -> bo
         match property_escape.name {
             Some(UnicodePropertyName::GeneralCategory) => match &property_escape.value {
                 UnicodePropertyValue::GeneralCategory(t) => {
-                    unicodetables::is_property_value_general_category(c, t)
+                    t.contains(icu_properties::maps::general_category().get(c))
                 }
                 _ => false,
             },
             Some(UnicodePropertyName::Script) => match &property_escape.value {
-                UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
+                UnicodePropertyValue::Script(t) => icu_properties::maps::script().get(c) == *t,
                 _ => false,
             },
             Some(UnicodePropertyName::ScriptExtensions) => match &property_escape.value {
-                UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
+                UnicodePropertyValue::Script(t) => icu_properties::maps::script().get(c) == *t,
                 _ => false,
             },
             None => match &property_escape.value {
-                UnicodePropertyValue::Binary(t) => unicodetables::is_property_binary(c, t),
+                UnicodePropertyValue::Binary(t) => tatat(c, *t),
                 UnicodePropertyValue::GeneralCategory(t) => {
-                    unicodetables::is_property_value_general_category(c, t)
+                    t.contains(icu_properties::maps::general_category().get(c))
                 }
-                UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(c, t),
+                UnicodePropertyValue::Script(t) => icu_properties::maps::script().get(c) == *t,
             },
         }
     } else {
         false
+    }
+}
+
+fn tatat(ch: char, t: UnicodePropertyBinary) -> bool {
+    match t {
+        UnicodePropertyBinary::Alphabetic => icu_properties::sets::alphabetic().contains(ch),
+        UnicodePropertyBinary::CaseIgnorable => icu_properties::sets::case_ignorable().contains(ch),
+        UnicodePropertyBinary::Cased => icu_properties::sets::cased().contains(ch),
+        UnicodePropertyBinary::ChangesWhenCasefolded => {
+            icu_properties::sets::changes_when_casefolded().contains(ch)
+        }
+        UnicodePropertyBinary::ChangesWhenCasemapped => {
+            icu_properties::sets::changes_when_casemapped().contains(ch)
+        }
+        UnicodePropertyBinary::ChangesWhenLowercased => {
+            icu_properties::sets::changes_when_lowercased().contains(ch)
+        }
+        UnicodePropertyBinary::ChangesWhenTitlecased => {
+            icu_properties::sets::changes_when_titlecased().contains(ch)
+        }
+        UnicodePropertyBinary::ChangesWhenUppercased => {
+            icu_properties::sets::changes_when_uppercased().contains(ch)
+        }
+        UnicodePropertyBinary::DefaultIgnorableCodePoint => {
+            icu_properties::sets::default_ignorable_code_point().contains(ch)
+        }
+        UnicodePropertyBinary::GraphemeBase => icu_properties::sets::grapheme_base().contains(ch),
+        UnicodePropertyBinary::GraphemeExtend => {
+            icu_properties::sets::grapheme_extend().contains(ch)
+        }
+        UnicodePropertyBinary::IDContinue => icu_properties::sets::id_continue().contains(ch),
+        UnicodePropertyBinary::IDStart => icu_properties::sets::id_start().contains(ch),
+        UnicodePropertyBinary::Math => icu_properties::sets::math().contains(ch),
+        UnicodePropertyBinary::XIDContinue => icu_properties::sets::xid_continue().contains(ch),
+        UnicodePropertyBinary::XIDStart => icu_properties::sets::xid_start().contains(ch),
+        UnicodePropertyBinary::ASCIIHexDigit => {
+            icu_properties::sets::ascii_hex_digit().contains(ch)
+        }
+        UnicodePropertyBinary::BidiControl => icu_properties::sets::bidi_control().contains(ch),
+        UnicodePropertyBinary::Dash => icu_properties::sets::dash().contains(ch),
+        UnicodePropertyBinary::Deprecated => icu_properties::sets::deprecated().contains(ch),
+        UnicodePropertyBinary::Diacritic => icu_properties::sets::diacritic().contains(ch),
+        UnicodePropertyBinary::Extender => icu_properties::sets::extender().contains(ch),
+        UnicodePropertyBinary::HexDigit => icu_properties::sets::hex_digit().contains(ch),
+        UnicodePropertyBinary::IDSBinaryOperator => {
+            icu_properties::sets::ids_binary_operator().contains(ch)
+        }
+        UnicodePropertyBinary::IDSTrinaryOperator => {
+            icu_properties::sets::ids_trinary_operator().contains(ch)
+        }
+        UnicodePropertyBinary::Ideographic => icu_properties::sets::ideographic().contains(ch),
+        UnicodePropertyBinary::JoinControl => icu_properties::sets::join_control().contains(ch),
+        UnicodePropertyBinary::LogicalOrderException => {
+            icu_properties::sets::logical_order_exception().contains(ch)
+        }
+        UnicodePropertyBinary::Lowercase => icu_properties::sets::lowercase().contains(ch),
+        UnicodePropertyBinary::NoncharacterCodePoint => {
+            icu_properties::sets::noncharacter_code_point().contains(ch)
+        }
+        UnicodePropertyBinary::PatternSyntax => icu_properties::sets::pattern_syntax().contains(ch),
+        UnicodePropertyBinary::PatternWhiteSpace => {
+            icu_properties::sets::pattern_white_space().contains(ch)
+        }
+        UnicodePropertyBinary::QuotationMark => icu_properties::sets::quotation_mark().contains(ch),
+        UnicodePropertyBinary::Radical => icu_properties::sets::radical().contains(ch),
+        UnicodePropertyBinary::RegionalIndicator => {
+            icu_properties::sets::regional_indicator().contains(ch)
+        }
+        UnicodePropertyBinary::SentenceTerminal => {
+            icu_properties::sets::sentence_terminal().contains(ch)
+        }
+        UnicodePropertyBinary::SoftDotted => icu_properties::sets::soft_dotted().contains(ch),
+        UnicodePropertyBinary::TerminalPunctuation => {
+            icu_properties::sets::terminal_punctuation().contains(ch)
+        }
+        UnicodePropertyBinary::UnifiedIdeograph => {
+            icu_properties::sets::unified_ideograph().contains(ch)
+        }
+        UnicodePropertyBinary::Uppercase => icu_properties::sets::uppercase().contains(ch),
+        UnicodePropertyBinary::VariationSelector => {
+            icu_properties::sets::variation_selector().contains(ch)
+        }
+        UnicodePropertyBinary::WhiteSpace => icu_properties::sets::white_space().contains(ch),
+        UnicodePropertyBinary::Emoji => icu_properties::sets::emoji().contains(ch),
+        UnicodePropertyBinary::EmojiComponent => {
+            icu_properties::sets::emoji_component().contains(ch)
+        }
+        UnicodePropertyBinary::EmojiModifier => icu_properties::sets::emoji_modifier().contains(ch),
+        UnicodePropertyBinary::EmojiModifierBase => {
+            icu_properties::sets::emoji_modifier_base().contains(ch)
+        }
+        UnicodePropertyBinary::EmojiPresentation => {
+            icu_properties::sets::emoji_presentation().contains(ch)
+        }
+        UnicodePropertyBinary::ExtendedPictographic => {
+            icu_properties::sets::extended_pictographic().contains(ch)
+        }
+        UnicodePropertyBinary::ChangesWhenNFKCCasefolded => {
+            icu_properties::sets::changes_when_nfkc_casefolded().contains(ch)
+        }
+        UnicodePropertyBinary::BidiMirrored => icu_properties::sets::bidi_mirrored().contains(ch),
+        UnicodePropertyBinary::Ascii => ch.is_ascii(),
+        UnicodePropertyBinary::Any => ch.as_u32() <= 0x10FFFF,
+        UnicodePropertyBinary::Assigned => {
+            icu_properties::maps::general_category().get(ch) != GeneralCategory::Unassigned
+        }
     }
 }

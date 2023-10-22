@@ -9,7 +9,6 @@ use crate::{
         MAX_LOOPS,
     },
     unicode::{self, unicode_property_value_from_str, PropertyEscape},
-    unicodetables::{is_id_continue, is_id_start},
     util::to_char_sat,
 };
 use core::{fmt, iter::Peekable};
@@ -941,7 +940,7 @@ where
                 }
             }
 
-            if is_id_start(c) || c == '$' || c == '_' {
+            if icu_properties::sets::id_start().contains(c) || c == '$' || c == '_' {
                 group_name.push(c);
             } else {
                 self.input = orig_input;
@@ -969,7 +968,7 @@ where
                     break;
                 }
 
-                if is_id_continue(c) || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
+                if icu_properties::sets::id_continue().contains(c) || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
                 /* <ZWJ> */
                 {
                     group_name.push(c);
