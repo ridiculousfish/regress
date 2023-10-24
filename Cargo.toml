@@ -10,7 +10,7 @@ edition = "2021"
 readme = "README.md"
 
 [workspace]
-members = ["regress-tool", "gen-unicode", "."]
+members = ["regress-tool", "."]
 default-members = ["regress-tool", "."]
 
 [profile.release]
@@ -33,3 +33,4 @@ prohibit-unsafe = []
 hashbrown = "0.13.2"
 memchr = { version = "2.4.0", default-features = false }
 icu_properties = "1.3.2"
+icu_casemap = "1.3.2"

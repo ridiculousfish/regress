@@ -86,7 +86,9 @@ impl TestCompiledRegex {
     pub fn match1f(&self, input: &str) -> String {
         match self.find(input) {
             Some(m) => format_match(&m, input),
-            None => panic!("Failed to match {}", input),
+            None => {
+                panic!("Failed to match {}", input);
+            }
         }
     }
 

@@ -523,11 +523,7 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
         } => {
             let sense = if *negate { "negative" } else { "" };
 
-            writeln!(
-                f,
-                "UnicodePropertyEscape {} {:?} {:?}",
-                sense, property_escape.name, property_escape.value
-            )?;
+            writeln!(f, "UnicodePropertyEscape {} {:?}", sense, property_escape)?;
         }
     }
     Ok(())

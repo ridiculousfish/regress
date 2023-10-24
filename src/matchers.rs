@@ -1,8 +1,7 @@
-use crate::cursor;
 use crate::cursor::Direction;
 use crate::indexing::{ElementType, InputIndexer};
 use crate::types::BracketContents;
-use crate::unicode;
+use crate::{cursor, CASE_MATCHER};
 
 pub trait CharProperties {
     type Element: ElementType;
@@ -33,8 +32,7 @@ pub trait CharProperties {
     /// \return whether the bracket \p bc matches the given character \p c,
     /// respecting case. Respects 'invert'.
     #[inline(always)]
-    fn bracket(bc: &BracketContents, c: Self::Element) -> bool {
-        let cp = c.into();
+    fn bracket(bc: &BracketContents, cp: u32) -> bool {
         let contained = bc.cps.intervals().iter().any(|r| r.contains(cp));
         contained ^ bc.invert
     }
@@ -46,7 +44,7 @@ impl CharProperties for UTF8CharProperties {
     type Element = char;
 
     fn fold(c: Self::Element) -> Self::Element {
-        char::from_u32(unicode::fold(c.as_u32())).unwrap()
+        CASE_MATCHER.simple_fold(c)
     }
 }
 
@@ -55,7 +53,7 @@ impl CharProperties for ASCIICharProperties {
     type Element = u8;
 
     fn fold(c: Self::Element) -> Self::Element {
-        c.to_ascii_lowercase()
+        CASE_MATCHER.simple_fold(c.into()) as u8
     }
 }
 

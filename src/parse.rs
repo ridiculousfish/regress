@@ -8,8 +8,9 @@ use crate::{
         BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
         MAX_LOOPS,
     },
-    unicode::{self, unicode_property_value_from_str, PropertyEscape},
+    unicode::{PropertyEscape, UnicodePropertyName, UnicodePropertyValue},
     util::to_char_sat,
+    CASE_MATCHER,
 };
 use core::{fmt, iter::Peekable};
 #[cfg(feature = "std")]
@@ -357,7 +358,7 @@ where
                     let mut cc = c;
                     self.consume(cc);
                     if self.flags.icase {
-                        cc = unicode::fold(cc)
+                        cc = CASE_MATCHER.simple_fold(char::from_u32(cc).unwrap()).into();
                     }
                     result.push(ir::Node::Char {
                         c: cc,
@@ -410,7 +411,17 @@ where
                 Some(']') => {
                     self.consume(']');
                     if self.flags.icase {
-                        result.cps = unicode::fold_code_points(result.cps);
+                        let mut new_cps = CodePointSet::new();
+
+                        for interval in result.cps.intervals() {
+                            for code_point in interval.first..=interval.last {
+                                let folded =
+                                    CASE_MATCHER.simple_fold(char::from_u32(code_point).unwrap());
+                                new_cps.add_one(folded.into());
+                            }
+                        }
+
+                        result.cps = new_cps;
                     }
                     return Ok(ir::Node::Bracket(result));
                 }
@@ -1039,57 +1050,30 @@ where
             return error("Invalid character at property escape start");
         }
 
-        let mut name = String::new();
+        let mut buffer = String::new();
+        let mut name = None;
 
         while let Some(c) = self.peek().and_then(char::from_u32) {
             match c {
                 '}' => {
                     self.consume(c);
-                    if let Some(value) = unicode_property_value_from_str(&name) {
-                        return Ok(PropertyEscape { name: None, value });
+                    if let Some(value) = UnicodePropertyValue::from_str(&buffer, name) {
+                        return Ok(PropertyEscape::new(name, value));
                     } else {
                         return error("Invalid property name");
                     }
                 }
-                '=' => {
+                '=' if name.is_none() => {
                     self.consume(c);
-                    break;
-                }
-                c if c.is_ascii_alphanumeric() || c == '_' => {
-                    self.consume(c);
-                    name.push(c);
-                }
-                _ => {
-                    return error("Invalid property name");
-                }
-            }
-        }
-
-        let mut value = String::new();
-
-        while let Some(c) = self.peek().and_then(char::from_u32) {
-            match c {
-                '}' => {
-                    self.consume(c);
-                    let name = if let Some(name) = unicode::unicode_property_name_from_str(&name) {
-                        name
-                    } else {
+                    let Some(n) = UnicodePropertyName::from_str(&buffer) else {
                         return error("Invalid property name");
                     };
-                    let value =
-                        if let Some(value) = unicode::unicode_property_value_from_str(&value) {
-                            value
-                        } else {
-                            return error("Invalid property name");
-                        };
-                    return Ok(PropertyEscape {
-                        name: Some(name),
-                        value,
-                    });
+                    name = Some(n);
+                    buffer.clear();
                 }
                 c if c.is_ascii_alphanumeric() || c == '_' => {
                     self.consume(c);
-                    value.push(c);
+                    buffer.push(c);
                 }
                 _ => {
                     return error("Invalid property name");

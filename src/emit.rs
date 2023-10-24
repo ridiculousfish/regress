@@ -2,11 +2,10 @@
 
 use crate::bytesearch::{AsciiBitmap, ByteArraySet};
 use crate::insn::{CompiledRegex, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR_SET_LENGTH};
-use crate::ir;
 use crate::ir::Node;
 use crate::startpredicate;
 use crate::types::{BracketContents, CaptureGroupID, LoopID};
-use crate::unicode;
+use crate::{ir, CASE_MATCHER};
 use core::convert::TryInto;
 #[cfg(feature = "std")]
 use std::collections::HashMap;
@@ -97,7 +96,11 @@ impl Emitter {
                 if !*icase {
                     self.emit_insn(Insn::Char(c))
                 } else {
-                    core::debug_assert!(unicode::fold(c) == c, "Char should be folded");
+                    core::debug_assert!(
+                        CASE_MATCHER.simple_fold(char::from_u32(c).unwrap())
+                            == char::from_u32(c).unwrap(),
+                        "Char should be folded"
+                    );
                     self.emit_insn(Insn::CharICase(c))
                 }
             }

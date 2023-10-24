@@ -182,12 +182,13 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         max: usize,
         dir: Dir,
         matcher: Scm,
+        icase: bool,
     ) -> Option<(Input::Position, Input::Position)> {
         debug_assert!(min <= max, "min should be <= max");
         // Drive the iteration min times.
         // That tells us the min position.
         for _ in 0..min {
-            if !matcher.matches(input, dir, &mut pos) {
+            if !matcher.matches(input, dir, &mut pos, icase) {
                 return None;
             }
         }
@@ -197,7 +198,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         // TODO; this is dumb.
         for _ in 0..(max - min) {
             let saved = pos;
-            if !matcher.matches(input, dir, &mut pos) {
+            if !matcher.matches(input, dir, &mut pos, icase) {
                 pos = saved;
                 break;
             }
@@ -228,15 +229,15 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 // Note this try_from may fail, for example if our char is outside ASCII.
                 // In this case we wish to not match.
                 let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::Char { c })
+                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::Char { c }, self.re.flags.icase)
             }
             &Insn::CharICase(c) => {
                 let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::CharICase { c })
+                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::CharICase { c }, self.re.flags.icase)
             }
             &Insn::Bracket(idx) => {
                 let bc = &self.re.brackets[idx];
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::Bracket { bc })
+                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::Bracket { bc }, self.re.flags.icase)
             }
             Insn::AsciiBracket(bitmap) => Self::run_scm_loop_impl(
                 input,
@@ -245,9 +246,10 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 max,
                 dir,
                 scm::MatchByteSet { bytes: bitmap },
+                self.re.flags.icase
             ),
             Insn::MatchAny => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchAny::new())
+                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchAny::new(), self.re.flags.icase)
             }
             Insn::MatchAnyExceptLineTerminator => Self::run_scm_loop_impl(
                 input,
@@ -256,9 +258,10 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 max,
                 dir,
                 scm::MatchAnyExceptLineTerminator::new(),
+                self.re.flags.icase
             ),
             Insn::CharSet(chars) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::CharSet { chars })
+                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::CharSet { chars }, self.re.flags.icase)
             }
             &Insn::ByteSet2(bytes) => Self::run_scm_loop_impl(
                 input,
@@ -267,6 +270,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 max,
                 dir,
                 scm::MatchByteArraySet { bytes },
+                self.re.flags.icase
             ),
             &Insn::ByteSet3(bytes) => Self::run_scm_loop_impl(
                 input,
@@ -275,6 +279,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 max,
                 dir,
                 scm::MatchByteArraySet { bytes },
+                self.re.flags.icase
             ),
             &Insn::ByteSet4(bytes) => Self::run_scm_loop_impl(
                 input,
@@ -283,24 +288,25 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 max,
                 dir,
                 scm::MatchByteArraySet { bytes },
+                self.re.flags.icase
             ),
             Insn::ByteSeq1(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.icase)
             }
             Insn::ByteSeq2(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.icase)
             }
             Insn::ByteSeq3(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.icase)
             }
             Insn::ByteSeq4(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.icase)
             }
             Insn::ByteSeq5(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.icase)
             }
             Insn::ByteSeq6(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.icase)
             }
             _ => {
                 // There should be no other SCMs.
@@ -554,101 +560,101 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     &Insn::Char(c) => {
                         let m = match <<Input as InputIndexer>::Element as ElementType>::try_from(c)
                         {
-                            Some(c) => scm::Char { c }.matches(input, dir, &mut pos),
+                            Some(c) => scm::Char { c }.matches(input, dir, &mut pos, re.flags.icase),
                             None => false,
                         };
                         next_or_bt!(m);
                     }
 
                     Insn::CharSet(chars) => {
-                        let m = scm::CharSet { chars }.matches(input, dir, &mut pos);
+                        let m = scm::CharSet { chars }.matches(input, dir, &mut pos, re.flags.icase);
                         next_or_bt!(m);
                     }
 
                     &Insn::ByteSet2(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos))
+                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos, re.flags.icase))
                     }
                     &Insn::ByteSet3(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos))
+                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos, re.flags.icase))
                     }
                     &Insn::ByteSet4(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos))
+                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos, re.flags.icase))
                     }
 
                     Insn::ByteSeq1(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq2(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq3(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq4(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq5(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq6(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq7(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq8(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq9(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq10(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq11(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq12(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq13(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq14(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq15(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
                     Insn::ByteSeq16(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v, re.flags.icase))
                     }
 
                     &Insn::CharICase(c) => {
                         let m = match <<Input as indexing::InputIndexer>::Element as indexing::ElementType>::try_from(c) {
-                            Some(c) => scm::CharICase { c }.matches(input, dir, &mut pos),
+                            Some(c) => scm::CharICase { c }.matches(input, dir, &mut pos, re.flags.icase),
                             None => false,
                         };
                         next_or_bt!(m)
                     }
 
                     Insn::AsciiBracket(bitmap) => next_or_bt!(
-                        scm::MatchByteSet { bytes: bitmap }.matches(input, dir, &mut pos)
+                        scm::MatchByteSet { bytes: bitmap }.matches(input, dir, &mut pos, re.flags.icase)
                     ),
 
                     &Insn::Bracket(idx) => {
                         next_or_bt!(scm::Bracket {
                             bc: &self.re.brackets[idx]
                         }
-                        .matches(input, dir, &mut pos))
+                        .matches(input, dir, &mut pos, re.flags.icase))
                     }
 
                     Insn::MatchAny => {
-                        next_or_bt!(scm::MatchAny::new().matches(input, dir, &mut pos))
+                        next_or_bt!(scm::MatchAny::new().matches(input, dir, &mut pos, re.flags.icase))
                     }
 
                     Insn::MatchAnyExceptLineTerminator => next_or_bt!(
-                        scm::MatchAnyExceptLineTerminator::new().matches(input, dir, &mut pos)
+                        scm::MatchAnyExceptLineTerminator::new().matches(input, dir, &mut pos, re.flags.icase)
                     ),
 
                     &Insn::WordBoundary { invert } => {
@@ -863,7 +869,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         negate,
                     } => {
                         let m = scm::UnicodePropertyEscape { property_escape }
-                            .matches(input, dir, &mut pos);
+                            .matches(input, dir, &mut pos, re.flags.icase);
                         next_or_bt!(m != *negate);
                     }
 
@@ -942,7 +948,7 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
         let inp = self.input;
         loop {
             // Find the next start location, or None if none.
-            pos = inp.find_bytes(pos, prefix_search)?;
+            pos = inp.find_bytes(pos, prefix_search, self.matcher.re.flags.icase)?;
             if let Some(end) = self.matcher.try_at_pos(inp, 0, pos, Forward::new()) {
                 // If we matched the empty string, we have to increment.
                 if end != pos {

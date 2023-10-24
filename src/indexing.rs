@@ -2,6 +2,7 @@ use crate::bytesearch;
 use crate::matchers;
 use crate::position::{DefPosition, PositionType};
 use crate::util::{is_utf8_continuation, utf8_w2, utf8_w3, utf8_w4};
+use crate::CASE_MATCHER;
 use core::convert::TryInto;
 use core::{ops, str};
 
@@ -126,6 +127,7 @@ where
         &self,
         pos: Self::Position,
         search: &Search,
+        icase: bool,
     ) -> Option<Self::Position>;
 
     /// Peek at the char to the right of a position, without changing that position.
@@ -454,9 +456,19 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         &self,
         pos: Self::Position,
         search: &Search,
+        icase: bool,
     ) -> Option<Self::Position> {
-        let rem = self.slice(pos, self.right_end());
-        let idx = search.find_in(rem)?;
+        let idx = if icase {
+            let rem: Vec<u8> = self
+                .slice(pos, self.right_end())
+                .iter()
+                .map(|c| CASE_MATCHER.simple_fold(char::from(*c)) as u8)
+                .collect();
+            search.find_in(&rem)?
+        } else {
+            let rem = self.slice(pos, self.right_end());
+            search.find_in(rem)?
+        };
         Some(pos + idx)
     }
 }
@@ -640,9 +652,19 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         &self,
         pos: Self::Position,
         search: &Search,
+        icase: bool,
     ) -> Option<Self::Position> {
-        let rem = self.slice(pos, self.right_end());
-        let idx = search.find_in(rem)?;
+        let idx = if icase {
+            let rem: Vec<u8> = self
+                .slice(pos, self.right_end())
+                .iter()
+                .map(|c| CASE_MATCHER.simple_fold(char::from(*c)) as u8)
+                .collect();
+            search.find_in(&rem)?
+        } else {
+            let rem = self.slice(pos, self.right_end());
+            search.find_in(rem)?
+        };
         Some(pos + idx)
     }
 }

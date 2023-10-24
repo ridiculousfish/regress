@@ -1,5 +1,6 @@
 use crate::bytesearch::ByteSeq;
 use crate::indexing::InputIndexer;
+use crate::CASE_MATCHER;
 
 #[derive(Debug, Copy, Clone)]
 pub struct Forward;
@@ -60,11 +61,20 @@ pub fn try_match_lit<Input: InputIndexer, Dir: Direction, Bytes: ByteSeq>(
     dir: Dir,
     pos: &mut Input::Position,
     bytes: &Bytes,
+    icase: bool,
 ) -> bool {
     let len = Bytes::LENGTH;
     debug_assert!(len > 0, "Should not have zero length");
     if let Some(subr_slice) = try_slice(input, dir, pos, len) {
-        bytes.equals_known_len(subr_slice)
+        if icase {
+            let v: Vec<u8> = subr_slice
+                .iter()
+                .map(|c| CASE_MATCHER.simple_fold(*c as char) as u8)
+                .collect();
+            bytes.equals_known_len(&v)
+        } else {
+            bytes.equals_known_len(subr_slice)
+        }
     } else {
         false
     }

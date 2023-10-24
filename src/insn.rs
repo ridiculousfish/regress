@@ -18,9 +18,6 @@ type JumpTarget = u32;
 /// The maximum size of a byte sequence instruction.
 pub const MAX_BYTE_SEQ_LENGTH: usize = 16;
 
-/// The maximum size of an array-type-byteset instruction.
-pub const MAX_BYTE_SET_LENGTH: usize = 4;
-
 /// The maximum size of an array-type-charset instruction.
 /// This also happens to be the maximum number of characters in case-insensitive
 /// equivalence classes.

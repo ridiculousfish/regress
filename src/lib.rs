@@ -143,7 +143,9 @@ mod scm;
 mod startpredicate;
 mod types;
 mod unicode;
-mod unicodetables;
 
 #[cfg(feature = "backend-pikevm")]
 mod pikevm;
+
+// Case folding is used by multiple modules.
+pub(crate) const CASE_MATCHER: icu_casemap::CaseMapper = icu_casemap::CaseMapper::new();

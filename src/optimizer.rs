@@ -1,9 +1,8 @@
 //! Optimizations on regex IR
 
-use crate::insn::{MAX_BYTE_SET_LENGTH, MAX_CHAR_SET_LENGTH};
+use crate::insn::MAX_CHAR_SET_LENGTH;
 use crate::ir::*;
 use crate::types::BracketContents;
-use crate::unicode;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
 
@@ -199,35 +198,6 @@ fn decat(n: &mut Node, _w: &Walk) -> PassAction {
                 PassAction::Replace(Node::Cat(decatted))
             } else {
                 PassAction::Keep
-            }
-        }
-        _ => PassAction::Keep,
-    }
-}
-
-/// Unfold icase chars.
-/// That means for case-insensitive characters, figure out everything that they
-/// could match.
-/// TODO: should cache unfolding.
-fn unfold_icase_chars(n: &mut Node, _w: &Walk) -> PassAction {
-    match *n {
-        Node::Char { c, icase } if icase => {
-            let unfolded = unicode::unfold_char(c);
-            debug_assert!(
-                unfolded.contains(&c),
-                "Char should always unfold to at least itself"
-            );
-            match unfolded.len() {
-                0 => panic!("Char should always unfold to at least itself"),
-                1 => {
-                    // Character does not fold or unfold at all.
-                    PassAction::Replace(Node::Char { c, icase: false })
-                }
-                2..=MAX_BYTE_SET_LENGTH => {
-                    // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet(unfolded))
-                }
-                _ => panic!("Unfolded to more characters than we believed possible"),
             }
         }
         _ => PassAction::Keep,
@@ -431,9 +401,6 @@ pub fn optimize(r: &mut Regex) {
     loop {
         let mut changed = false;
         changed |= run_pass(r, &mut decat);
-        if r.flags.icase {
-            changed |= run_pass(r, &mut unfold_icase_chars);
-        }
         changed |= run_pass(r, &mut unroll_loops);
         changed |= run_pass(r, &mut promote_1char_loops);
         changed |= run_pass(r, &mut form_literal_bytes);
