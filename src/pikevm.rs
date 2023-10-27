@@ -128,22 +128,22 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             _ => StateMatch::Fail,
         },
 
-        Insn::ByteSeq1(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq2(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq3(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq4(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq5(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq6(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq7(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq8(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq9(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq10(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq11(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq12(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq13(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq14(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq15(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
-        Insn::ByteSeq16(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq1(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq2(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq3(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq4(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq5(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq6(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq7(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq8(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq9(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq10(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq11(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq12(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq13(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq14(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq15(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeq16(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
 
         Insn::StartOfLine => {
             let matches = match input.peek_left(s.pos) {
@@ -292,16 +292,16 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         },
 
         Insn::AsciiBracket(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(input, dir, &mut s.pos,))
+            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(input, dir, &mut s.pos))
         }
         &Insn::ByteSet2(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos,))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos))
         }
         &Insn::ByteSet3(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos,))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos))
         }
         &Insn::ByteSet4(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos,))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos))
         }
 
         &Insn::WordBoundary { invert } => {

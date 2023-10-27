@@ -561,62 +561,62 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     }
 
                     &Insn::ByteSet2(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos,))
+                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos))
                     }
                     &Insn::ByteSet3(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos,))
+                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos))
                     }
                     &Insn::ByteSet4(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos,))
+                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos))
                     }
 
                     Insn::ByteSeq1(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq2(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq3(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq4(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq5(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq6(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq7(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq8(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq9(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq10(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq11(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq12(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq13(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq14(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq15(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
                     Insn::ByteSeq16(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v,))
+                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
 
                     Insn::AsciiBracket(bitmap) => next_or_bt!(
@@ -631,14 +631,12 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     }
 
                     Insn::MatchAny => {
-                        next_or_bt!(scm::MatchAny::new().matches(input, dir, &mut pos,))
+                        next_or_bt!(scm::MatchAny::new().matches(input, dir, &mut pos))
                     }
 
-                    Insn::MatchAnyExceptLineTerminator => {
-                        next_or_bt!(
-                            scm::MatchAnyExceptLineTerminator::new().matches(input, dir, &mut pos,)
-                        )
-                    }
+                    Insn::MatchAnyExceptLineTerminator => next_or_bt!(
+                        scm::MatchAnyExceptLineTerminator::new().matches(input, dir, &mut pos)
+                    ),
 
                     &Insn::WordBoundary { invert } => {
                         // Copy the positions since these destructively move them.
