@@ -8,11 +8,13 @@ use crate::{
         BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
         MAX_LOOPS,
     },
+    unfold_char,
     unicode::{PropertyEscape, UnicodePropertyName, UnicodePropertyValue},
     util::to_char_sat,
     CASE_MATCHER,
 };
 use core::{fmt, iter::Peekable};
+use icu_collections::codepointinvlist::CodePointInversionListBuilder;
 #[cfg(feature = "std")]
 use std::collections::HashMap;
 #[cfg(not(feature = "std"))]
@@ -355,15 +357,14 @@ where
                         return error("Nothing to repeat");
                     }
                     self.input = saved;
-                    let mut cc = c;
+                    let cc = c;
                     self.consume(cc);
+
                     if self.flags.icase {
-                        cc = CASE_MATCHER.simple_fold(char::from_u32(cc).unwrap()).into();
+                        result.push(unfold_char(char::from_u32(cc).unwrap()))
+                    } else {
+                        result.push(ir::Node::Char(cc))
                     }
-                    result.push(ir::Node::Char {
-                        c: cc,
-                        icase: self.flags.icase,
-                    })
                 }
             }
 
@@ -411,17 +412,20 @@ where
                 Some(']') => {
                     self.consume(']');
                     if self.flags.icase {
-                        let mut new_cps = CodePointSet::new();
-
-                        for interval in result.cps.intervals() {
+                        let intervals = result.cps.intervals().to_vec();
+                        for interval in intervals {
                             for code_point in interval.first..=interval.last {
-                                let folded =
-                                    CASE_MATCHER.simple_fold(char::from_u32(code_point).unwrap());
-                                new_cps.add_one(folded.into());
+                                let c = char::from_u32(code_point).unwrap();
+                                let simple = CASE_MATCHER.simple_fold(c);
+                                let mut builder = CodePointInversionListBuilder::new();
+                                CASE_MATCHER.add_case_closure_to(c, &mut builder);
+                                for unfolded in builder.build().iter_chars() {
+                                    if CASE_MATCHER.simple_fold(unfolded) == simple {
+                                        result.cps.add_one(unfolded.into());
+                                    }
+                                }
                             }
                         }
-
-                        result.cps = new_cps;
                     }
                     return Ok(ir::Node::Bracket(result));
                 }
@@ -836,10 +840,15 @@ where
                     error("Unexpected end of named backreference")
                 }
             }
-            _ => Ok(ir::Node::Char {
-                c: self.consume_character_escape()?,
-                icase: self.flags.icase,
-            }),
+            _ => {
+                let c = self.consume_character_escape()?;
+
+                if self.flags.icase {
+                    Ok(unfold_char(char::from_u32(c).unwrap()))
+                } else {
+                    Ok(ir::Node::Char(c))
+                }
+            }
         }
     }
 

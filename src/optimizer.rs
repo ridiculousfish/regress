@@ -96,7 +96,7 @@ where
 // Remove empty Nodes.
 fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
     match n {
-        Node::Empty | Node::Goal | Node::Char { .. } => PassAction::Keep,
+        Node::Empty | Node::Goal | Node::Char(_) => PassAction::Keep,
         Node::ByteSequence(v) => {
             if v.is_empty() {
                 PassAction::Remove
@@ -291,7 +291,7 @@ fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
         }
     }
     match n {
-        Node::Char { c, icase } if !*icase => {
+        Node::Char(c) => {
             if let Some(c) = char::from_u32(*c) {
                 let mut buff = [0; 4];
                 PassAction::Replace(Node::ByteSequence(
@@ -384,7 +384,9 @@ fn simplify_brackets(n: &mut Node, _walk: &Walk) -> PassAction {
             }
 
             // TODO: does this ever help anything?
-            if bc.cps.intervals().len() > bc.cps.inverted_interval_count() {
+            if bc.cps.intervals().len() > 1
+                && bc.cps.intervals().len() > bc.cps.inverted_interval_count()
+            {
                 bc.cps = bc.cps.inverted();
                 bc.invert = !bc.invert;
                 PassAction::Modified

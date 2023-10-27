@@ -147,7 +147,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         // We assume that most char nodes have been optimized to ByteSeq or AnyBytes2, so skip
         // these.
         // TODO: we could support icase through bitmap of de-folded first bytes.
-        Node::Char { .. } => arbitrary,
+        Node::Char(_) => arbitrary,
 
         // Cats return the first non-None value, if any.
         Node::Cat(nodes) => nodes.iter().filter_map(compute_start_predicate).next(),

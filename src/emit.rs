@@ -2,10 +2,10 @@
 
 use crate::bytesearch::{AsciiBitmap, ByteArraySet};
 use crate::insn::{CompiledRegex, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR_SET_LENGTH};
+use crate::ir;
 use crate::ir::Node;
 use crate::startpredicate;
 use crate::types::{BracketContents, CaptureGroupID, LoopID};
-use crate::{ir, CASE_MATCHER};
 use core::convert::TryInto;
 #[cfg(feature = "std")]
 use std::collections::HashMap;
@@ -91,19 +91,7 @@ impl Emitter {
         match node {
             Node::Empty => {}
             Node::Goal => self.emit_insn(Insn::Goal),
-            Node::Char { c, icase } => {
-                let c = *c;
-                if !*icase {
-                    self.emit_insn(Insn::Char(c))
-                } else {
-                    core::debug_assert!(
-                        CASE_MATCHER.simple_fold(char::from_u32(c).unwrap())
-                            == char::from_u32(c).unwrap(),
-                        "Char should be folded"
-                    );
-                    self.emit_insn(Insn::CharICase(c))
-                }
-            }
+            Node::Char(c) => self.emit_insn(Insn::Char(*c)),
             Node::Cat(children) => {
                 for nn in children {
                     self.emit_node(nn)

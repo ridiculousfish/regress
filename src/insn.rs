@@ -41,9 +41,6 @@ pub enum Insn {
     /// Match a single char.
     Char(u32),
 
-    /// Match a single char, case-insensitive.
-    CharICase(u32),
-
     /// Match the start of a line (if multiline); emitted by '^'
     StartOfLine,
 

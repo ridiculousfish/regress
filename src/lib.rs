@@ -119,6 +119,8 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 #[macro_use]
 extern crate alloc;
 
+use insn::MAX_CHAR_SET_LENGTH;
+
 pub use crate::api::*;
 
 #[macro_use]
@@ -149,3 +151,23 @@ mod pikevm;
 
 // Case folding is used by multiple modules.
 pub(crate) const CASE_MATCHER: icu_casemap::CaseMapper = icu_casemap::CaseMapper::new();
+
+pub(crate) fn unfold_char(c: char) -> ir::Node {
+    let mut builder = icu_collections::codepointinvlist::CodePointInversionListBuilder::new();
+    CASE_MATCHER.add_case_closure_to(c, &mut builder);
+    let list = builder.build();
+    if list.is_empty() {
+        ir::Node::Char(c.into())
+    } else {
+        let simple = CASE_MATCHER.simple_fold(c);
+        let mut v = Vec::new();
+        for unfolded in list.iter_chars() {
+            if CASE_MATCHER.simple_fold(unfolded) == simple {
+                v.push(unfolded.into());
+            }
+        }
+        v.push(c.into());
+        assert!(v.len() <= MAX_CHAR_SET_LENGTH);
+        ir::Node::CharSet(v)
+    }
+}

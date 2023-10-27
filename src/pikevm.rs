@@ -2,6 +2,7 @@
 
 use crate::api::Match;
 use crate::bytesearch::charset_contains;
+use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
@@ -13,7 +14,6 @@ use crate::scm;
 use crate::scm::SingleCharMatcher;
 use crate::types::{GroupData, LoopData};
 use crate::util::DebugCheckIndex;
-use crate::{cursor, CASE_MATCHER};
 use core::ops::Range;
 #[cfg(feature = "std")]
 use std::collections::HashMap;
@@ -122,130 +122,28 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             Some(c2) => nextinsn_or_fail!(c == c2.as_u32()),
             _ => StateMatch::Fail,
         },
-        &Insn::CharICase(c) => match cursor::next(input, dir, &mut s.pos) {
-            Some(c2) => {
-                nextinsn_or_fail!(c == c2.as_u32() || Input::CharProps::fold(c2).as_u32() == c)
-            }
-            _ => StateMatch::Fail,
-        },
 
         Insn::CharSet(v) => match cursor::next(input, dir, &mut s.pos) {
             Some(c) => nextinsn_or_fail!(charset_contains(v, c.as_u32())),
             _ => StateMatch::Fail,
         },
 
-        Insn::ByteSeq1(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq2(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq3(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq4(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq5(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq6(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq7(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq8(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq9(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq10(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq11(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq12(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq13(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq14(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq15(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
-        Insn::ByteSeq16(v) => nextinsn_or_fail!(cursor::try_match_lit(
-            input,
-            dir,
-            &mut s.pos,
-            v,
-            re.flags.icase
-        )),
+        Insn::ByteSeq1(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq2(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq3(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq4(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq5(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq6(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq7(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq8(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq9(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq10(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq11(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq12(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq13(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq14(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq15(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
+        Insn::ByteSeq16(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v,)),
 
         Insn::StartOfLine => {
             let matches = match input.peek_left(s.pos) {
@@ -388,47 +286,22 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         Insn::Loop1CharBody { .. } => panic!("Loop1CharBody unimplemented for pikevm"),
         &Insn::Bracket(idx) => match cursor::next(input, dir, &mut s.pos) {
             Some(c) => {
-                let mut cp = c.into();
-                if re.flags.icase {
-                    cp = CASE_MATCHER.simple_fold(char::from_u32(cp).unwrap()).into();
-                }
-
-                nextinsn_or_fail!(Input::CharProps::bracket(&re.brackets[idx], cp))
+                nextinsn_or_fail!(Input::CharProps::bracket(&re.brackets[idx], c.into()))
             }
             _ => StateMatch::Fail,
         },
 
         Insn::AsciiBracket(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(
-                input,
-                dir,
-                &mut s.pos,
-                re.flags.icase
-            ))
+            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(input, dir, &mut s.pos,))
         }
         &Insn::ByteSet2(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(
-                input,
-                dir,
-                &mut s.pos,
-                re.flags.icase
-            ))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos,))
         }
         &Insn::ByteSet3(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(
-                input,
-                dir,
-                &mut s.pos,
-                re.flags.icase
-            ))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos,))
         }
         &Insn::ByteSet4(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(
-                input,
-                dir,
-                &mut s.pos,
-                re.flags.icase
-            ))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos,))
         }
 
         &Insn::WordBoundary { invert } => {
@@ -446,12 +319,9 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             property_escape,
             negate,
         } => {
-            let m = if (scm::UnicodePropertyEscape { property_escape }).matches(
-                input,
-                dir,
-                &mut s.pos,
-                re.flags.icase,
-            ) {
+            let m = if (scm::UnicodePropertyEscape { property_escape })
+                .matches(input, dir, &mut s.pos)
+            {
                 !*negate
             } else {
                 *negate

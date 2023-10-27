@@ -1,17 +1,17 @@
 use crate::bytesearch::{charset_contains, ByteArraySet, ByteSeq, ByteSet, SmallArraySet};
+use crate::cursor;
 use crate::cursor::Direction;
-use crate::indexing::{ElementType, InputIndexer};
+use crate::indexing::InputIndexer;
 use crate::insn::MAX_CHAR_SET_LENGTH;
 use crate::matchers::CharProperties;
 use crate::types::BracketContents;
 use crate::unicode::PropertyEscape;
-use crate::{cursor, CASE_MATCHER};
 
 /// A trait for things that match a single Element.
 pub trait SingleCharMatcher<Input: InputIndexer, Dir: Direction> {
     /// \return whether we match the character at the given position, advancing
     /// the position if so. On a false return, the position is unspecified.
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position, icase: bool) -> bool;
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool;
 }
 
 /// Insn::Char
@@ -20,23 +20,9 @@ pub struct Char<Input: InputIndexer> {
 }
 impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Char<Input> {
     #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position, _icase: bool) -> bool {
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
             Some(c2) => c2 == self.c,
-            _ => false,
-        }
-    }
-}
-
-/// Insn::CharICase
-pub struct CharICase<Input: InputIndexer> {
-    pub c: Input::Element,
-}
-impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for CharICase<Input> {
-    #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position, _icase: bool) -> bool {
-        match cursor::next(input, dir, pos) {
-            Some(c2) => c2 == self.c || Input::CharProps::fold(c2) == self.c,
             _ => false,
         }
     }
@@ -49,15 +35,9 @@ pub struct CharSet<'a> {
 
 impl<'a, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for CharSet<'a> {
     #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position, icase: bool) -> bool {
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
-            Some(c) => {
-                let mut c = c.as_u32();
-                if icase {
-                    c = CASE_MATCHER.simple_fold(char::from_u32(c).unwrap()).into();
-                }
-                charset_contains(self.chars, c)
-            }
+            Some(c) => charset_contains(self.chars, c.into()),
             None => false,
         }
     }
@@ -70,12 +50,8 @@ pub struct Bracket<'a> {
 
 impl<'a, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Bracket<'a> {
     #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position, icase: bool) -> bool {
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
-            Some(c) if icase => {
-                let c = CASE_MATCHER.simple_fold(char::from_u32(c.into()).unwrap());
-                Input::CharProps::bracket(self.bc, c.into())
-            }
             Some(c) => Input::CharProps::bracket(self.bc, c.into()),
             _ => false,
         }
@@ -91,7 +67,7 @@ impl MatchAny {
 }
 impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for MatchAny {
     #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position, _icase: bool) -> bool {
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         // If there is a character, it counts as a match.
         cursor::next(input, dir, pos).is_some()
     }
@@ -108,7 +84,7 @@ impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir>
     for MatchAnyExceptLineTerminator
 {
     #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position, _icase: bool) -> bool {
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
             Some(c2) => !Input::CharProps::is_line_terminator(c2),
             _ => false,
@@ -125,11 +101,8 @@ impl<'a, Input: InputIndexer, Dir: Direction, Bytes: ByteSet> SingleCharMatcher<
     for MatchByteSet<'a, Bytes>
 {
     #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position, icase: bool) -> bool {
-        if let Some(mut b) = cursor::next_byte(input, dir, pos) {
-            if icase {
-                b = CASE_MATCHER.simple_fold(char::from(b)) as u8;
-            }
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
+        if let Some(b) = cursor::next_byte(input, dir, pos) {
             self.bytes.contains(b)
         } else {
             false
@@ -147,11 +120,8 @@ impl<Input: InputIndexer, Dir: Direction, ArraySet: SmallArraySet> SingleCharMat
     for MatchByteArraySet<ArraySet>
 {
     #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position, icase: bool) -> bool {
-        if let Some(mut b) = cursor::next_byte(input, dir, pos) {
-            if icase {
-                b = CASE_MATCHER.simple_fold(char::from(b)) as u8;
-            }
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
+        if let Some(b) = cursor::next_byte(input, dir, pos) {
             self.bytes.0.contains(b)
         } else {
             false
@@ -168,12 +138,12 @@ impl<'a, Input: InputIndexer, Dir: Direction, Bytes: ByteSeq> SingleCharMatcher<
     for MatchByteSeq<'a, Bytes>
 {
     #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position, icase: bool) -> bool {
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         debug_assert!(
             Bytes::LENGTH <= 4,
             "This looks like it could match more than one char"
         );
-        cursor::try_match_lit(input, dir, pos, self.bytes, icase)
+        cursor::try_match_lit(input, dir, pos, self.bytes)
     }
 }
 
@@ -186,7 +156,7 @@ impl<'a, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir>
     for UnicodePropertyEscape<'a>
 {
     #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position, _icase: bool) -> bool {
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
             Some(c2) => self.property_escape.contains(c2.into()),
             _ => false,

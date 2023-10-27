@@ -36,7 +36,7 @@ pub enum Node {
     Goal,
 
     /// Match a literal character.
-    Char { c: u32, icase: bool },
+    Char(u32),
 
     /// Match a literal sequence of bytes.
     ByteSequence(Vec<u8>),
@@ -136,7 +136,7 @@ impl Node {
     /// This is best-effort: a false return is always safe.
     pub fn matches_exactly_one_char(&self) -> bool {
         match self {
-            Node::Char { .. } => true,
+            Node::Char(_) => true,
             Node::CharSet { .. } => true,
             Node::Bracket { .. } => true,
             Node::MatchAny => true,
@@ -151,7 +151,7 @@ impl Node {
         match self {
             Node::Empty => Node::Empty,
             Node::Goal => Node::Goal,
-            &Node::Char { c, icase } => Node::Char { c, icase },
+            &Node::Char(c) => Node::Char(c),
             Node::ByteSequence(bytes) => Node::ByteSequence(bytes.clone()),
             Node::ByteSet(bytes) => Node::ByteSet(bytes.clone()),
             Node::CharSet(chars) => Node::CharSet(chars.clone()),
@@ -252,7 +252,7 @@ where
         match n {
             Node::Empty
             | Node::Goal
-            | Node::Char { .. }
+            | Node::Char(_)
             | Node::ByteSequence(..)
             | Node::ByteSet(..)
             | Node::CharSet(..)
@@ -325,7 +325,7 @@ where
         match n {
             Node::Empty
             | Node::Goal
-            | Node::Char { .. }
+            | Node::Char(_)
             | Node::ByteSequence(..)
             | Node::ByteSet(..)
             | Node::CharSet(..)
@@ -432,7 +432,7 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
         Node::Goal => {
             writeln!(f, "Goal")?;
         }
-        Node::Char { c, icase: _ } => {
+        Node::Char(c) => {
             writeln!(f, "'{}'", &c.to_string())?;
         }
         Node::ByteSequence(bytes) => {
