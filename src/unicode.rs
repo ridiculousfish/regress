@@ -4,6 +4,8 @@ use crate::util::SliceHelp;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::cmp::Ordering;
+#[cfg(test)]
+use std::collections::HashMap;
 
 // CodePointRange packs a code point and a length together into a u32.
 // We currently do not need to store any information about code points in plane 16 (U+100000),
@@ -100,7 +102,8 @@ pub(crate) struct FoldRange {
 impl FoldRange {
     #[inline(always)]
     pub const fn from(start: u32, length: u32, delta: i32, modulo: u8) -> Self {
-        let mask = (1 << modulo) - 1;
+        const_assert_true!(modulo.is_power_of_two());
+        let mask = (modulo - 1) as i32;
         const_assert_true!(mask < (1 << PREDICATE_MASK_BITS));
         const_assert_true!(((delta << PREDICATE_MASK_BITS) >> PREDICATE_MASK_BITS) == delta);
         let extra = mask | (delta << PREDICATE_MASK_BITS);
@@ -126,7 +129,7 @@ impl FoldRange {
 
     #[inline(always)]
     fn predicate_mask(&self) -> u32 {
-        (self.extra as u32) & PREDICATE_MASK_BITS
+        (self.extra as u32) & ((1 << PREDICATE_MASK_BITS) - 1)
     }
 
     fn add_delta(&self, cu: u32) -> u32 {
@@ -344,5 +347,73 @@ pub(crate) fn is_character_class(c: u32, property_escape: &PropertyEscape) -> bo
         }
     } else {
         false
+    }
+}
+
+#[test]
+fn test_folds() {
+    for c in 0..0x41 {
+        assert_eq!(fold(c), c);
+    }
+    for c in 0x41..=0x5A {
+        assert_eq!(fold(c), c + 0x20);
+    }
+    assert_eq!(fold(0xB5), 0x3BC);
+    assert_eq!(fold(0xC0), 0xE0);
+
+    assert_eq!(fold(0x1B8), 0x1B9);
+    assert_eq!(fold(0x1B9), 0x1B9);
+    assert_eq!(fold(0x1BA), 0x1BA);
+    assert_eq!(fold(0x1BB), 0x1BB);
+    assert_eq!(fold(0x1BC), 0x1BD);
+    assert_eq!(fold(0x1BD), 0x1BD);
+
+    for c in 0x1F8..0x21F {
+        if c % 2 == 0 {
+            assert_eq!(fold(c), c + 1);
+        } else {
+            assert_eq!(fold(c), c);
+        }
+    }
+
+    assert_eq!(fold(0x37F), 0x3F3);
+    assert_eq!(fold(0x380), 0x380);
+    assert_eq!(fold(0x16E40), 0x16E60);
+    assert_eq!(fold(0x16E41), 0x16E61);
+    assert_eq!(fold(0x16E42), 0x16E62);
+    assert_eq!(fold(0x1E900), 0x1E922);
+    assert_eq!(fold(0x1E901), 0x1E923);
+    for c in 0xF0000..=0x10FFFF {
+        assert_eq!(fold(c), c);
+    }
+}
+
+#[test]
+fn test_fold_idempotent() {
+    for c in 0..=0x10FFFF {
+        let fc = fold(c);
+        let ffc = fold(fc);
+        assert_eq!(ffc, fc);
+    }
+}
+
+#[test]
+fn test_unfold_chars() {
+    // Map from folded char to the chars that folded to it.
+    let mut fold_map: HashMap<u32, Vec<u32>> = HashMap::new();
+    for c in 0..=0x10FFFF {
+        let fc = fold(c);
+        fold_map.entry(fc).or_insert_with(Vec::new).push(c);
+    }
+
+    // Sort them all.
+    for v in fold_map.values_mut() {
+        v.sort_unstable();
+    }
+
+    for c in 0..=0x10FFFF {
+        let mut unfolded = unfold_char(c);
+        unfolded.sort_unstable();
+        assert_eq!(unfolded, fold_map[&fold(c)]);
     }
 }

@@ -1537,3 +1537,46 @@ fn test_escapes_folding_tc(tc: TestConfig) {
     tc.test_match_succeeds(r"\u{61}", "i", "a");
     tc.test_match_succeeds(r"\u{61}", "i", "A");
 }
+
+#[test]
+fn test_high_folds() {
+    test_with_configs(test_high_folds_tc)
+}
+
+fn test_high_folds_tc(tc: TestConfig) {
+    // Regression test for bogus folding.
+    // We incorrectly folded certain characters in delta blocks:
+    // we folded U+100 to U+101 (correctly) but then U+101 to U+102 (wrong).
+    tc.test_match_succeeds(r"\u{100}", "", "\u{100}");
+    tc.test_match_succeeds(r"\u{100}", "i", "\u{100}");
+
+    tc.test_match_fails(r"\u{100}", "", "\u{101}");
+    tc.test_match_succeeds(r"\u{100}", "i", "\u{101}");
+
+    tc.test_match_succeeds(r"\u{101}", "", "\u{101}");
+    tc.test_match_succeeds(r"\u{101}", "i", "\u{101}");
+
+    tc.test_match_fails(r"\u{101}", "", "\u{102}");
+    tc.test_match_fails(r"\u{101}", "i", "\u{102}");
+
+    // Exercise a "mod 4 range":
+    //   U+1B8 folds to U+1B9
+    //   U+1BC folds to U+1BD
+    // Codepoints between fold to themselves.
+    tc.test_match_succeeds(r"\u{1B8}", "", "\u{1B8}");
+    tc.test_match_succeeds(r"\u{1B8}", "i", "\u{1B8}");
+    tc.test_match_fails(r"\u{1B8}", "", "\u{1B9}");
+    tc.test_match_succeeds(r"\u{1B8}", "i", "\u{1B9}");
+    tc.test_match_succeeds(r"\u{1B9}", "", "\u{1B9}");
+    tc.test_match_succeeds(r"\u{1B9}", "i", "\u{1B9}");
+    tc.test_match_fails(r"\u{1B9}", "", "\u{1BA}");
+    tc.test_match_fails(r"\u{1B9}", "i", "\u{1BA}");
+    tc.test_match_succeeds(r"\u{1BC}", "", "\u{1BC}");
+    tc.test_match_succeeds(r"\u{1BC}", "i", "\u{1BC}");
+    tc.test_match_fails(r"\u{1BC}", "", "\u{1BD}");
+    tc.test_match_succeeds(r"\u{1BC}", "i", "\u{1BD}");
+    tc.test_match_succeeds(r"\u{1BD}", "", "\u{1BD}");
+    tc.test_match_succeeds(r"\u{1BD}", "i", "\u{1BD}");
+    tc.test_match_fails(r"\u{1BD}", "", "\u{1BE}");
+    tc.test_match_fails(r"\u{1BD}", "i", "\u{1BE}");
+}
