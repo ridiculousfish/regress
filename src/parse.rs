@@ -1117,15 +1117,6 @@ pub fn try_parse<I>(pattern: I, flags: api::Flags) -> Result<ir::Regex, Error>
 where
     I: Iterator<Item = u32> + Clone,
 {
-    // for q in 0..=0x10FFFF {
-    //     if let Some(c) = core::char::from_u32(q) {
-    //         let cc = folds::fold(c);
-    //         if (c as u32) > 127 && (cc as u32) < 127 {
-    //             println!("Bad CP: {}", q);
-    //         }
-    //     }
-    // }
-
     let mut p = Parser {
         input: pattern.peekable(),
         flags,
