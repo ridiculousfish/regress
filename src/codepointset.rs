@@ -1,23 +1,23 @@
 use crate::util::SliceHelp;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
-use core::cmp::Ordering;
-use core::iter::once;
+use core::cmp::{self, Ordering};
 
 pub type CodePoint = u32;
 
 /// The maximum (inclusive) code point.
 pub const CODE_POINT_MAX: CodePoint = 0x10FFFF;
 
-/// An list of sorted, inclusive, non-empty ranges of code points.
+/// An inclusive range of code points.
 /// This is more efficient than InclusiveRange because it does not need to carry
 /// around the Option<bool>.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Interval {
     pub first: CodePoint,
     pub last: CodePoint,
 }
 
+/// A list of sorted, inclusive, non-empty ranges of code points.
 impl Interval {
     /// Return whether self is before rhs.
     fn is_before(self, other: Interval) -> bool {
@@ -34,7 +34,7 @@ impl Interval {
 
     /// Compare two intervals.
     /// Overlapping *or abutting* intervals are considered equal.
-    fn mergecmp(self, rhs: Interval) -> Ordering {
+    fn mergecmp(self, rhs: Interval) -> cmp::Ordering {
         if self.is_strictly_before(rhs) {
             Ordering::Less
         } else if rhs.is_strictly_before(self) {
@@ -81,7 +81,7 @@ fn merge_intervals(x: Interval, y: &Interval) -> Interval {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CodePointSet {
     ivs: Vec<Interval>,
 }
@@ -92,6 +92,7 @@ impl CodePointSet {
         CodePointSet { ivs: Vec::new() }
     }
 
+    #[inline]
     fn assert_is_well_formed(&self) {
         if cfg!(debug_assertions) {
             for iv in &self.ivs {
@@ -120,6 +121,7 @@ impl CodePointSet {
 
         // Check our work.
         if cfg!(debug_assertions) {
+            debug_assert!(new_iv.first <= new_iv.last);
             for (idx, iv) in self.ivs.iter().enumerate() {
                 if idx < mergeable.start {
                     debug_assert!(iv.is_strictly_before(new_iv));
@@ -132,15 +134,36 @@ impl CodePointSet {
         }
 
         // Merge all the overlapping intervals (possibly none), and then replace the
-        // range.
-        let merged_iv = self.ivs[mergeable.clone()]
-            .iter()
-            .fold(new_iv, merge_intervals);
-        self.ivs.splice(mergeable, once(merged_iv));
+        // range. Tests show that drain(), which modifies the vector, is not effectively
+        // optimized, so try to avoid it in the cases of a new entry or replacing an existing
+        // entry.
+        match mergeable.end - mergeable.start {
+            0 => {
+                // New entry.
+                self.ivs.insert(mergeable.start, new_iv);
+            }
+            1 => {
+                // Replace a single entry.
+                let entry = &mut self.ivs[mergeable.start];
+                *entry = Interval {
+                    first: cmp::min(entry.first, new_iv.first),
+                    last: cmp::max(entry.last, new_iv.last),
+                };
+            }
+            _ => {
+                // Replace range of entries.
+                let merged_iv: Interval = self.ivs[mergeable.clone()]
+                    .iter()
+                    .fold(new_iv, merge_intervals);
+                self.ivs[mergeable.start] = merged_iv;
+                self.ivs.drain(mergeable.start + 1..mergeable.end);
+            }
+        }
         self.assert_is_well_formed();
     }
 
     /// Add a single code point to the set.
+    #[inline]
     pub fn add_one(&mut self, cp: CodePoint) {
         self.add(Interval {
             first: cp,
@@ -204,5 +227,180 @@ impl CodePointSet {
             })
         }
         CodePointSet::from_sorted_disjoint_intervals(inverted_ivs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn iv(first: u32, last: u32) -> Interval {
+        Interval { first, last }
+    }
+
+    #[test]
+    fn test_is_before() {
+        let a = iv(0, 9);
+        let b = iv(10, 19);
+        assert!(a.is_before(b));
+        assert!(!b.is_before(a));
+    }
+
+    #[test]
+    fn test_is_strictly_before() {
+        let a = iv(0, 9);
+        let b = iv(10, 19);
+        let c = iv(11, 19);
+        assert!(!a.is_strictly_before(b));
+        assert!(a.is_strictly_before(c));
+        assert!(!b.is_strictly_before(a));
+        assert!(!b.is_strictly_before(c));
+    }
+
+    #[test]
+    fn test_mergecmp() {
+        let a = iv(0, 9);
+        let b = iv(10, 19);
+        let c = iv(9, 18);
+        assert_eq!(a.mergecmp(b), Ordering::Equal);
+        assert_eq!(b.mergecmp(a), Ordering::Equal);
+        assert_eq!(a.mergecmp(c), Ordering::Equal);
+        assert_eq!(c.mergecmp(a), Ordering::Equal);
+
+        let d = iv(11, 19);
+        assert_eq!(a.mergecmp(d), Ordering::Less);
+        assert_eq!(d.mergecmp(a), Ordering::Greater);
+        assert_eq!(b.mergecmp(d), Ordering::Equal);
+        assert_eq!(d.mergecmp(b), Ordering::Equal);
+        assert_eq!(c.mergecmp(d), Ordering::Equal);
+        assert_eq!(d.mergecmp(c), Ordering::Equal);
+
+        let e = iv(100, 109);
+        assert_eq!(a.mergecmp(e), Ordering::Less);
+        assert_eq!(e.mergecmp(a), Ordering::Greater);
+    }
+
+    #[test]
+    fn test_mergeable() {
+        let a = iv(0, 9);
+        let b = iv(9, 19);
+        assert!(a.mergeable(a));
+        assert!(a.mergeable(b));
+        assert!(b.mergeable(b));
+    }
+
+    #[test]
+    fn test_contains() {
+        let a = iv(0, 9);
+        assert!(a.contains(0));
+        assert!(a.contains(9));
+        assert!(!a.contains(10));
+    }
+
+    #[test]
+    fn test_overlaps() {
+        let a = iv(0, 9);
+        let b = iv(5, 14);
+        let c = iv(10, 19);
+        assert!(a.overlaps(b));
+        assert!(!a.overlaps(c));
+    }
+
+    #[test]
+    fn test_codepoints() {
+        let a = iv(0, 9);
+        assert_eq!(a.codepoints(), 0..10);
+    }
+
+    #[test]
+    fn test_count_codepoints() {
+        assert_eq!(iv(0, 9).count_codepoints(), 10);
+        assert_eq!(iv(0, 0).count_codepoints(), 1);
+        assert_eq!(
+            iv(0, CODE_POINT_MAX).count_codepoints(),
+            (CODE_POINT_MAX + 1) as usize
+        );
+    }
+
+    #[test]
+    fn test_add() {
+        let mut set = CodePointSet::new();
+        set.add(iv(10, 20));
+        set.add(iv(30, 40));
+        set.add(iv(15, 35));
+        assert_eq!(set.intervals(), &[iv(10, 40)]);
+    }
+
+    #[test]
+    fn test_add_one() {
+        let mut set = CodePointSet::new();
+        set.add_one(10);
+        set.add_one(20);
+        set.add_one(15);
+        assert_eq!(set.intervals(), &[iv(10, 10), iv(15, 15), iv(20, 20)]);
+    }
+
+    #[test]
+    fn test_add_set() {
+        let mut set1 = CodePointSet::new();
+        set1.add(iv(10, 20));
+        set1.add(iv(30, 40));
+        let mut set2 = CodePointSet::new();
+        set2.add(iv(15, 25));
+        set2.add(iv(35, 45));
+        set1.add_set(set2);
+        assert_eq!(set1.intervals(), &[iv(10, 25), iv(30, 45)]);
+    }
+
+    #[test]
+    fn test_inverted() {
+        let mut set = CodePointSet::new();
+        set.add(iv(10, 20));
+        set.add(iv(30, 40));
+        let inverted_set = set.inverted();
+        assert_eq!(
+            inverted_set.intervals(),
+            &[iv(0, 9), iv(21, 29), iv(41, CODE_POINT_MAX)]
+        );
+        let set_again = inverted_set.inverted();
+        assert_eq!(set_again.intervals(), set.intervals());
+
+        assert_eq!(
+            set.inverted_interval_count(),
+            inverted_set.intervals().len()
+        );
+        assert_eq!(
+            inverted_set.inverted_interval_count(),
+            set.intervals().len()
+        );
+    }
+
+    #[test]
+    fn test_adds_torture() {
+        let mut set = CodePointSet::new();
+        set.add(iv(1, 3));
+        assert_eq!(&set.intervals(), &[iv(1, 3)]);
+        set.add(iv(0, 0));
+        assert_eq!(&set.intervals(), &[iv(0, 3)]);
+        set.add(iv(3, 5));
+        assert_eq!(&set.intervals(), &[iv(0, 5)]);
+        set.add(iv(6, 10));
+        assert_eq!(&set.intervals(), &[iv(0, 10)]);
+        set.add(iv(15, 15));
+        assert_eq!(&set.intervals(), &[iv(0, 10), iv(15, 15)]);
+        set.add(iv(12, 14));
+        assert_eq!(&set.intervals(), &[iv(0, 10), iv(12, 15)]);
+        set.add(iv(16, 20));
+        assert_eq!(&set.intervals(), &[iv(0, 10), iv(12, 20)]);
+        set.add(iv(21, 22));
+        assert_eq!(&set.intervals(), &[iv(0, 10), iv(12, 22)]);
+        set.add(iv(23, 23));
+        assert_eq!(&set.intervals(), &[iv(0, 10), iv(12, 23)]);
+        set.add(iv(100, 200));
+        assert_eq!(&set.intervals(), &[iv(0, 10), iv(12, 23), iv(100, 200)]);
+        set.add(iv(201, 250));
+        assert_eq!(&set.intervals(), &[iv(0, 10), iv(12, 23), iv(100, 250)]);
+        set.add(iv(0, 0x10ffff));
+        assert_eq!(&set.intervals(), &[iv(0, 0x10ffff)]);
     }
 }

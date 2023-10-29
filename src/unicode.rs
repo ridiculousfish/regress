@@ -4,8 +4,6 @@ use crate::util::SliceHelp;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::cmp::Ordering;
-#[cfg(test)]
-use std::collections::HashMap;
 
 // CodePointRange packs a code point and a length together into a u32.
 // We currently do not need to store any information about code points in plane 16 (U+100000),
@@ -191,8 +189,9 @@ pub fn fold(cu: u32) -> u32 {
     }
 }
 
+// Add all folded characters in the given interval to the given code point set.
+// This skips characters which fold to themselves.
 fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
-    // Find the range of folds which overlap our interval.
     let overlaps = FOLDS.equal_range_by(|tr| {
         if tr.first() > iv.last {
             Ordering::Greater
@@ -240,6 +239,7 @@ fn unfold_interval(iv: Interval, recv: &mut CodePointSet) {
 
 /// \return all the characters which fold to c's fold.
 /// This is a slow linear search across all ranges.
+/// The result always contains c.
 pub fn unfold_char(c: u32) -> Vec<u32> {
     let mut res = vec![c];
     let fcp = fold(c);
@@ -265,7 +265,7 @@ pub fn unfold_char(c: u32) -> Vec<u32> {
 }
 
 // Fold every character in \p input, then find all the prefolds.
-pub fn fold_code_points(mut input: CodePointSet) -> CodePointSet {
+pub fn add_icase_code_points(mut input: CodePointSet) -> CodePointSet {
     let mut folded = input.clone();
     for iv in input.intervals() {
         fold_interval(*iv, &mut folded)
@@ -350,70 +350,187 @@ pub(crate) fn is_character_class(c: u32, property_escape: &PropertyEscape) -> bo
     }
 }
 
-#[test]
-fn test_folds() {
-    for c in 0..0x41 {
-        assert_eq!(fold(c), c);
-    }
-    for c in 0x41..=0x5A {
-        assert_eq!(fold(c), c + 0x20);
-    }
-    assert_eq!(fold(0xB5), 0x3BC);
-    assert_eq!(fold(0xC0), 0xE0);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
 
-    assert_eq!(fold(0x1B8), 0x1B9);
-    assert_eq!(fold(0x1B9), 0x1B9);
-    assert_eq!(fold(0x1BA), 0x1BA);
-    assert_eq!(fold(0x1BB), 0x1BB);
-    assert_eq!(fold(0x1BC), 0x1BD);
-    assert_eq!(fold(0x1BD), 0x1BD);
+    // Map from folded char to the chars that folded to it.
+    // If an entry is missing, it means either nothing folds to the char,
+    // or it folds exclusively to itself; this can be determined by comparing
+    // the char to its fold.
+    fn get_unfold_map() -> HashMap<u32, Vec<u32>> {
+        let mut unfold_map: HashMap<u32, Vec<u32>> = HashMap::new();
+        for c in 0..=0x10FFFF {
+            let fc = fold(c);
+            if fc != c {
+                unfold_map.entry(fc).or_insert_with(Vec::new).push(c);
+            }
+        }
 
-    for c in 0x1F8..0x21F {
-        if c % 2 == 0 {
-            assert_eq!(fold(c), c + 1);
-        } else {
+        // We neglected self-folds - add them now, but only for entries
+        // where something else folds to it, else our map would be quite large.
+        // Also sort them all.
+        for (&k, v) in unfold_map.iter_mut() {
+            assert_eq!(k, fold(k), "folds should be idempotent");
+            v.push(k);
+            v.sort_unstable();
+        }
+        unfold_map
+    }
+
+    #[test]
+    fn test_folds() {
+        for c in 0..0x41 {
+            assert_eq!(fold(c), c);
+        }
+        for c in 0x41..=0x5A {
+            assert_eq!(fold(c), c + 0x20);
+        }
+        assert_eq!(fold(0xB5), 0x3BC);
+        assert_eq!(fold(0xC0), 0xE0);
+
+        assert_eq!(fold(0x1B8), 0x1B9);
+        assert_eq!(fold(0x1B9), 0x1B9);
+        assert_eq!(fold(0x1BA), 0x1BA);
+        assert_eq!(fold(0x1BB), 0x1BB);
+        assert_eq!(fold(0x1BC), 0x1BD);
+        assert_eq!(fold(0x1BD), 0x1BD);
+
+        for c in 0x1F8..0x21F {
+            if c % 2 == 0 {
+                assert_eq!(fold(c), c + 1);
+            } else {
+                assert_eq!(fold(c), c);
+            }
+        }
+
+        assert_eq!(fold(0x37F), 0x3F3);
+        assert_eq!(fold(0x380), 0x380);
+        assert_eq!(fold(0x16E40), 0x16E60);
+        assert_eq!(fold(0x16E41), 0x16E61);
+        assert_eq!(fold(0x16E42), 0x16E62);
+        assert_eq!(fold(0x1E900), 0x1E922);
+        assert_eq!(fold(0x1E901), 0x1E923);
+        for c in 0xF0000..=0x10FFFF {
             assert_eq!(fold(c), c);
         }
     }
 
-    assert_eq!(fold(0x37F), 0x3F3);
-    assert_eq!(fold(0x380), 0x380);
-    assert_eq!(fold(0x16E40), 0x16E60);
-    assert_eq!(fold(0x16E41), 0x16E61);
-    assert_eq!(fold(0x16E42), 0x16E62);
-    assert_eq!(fold(0x1E900), 0x1E922);
-    assert_eq!(fold(0x1E901), 0x1E923);
-    for c in 0xF0000..=0x10FFFF {
-        assert_eq!(fold(c), c);
-    }
-}
-
-#[test]
-fn test_fold_idempotent() {
-    for c in 0..=0x10FFFF {
-        let fc = fold(c);
-        let ffc = fold(fc);
-        assert_eq!(ffc, fc);
-    }
-}
-
-#[test]
-fn test_unfold_chars() {
-    // Map from folded char to the chars that folded to it.
-    let mut fold_map: HashMap<u32, Vec<u32>> = HashMap::new();
-    for c in 0..=0x10FFFF {
-        let fc = fold(c);
-        fold_map.entry(fc).or_insert_with(Vec::new).push(c);
+    #[test]
+    fn test_fold_idempotent() {
+        for c in 0..=0x10FFFF {
+            let fc = fold(c);
+            let ffc = fold(fc);
+            assert_eq!(ffc, fc);
+        }
     }
 
-    // Sort them all.
-    for v in fold_map.values_mut() {
-        v.sort_unstable();
+    #[test]
+    fn test_unfolds_refold() {
+        for c in 0..=0x10FFFF {
+            let fc = fold(c);
+            let unfolds = unfold_char(c);
+            for uc in unfolds {
+                assert_eq!(fold(uc), fc);
+            }
+        }
     }
 
-    for c in 0..=0x10FFFF {
-        let mut unfolded = unfold_char(c);
-        unfolded.sort_unstable();
-        assert_eq!(unfolded, fold_map[&fold(c)]);
+    #[test]
+    fn test_unfold_chars() {
+        let unfold_map = get_unfold_map();
+        for c in 0..=0x10FFFF {
+            let mut unfolded = unfold_char(c);
+            unfolded.sort_unstable();
+            let fc = fold(c);
+            if let Some(expected) = unfold_map.get(&fc) {
+                // Explicit list of unfolds.
+                assert_eq!(&unfolded, expected);
+            } else {
+                // No entry in our testing unfold map: that means that either the
+                // character folds to itself and nothing else does, or the character
+                // folds to a different character - but that different character
+                // should fold to itself (folding is idempotent) so we should always
+                // have multiple characters in that case. Therefore we expect this
+                // character's unfolds to be itself exclusively.
+                assert_eq!(&unfolded, &[c]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_add_icase_code_points() {
+        let unfold_map = get_unfold_map();
+        let locs = [
+            0x0, 0x42, 0x100, 0xdeba, 0x11419, 0x278f8, 0x2e000, 0x35df7, 0x462d6, 0x4bc29,
+            0x4f4c0, 0x58a9b, 0x5bafc, 0x62383, 0x66d60, 0x6974a, 0x77628, 0x87804, 0x9262b,
+            0x931e4, 0xaa08c, 0xad7a8, 0xca6b0, 0xcce27, 0xcd897, 0xcf5e7, 0xe2802, 0xe561b,
+            0xe5f43, 0xf4339, 0xfb78c, 0xfc5ee, 0x104fa9, 0x10e402, 0x10e6cf, 0x10FFFF,
+        ];
+        for (idx, &first) in locs.iter().enumerate() {
+            // Keep a running set of the unfolded code points we expect to be in the
+            // range [first, last].
+            let mut expected = CodePointSet::default();
+            let mut from = first;
+            for &last in &locs[idx..] {
+                // Add both folded and unfolded characters to expected.
+                for c in from..=last {
+                    let fc = fold(c);
+                    if let Some(unfolded) = unfold_map.get(&fc) {
+                        // Some nontrival set of characters fold to fc.
+                        for &ufc in unfolded {
+                            expected.add_one(ufc);
+                        }
+                    } else {
+                        // Only fc folds to fc.
+                        expected.add_one(fc);
+                    }
+                }
+                let mut input = CodePointSet::new();
+                input.add(Interval { first, last });
+                let folded = add_icase_code_points(input);
+                assert_eq!(folded, expected);
+                from = last;
+            }
+        }
+    }
+
+    #[test]
+    fn test_fold_interval() {
+        let locs = [
+            0, 0x894, 0x59ac, 0xfa64, 0x10980, 0x12159, 0x16b8d, 0x1aaa2, 0x1f973, 0x1fcd4,
+            0x20c35, 0x23d8a, 0x276af, 0x2c6b8, 0x2fb25, 0x30b9b, 0x338ad, 0x35ab3, 0x38d37,
+            0x3bfa7, 0x3fba6, 0x404c9, 0x44572, 0x480c9, 0x4b5c4, 0x4f371, 0x5a9fa, 0x5ad6c,
+            0x5e395, 0x5f103, 0x5fa98, 0x617fa, 0x6500e, 0x68890, 0x6a3fc, 0x6eab3, 0x704a6,
+            0x70c22, 0x72efb, 0x737cc, 0x76796, 0x79da8, 0x7a450, 0x7b023, 0x7cc5c, 0x82027,
+            0x84ef4, 0x8ac66, 0x8b898, 0x8bd1a, 0x95841, 0x98a48, 0x9e6cd, 0xa035a, 0xa41fb,
+            0xa50e3, 0xa6387, 0xa7ba1, 0xaad9a, 0xabed8, 0xacc88, 0xb2737, 0xb31b1, 0xb6daf,
+            0xb7ff4, 0xba2b4, 0xbde4f, 0xbe38b, 0xbe7a5, 0xc4eb2, 0xc5670, 0xc7703, 0xc995d,
+            0xccb72, 0xcdfe3, 0xcfc99, 0xd09eb, 0xd2773, 0xd357d, 0xd6696, 0xd9aec, 0xdc3fa,
+            0xdc8ae, 0xdc9d5, 0xde31d, 0xe2edb, 0xe652b, 0xe92d5, 0xebf2d, 0xee335, 0xef45f,
+            0xf4280, 0xf74b1, 0xf9ac4, 0xfafca, 0x10208d, 0x107d63, 0x10821e, 0x108818, 0x10911f,
+            0x10b6fd, 0x10FFFF,
+        ];
+        for (idx, &first) in locs.iter().enumerate() {
+            // Keep a running set of the folded code points we expect to be in the
+            // range [first, last].
+            let mut expected = CodePointSet::default();
+            let mut from = first;
+            for &last in &locs[idx..] {
+                // Add characters to expected which do not fold to themselves.
+                for c in from..=last {
+                    let fc = fold(c);
+                    if fc != c {
+                        expected.add_one(fc);
+                    }
+                }
+                let mut cps = CodePointSet::default();
+                fold_interval(Interval { first, last }, &mut cps);
+                assert_eq!(cps.intervals(), expected.intervals());
+
+                from = last;
+            }
+        }
     }
 }

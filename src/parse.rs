@@ -416,7 +416,7 @@ where
                 Some(']') => {
                     self.consume(']');
                     if self.flags.icase {
-                        result.cps = unicode::fold_code_points(result.cps);
+                        result.cps = unicode::add_icase_code_points(result.cps);
                     }
                     return Ok(ir::Node::Bracket(result));
                 }
