@@ -188,6 +188,15 @@ where
         true
     }
 
+    /// Fold a character if icase.
+    fn fold_if_icase(&self, c: u32) -> u32 {
+        if self.flags.icase {
+            unicode::fold(c)
+        } else {
+            c
+        }
+    }
+
     /// Peek at the next character.
     fn peek(&mut self) -> Option<u32> {
         self.input.peek().copied()
@@ -355,13 +364,9 @@ where
                         return error("Nothing to repeat");
                     }
                     self.input = saved;
-                    let mut cc = c;
-                    self.consume(cc);
-                    if self.flags.icase {
-                        cc = unicode::fold(cc)
-                    }
+                    self.consume(c);
                     result.push(ir::Node::Char {
-                        c: cc,
+                        c: self.fold_if_icase(c),
                         icase: self.flags.icase,
                     })
                 }
@@ -826,10 +831,13 @@ where
                     error("Unexpected end of named backreference")
                 }
             }
-            _ => Ok(ir::Node::Char {
-                c: self.consume_character_escape()?,
-                icase: self.flags.icase,
-            }),
+            _ => {
+                let c = self.consume_character_escape()?;
+                Ok(ir::Node::Char {
+                    c: self.fold_if_icase(c),
+                    icase: self.flags.icase,
+                })
+            }
         }
     }
 

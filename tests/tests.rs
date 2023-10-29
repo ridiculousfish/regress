@@ -1520,3 +1520,20 @@ fn test_valid_character_sets_in_annex_b_tc(tc: TestConfig) {
     tc.test_match_fails(regexp, "", "f");
     tc.test_match_fails(regexp, "", " ");
 }
+
+#[test]
+fn test_escapes_folding() {
+    test_with_configs(test_escapes_folding_tc)
+}
+
+fn test_escapes_folding_tc(tc: TestConfig) {
+    // Regression test for failing to fold characters which come from escapes.
+    tc.test_match_fails(r"\u{41}", "", "a");
+    tc.test_match_succeeds(r"\u{41}", "", "A");
+    tc.test_match_fails(r"\u{61}", "", "A");
+    tc.test_match_succeeds(r"\u{61}", "", "a");
+    tc.test_match_succeeds(r"\u{41}", "i", "a");
+    tc.test_match_succeeds(r"\u{41}", "i", "A");
+    tc.test_match_succeeds(r"\u{61}", "i", "a");
+    tc.test_match_succeeds(r"\u{61}", "i", "A");
+}

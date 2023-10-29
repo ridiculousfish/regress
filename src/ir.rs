@@ -36,6 +36,7 @@ pub enum Node {
     Goal,
 
     /// Match a literal character.
+    /// If icase is true, then `c` MUST be already folded.
     Char { c: u32, icase: bool },
 
     /// Match a literal sequence of bytes.
