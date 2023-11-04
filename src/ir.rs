@@ -446,11 +446,8 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
         Node::ByteSet(bytes) => {
             let len = bytes.len();
             write!(f, "ByteSet{}", len)?;
-            if len > 0 {
-                write!(f, "0x")?;
-                for &b in bytes {
-                    write!(f, "{:x}", b)?;
-                }
+            for &b in bytes {
+                write!(f, " 0x{:x}", b)?;
             }
             writeln!(f)?;
         }
