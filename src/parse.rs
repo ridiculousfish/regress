@@ -48,6 +48,10 @@ enum ClassAtom {
         class_type: CharacterClassType,
         positive: bool,
     },
+    UnicodePropertyEscape {
+        property_escape: PropertyEscape,
+        negate: bool,
+    },
 }
 
 fn error<S, T>(text: S) -> Result<T, Error>
@@ -107,6 +111,7 @@ fn make_bracket_class(ct: CharacterClassType, positive: bool) -> ir::Node {
     ir::Node::Bracket(BracketContents {
         invert: false,
         cps: codepoints_from_class(ct, positive),
+        unicode_property: Vec::new(),
     })
 }
 
@@ -119,6 +124,10 @@ fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom) {
         } => {
             bc.cps.add_set(codepoints_from_class(class_type, positive));
         }
+        ClassAtom::UnicodePropertyEscape {
+            property_escape,
+            negate,
+        } => bc.unicode_property.push((property_escape, negate)),
     }
 }
 
@@ -406,6 +415,7 @@ where
         let mut result = BracketContents {
             invert,
             cps: CodePointSet::default(),
+            unicode_property: Vec::new(),
         };
 
         loop {
@@ -480,52 +490,82 @@ where
             // Escape sequence.
             '\\' => {
                 self.consume('\\');
-                let next = self.peek();
-                if next.is_none() {
+                let ec = if let Some(ec) = self.peek() {
+                    ec
+                } else {
                     return error("Unterminated escape");
-                }
-                let ec = next.unwrap();
+                };
                 match to_char_sat(ec) {
-                    // ES6 21.2.2.12 CharacterClassEscape.
-                    'd' | 'D' | 's' | 'S' | 'w' | 'W' => {
-                        self.consume(ec);
-                        let class_type = match to_char_sat(ec) {
-                            'd' | 'D' => CharacterClassType::Digits,
-                            's' | 'S' => CharacterClassType::Spaces,
-                            'w' | 'W' => CharacterClassType::Words,
-                            _ => panic!("Unreachable"),
-                        };
-                        Ok(Some(ClassAtom::CharacterClass {
-                            class_type,
-                            positive: (ec == 'd' as u32 || ec == 's' as u32 || ec == 'w' as u32),
-                        }))
-                    }
+                    // ClassEscape :: b
                     'b' => {
-                        // "Return the CharSet containing the single character <BS> U+0008
-                        // (BACKSPACE)"
                         self.consume('b');
                         Ok(Some(ClassAtom::CodePoint(u32::from('\x08'))))
                     }
-
-                    '-' => {
-                        // ES6 21.2.1 ClassEscape: \- escapes - in Unicode
-                        // expressions.
+                    // ClassEscape :: [+UnicodeMode] -
+                    '-' if self.flags.unicode => {
                         self.consume('-');
                         Ok(Some(ClassAtom::CodePoint(u32::from('-'))))
                     }
-
-                    // TODO: implement property escape in brackets
-                    //                    'p' | 'P' => {
-                    //                        self.consume(ec);
-                    //
-                    //                        let property_escape = self.try_consume_unicode_property_escape()?;
-                    //                        let negate = ec == 'P';
-                    //
-                    //                        Ok(Some(ClassAtom::UnicodePropertyEscape {
-                    //                            property_escape,
-                    //                            negate,
-                    //                        }))
-                    //                    }
+                    // ClassEscape :: CharacterClassEscape :: d
+                    'd' => {
+                        self.consume('d');
+                        Ok(Some(ClassAtom::CharacterClass {
+                            class_type: CharacterClassType::Digits,
+                            positive: true,
+                        }))
+                    }
+                    // ClassEscape :: CharacterClassEscape :: D
+                    'D' => {
+                        self.consume('D');
+                        Ok(Some(ClassAtom::CharacterClass {
+                            class_type: CharacterClassType::Digits,
+                            positive: false,
+                        }))
+                    }
+                    // ClassEscape :: CharacterClassEscape :: s
+                    's' => {
+                        self.consume('s');
+                        Ok(Some(ClassAtom::CharacterClass {
+                            class_type: CharacterClassType::Spaces,
+                            positive: true,
+                        }))
+                    }
+                    // ClassEscape :: CharacterClassEscape :: S
+                    'S' => {
+                        self.consume('S');
+                        Ok(Some(ClassAtom::CharacterClass {
+                            class_type: CharacterClassType::Spaces,
+                            positive: false,
+                        }))
+                    }
+                    // ClassEscape :: CharacterClassEscape :: w
+                    'w' => {
+                        self.consume('w');
+                        Ok(Some(ClassAtom::CharacterClass {
+                            class_type: CharacterClassType::Words,
+                            positive: true,
+                        }))
+                    }
+                    // ClassEscape :: CharacterClassEscape :: W
+                    'W' => {
+                        self.consume('W');
+                        Ok(Some(ClassAtom::CharacterClass {
+                            class_type: CharacterClassType::Words,
+                            positive: false,
+                        }))
+                    }
+                    // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
+                    // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] P{ UnicodePropertyValueExpression }
+                    'p' | 'P' if self.flags.unicode => {
+                        self.consume(ec);
+                        let property_escape = self.try_consume_unicode_property_escape()?;
+                        let negate = ec == 'P' as u32;
+                        Ok(Some(ClassAtom::UnicodePropertyEscape {
+                            property_escape,
+                            negate,
+                        }))
+                    }
+                    // ClassEscape :: CharacterEscape
                     _ => {
                         let cc = self.consume_character_escape()?;
                         Ok(Some(ClassAtom::CodePoint(cc)))

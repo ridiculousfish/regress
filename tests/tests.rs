@@ -1259,25 +1259,22 @@ fn property_escapes_invalid() {
     test_parse_fails(r#"\p{ASCII=Y}"#);
     test_parse_fails(r#"\P{ASCII=Yes}"#);
     test_parse_fails(r#"\p{ASCII=Yes}"#);
-    // TODO: implement property escape in brackets
-    //test_parse_fails(r#"[--\p{Hex}]"#);
-    //test_parse_fails(r#"[\uFFFF-\p{Hex}]"#);
-    //test_parse_fails(r#"[\p{Hex}-\uFFFF]"#);
-    //test_parse_fails(r#"[\p{Hex}--]"#);
+    test_parse_fails_flags(r#"[--\p{Hex}]"#, "u");
+    test_parse_fails_flags(r#"[\uFFFF-\p{Hex}]"#, "u");
+    test_parse_fails_flags(r#"[\p{Hex}-\uFFFF]"#, "u");
+    test_parse_fails_flags(r#"[\p{Hex}--]"#, "u");
     test_parse_fails(r#"\P{^General_Category=Letter}"#);
     test_parse_fails(r#"\p{^General_Category=Letter}"#);
-    // TODO: implement property escape in brackets
-    //test_parse_fails(r#"[\p{}]"#);
-    //test_parse_fails(r#"[\P{}]"#);
+    test_parse_fails_flags(r#"[\p{}]"#, "u");
+    test_parse_fails_flags(r#"[\P{}]"#, "u");
     test_parse_fails(r#"\P{InAdlam}"#);
     test_parse_fails(r#"\p{InAdlam}"#);
     test_parse_fails(r#"\P{InAdlam}"#);
     test_parse_fails(r#"\p{InAdlam}"#);
     test_parse_fails(r#"\P{InScript=Adlam}"#);
     test_parse_fails(r#"\p{InScript=Adlam}"#);
-    // TODO: implement property escape in brackets
-    //test_parse_fails(r#"[\P{invalid}]"#);
-    //test_parse_fails(r#"[\p{invalid}]"#);
+    test_parse_fails_flags(r#"[\P{invalid}]"#, "u");
+    test_parse_fails_flags(r#"[\p{invalid}]"#, "u");
     test_parse_fails(r#"\P{IsScript=Adlam}"#);
     test_parse_fails(r#"\p{IsScript=Adlam}"#);
     test_parse_fails(r#"\P"#);
