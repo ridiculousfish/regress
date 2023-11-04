@@ -16,9 +16,9 @@ struct Opt {
     #[structopt(long, short, parse(from_str = Flags::from))]
     flags: Option<Flags>,
 
-    /// Should the regular expression be optimized.
-    #[structopt(long, short)]
-    optimization: Option<bool>,
+    /// Optimize the IR.
+    #[structopt(long, short, takes_value = false)]
+    optimize: bool,
 
     /// Dump the unoptimized IR to stdout
     #[structopt(long)]
@@ -98,7 +98,7 @@ fn main() -> Result<(), Error> {
         println!("Unoptimized IR:\n{}", ire);
     }
 
-    if args.optimization.unwrap_or(true) {
+    if args.optimize {
         backends::optimize(&mut ire);
         if args.dump_phases || args.dump_optimized_ir {
             println!("Optimized IR:\n{}", ire);
