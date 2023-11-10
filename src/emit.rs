@@ -25,6 +25,10 @@ fn make_anchor(anchor_type: ir::AnchorType) -> Insn {
 /// If the given bracket can be represented as ASCII contents, return the
 /// bitmap. Otherwise nothing.
 fn bracket_as_ascii(bc: &BracketContents) -> Option<AsciiBitmap> {
+    if !bc.unicode_property.is_empty() {
+        return None;
+    }
+
     let mut result = AsciiBitmap::default();
     // We just assume that inverted brackets contain non-ASCII characters.
     if bc.invert {

@@ -1,5 +1,6 @@
 use crate::codepointset::CodePointSet;
 use crate::position::PositionType;
+use crate::unicode::PropertyEscape;
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
 use core::ops;
@@ -30,6 +31,7 @@ pub enum CharacterClassType {
 pub struct BracketContents {
     pub invert: bool,
     pub cps: CodePointSet,
+    pub unicode_property: Vec<(PropertyEscape, bool)>,
 }
 
 /// An instruction pointer.
