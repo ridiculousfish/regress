@@ -12535,2882 +12535,6 @@ pub(crate) const FOLDS: [FoldRange; 201] = [
     FoldRange::from(0x1E900, 34, 34, 1),
 ];
 
-pub(crate) const ADLAM: [CodePointRange; 3] = [
-    CodePointRange::from(125184, 76),
-    CodePointRange::from(125264, 10),
-    CodePointRange::from(125278, 2),
-];
-
-/// Return whether c has the 'Adlam' Unicode property.
-pub(crate) fn is_adlam(c: char) -> bool {
-    ADLAM.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const AHOM: [CodePointRange; 3] = [
-    CodePointRange::from(71424, 27),
-    CodePointRange::from(71453, 15),
-    CodePointRange::from(71472, 23),
-];
-
-/// Return whether c has the 'Ahom' Unicode property.
-pub(crate) fn is_ahom(c: char) -> bool {
-    AHOM.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const ANATOLIAN_HIEROGLYPHS: [CodePointRange; 1] = [CodePointRange::from(82944, 583)];
-
-/// Return whether c has the 'Anatolian_Hieroglyphs' Unicode property.
-pub(crate) fn is_anatolian_hieroglyphs(c: char) -> bool {
-    ANATOLIAN_HIEROGLYPHS
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const ARABIC: [CodePointRange; 58] = [
-    CodePointRange::from(1536, 5),
-    CodePointRange::from(1542, 6),
-    CodePointRange::from(1549, 14),
-    CodePointRange::from(1564, 3),
-    CodePointRange::from(1568, 32),
-    CodePointRange::from(1601, 10),
-    CodePointRange::from(1622, 26),
-    CodePointRange::from(1649, 108),
-    CodePointRange::from(1758, 34),
-    CodePointRange::from(1872, 48),
-    CodePointRange::from(2160, 31),
-    CodePointRange::from(2192, 2),
-    CodePointRange::from(2200, 74),
-    CodePointRange::from(2275, 29),
-    CodePointRange::from(64336, 115),
-    CodePointRange::from(64467, 363),
-    CodePointRange::from(64832, 80),
-    CodePointRange::from(64914, 54),
-    CodePointRange::from(64975, 1),
-    CodePointRange::from(65008, 16),
-    CodePointRange::from(65136, 5),
-    CodePointRange::from(65142, 135),
-    CodePointRange::from(69216, 31),
-    CodePointRange::from(69373, 3),
-    CodePointRange::from(126464, 4),
-    CodePointRange::from(126469, 27),
-    CodePointRange::from(126497, 2),
-    CodePointRange::from(126500, 1),
-    CodePointRange::from(126503, 1),
-    CodePointRange::from(126505, 10),
-    CodePointRange::from(126516, 4),
-    CodePointRange::from(126521, 1),
-    CodePointRange::from(126523, 1),
-    CodePointRange::from(126530, 1),
-    CodePointRange::from(126535, 1),
-    CodePointRange::from(126537, 1),
-    CodePointRange::from(126539, 1),
-    CodePointRange::from(126541, 3),
-    CodePointRange::from(126545, 2),
-    CodePointRange::from(126548, 1),
-    CodePointRange::from(126551, 1),
-    CodePointRange::from(126553, 1),
-    CodePointRange::from(126555, 1),
-    CodePointRange::from(126557, 1),
-    CodePointRange::from(126559, 1),
-    CodePointRange::from(126561, 2),
-    CodePointRange::from(126564, 1),
-    CodePointRange::from(126567, 4),
-    CodePointRange::from(126572, 7),
-    CodePointRange::from(126580, 4),
-    CodePointRange::from(126585, 4),
-    CodePointRange::from(126590, 1),
-    CodePointRange::from(126592, 10),
-    CodePointRange::from(126603, 17),
-    CodePointRange::from(126625, 3),
-    CodePointRange::from(126629, 5),
-    CodePointRange::from(126635, 17),
-    CodePointRange::from(126704, 2),
-];
-
-/// Return whether c has the 'Arabic' Unicode property.
-pub(crate) fn is_arabic(c: char) -> bool {
-    ARABIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const ARMENIAN: [CodePointRange; 4] = [
-    CodePointRange::from(1329, 38),
-    CodePointRange::from(1369, 50),
-    CodePointRange::from(1421, 3),
-    CodePointRange::from(64275, 5),
-];
-
-/// Return whether c has the 'Armenian' Unicode property.
-pub(crate) fn is_armenian(c: char) -> bool {
-    ARMENIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const AVESTAN: [CodePointRange; 2] = [
-    CodePointRange::from(68352, 54),
-    CodePointRange::from(68409, 7),
-];
-
-/// Return whether c has the 'Avestan' Unicode property.
-pub(crate) fn is_avestan(c: char) -> bool {
-    AVESTAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const BALINESE: [CodePointRange; 2] = [
-    CodePointRange::from(6912, 77),
-    CodePointRange::from(6992, 47),
-];
-
-/// Return whether c has the 'Balinese' Unicode property.
-pub(crate) fn is_balinese(c: char) -> bool {
-    BALINESE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const BAMUM: [CodePointRange; 2] = [
-    CodePointRange::from(42656, 88),
-    CodePointRange::from(92160, 569),
-];
-
-/// Return whether c has the 'Bamum' Unicode property.
-pub(crate) fn is_bamum(c: char) -> bool {
-    BAMUM.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const BASSA_VAH: [CodePointRange; 2] = [
-    CodePointRange::from(92880, 30),
-    CodePointRange::from(92912, 6),
-];
-
-/// Return whether c has the 'Bassa_Vah' Unicode property.
-pub(crate) fn is_bassa_vah(c: char) -> bool {
-    BASSA_VAH
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const BATAK: [CodePointRange; 2] = [
-    CodePointRange::from(7104, 52),
-    CodePointRange::from(7164, 4),
-];
-
-/// Return whether c has the 'Batak' Unicode property.
-pub(crate) fn is_batak(c: char) -> bool {
-    BATAK.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const BENGALI: [CodePointRange; 14] = [
-    CodePointRange::from(2432, 4),
-    CodePointRange::from(2437, 8),
-    CodePointRange::from(2447, 2),
-    CodePointRange::from(2451, 22),
-    CodePointRange::from(2474, 7),
-    CodePointRange::from(2482, 1),
-    CodePointRange::from(2486, 4),
-    CodePointRange::from(2492, 9),
-    CodePointRange::from(2503, 2),
-    CodePointRange::from(2507, 4),
-    CodePointRange::from(2519, 1),
-    CodePointRange::from(2524, 2),
-    CodePointRange::from(2527, 5),
-    CodePointRange::from(2534, 25),
-];
-
-/// Return whether c has the 'Bengali' Unicode property.
-pub(crate) fn is_bengali(c: char) -> bool {
-    BENGALI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const BHAIKSUKI: [CodePointRange; 4] = [
-    CodePointRange::from(72704, 9),
-    CodePointRange::from(72714, 45),
-    CodePointRange::from(72760, 14),
-    CodePointRange::from(72784, 29),
-];
-
-/// Return whether c has the 'Bhaiksuki' Unicode property.
-pub(crate) fn is_bhaiksuki(c: char) -> bool {
-    BHAIKSUKI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const BOPOMOFO: [CodePointRange; 3] = [
-    CodePointRange::from(746, 2),
-    CodePointRange::from(12549, 43),
-    CodePointRange::from(12704, 32),
-];
-
-/// Return whether c has the 'Bopomofo' Unicode property.
-pub(crate) fn is_bopomofo(c: char) -> bool {
-    BOPOMOFO
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const BRAHMI: [CodePointRange; 3] = [
-    CodePointRange::from(69632, 78),
-    CodePointRange::from(69714, 36),
-    CodePointRange::from(69759, 1),
-];
-
-/// Return whether c has the 'Brahmi' Unicode property.
-pub(crate) fn is_brahmi(c: char) -> bool {
-    BRAHMI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const BRAILLE: [CodePointRange; 1] = [CodePointRange::from(10240, 256)];
-
-/// Return whether c has the 'Braille' Unicode property.
-pub(crate) fn is_braille(c: char) -> bool {
-    BRAILLE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const BUGINESE: [CodePointRange; 2] = [
-    CodePointRange::from(6656, 28),
-    CodePointRange::from(6686, 2),
-];
-
-/// Return whether c has the 'Buginese' Unicode property.
-pub(crate) fn is_buginese(c: char) -> bool {
-    BUGINESE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const BUHID: [CodePointRange; 1] = [CodePointRange::from(5952, 20)];
-
-/// Return whether c has the 'Buhid' Unicode property.
-pub(crate) fn is_buhid(c: char) -> bool {
-    BUHID.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const CANADIAN_ABORIGINAL: [CodePointRange; 3] = [
-    CodePointRange::from(5120, 640),
-    CodePointRange::from(6320, 70),
-    CodePointRange::from(72368, 16),
-];
-
-/// Return whether c has the 'Canadian_Aboriginal' Unicode property.
-pub(crate) fn is_canadian_aboriginal(c: char) -> bool {
-    CANADIAN_ABORIGINAL
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const CARIAN: [CodePointRange; 1] = [CodePointRange::from(66208, 49)];
-
-/// Return whether c has the 'Carian' Unicode property.
-pub(crate) fn is_carian(c: char) -> bool {
-    CARIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const CAUCASIAN_ALBANIAN: [CodePointRange; 2] = [
-    CodePointRange::from(66864, 52),
-    CodePointRange::from(66927, 1),
-];
-
-/// Return whether c has the 'Caucasian_Albanian' Unicode property.
-pub(crate) fn is_caucasian_albanian(c: char) -> bool {
-    CAUCASIAN_ALBANIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const CHAKMA: [CodePointRange; 2] = [
-    CodePointRange::from(69888, 53),
-    CodePointRange::from(69942, 18),
-];
-
-/// Return whether c has the 'Chakma' Unicode property.
-pub(crate) fn is_chakma(c: char) -> bool {
-    CHAKMA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const CHAM: [CodePointRange; 4] = [
-    CodePointRange::from(43520, 55),
-    CodePointRange::from(43584, 14),
-    CodePointRange::from(43600, 10),
-    CodePointRange::from(43612, 4),
-];
-
-/// Return whether c has the 'Cham' Unicode property.
-pub(crate) fn is_cham(c: char) -> bool {
-    CHAM.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const CHORASMIAN: [CodePointRange; 1] = [CodePointRange::from(69552, 28)];
-
-/// Return whether c has the 'Chorasmian' Unicode property.
-pub(crate) fn is_chorasmian(c: char) -> bool {
-    CHORASMIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const CHEROKEE: [CodePointRange; 3] = [
-    CodePointRange::from(5024, 86),
-    CodePointRange::from(5112, 6),
-    CodePointRange::from(43888, 80),
-];
-
-/// Return whether c has the 'Cherokee' Unicode property.
-pub(crate) fn is_cherokee(c: char) -> bool {
-    CHEROKEE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const COMMON: [CodePointRange; 173] = [
-    CodePointRange::from(0, 65),
-    CodePointRange::from(91, 6),
-    CodePointRange::from(123, 47),
-    CodePointRange::from(171, 15),
-    CodePointRange::from(187, 5),
-    CodePointRange::from(215, 1),
-    CodePointRange::from(247, 1),
-    CodePointRange::from(697, 39),
-    CodePointRange::from(741, 5),
-    CodePointRange::from(748, 20),
-    CodePointRange::from(884, 1),
-    CodePointRange::from(894, 1),
-    CodePointRange::from(901, 1),
-    CodePointRange::from(903, 1),
-    CodePointRange::from(1541, 1),
-    CodePointRange::from(1548, 1),
-    CodePointRange::from(1563, 1),
-    CodePointRange::from(1567, 1),
-    CodePointRange::from(1600, 1),
-    CodePointRange::from(1757, 1),
-    CodePointRange::from(2274, 1),
-    CodePointRange::from(2404, 2),
-    CodePointRange::from(3647, 1),
-    CodePointRange::from(4053, 4),
-    CodePointRange::from(4347, 1),
-    CodePointRange::from(5867, 3),
-    CodePointRange::from(5941, 2),
-    CodePointRange::from(6146, 2),
-    CodePointRange::from(6149, 1),
-    CodePointRange::from(7379, 1),
-    CodePointRange::from(7393, 1),
-    CodePointRange::from(7401, 4),
-    CodePointRange::from(7406, 6),
-    CodePointRange::from(7413, 3),
-    CodePointRange::from(7418, 1),
-    CodePointRange::from(8192, 12),
-    CodePointRange::from(8206, 87),
-    CodePointRange::from(8294, 11),
-    CodePointRange::from(8308, 11),
-    CodePointRange::from(8320, 15),
-    CodePointRange::from(8352, 33),
-    CodePointRange::from(8448, 38),
-    CodePointRange::from(8487, 3),
-    CodePointRange::from(8492, 6),
-    CodePointRange::from(8499, 27),
-    CodePointRange::from(8527, 17),
-    CodePointRange::from(8585, 3),
-    CodePointRange::from(8592, 663),
-    CodePointRange::from(9280, 11),
-    CodePointRange::from(9312, 928),
-    CodePointRange::from(10496, 628),
-    CodePointRange::from(11126, 32),
-    CodePointRange::from(11159, 105),
-    CodePointRange::from(11776, 94),
-    CodePointRange::from(12272, 12),
-    CodePointRange::from(12288, 5),
-    CodePointRange::from(12294, 1),
-    CodePointRange::from(12296, 25),
-    CodePointRange::from(12336, 8),
-    CodePointRange::from(12348, 4),
-    CodePointRange::from(12443, 2),
-    CodePointRange::from(12448, 1),
-    CodePointRange::from(12539, 2),
-    CodePointRange::from(12688, 16),
-    CodePointRange::from(12736, 36),
-    CodePointRange::from(12832, 64),
-    CodePointRange::from(12927, 81),
-    CodePointRange::from(13055, 1),
-    CodePointRange::from(13144, 168),
-    CodePointRange::from(19904, 64),
-    CodePointRange::from(42752, 34),
-    CodePointRange::from(42888, 3),
-    CodePointRange::from(43056, 10),
-    CodePointRange::from(43310, 1),
-    CodePointRange::from(43471, 1),
-    CodePointRange::from(43867, 1),
-    CodePointRange::from(43882, 2),
-    CodePointRange::from(64830, 2),
-    CodePointRange::from(65040, 10),
-    CodePointRange::from(65072, 35),
-    CodePointRange::from(65108, 19),
-    CodePointRange::from(65128, 4),
-    CodePointRange::from(65279, 1),
-    CodePointRange::from(65281, 32),
-    CodePointRange::from(65339, 6),
-    CodePointRange::from(65371, 11),
-    CodePointRange::from(65392, 1),
-    CodePointRange::from(65438, 2),
-    CodePointRange::from(65504, 7),
-    CodePointRange::from(65512, 7),
-    CodePointRange::from(65529, 5),
-    CodePointRange::from(65792, 3),
-    CodePointRange::from(65799, 45),
-    CodePointRange::from(65847, 9),
-    CodePointRange::from(65936, 13),
-    CodePointRange::from(66000, 45),
-    CodePointRange::from(66273, 27),
-    CodePointRange::from(113824, 4),
-    CodePointRange::from(118608, 116),
-    CodePointRange::from(118784, 246),
-    CodePointRange::from(119040, 39),
-    CodePointRange::from(119081, 62),
-    CodePointRange::from(119146, 17),
-    CodePointRange::from(119171, 2),
-    CodePointRange::from(119180, 30),
-    CodePointRange::from(119214, 61),
-    CodePointRange::from(119488, 20),
-    CodePointRange::from(119520, 20),
-    CodePointRange::from(119552, 87),
-    CodePointRange::from(119648, 25),
-    CodePointRange::from(119808, 85),
-    CodePointRange::from(119894, 71),
-    CodePointRange::from(119966, 2),
-    CodePointRange::from(119970, 1),
-    CodePointRange::from(119973, 2),
-    CodePointRange::from(119977, 4),
-    CodePointRange::from(119982, 12),
-    CodePointRange::from(119995, 1),
-    CodePointRange::from(119997, 7),
-    CodePointRange::from(120005, 65),
-    CodePointRange::from(120071, 4),
-    CodePointRange::from(120077, 8),
-    CodePointRange::from(120086, 7),
-    CodePointRange::from(120094, 28),
-    CodePointRange::from(120123, 4),
-    CodePointRange::from(120128, 5),
-    CodePointRange::from(120134, 1),
-    CodePointRange::from(120138, 7),
-    CodePointRange::from(120146, 340),
-    CodePointRange::from(120488, 292),
-    CodePointRange::from(120782, 50),
-    CodePointRange::from(126065, 68),
-    CodePointRange::from(126209, 61),
-    CodePointRange::from(126976, 44),
-    CodePointRange::from(127024, 100),
-    CodePointRange::from(127136, 15),
-    CodePointRange::from(127153, 15),
-    CodePointRange::from(127169, 15),
-    CodePointRange::from(127185, 37),
-    CodePointRange::from(127232, 174),
-    CodePointRange::from(127462, 26),
-    CodePointRange::from(127489, 2),
-    CodePointRange::from(127504, 44),
-    CodePointRange::from(127552, 9),
-    CodePointRange::from(127568, 2),
-    CodePointRange::from(127584, 6),
-    CodePointRange::from(127744, 984),
-    CodePointRange::from(128732, 17),
-    CodePointRange::from(128752, 13),
-    CodePointRange::from(128768, 119),
-    CodePointRange::from(128891, 95),
-    CodePointRange::from(128992, 12),
-    CodePointRange::from(129008, 1),
-    CodePointRange::from(129024, 12),
-    CodePointRange::from(129040, 56),
-    CodePointRange::from(129104, 10),
-    CodePointRange::from(129120, 40),
-    CodePointRange::from(129168, 30),
-    CodePointRange::from(129200, 2),
-    CodePointRange::from(129280, 340),
-    CodePointRange::from(129632, 14),
-    CodePointRange::from(129648, 13),
-    CodePointRange::from(129664, 9),
-    CodePointRange::from(129680, 46),
-    CodePointRange::from(129727, 7),
-    CodePointRange::from(129742, 14),
-    CodePointRange::from(129760, 9),
-    CodePointRange::from(129776, 9),
-    CodePointRange::from(129792, 147),
-    CodePointRange::from(129940, 55),
-    CodePointRange::from(130032, 10),
-    CodePointRange::from(917505, 1),
-    CodePointRange::from(917536, 96),
-];
-
-/// Return whether c has the 'Common' Unicode property.
-pub(crate) fn is_common(c: char) -> bool {
-    COMMON
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const COPTIC: [CodePointRange; 3] = [
-    CodePointRange::from(994, 14),
-    CodePointRange::from(11392, 116),
-    CodePointRange::from(11513, 7),
-];
-
-/// Return whether c has the 'Coptic' Unicode property.
-pub(crate) fn is_coptic(c: char) -> bool {
-    COPTIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const CUNEIFORM: [CodePointRange; 4] = [
-    CodePointRange::from(73728, 922),
-    CodePointRange::from(74752, 111),
-    CodePointRange::from(74864, 5),
-    CodePointRange::from(74880, 196),
-];
-
-/// Return whether c has the 'Cuneiform' Unicode property.
-pub(crate) fn is_cuneiform(c: char) -> bool {
-    CUNEIFORM
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const CYPRIOT: [CodePointRange; 6] = [
-    CodePointRange::from(67584, 6),
-    CodePointRange::from(67592, 1),
-    CodePointRange::from(67594, 44),
-    CodePointRange::from(67639, 2),
-    CodePointRange::from(67644, 1),
-    CodePointRange::from(67647, 1),
-];
-
-/// Return whether c has the 'Cypriot' Unicode property.
-pub(crate) fn is_cypriot(c: char) -> bool {
-    CYPRIOT
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const CYRILLIC: [CodePointRange; 10] = [
-    CodePointRange::from(1024, 133),
-    CodePointRange::from(1159, 169),
-    CodePointRange::from(7296, 9),
-    CodePointRange::from(7467, 1),
-    CodePointRange::from(7544, 1),
-    CodePointRange::from(11744, 32),
-    CodePointRange::from(42560, 96),
-    CodePointRange::from(65070, 2),
-    CodePointRange::from(122928, 62),
-    CodePointRange::from(123023, 1),
-];
-
-/// Return whether c has the 'Cyrillic' Unicode property.
-pub(crate) fn is_cyrillic(c: char) -> bool {
-    CYRILLIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const DESERET: [CodePointRange; 1] = [CodePointRange::from(66560, 80)];
-
-/// Return whether c has the 'Deseret' Unicode property.
-pub(crate) fn is_deseret(c: char) -> bool {
-    DESERET
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const DEVANAGARI: [CodePointRange; 5] = [
-    CodePointRange::from(2304, 81),
-    CodePointRange::from(2389, 15),
-    CodePointRange::from(2406, 26),
-    CodePointRange::from(43232, 32),
-    CodePointRange::from(72448, 10),
-];
-
-/// Return whether c has the 'Devanagari' Unicode property.
-pub(crate) fn is_devanagari(c: char) -> bool {
-    DEVANAGARI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const DIVES_AKURU: [CodePointRange; 8] = [
-    CodePointRange::from(71936, 7),
-    CodePointRange::from(71945, 1),
-    CodePointRange::from(71948, 8),
-    CodePointRange::from(71957, 2),
-    CodePointRange::from(71960, 30),
-    CodePointRange::from(71991, 2),
-    CodePointRange::from(71995, 12),
-    CodePointRange::from(72016, 10),
-];
-
-/// Return whether c has the 'Dives_Akuru' Unicode property.
-pub(crate) fn is_dives_akuru(c: char) -> bool {
-    DIVES_AKURU
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const DOGRA: [CodePointRange; 1] = [CodePointRange::from(71680, 60)];
-
-/// Return whether c has the 'Dogra' Unicode property.
-pub(crate) fn is_dogra(c: char) -> bool {
-    DOGRA.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const DUPLOYAN: [CodePointRange; 5] = [
-    CodePointRange::from(113664, 107),
-    CodePointRange::from(113776, 13),
-    CodePointRange::from(113792, 9),
-    CodePointRange::from(113808, 10),
-    CodePointRange::from(113820, 4),
-];
-
-/// Return whether c has the 'Duployan' Unicode property.
-pub(crate) fn is_duployan(c: char) -> bool {
-    DUPLOYAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const EGYPTIAN_HIEROGLYPHS: [CodePointRange; 1] = [CodePointRange::from(77824, 1110)];
-
-/// Return whether c has the 'Egyptian_Hieroglyphs' Unicode property.
-pub(crate) fn is_egyptian_hieroglyphs(c: char) -> bool {
-    EGYPTIAN_HIEROGLYPHS
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const ELBASAN: [CodePointRange; 1] = [CodePointRange::from(66816, 40)];
-
-/// Return whether c has the 'Elbasan' Unicode property.
-pub(crate) fn is_elbasan(c: char) -> bool {
-    ELBASAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const ELYMAIC: [CodePointRange; 1] = [CodePointRange::from(69600, 23)];
-
-/// Return whether c has the 'Elymaic' Unicode property.
-pub(crate) fn is_elymaic(c: char) -> bool {
-    ELYMAIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const ETHIOPIC: [CodePointRange; 36] = [
-    CodePointRange::from(4608, 73),
-    CodePointRange::from(4682, 4),
-    CodePointRange::from(4688, 7),
-    CodePointRange::from(4696, 1),
-    CodePointRange::from(4698, 4),
-    CodePointRange::from(4704, 41),
-    CodePointRange::from(4746, 4),
-    CodePointRange::from(4752, 33),
-    CodePointRange::from(4786, 4),
-    CodePointRange::from(4792, 7),
-    CodePointRange::from(4800, 1),
-    CodePointRange::from(4802, 4),
-    CodePointRange::from(4808, 15),
-    CodePointRange::from(4824, 57),
-    CodePointRange::from(4882, 4),
-    CodePointRange::from(4888, 67),
-    CodePointRange::from(4957, 32),
-    CodePointRange::from(4992, 26),
-    CodePointRange::from(11648, 23),
-    CodePointRange::from(11680, 7),
-    CodePointRange::from(11688, 7),
-    CodePointRange::from(11696, 7),
-    CodePointRange::from(11704, 7),
-    CodePointRange::from(11712, 7),
-    CodePointRange::from(11720, 7),
-    CodePointRange::from(11728, 7),
-    CodePointRange::from(11736, 7),
-    CodePointRange::from(43777, 6),
-    CodePointRange::from(43785, 6),
-    CodePointRange::from(43793, 6),
-    CodePointRange::from(43808, 7),
-    CodePointRange::from(43816, 7),
-    CodePointRange::from(124896, 7),
-    CodePointRange::from(124904, 4),
-    CodePointRange::from(124909, 2),
-    CodePointRange::from(124912, 15),
-];
-
-/// Return whether c has the 'Ethiopic' Unicode property.
-pub(crate) fn is_ethiopic(c: char) -> bool {
-    ETHIOPIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const GEORGIAN: [CodePointRange; 10] = [
-    CodePointRange::from(4256, 38),
-    CodePointRange::from(4295, 1),
-    CodePointRange::from(4301, 1),
-    CodePointRange::from(4304, 43),
-    CodePointRange::from(4348, 4),
-    CodePointRange::from(7312, 43),
-    CodePointRange::from(7357, 3),
-    CodePointRange::from(11520, 38),
-    CodePointRange::from(11559, 1),
-    CodePointRange::from(11565, 1),
-];
-
-/// Return whether c has the 'Georgian' Unicode property.
-pub(crate) fn is_georgian(c: char) -> bool {
-    GEORGIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const GLAGOLITIC: [CodePointRange; 6] = [
-    CodePointRange::from(11264, 96),
-    CodePointRange::from(122880, 7),
-    CodePointRange::from(122888, 17),
-    CodePointRange::from(122907, 7),
-    CodePointRange::from(122915, 2),
-    CodePointRange::from(122918, 5),
-];
-
-/// Return whether c has the 'Glagolitic' Unicode property.
-pub(crate) fn is_glagolitic(c: char) -> bool {
-    GLAGOLITIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const GOTHIC: [CodePointRange; 1] = [CodePointRange::from(66352, 27)];
-
-/// Return whether c has the 'Gothic' Unicode property.
-pub(crate) fn is_gothic(c: char) -> bool {
-    GOTHIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const GRANTHA: [CodePointRange; 15] = [
-    CodePointRange::from(70400, 4),
-    CodePointRange::from(70405, 8),
-    CodePointRange::from(70415, 2),
-    CodePointRange::from(70419, 22),
-    CodePointRange::from(70442, 7),
-    CodePointRange::from(70450, 2),
-    CodePointRange::from(70453, 5),
-    CodePointRange::from(70460, 9),
-    CodePointRange::from(70471, 2),
-    CodePointRange::from(70475, 3),
-    CodePointRange::from(70480, 1),
-    CodePointRange::from(70487, 1),
-    CodePointRange::from(70493, 7),
-    CodePointRange::from(70502, 7),
-    CodePointRange::from(70512, 5),
-];
-
-/// Return whether c has the 'Grantha' Unicode property.
-pub(crate) fn is_grantha(c: char) -> bool {
-    GRANTHA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const GREEK: [CodePointRange; 36] = [
-    CodePointRange::from(880, 4),
-    CodePointRange::from(885, 3),
-    CodePointRange::from(890, 4),
-    CodePointRange::from(895, 1),
-    CodePointRange::from(900, 1),
-    CodePointRange::from(902, 1),
-    CodePointRange::from(904, 3),
-    CodePointRange::from(908, 1),
-    CodePointRange::from(910, 20),
-    CodePointRange::from(931, 63),
-    CodePointRange::from(1008, 16),
-    CodePointRange::from(7462, 5),
-    CodePointRange::from(7517, 5),
-    CodePointRange::from(7526, 5),
-    CodePointRange::from(7615, 1),
-    CodePointRange::from(7936, 22),
-    CodePointRange::from(7960, 6),
-    CodePointRange::from(7968, 38),
-    CodePointRange::from(8008, 6),
-    CodePointRange::from(8016, 8),
-    CodePointRange::from(8025, 1),
-    CodePointRange::from(8027, 1),
-    CodePointRange::from(8029, 1),
-    CodePointRange::from(8031, 31),
-    CodePointRange::from(8064, 53),
-    CodePointRange::from(8118, 15),
-    CodePointRange::from(8134, 14),
-    CodePointRange::from(8150, 6),
-    CodePointRange::from(8157, 19),
-    CodePointRange::from(8178, 3),
-    CodePointRange::from(8182, 9),
-    CodePointRange::from(8486, 1),
-    CodePointRange::from(43877, 1),
-    CodePointRange::from(65856, 79),
-    CodePointRange::from(65952, 1),
-    CodePointRange::from(119296, 70),
-];
-
-/// Return whether c has the 'Greek' Unicode property.
-pub(crate) fn is_greek(c: char) -> bool {
-    GREEK.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const GUJARATI: [CodePointRange; 14] = [
-    CodePointRange::from(2689, 3),
-    CodePointRange::from(2693, 9),
-    CodePointRange::from(2703, 3),
-    CodePointRange::from(2707, 22),
-    CodePointRange::from(2730, 7),
-    CodePointRange::from(2738, 2),
-    CodePointRange::from(2741, 5),
-    CodePointRange::from(2748, 10),
-    CodePointRange::from(2759, 3),
-    CodePointRange::from(2763, 3),
-    CodePointRange::from(2768, 1),
-    CodePointRange::from(2784, 4),
-    CodePointRange::from(2790, 12),
-    CodePointRange::from(2809, 7),
-];
-
-/// Return whether c has the 'Gujarati' Unicode property.
-pub(crate) fn is_gujarati(c: char) -> bool {
-    GUJARATI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const GUNJALA_GONDI: [CodePointRange; 6] = [
-    CodePointRange::from(73056, 6),
-    CodePointRange::from(73063, 2),
-    CodePointRange::from(73066, 37),
-    CodePointRange::from(73104, 2),
-    CodePointRange::from(73107, 6),
-    CodePointRange::from(73120, 10),
-];
-
-/// Return whether c has the 'Gunjala_Gondi' Unicode property.
-pub(crate) fn is_gunjala_gondi(c: char) -> bool {
-    GUNJALA_GONDI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const GURMUKHI: [CodePointRange; 16] = [
-    CodePointRange::from(2561, 3),
-    CodePointRange::from(2565, 6),
-    CodePointRange::from(2575, 2),
-    CodePointRange::from(2579, 22),
-    CodePointRange::from(2602, 7),
-    CodePointRange::from(2610, 2),
-    CodePointRange::from(2613, 2),
-    CodePointRange::from(2616, 2),
-    CodePointRange::from(2620, 1),
-    CodePointRange::from(2622, 5),
-    CodePointRange::from(2631, 2),
-    CodePointRange::from(2635, 3),
-    CodePointRange::from(2641, 1),
-    CodePointRange::from(2649, 4),
-    CodePointRange::from(2654, 1),
-    CodePointRange::from(2662, 17),
-];
-
-/// Return whether c has the 'Gurmukhi' Unicode property.
-pub(crate) fn is_gurmukhi(c: char) -> bool {
-    GURMUKHI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const HAN: [CodePointRange; 42] = [
-    CodePointRange::from(11904, 26),
-    CodePointRange::from(11931, 89),
-    CodePointRange::from(12032, 214),
-    CodePointRange::from(12293, 1),
-    CodePointRange::from(12295, 1),
-    CodePointRange::from(12321, 9),
-    CodePointRange::from(12344, 4),
-    CodePointRange::from(13312, 4096),
-    CodePointRange::from(17408, 2496),
-    CodePointRange::from(19968, 4096),
-    CodePointRange::from(24064, 4096),
-    CodePointRange::from(28160, 4096),
-    CodePointRange::from(32256, 4096),
-    CodePointRange::from(36352, 4096),
-    CodePointRange::from(40448, 512),
-    CodePointRange::from(63744, 366),
-    CodePointRange::from(64112, 106),
-    CodePointRange::from(94178, 2),
-    CodePointRange::from(94192, 2),
-    CodePointRange::from(131072, 4096),
-    CodePointRange::from(135168, 4096),
-    CodePointRange::from(139264, 4096),
-    CodePointRange::from(143360, 4096),
-    CodePointRange::from(147456, 4096),
-    CodePointRange::from(151552, 4096),
-    CodePointRange::from(155648, 4096),
-    CodePointRange::from(159744, 4096),
-    CodePointRange::from(163840, 4096),
-    CodePointRange::from(167936, 4096),
-    CodePointRange::from(172032, 1760),
-    CodePointRange::from(173824, 4096),
-    CodePointRange::from(177920, 58),
-    CodePointRange::from(177984, 222),
-    CodePointRange::from(178208, 4096),
-    CodePointRange::from(182304, 1666),
-    CodePointRange::from(183984, 4096),
-    CodePointRange::from(188080, 3377),
-    CodePointRange::from(194560, 542),
-    CodePointRange::from(196608, 4096),
-    CodePointRange::from(200704, 843),
-    CodePointRange::from(201552, 4096),
-    CodePointRange::from(205648, 96),
-];
-
-/// Return whether c has the 'Han' Unicode property.
-pub(crate) fn is_han(c: char) -> bool {
-    HAN.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const HANGUL: [CodePointRange; 16] = [
-    CodePointRange::from(4352, 256),
-    CodePointRange::from(12334, 2),
-    CodePointRange::from(12593, 94),
-    CodePointRange::from(12800, 31),
-    CodePointRange::from(12896, 31),
-    CodePointRange::from(43360, 29),
-    CodePointRange::from(44032, 4096),
-    CodePointRange::from(48128, 4096),
-    CodePointRange::from(52224, 2980),
-    CodePointRange::from(55216, 23),
-    CodePointRange::from(55243, 49),
-    CodePointRange::from(65440, 31),
-    CodePointRange::from(65474, 6),
-    CodePointRange::from(65482, 6),
-    CodePointRange::from(65490, 6),
-    CodePointRange::from(65498, 3),
-];
-
-/// Return whether c has the 'Hangul' Unicode property.
-pub(crate) fn is_hangul(c: char) -> bool {
-    HANGUL
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const HANIFI_ROHINGYA: [CodePointRange; 2] = [
-    CodePointRange::from(68864, 40),
-    CodePointRange::from(68912, 10),
-];
-
-/// Return whether c has the 'Hanifi_Rohingya' Unicode property.
-pub(crate) fn is_hanifi_rohingya(c: char) -> bool {
-    HANIFI_ROHINGYA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const HANUNOO: [CodePointRange; 1] = [CodePointRange::from(5920, 21)];
-
-/// Return whether c has the 'Hanunoo' Unicode property.
-pub(crate) fn is_hanunoo(c: char) -> bool {
-    HANUNOO
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const HATRAN: [CodePointRange; 3] = [
-    CodePointRange::from(67808, 19),
-    CodePointRange::from(67828, 2),
-    CodePointRange::from(67835, 5),
-];
-
-/// Return whether c has the 'Hatran' Unicode property.
-pub(crate) fn is_hatran(c: char) -> bool {
-    HATRAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const HEBREW: [CodePointRange; 9] = [
-    CodePointRange::from(1425, 55),
-    CodePointRange::from(1488, 27),
-    CodePointRange::from(1519, 6),
-    CodePointRange::from(64285, 26),
-    CodePointRange::from(64312, 5),
-    CodePointRange::from(64318, 1),
-    CodePointRange::from(64320, 2),
-    CodePointRange::from(64323, 2),
-    CodePointRange::from(64326, 10),
-];
-
-/// Return whether c has the 'Hebrew' Unicode property.
-pub(crate) fn is_hebrew(c: char) -> bool {
-    HEBREW
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const HIRAGANA: [CodePointRange; 6] = [
-    CodePointRange::from(12353, 86),
-    CodePointRange::from(12445, 3),
-    CodePointRange::from(110593, 287),
-    CodePointRange::from(110898, 1),
-    CodePointRange::from(110928, 3),
-    CodePointRange::from(127488, 1),
-];
-
-/// Return whether c has the 'Hiragana' Unicode property.
-pub(crate) fn is_hiragana(c: char) -> bool {
-    HIRAGANA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const IMPERIAL_ARAMAIC: [CodePointRange; 2] = [
-    CodePointRange::from(67648, 22),
-    CodePointRange::from(67671, 9),
-];
-
-/// Return whether c has the 'Imperial_Aramaic' Unicode property.
-pub(crate) fn is_imperial_aramaic(c: char) -> bool {
-    IMPERIAL_ARAMAIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const INHERITED: [CodePointRange; 29] = [
-    CodePointRange::from(768, 112),
-    CodePointRange::from(1157, 2),
-    CodePointRange::from(1611, 11),
-    CodePointRange::from(1648, 1),
-    CodePointRange::from(2385, 4),
-    CodePointRange::from(6832, 31),
-    CodePointRange::from(7376, 3),
-    CodePointRange::from(7380, 13),
-    CodePointRange::from(7394, 7),
-    CodePointRange::from(7405, 1),
-    CodePointRange::from(7412, 1),
-    CodePointRange::from(7416, 2),
-    CodePointRange::from(7616, 64),
-    CodePointRange::from(8204, 2),
-    CodePointRange::from(8400, 33),
-    CodePointRange::from(12330, 4),
-    CodePointRange::from(12441, 2),
-    CodePointRange::from(65024, 16),
-    CodePointRange::from(65056, 14),
-    CodePointRange::from(66045, 1),
-    CodePointRange::from(66272, 1),
-    CodePointRange::from(70459, 1),
-    CodePointRange::from(118528, 46),
-    CodePointRange::from(118576, 23),
-    CodePointRange::from(119143, 3),
-    CodePointRange::from(119163, 8),
-    CodePointRange::from(119173, 7),
-    CodePointRange::from(119210, 4),
-    CodePointRange::from(917760, 240),
-];
-
-/// Return whether c has the 'Inherited' Unicode property.
-pub(crate) fn is_inherited(c: char) -> bool {
-    INHERITED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const INSCRIPTIONAL_PAHLAVI: [CodePointRange; 2] = [
-    CodePointRange::from(68448, 19),
-    CodePointRange::from(68472, 8),
-];
-
-/// Return whether c has the 'Inscriptional_Pahlavi' Unicode property.
-pub(crate) fn is_inscriptional_pahlavi(c: char) -> bool {
-    INSCRIPTIONAL_PAHLAVI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const INSCRIPTIONAL_PARTHIAN: [CodePointRange; 2] = [
-    CodePointRange::from(68416, 22),
-    CodePointRange::from(68440, 8),
-];
-
-/// Return whether c has the 'Inscriptional_Parthian' Unicode property.
-pub(crate) fn is_inscriptional_parthian(c: char) -> bool {
-    INSCRIPTIONAL_PARTHIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const JAVANESE: [CodePointRange; 3] = [
-    CodePointRange::from(43392, 78),
-    CodePointRange::from(43472, 10),
-    CodePointRange::from(43486, 2),
-];
-
-/// Return whether c has the 'Javanese' Unicode property.
-pub(crate) fn is_javanese(c: char) -> bool {
-    JAVANESE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const KAITHI: [CodePointRange; 2] = [
-    CodePointRange::from(69760, 67),
-    CodePointRange::from(69837, 1),
-];
-
-/// Return whether c has the 'Kaithi' Unicode property.
-pub(crate) fn is_kaithi(c: char) -> bool {
-    KAITHI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const KANNADA: [CodePointRange; 13] = [
-    CodePointRange::from(3200, 13),
-    CodePointRange::from(3214, 3),
-    CodePointRange::from(3218, 23),
-    CodePointRange::from(3242, 10),
-    CodePointRange::from(3253, 5),
-    CodePointRange::from(3260, 9),
-    CodePointRange::from(3270, 3),
-    CodePointRange::from(3274, 4),
-    CodePointRange::from(3285, 2),
-    CodePointRange::from(3293, 2),
-    CodePointRange::from(3296, 4),
-    CodePointRange::from(3302, 10),
-    CodePointRange::from(3313, 3),
-];
-
-/// Return whether c has the 'Kannada' Unicode property.
-pub(crate) fn is_kannada(c: char) -> bool {
-    KANNADA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const KATAKANA: [CodePointRange; 14] = [
-    CodePointRange::from(12449, 90),
-    CodePointRange::from(12541, 3),
-    CodePointRange::from(12784, 16),
-    CodePointRange::from(13008, 47),
-    CodePointRange::from(13056, 88),
-    CodePointRange::from(65382, 10),
-    CodePointRange::from(65393, 45),
-    CodePointRange::from(110576, 4),
-    CodePointRange::from(110581, 7),
-    CodePointRange::from(110589, 2),
-    CodePointRange::from(110592, 1),
-    CodePointRange::from(110880, 3),
-    CodePointRange::from(110933, 1),
-    CodePointRange::from(110948, 4),
-];
-
-/// Return whether c has the 'Katakana' Unicode property.
-pub(crate) fn is_katakana(c: char) -> bool {
-    KATAKANA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const KAYAH_LI: [CodePointRange; 2] = [
-    CodePointRange::from(43264, 46),
-    CodePointRange::from(43311, 1),
-];
-
-/// Return whether c has the 'Kayah_Li' Unicode property.
-pub(crate) fn is_kayah_li(c: char) -> bool {
-    KAYAH_LI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const KHAROSHTHI: [CodePointRange; 8] = [
-    CodePointRange::from(68096, 4),
-    CodePointRange::from(68101, 2),
-    CodePointRange::from(68108, 8),
-    CodePointRange::from(68117, 3),
-    CodePointRange::from(68121, 29),
-    CodePointRange::from(68152, 3),
-    CodePointRange::from(68159, 10),
-    CodePointRange::from(68176, 9),
-];
-
-/// Return whether c has the 'Kharoshthi' Unicode property.
-pub(crate) fn is_kharoshthi(c: char) -> bool {
-    KHAROSHTHI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const KHITAN_SMALL_SCRIPT: [CodePointRange; 2] = [
-    CodePointRange::from(94180, 1),
-    CodePointRange::from(101120, 470),
-];
-
-/// Return whether c has the 'Khitan_Small_Script' Unicode property.
-pub(crate) fn is_khitan_small_script(c: char) -> bool {
-    KHITAN_SMALL_SCRIPT
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const KHMER: [CodePointRange; 4] = [
-    CodePointRange::from(6016, 94),
-    CodePointRange::from(6112, 10),
-    CodePointRange::from(6128, 10),
-    CodePointRange::from(6624, 32),
-];
-
-/// Return whether c has the 'Khmer' Unicode property.
-pub(crate) fn is_khmer(c: char) -> bool {
-    KHMER.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const KHOJKI: [CodePointRange; 2] = [
-    CodePointRange::from(70144, 18),
-    CodePointRange::from(70163, 47),
-];
-
-/// Return whether c has the 'Khojki' Unicode property.
-pub(crate) fn is_khojki(c: char) -> bool {
-    KHOJKI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const KHUDAWADI: [CodePointRange; 2] = [
-    CodePointRange::from(70320, 59),
-    CodePointRange::from(70384, 10),
-];
-
-/// Return whether c has the 'Khudawadi' Unicode property.
-pub(crate) fn is_khudawadi(c: char) -> bool {
-    KHUDAWADI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const LAO: [CodePointRange; 11] = [
-    CodePointRange::from(3713, 2),
-    CodePointRange::from(3716, 1),
-    CodePointRange::from(3718, 5),
-    CodePointRange::from(3724, 24),
-    CodePointRange::from(3749, 1),
-    CodePointRange::from(3751, 23),
-    CodePointRange::from(3776, 5),
-    CodePointRange::from(3782, 1),
-    CodePointRange::from(3784, 7),
-    CodePointRange::from(3792, 10),
-    CodePointRange::from(3804, 4),
-];
-
-/// Return whether c has the 'Lao' Unicode property.
-pub(crate) fn is_lao(c: char) -> bool {
-    LAO.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const LATIN: [CodePointRange; 39] = [
-    CodePointRange::from(65, 26),
-    CodePointRange::from(97, 26),
-    CodePointRange::from(170, 1),
-    CodePointRange::from(186, 1),
-    CodePointRange::from(192, 23),
-    CodePointRange::from(216, 31),
-    CodePointRange::from(248, 449),
-    CodePointRange::from(736, 5),
-    CodePointRange::from(7424, 38),
-    CodePointRange::from(7468, 49),
-    CodePointRange::from(7522, 4),
-    CodePointRange::from(7531, 13),
-    CodePointRange::from(7545, 70),
-    CodePointRange::from(7680, 256),
-    CodePointRange::from(8305, 1),
-    CodePointRange::from(8319, 1),
-    CodePointRange::from(8336, 13),
-    CodePointRange::from(8490, 2),
-    CodePointRange::from(8498, 1),
-    CodePointRange::from(8526, 1),
-    CodePointRange::from(8544, 41),
-    CodePointRange::from(11360, 32),
-    CodePointRange::from(42786, 102),
-    CodePointRange::from(42891, 64),
-    CodePointRange::from(42960, 2),
-    CodePointRange::from(42963, 1),
-    CodePointRange::from(42965, 5),
-    CodePointRange::from(42994, 14),
-    CodePointRange::from(43824, 43),
-    CodePointRange::from(43868, 9),
-    CodePointRange::from(43878, 4),
-    CodePointRange::from(64256, 7),
-    CodePointRange::from(65313, 26),
-    CodePointRange::from(65345, 26),
-    CodePointRange::from(67456, 6),
-    CodePointRange::from(67463, 42),
-    CodePointRange::from(67506, 9),
-    CodePointRange::from(122624, 31),
-    CodePointRange::from(122661, 6),
-];
-
-/// Return whether c has the 'Latin' Unicode property.
-pub(crate) fn is_latin(c: char) -> bool {
-    LATIN.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const LEPCHA: [CodePointRange; 3] = [
-    CodePointRange::from(7168, 56),
-    CodePointRange::from(7227, 15),
-    CodePointRange::from(7245, 3),
-];
-
-/// Return whether c has the 'Lepcha' Unicode property.
-pub(crate) fn is_lepcha(c: char) -> bool {
-    LEPCHA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const LIMBU: [CodePointRange; 5] = [
-    CodePointRange::from(6400, 31),
-    CodePointRange::from(6432, 12),
-    CodePointRange::from(6448, 12),
-    CodePointRange::from(6464, 1),
-    CodePointRange::from(6468, 12),
-];
-
-/// Return whether c has the 'Limbu' Unicode property.
-pub(crate) fn is_limbu(c: char) -> bool {
-    LIMBU.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const LINEAR_A: [CodePointRange; 3] = [
-    CodePointRange::from(67072, 311),
-    CodePointRange::from(67392, 22),
-    CodePointRange::from(67424, 8),
-];
-
-/// Return whether c has the 'Linear_A' Unicode property.
-pub(crate) fn is_linear_a(c: char) -> bool {
-    LINEAR_A
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const LINEAR_B: [CodePointRange; 7] = [
-    CodePointRange::from(65536, 12),
-    CodePointRange::from(65549, 26),
-    CodePointRange::from(65576, 19),
-    CodePointRange::from(65596, 2),
-    CodePointRange::from(65599, 15),
-    CodePointRange::from(65616, 14),
-    CodePointRange::from(65664, 123),
-];
-
-/// Return whether c has the 'Linear_B' Unicode property.
-pub(crate) fn is_linear_b(c: char) -> bool {
-    LINEAR_B
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const LISU: [CodePointRange; 2] = [
-    CodePointRange::from(42192, 48),
-    CodePointRange::from(73648, 1),
-];
-
-/// Return whether c has the 'Lisu' Unicode property.
-pub(crate) fn is_lisu(c: char) -> bool {
-    LISU.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const LYCIAN: [CodePointRange; 1] = [CodePointRange::from(66176, 29)];
-
-/// Return whether c has the 'Lycian' Unicode property.
-pub(crate) fn is_lycian(c: char) -> bool {
-    LYCIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const LYDIAN: [CodePointRange; 2] = [
-    CodePointRange::from(67872, 26),
-    CodePointRange::from(67903, 1),
-];
-
-/// Return whether c has the 'Lydian' Unicode property.
-pub(crate) fn is_lydian(c: char) -> bool {
-    LYDIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MAHAJANI: [CodePointRange; 1] = [CodePointRange::from(69968, 39)];
-
-/// Return whether c has the 'Mahajani' Unicode property.
-pub(crate) fn is_mahajani(c: char) -> bool {
-    MAHAJANI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MAKASAR: [CodePointRange; 1] = [CodePointRange::from(73440, 25)];
-
-/// Return whether c has the 'Makasar' Unicode property.
-pub(crate) fn is_makasar(c: char) -> bool {
-    MAKASAR
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MALAYALAM: [CodePointRange; 7] = [
-    CodePointRange::from(3328, 13),
-    CodePointRange::from(3342, 3),
-    CodePointRange::from(3346, 51),
-    CodePointRange::from(3398, 3),
-    CodePointRange::from(3402, 6),
-    CodePointRange::from(3412, 16),
-    CodePointRange::from(3430, 26),
-];
-
-/// Return whether c has the 'Malayalam' Unicode property.
-pub(crate) fn is_malayalam(c: char) -> bool {
-    MALAYALAM
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MANDAIC: [CodePointRange; 2] = [
-    CodePointRange::from(2112, 28),
-    CodePointRange::from(2142, 1),
-];
-
-/// Return whether c has the 'Mandaic' Unicode property.
-pub(crate) fn is_mandaic(c: char) -> bool {
-    MANDAIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MANICHAEAN: [CodePointRange; 2] = [
-    CodePointRange::from(68288, 39),
-    CodePointRange::from(68331, 12),
-];
-
-/// Return whether c has the 'Manichaean' Unicode property.
-pub(crate) fn is_manichaean(c: char) -> bool {
-    MANICHAEAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MARCHEN: [CodePointRange; 3] = [
-    CodePointRange::from(72816, 32),
-    CodePointRange::from(72850, 22),
-    CodePointRange::from(72873, 14),
-];
-
-/// Return whether c has the 'Marchen' Unicode property.
-pub(crate) fn is_marchen(c: char) -> bool {
-    MARCHEN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MEDEFAIDRIN: [CodePointRange; 1] = [CodePointRange::from(93760, 91)];
-
-/// Return whether c has the 'Medefaidrin' Unicode property.
-pub(crate) fn is_medefaidrin(c: char) -> bool {
-    MEDEFAIDRIN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MASARAM_GONDI: [CodePointRange; 7] = [
-    CodePointRange::from(72960, 7),
-    CodePointRange::from(72968, 2),
-    CodePointRange::from(72971, 44),
-    CodePointRange::from(73018, 1),
-    CodePointRange::from(73020, 2),
-    CodePointRange::from(73023, 9),
-    CodePointRange::from(73040, 10),
-];
-
-/// Return whether c has the 'Masaram_Gondi' Unicode property.
-pub(crate) fn is_masaram_gondi(c: char) -> bool {
-    MASARAM_GONDI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MEETEI_MAYEK: [CodePointRange; 3] = [
-    CodePointRange::from(43744, 23),
-    CodePointRange::from(43968, 46),
-    CodePointRange::from(44016, 10),
-];
-
-/// Return whether c has the 'Meetei_Mayek' Unicode property.
-pub(crate) fn is_meetei_mayek(c: char) -> bool {
-    MEETEI_MAYEK
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MENDE_KIKAKUI: [CodePointRange; 2] = [
-    CodePointRange::from(124928, 197),
-    CodePointRange::from(125127, 16),
-];
-
-/// Return whether c has the 'Mende_Kikakui' Unicode property.
-pub(crate) fn is_mende_kikakui(c: char) -> bool {
-    MENDE_KIKAKUI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MEROITIC_CURSIVE: [CodePointRange; 3] = [
-    CodePointRange::from(68000, 24),
-    CodePointRange::from(68028, 20),
-    CodePointRange::from(68050, 46),
-];
-
-/// Return whether c has the 'Meroitic_Cursive' Unicode property.
-pub(crate) fn is_meroitic_cursive(c: char) -> bool {
-    MEROITIC_CURSIVE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MEROITIC_HIEROGLYPHS: [CodePointRange; 1] = [CodePointRange::from(67968, 32)];
-
-/// Return whether c has the 'Meroitic_Hieroglyphs' Unicode property.
-pub(crate) fn is_meroitic_hieroglyphs(c: char) -> bool {
-    MEROITIC_HIEROGLYPHS
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MIAO: [CodePointRange; 3] = [
-    CodePointRange::from(93952, 75),
-    CodePointRange::from(94031, 57),
-    CodePointRange::from(94095, 17),
-];
-
-/// Return whether c has the 'Miao' Unicode property.
-pub(crate) fn is_miao(c: char) -> bool {
-    MIAO.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const MODI: [CodePointRange; 2] = [
-    CodePointRange::from(71168, 69),
-    CodePointRange::from(71248, 10),
-];
-
-/// Return whether c has the 'Modi' Unicode property.
-pub(crate) fn is_modi(c: char) -> bool {
-    MODI.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const MONGOLIAN: [CodePointRange; 6] = [
-    CodePointRange::from(6144, 2),
-    CodePointRange::from(6148, 1),
-    CodePointRange::from(6150, 20),
-    CodePointRange::from(6176, 89),
-    CodePointRange::from(6272, 43),
-    CodePointRange::from(71264, 13),
-];
-
-/// Return whether c has the 'Mongolian' Unicode property.
-pub(crate) fn is_mongolian(c: char) -> bool {
-    MONGOLIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MRO: [CodePointRange; 3] = [
-    CodePointRange::from(92736, 31),
-    CodePointRange::from(92768, 10),
-    CodePointRange::from(92782, 2),
-];
-
-/// Return whether c has the 'Mro' Unicode property.
-pub(crate) fn is_mro(c: char) -> bool {
-    MRO.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const MULTANI: [CodePointRange; 5] = [
-    CodePointRange::from(70272, 7),
-    CodePointRange::from(70280, 1),
-    CodePointRange::from(70282, 4),
-    CodePointRange::from(70287, 15),
-    CodePointRange::from(70303, 11),
-];
-
-/// Return whether c has the 'Multani' Unicode property.
-pub(crate) fn is_multani(c: char) -> bool {
-    MULTANI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const MYANMAR: [CodePointRange; 3] = [
-    CodePointRange::from(4096, 160),
-    CodePointRange::from(43488, 31),
-    CodePointRange::from(43616, 32),
-];
-
-/// Return whether c has the 'Myanmar' Unicode property.
-pub(crate) fn is_myanmar(c: char) -> bool {
-    MYANMAR
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const NABATAEAN: [CodePointRange; 2] = [
-    CodePointRange::from(67712, 31),
-    CodePointRange::from(67751, 9),
-];
-
-/// Return whether c has the 'Nabataean' Unicode property.
-pub(crate) fn is_nabataean(c: char) -> bool {
-    NABATAEAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const NANDINAGARI: [CodePointRange; 3] = [
-    CodePointRange::from(72096, 8),
-    CodePointRange::from(72106, 46),
-    CodePointRange::from(72154, 11),
-];
-
-/// Return whether c has the 'Nandinagari' Unicode property.
-pub(crate) fn is_nandinagari(c: char) -> bool {
-    NANDINAGARI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const NEW_TAI_LUE: [CodePointRange; 4] = [
-    CodePointRange::from(6528, 44),
-    CodePointRange::from(6576, 26),
-    CodePointRange::from(6608, 11),
-    CodePointRange::from(6622, 2),
-];
-
-/// Return whether c has the 'New_Tai_Lue' Unicode property.
-pub(crate) fn is_new_tai_lue(c: char) -> bool {
-    NEW_TAI_LUE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const NEWA: [CodePointRange; 2] = [
-    CodePointRange::from(70656, 92),
-    CodePointRange::from(70749, 5),
-];
-
-/// Return whether c has the 'Newa' Unicode property.
-pub(crate) fn is_newa(c: char) -> bool {
-    NEWA.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const NKO: [CodePointRange; 2] = [
-    CodePointRange::from(1984, 59),
-    CodePointRange::from(2045, 3),
-];
-
-/// Return whether c has the 'Nko' Unicode property.
-pub(crate) fn is_nko(c: char) -> bool {
-    NKO.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const NUSHU: [CodePointRange; 2] = [
-    CodePointRange::from(94177, 1),
-    CodePointRange::from(110960, 396),
-];
-
-/// Return whether c has the 'Nushu' Unicode property.
-pub(crate) fn is_nushu(c: char) -> bool {
-    NUSHU.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const NYIAKENG_PUACHUE_HMONG: [CodePointRange; 4] = [
-    CodePointRange::from(123136, 45),
-    CodePointRange::from(123184, 14),
-    CodePointRange::from(123200, 10),
-    CodePointRange::from(123214, 2),
-];
-
-/// Return whether c has the 'Nyiakeng_Puachue_Hmong' Unicode property.
-pub(crate) fn is_nyiakeng_puachue_hmong(c: char) -> bool {
-    NYIAKENG_PUACHUE_HMONG
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const OGHAM: [CodePointRange; 1] = [CodePointRange::from(5760, 29)];
-
-/// Return whether c has the 'Ogham' Unicode property.
-pub(crate) fn is_ogham(c: char) -> bool {
-    OGHAM.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const OL_CHIKI: [CodePointRange; 1] = [CodePointRange::from(7248, 48)];
-
-/// Return whether c has the 'Ol_Chiki' Unicode property.
-pub(crate) fn is_ol_chiki(c: char) -> bool {
-    OL_CHIKI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const OLD_HUNGARIAN: [CodePointRange; 3] = [
-    CodePointRange::from(68736, 51),
-    CodePointRange::from(68800, 51),
-    CodePointRange::from(68858, 6),
-];
-
-/// Return whether c has the 'Old_Hungarian' Unicode property.
-pub(crate) fn is_old_hungarian(c: char) -> bool {
-    OLD_HUNGARIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const OLD_ITALIC: [CodePointRange; 2] = [
-    CodePointRange::from(66304, 36),
-    CodePointRange::from(66349, 3),
-];
-
-/// Return whether c has the 'Old_Italic' Unicode property.
-pub(crate) fn is_old_italic(c: char) -> bool {
-    OLD_ITALIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const OLD_NORTH_ARABIAN: [CodePointRange; 1] = [CodePointRange::from(68224, 32)];
-
-/// Return whether c has the 'Old_North_Arabian' Unicode property.
-pub(crate) fn is_old_north_arabian(c: char) -> bool {
-    OLD_NORTH_ARABIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const OLD_PERMIC: [CodePointRange; 1] = [CodePointRange::from(66384, 43)];
-
-/// Return whether c has the 'Old_Permic' Unicode property.
-pub(crate) fn is_old_permic(c: char) -> bool {
-    OLD_PERMIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const OLD_PERSIAN: [CodePointRange; 2] = [
-    CodePointRange::from(66464, 36),
-    CodePointRange::from(66504, 14),
-];
-
-/// Return whether c has the 'Old_Persian' Unicode property.
-pub(crate) fn is_old_persian(c: char) -> bool {
-    OLD_PERSIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const OLD_SOGDIAN: [CodePointRange; 1] = [CodePointRange::from(69376, 40)];
-
-/// Return whether c has the 'Old_Sogdian' Unicode property.
-pub(crate) fn is_old_sogdian(c: char) -> bool {
-    OLD_SOGDIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const OLD_SOUTH_ARABIAN: [CodePointRange; 1] = [CodePointRange::from(68192, 32)];
-
-/// Return whether c has the 'Old_South_Arabian' Unicode property.
-pub(crate) fn is_old_south_arabian(c: char) -> bool {
-    OLD_SOUTH_ARABIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const OLD_TURKIC: [CodePointRange; 1] = [CodePointRange::from(68608, 73)];
-
-/// Return whether c has the 'Old_Turkic' Unicode property.
-pub(crate) fn is_old_turkic(c: char) -> bool {
-    OLD_TURKIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const ORIYA: [CodePointRange; 14] = [
-    CodePointRange::from(2817, 3),
-    CodePointRange::from(2821, 8),
-    CodePointRange::from(2831, 2),
-    CodePointRange::from(2835, 22),
-    CodePointRange::from(2858, 7),
-    CodePointRange::from(2866, 2),
-    CodePointRange::from(2869, 5),
-    CodePointRange::from(2876, 9),
-    CodePointRange::from(2887, 2),
-    CodePointRange::from(2891, 3),
-    CodePointRange::from(2901, 3),
-    CodePointRange::from(2908, 2),
-    CodePointRange::from(2911, 5),
-    CodePointRange::from(2918, 18),
-];
-
-/// Return whether c has the 'Oriya' Unicode property.
-pub(crate) fn is_oriya(c: char) -> bool {
-    ORIYA.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const OSAGE: [CodePointRange; 2] = [
-    CodePointRange::from(66736, 36),
-    CodePointRange::from(66776, 36),
-];
-
-/// Return whether c has the 'Osage' Unicode property.
-pub(crate) fn is_osage(c: char) -> bool {
-    OSAGE.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const OSMANYA: [CodePointRange; 2] = [
-    CodePointRange::from(66688, 30),
-    CodePointRange::from(66720, 10),
-];
-
-/// Return whether c has the 'Osmanya' Unicode property.
-pub(crate) fn is_osmanya(c: char) -> bool {
-    OSMANYA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const PAHAWH_HMONG: [CodePointRange; 5] = [
-    CodePointRange::from(92928, 70),
-    CodePointRange::from(93008, 10),
-    CodePointRange::from(93019, 7),
-    CodePointRange::from(93027, 21),
-    CodePointRange::from(93053, 19),
-];
-
-/// Return whether c has the 'Pahawh_Hmong' Unicode property.
-pub(crate) fn is_pahawh_hmong(c: char) -> bool {
-    PAHAWH_HMONG
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const PALMYRENE: [CodePointRange; 1] = [CodePointRange::from(67680, 32)];
-
-/// Return whether c has the 'Palmyrene' Unicode property.
-pub(crate) fn is_palmyrene(c: char) -> bool {
-    PALMYRENE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const PAU_CIN_HAU: [CodePointRange; 1] = [CodePointRange::from(72384, 57)];
-
-/// Return whether c has the 'Pau_Cin_Hau' Unicode property.
-pub(crate) fn is_pau_cin_hau(c: char) -> bool {
-    PAU_CIN_HAU
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const PHAGS_PA: [CodePointRange; 1] = [CodePointRange::from(43072, 56)];
-
-/// Return whether c has the 'Phags_Pa' Unicode property.
-pub(crate) fn is_phags_pa(c: char) -> bool {
-    PHAGS_PA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const PHOENICIAN: [CodePointRange; 2] = [
-    CodePointRange::from(67840, 28),
-    CodePointRange::from(67871, 1),
-];
-
-/// Return whether c has the 'Phoenician' Unicode property.
-pub(crate) fn is_phoenician(c: char) -> bool {
-    PHOENICIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const PSALTER_PAHLAVI: [CodePointRange; 3] = [
-    CodePointRange::from(68480, 18),
-    CodePointRange::from(68505, 4),
-    CodePointRange::from(68521, 7),
-];
-
-/// Return whether c has the 'Psalter_Pahlavi' Unicode property.
-pub(crate) fn is_psalter_pahlavi(c: char) -> bool {
-    PSALTER_PAHLAVI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const REJANG: [CodePointRange; 2] = [
-    CodePointRange::from(43312, 36),
-    CodePointRange::from(43359, 1),
-];
-
-/// Return whether c has the 'Rejang' Unicode property.
-pub(crate) fn is_rejang(c: char) -> bool {
-    REJANG
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const RUNIC: [CodePointRange; 2] = [
-    CodePointRange::from(5792, 75),
-    CodePointRange::from(5870, 11),
-];
-
-/// Return whether c has the 'Runic' Unicode property.
-pub(crate) fn is_runic(c: char) -> bool {
-    RUNIC.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const SAMARITAN: [CodePointRange; 2] = [
-    CodePointRange::from(2048, 46),
-    CodePointRange::from(2096, 15),
-];
-
-/// Return whether c has the 'Samaritan' Unicode property.
-pub(crate) fn is_samaritan(c: char) -> bool {
-    SAMARITAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SAURASHTRA: [CodePointRange; 2] = [
-    CodePointRange::from(43136, 70),
-    CodePointRange::from(43214, 12),
-];
-
-/// Return whether c has the 'Saurashtra' Unicode property.
-pub(crate) fn is_saurashtra(c: char) -> bool {
-    SAURASHTRA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SHARADA: [CodePointRange; 1] = [CodePointRange::from(70016, 96)];
-
-/// Return whether c has the 'Sharada' Unicode property.
-pub(crate) fn is_sharada(c: char) -> bool {
-    SHARADA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SHAVIAN: [CodePointRange; 1] = [CodePointRange::from(66640, 48)];
-
-/// Return whether c has the 'Shavian' Unicode property.
-pub(crate) fn is_shavian(c: char) -> bool {
-    SHAVIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SIDDHAM: [CodePointRange; 2] = [
-    CodePointRange::from(71040, 54),
-    CodePointRange::from(71096, 38),
-];
-
-/// Return whether c has the 'Siddham' Unicode property.
-pub(crate) fn is_siddham(c: char) -> bool {
-    SIDDHAM
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SIGNWRITING: [CodePointRange; 3] = [
-    CodePointRange::from(120832, 652),
-    CodePointRange::from(121499, 5),
-    CodePointRange::from(121505, 15),
-];
-
-/// Return whether c has the 'SignWriting' Unicode property.
-pub(crate) fn is_signwriting(c: char) -> bool {
-    SIGNWRITING
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SINHALA: [CodePointRange; 13] = [
-    CodePointRange::from(3457, 3),
-    CodePointRange::from(3461, 18),
-    CodePointRange::from(3482, 24),
-    CodePointRange::from(3507, 9),
-    CodePointRange::from(3517, 1),
-    CodePointRange::from(3520, 7),
-    CodePointRange::from(3530, 1),
-    CodePointRange::from(3535, 6),
-    CodePointRange::from(3542, 1),
-    CodePointRange::from(3544, 8),
-    CodePointRange::from(3558, 10),
-    CodePointRange::from(3570, 3),
-    CodePointRange::from(70113, 20),
-];
-
-/// Return whether c has the 'Sinhala' Unicode property.
-pub(crate) fn is_sinhala(c: char) -> bool {
-    SINHALA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SOGDIAN: [CodePointRange; 1] = [CodePointRange::from(69424, 42)];
-
-/// Return whether c has the 'Sogdian' Unicode property.
-pub(crate) fn is_sogdian(c: char) -> bool {
-    SOGDIAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SORA_SOMPENG: [CodePointRange; 2] = [
-    CodePointRange::from(69840, 25),
-    CodePointRange::from(69872, 10),
-];
-
-/// Return whether c has the 'Sora_Sompeng' Unicode property.
-pub(crate) fn is_sora_sompeng(c: char) -> bool {
-    SORA_SOMPENG
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SOYOMBO: [CodePointRange; 1] = [CodePointRange::from(72272, 83)];
-
-/// Return whether c has the 'Soyombo' Unicode property.
-pub(crate) fn is_soyombo(c: char) -> bool {
-    SOYOMBO
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SUNDANESE: [CodePointRange; 2] = [
-    CodePointRange::from(7040, 64),
-    CodePointRange::from(7360, 8),
-];
-
-/// Return whether c has the 'Sundanese' Unicode property.
-pub(crate) fn is_sundanese(c: char) -> bool {
-    SUNDANESE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SYLOTI_NAGRI: [CodePointRange; 1] = [CodePointRange::from(43008, 45)];
-
-/// Return whether c has the 'Syloti_Nagri' Unicode property.
-pub(crate) fn is_syloti_nagri(c: char) -> bool {
-    SYLOTI_NAGRI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const SYRIAC: [CodePointRange; 4] = [
-    CodePointRange::from(1792, 14),
-    CodePointRange::from(1807, 60),
-    CodePointRange::from(1869, 3),
-    CodePointRange::from(2144, 11),
-];
-
-/// Return whether c has the 'Syriac' Unicode property.
-pub(crate) fn is_syriac(c: char) -> bool {
-    SYRIAC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const TAGALOG: [CodePointRange; 2] = [
-    CodePointRange::from(5888, 22),
-    CodePointRange::from(5919, 1),
-];
-
-/// Return whether c has the 'Tagalog' Unicode property.
-pub(crate) fn is_tagalog(c: char) -> bool {
-    TAGALOG
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const TAGBANWA: [CodePointRange; 3] = [
-    CodePointRange::from(5984, 13),
-    CodePointRange::from(5998, 3),
-    CodePointRange::from(6002, 2),
-];
-
-/// Return whether c has the 'Tagbanwa' Unicode property.
-pub(crate) fn is_tagbanwa(c: char) -> bool {
-    TAGBANWA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const TAI_LE: [CodePointRange; 2] = [
-    CodePointRange::from(6480, 30),
-    CodePointRange::from(6512, 5),
-];
-
-/// Return whether c has the 'Tai_Le' Unicode property.
-pub(crate) fn is_tai_le(c: char) -> bool {
-    TAI_LE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const TAI_THAM: [CodePointRange; 5] = [
-    CodePointRange::from(6688, 63),
-    CodePointRange::from(6752, 29),
-    CodePointRange::from(6783, 11),
-    CodePointRange::from(6800, 10),
-    CodePointRange::from(6816, 14),
-];
-
-/// Return whether c has the 'Tai_Tham' Unicode property.
-pub(crate) fn is_tai_tham(c: char) -> bool {
-    TAI_THAM
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const TAI_VIET: [CodePointRange; 2] = [
-    CodePointRange::from(43648, 67),
-    CodePointRange::from(43739, 5),
-];
-
-/// Return whether c has the 'Tai_Viet' Unicode property.
-pub(crate) fn is_tai_viet(c: char) -> bool {
-    TAI_VIET
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const TAKRI: [CodePointRange; 2] = [
-    CodePointRange::from(71296, 58),
-    CodePointRange::from(71360, 10),
-];
-
-/// Return whether c has the 'Takri' Unicode property.
-pub(crate) fn is_takri(c: char) -> bool {
-    TAKRI.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const TAMIL: [CodePointRange; 18] = [
-    CodePointRange::from(2946, 2),
-    CodePointRange::from(2949, 6),
-    CodePointRange::from(2958, 3),
-    CodePointRange::from(2962, 4),
-    CodePointRange::from(2969, 2),
-    CodePointRange::from(2972, 1),
-    CodePointRange::from(2974, 2),
-    CodePointRange::from(2979, 2),
-    CodePointRange::from(2984, 3),
-    CodePointRange::from(2990, 12),
-    CodePointRange::from(3006, 5),
-    CodePointRange::from(3014, 3),
-    CodePointRange::from(3018, 4),
-    CodePointRange::from(3024, 1),
-    CodePointRange::from(3031, 1),
-    CodePointRange::from(3046, 21),
-    CodePointRange::from(73664, 50),
-    CodePointRange::from(73727, 1),
-];
-
-/// Return whether c has the 'Tamil' Unicode property.
-pub(crate) fn is_tamil(c: char) -> bool {
-    TAMIL.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const TANGUT: [CodePointRange; 5] = [
-    CodePointRange::from(94176, 1),
-    CodePointRange::from(94208, 4096),
-    CodePointRange::from(98304, 2040),
-    CodePointRange::from(100352, 768),
-    CodePointRange::from(101632, 9),
-];
-
-/// Return whether c has the 'Tangut' Unicode property.
-pub(crate) fn is_tangut(c: char) -> bool {
-    TANGUT
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const TELUGU: [CodePointRange; 13] = [
-    CodePointRange::from(3072, 13),
-    CodePointRange::from(3086, 3),
-    CodePointRange::from(3090, 23),
-    CodePointRange::from(3114, 16),
-    CodePointRange::from(3132, 9),
-    CodePointRange::from(3142, 3),
-    CodePointRange::from(3146, 4),
-    CodePointRange::from(3157, 2),
-    CodePointRange::from(3160, 3),
-    CodePointRange::from(3165, 1),
-    CodePointRange::from(3168, 4),
-    CodePointRange::from(3174, 10),
-    CodePointRange::from(3191, 9),
-];
-
-/// Return whether c has the 'Telugu' Unicode property.
-pub(crate) fn is_telugu(c: char) -> bool {
-    TELUGU
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const THAANA: [CodePointRange; 1] = [CodePointRange::from(1920, 50)];
-
-/// Return whether c has the 'Thaana' Unicode property.
-pub(crate) fn is_thaana(c: char) -> bool {
-    THAANA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const THAI: [CodePointRange; 2] = [
-    CodePointRange::from(3585, 58),
-    CodePointRange::from(3648, 28),
-];
-
-/// Return whether c has the 'Thai' Unicode property.
-pub(crate) fn is_thai(c: char) -> bool {
-    THAI.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const TIBETAN: [CodePointRange; 7] = [
-    CodePointRange::from(3840, 72),
-    CodePointRange::from(3913, 36),
-    CodePointRange::from(3953, 39),
-    CodePointRange::from(3993, 36),
-    CodePointRange::from(4030, 15),
-    CodePointRange::from(4046, 7),
-    CodePointRange::from(4057, 2),
-];
-
-/// Return whether c has the 'Tibetan' Unicode property.
-pub(crate) fn is_tibetan(c: char) -> bool {
-    TIBETAN
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const TIFINAGH: [CodePointRange; 3] = [
-    CodePointRange::from(11568, 56),
-    CodePointRange::from(11631, 2),
-    CodePointRange::from(11647, 1),
-];
-
-/// Return whether c has the 'Tifinagh' Unicode property.
-pub(crate) fn is_tifinagh(c: char) -> bool {
-    TIFINAGH
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const TIRHUTA: [CodePointRange; 2] = [
-    CodePointRange::from(70784, 72),
-    CodePointRange::from(70864, 10),
-];
-
-/// Return whether c has the 'Tirhuta' Unicode property.
-pub(crate) fn is_tirhuta(c: char) -> bool {
-    TIRHUTA
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const UGARITIC: [CodePointRange; 2] = [
-    CodePointRange::from(66432, 30),
-    CodePointRange::from(66463, 1),
-];
-
-/// Return whether c has the 'Ugaritic' Unicode property.
-pub(crate) fn is_ugaritic(c: char) -> bool {
-    UGARITIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const VAI: [CodePointRange; 1] = [CodePointRange::from(42240, 300)];
-
-/// Return whether c has the 'Vai' Unicode property.
-pub(crate) fn is_vai(c: char) -> bool {
-    VAI.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const WANCHO: [CodePointRange; 2] = [
-    CodePointRange::from(123584, 58),
-    CodePointRange::from(123647, 1),
-];
-
-/// Return whether c has the 'Wancho' Unicode property.
-pub(crate) fn is_wancho(c: char) -> bool {
-    WANCHO
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const WARANG_CITI: [CodePointRange; 2] = [
-    CodePointRange::from(71840, 83),
-    CodePointRange::from(71935, 1),
-];
-
-/// Return whether c has the 'Warang_Citi' Unicode property.
-pub(crate) fn is_warang_citi(c: char) -> bool {
-    WARANG_CITI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const YEZIDI: [CodePointRange; 3] = [
-    CodePointRange::from(69248, 42),
-    CodePointRange::from(69291, 3),
-    CodePointRange::from(69296, 2),
-];
-
-/// Return whether c has the 'Yezidi' Unicode property.
-pub(crate) fn is_yezidi(c: char) -> bool {
-    YEZIDI
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) const YI: [CodePointRange; 2] = [
-    CodePointRange::from(40960, 1165),
-    CodePointRange::from(42128, 55),
-];
-
-/// Return whether c has the 'Yi' Unicode property.
-pub(crate) fn is_yi(c: char) -> bool {
-    YI.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
-}
-
-pub(crate) const ZANABAZAR_SQUARE: [CodePointRange; 1] = [CodePointRange::from(72192, 72)];
-
-/// Return whether c has the 'Zanabazar_Square' Unicode property.
-pub(crate) fn is_zanabazar_square(c: char) -> bool {
-    ZANABAZAR_SQUARE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
-}
-
-pub(crate) fn is_property_value_script(c: char, value: &UnicodePropertyValueScript) -> bool {
-    use UnicodePropertyValueScript::*;
-    match value {
-        Adlam => is_adlam(c),
-        Ahom => is_ahom(c),
-        AnatolianHieroglyphs => is_anatolian_hieroglyphs(c),
-        Arabic => is_arabic(c),
-        Armenian => is_armenian(c),
-        Avestan => is_avestan(c),
-        Balinese => is_balinese(c),
-        Bamum => is_bamum(c),
-        BassaVah => is_bassa_vah(c),
-        Batak => is_batak(c),
-        Bengali => is_bengali(c),
-        Bhaiksuki => is_bhaiksuki(c),
-        Bopomofo => is_bopomofo(c),
-        Brahmi => is_brahmi(c),
-        Braille => is_braille(c),
-        Buginese => is_buginese(c),
-        Buhid => is_buhid(c),
-        CanadianAboriginal => is_canadian_aboriginal(c),
-        Carian => is_carian(c),
-        CaucasianAlbanian => is_caucasian_albanian(c),
-        Chakma => is_chakma(c),
-        Cham => is_cham(c),
-        Chorasmian => is_chorasmian(c),
-        Cherokee => is_cherokee(c),
-        Common => is_common(c),
-        Coptic => is_coptic(c),
-        Cuneiform => is_cuneiform(c),
-        Cypriot => is_cypriot(c),
-        Cyrillic => is_cyrillic(c),
-        Deseret => is_deseret(c),
-        Devanagari => is_devanagari(c),
-        DivesAkuru => is_dives_akuru(c),
-        Dogra => is_dogra(c),
-        Duployan => is_duployan(c),
-        EgyptianHieroglyphs => is_egyptian_hieroglyphs(c),
-        Elbasan => is_elbasan(c),
-        Elymaic => is_elymaic(c),
-        Ethiopic => is_ethiopic(c),
-        Georgian => is_georgian(c),
-        Glagolitic => is_glagolitic(c),
-        Gothic => is_gothic(c),
-        Grantha => is_grantha(c),
-        Greek => is_greek(c),
-        Gujarati => is_gujarati(c),
-        GunjalaGondi => is_gunjala_gondi(c),
-        Gurmukhi => is_gurmukhi(c),
-        Han => is_han(c),
-        Hangul => is_hangul(c),
-        HanifiRohingya => is_hanifi_rohingya(c),
-        Hanunoo => is_hanunoo(c),
-        Hatran => is_hatran(c),
-        Hebrew => is_hebrew(c),
-        Hiragana => is_hiragana(c),
-        ImperialAramaic => is_imperial_aramaic(c),
-        Inherited => is_inherited(c),
-        InscriptionalPahlavi => is_inscriptional_pahlavi(c),
-        InscriptionalParthian => is_inscriptional_parthian(c),
-        Javanese => is_javanese(c),
-        Kaithi => is_kaithi(c),
-        Kannada => is_kannada(c),
-        Katakana => is_katakana(c),
-        KayahLi => is_kayah_li(c),
-        Kharoshthi => is_kharoshthi(c),
-        KhitanSmallScript => is_khitan_small_script(c),
-        Khmer => is_khmer(c),
-        Khojki => is_khojki(c),
-        Khudawadi => is_khudawadi(c),
-        Lao => is_lao(c),
-        Latin => is_latin(c),
-        Lepcha => is_lepcha(c),
-        Limbu => is_limbu(c),
-        LinearA => is_linear_a(c),
-        LinearB => is_linear_b(c),
-        Lisu => is_lisu(c),
-        Lycian => is_lycian(c),
-        Lydian => is_lydian(c),
-        Mahajani => is_mahajani(c),
-        Makasar => is_makasar(c),
-        Malayalam => is_malayalam(c),
-        Mandaic => is_mandaic(c),
-        Manichaean => is_manichaean(c),
-        Marchen => is_marchen(c),
-        Medefaidrin => is_medefaidrin(c),
-        MasaramGondi => is_masaram_gondi(c),
-        MeeteiMayek => is_meetei_mayek(c),
-        MendeKikakui => is_mende_kikakui(c),
-        MeroiticCursive => is_meroitic_cursive(c),
-        MeroiticHieroglyphs => is_meroitic_hieroglyphs(c),
-        Miao => is_miao(c),
-        Modi => is_modi(c),
-        Mongolian => is_mongolian(c),
-        Mro => is_mro(c),
-        Multani => is_multani(c),
-        Myanmar => is_myanmar(c),
-        Nabataean => is_nabataean(c),
-        Nandinagari => is_nandinagari(c),
-        NewTaiLue => is_new_tai_lue(c),
-        Newa => is_newa(c),
-        Nko => is_nko(c),
-        Nushu => is_nushu(c),
-        NyiakengPuachueHmong => is_nyiakeng_puachue_hmong(c),
-        Ogham => is_ogham(c),
-        OlChiki => is_ol_chiki(c),
-        OldHungarian => is_old_hungarian(c),
-        OldItalic => is_old_italic(c),
-        OldNorthArabian => is_old_north_arabian(c),
-        OldPermic => is_old_permic(c),
-        OldPersian => is_old_persian(c),
-        OldSogdian => is_old_sogdian(c),
-        OldSouthArabian => is_old_south_arabian(c),
-        OldTurkic => is_old_turkic(c),
-        Oriya => is_oriya(c),
-        Osage => is_osage(c),
-        Osmanya => is_osmanya(c),
-        PahawhHmong => is_pahawh_hmong(c),
-        Palmyrene => is_palmyrene(c),
-        PauCinHau => is_pau_cin_hau(c),
-        PhagsPa => is_phags_pa(c),
-        Phoenician => is_phoenician(c),
-        PsalterPahlavi => is_psalter_pahlavi(c),
-        Rejang => is_rejang(c),
-        Runic => is_runic(c),
-        Samaritan => is_samaritan(c),
-        Saurashtra => is_saurashtra(c),
-        Sharada => is_sharada(c),
-        Shavian => is_shavian(c),
-        Siddham => is_siddham(c),
-        SignWriting => is_signwriting(c),
-        Sinhala => is_sinhala(c),
-        Sogdian => is_sogdian(c),
-        SoraSompeng => is_sora_sompeng(c),
-        Soyombo => is_soyombo(c),
-        Sundanese => is_sundanese(c),
-        SylotiNagri => is_syloti_nagri(c),
-        Syriac => is_syriac(c),
-        Tagalog => is_tagalog(c),
-        Tagbanwa => is_tagbanwa(c),
-        TaiLe => is_tai_le(c),
-        TaiTham => is_tai_tham(c),
-        TaiViet => is_tai_viet(c),
-        Takri => is_takri(c),
-        Tamil => is_tamil(c),
-        Tangut => is_tangut(c),
-        Telugu => is_telugu(c),
-        Thaana => is_thaana(c),
-        Thai => is_thai(c),
-        Tibetan => is_tibetan(c),
-        Tifinagh => is_tifinagh(c),
-        Tirhuta => is_tirhuta(c),
-        Ugaritic => is_ugaritic(c),
-        Vai => is_vai(c),
-        Wancho => is_wancho(c),
-        WarangCiti => is_warang_citi(c),
-        Yezidi => is_yezidi(c),
-        Yi => is_yi(c),
-        ZanabazarSquare => is_zanabazar_square(c),
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum UnicodePropertyValueScript {
-    Adlam,
-    Ahom,
-    AnatolianHieroglyphs,
-    Arabic,
-    Armenian,
-    Avestan,
-    Balinese,
-    Bamum,
-    BassaVah,
-    Batak,
-    Bengali,
-    Bhaiksuki,
-    Bopomofo,
-    Brahmi,
-    Braille,
-    Buginese,
-    Buhid,
-    CanadianAboriginal,
-    Carian,
-    CaucasianAlbanian,
-    Chakma,
-    Cham,
-    Chorasmian,
-    Cherokee,
-    Common,
-    Coptic,
-    Cuneiform,
-    Cypriot,
-    Cyrillic,
-    Deseret,
-    Devanagari,
-    DivesAkuru,
-    Dogra,
-    Duployan,
-    EgyptianHieroglyphs,
-    Elbasan,
-    Elymaic,
-    Ethiopic,
-    Georgian,
-    Glagolitic,
-    Gothic,
-    Grantha,
-    Greek,
-    Gujarati,
-    GunjalaGondi,
-    Gurmukhi,
-    Han,
-    Hangul,
-    HanifiRohingya,
-    Hanunoo,
-    Hatran,
-    Hebrew,
-    Hiragana,
-    ImperialAramaic,
-    Inherited,
-    InscriptionalPahlavi,
-    InscriptionalParthian,
-    Javanese,
-    Kaithi,
-    Kannada,
-    Katakana,
-    KayahLi,
-    Kharoshthi,
-    KhitanSmallScript,
-    Khmer,
-    Khojki,
-    Khudawadi,
-    Lao,
-    Latin,
-    Lepcha,
-    Limbu,
-    LinearA,
-    LinearB,
-    Lisu,
-    Lycian,
-    Lydian,
-    Mahajani,
-    Makasar,
-    Malayalam,
-    Mandaic,
-    Manichaean,
-    Marchen,
-    Medefaidrin,
-    MasaramGondi,
-    MeeteiMayek,
-    MendeKikakui,
-    MeroiticCursive,
-    MeroiticHieroglyphs,
-    Miao,
-    Modi,
-    Mongolian,
-    Mro,
-    Multani,
-    Myanmar,
-    Nabataean,
-    Nandinagari,
-    NewTaiLue,
-    Newa,
-    Nko,
-    Nushu,
-    NyiakengPuachueHmong,
-    Ogham,
-    OlChiki,
-    OldHungarian,
-    OldItalic,
-    OldNorthArabian,
-    OldPermic,
-    OldPersian,
-    OldSogdian,
-    OldSouthArabian,
-    OldTurkic,
-    Oriya,
-    Osage,
-    Osmanya,
-    PahawhHmong,
-    Palmyrene,
-    PauCinHau,
-    PhagsPa,
-    Phoenician,
-    PsalterPahlavi,
-    Rejang,
-    Runic,
-    Samaritan,
-    Saurashtra,
-    Sharada,
-    Shavian,
-    Siddham,
-    SignWriting,
-    Sinhala,
-    Sogdian,
-    SoraSompeng,
-    Soyombo,
-    Sundanese,
-    SylotiNagri,
-    Syriac,
-    Tagalog,
-    Tagbanwa,
-    TaiLe,
-    TaiTham,
-    TaiViet,
-    Takri,
-    Tamil,
-    Tangut,
-    Telugu,
-    Thaana,
-    Thai,
-    Tibetan,
-    Tifinagh,
-    Tirhuta,
-    Ugaritic,
-    Vai,
-    Wancho,
-    WarangCiti,
-    Yezidi,
-    Yi,
-    ZanabazarSquare,
-}
-
-pub fn unicode_property_value_script_from_str(s: &str) -> Option<UnicodePropertyValueScript> {
-    use UnicodePropertyValueScript::*;
-    match s {
-        "Adlm" | "Adlam" => Some(Adlam),
-        "Ahom" => Some(Ahom),
-        "Hluw" | "Anatolian_Hieroglyphs" => Some(AnatolianHieroglyphs),
-        "Arab" | "Arabic" => Some(Arabic),
-        "Armn" | "Armenian" => Some(Armenian),
-        "Avst" | "Avestan" => Some(Avestan),
-        "Bali" | "Balinese" => Some(Balinese),
-        "Bamu" | "Bamum" => Some(Bamum),
-        "Bass" | "Bassa_Vah" => Some(BassaVah),
-        "Batk" | "Batak" => Some(Batak),
-        "Beng" | "Bengali" => Some(Bengali),
-        "Bhks" | "Bhaiksuki" => Some(Bhaiksuki),
-        "Bopo" | "Bopomofo" => Some(Bopomofo),
-        "Brah" | "Brahmi" => Some(Brahmi),
-        "Brai" | "Braille" => Some(Braille),
-        "Bugi" | "Buginese" => Some(Buginese),
-        "Buhd" | "Buhid" => Some(Buhid),
-        "Cans" | "Canadian_Aboriginal" => Some(CanadianAboriginal),
-        "Cari" | "Carian" => Some(Carian),
-        "Aghb" | "Caucasian_Albanian" => Some(CaucasianAlbanian),
-        "Cakm" | "Chakma" => Some(Chakma),
-        "Cham" => Some(Cham),
-        "Chrs" | "Chorasmian" => Some(Chorasmian),
-        "Cher" | "Cherokee" => Some(Cherokee),
-        "Zyyy" | "Common" => Some(Common),
-        "Copt" | "Qaac" | "Coptic" => Some(Coptic),
-        "Xsux" | "Cuneiform" => Some(Cuneiform),
-        "Cprt" | "Cypriot" => Some(Cypriot),
-        "Cyrl" | "Cyrillic" => Some(Cyrillic),
-        "Dsrt" | "Deseret" => Some(Deseret),
-        "Deva" | "Devanagari" => Some(Devanagari),
-        "Diak" | "Dives_Akuru" => Some(DivesAkuru),
-        "Dogr" | "Dogra" => Some(Dogra),
-        "Dupl" | "Duployan" => Some(Duployan),
-        "Egyp" | "Egyptian_Hieroglyphs" => Some(EgyptianHieroglyphs),
-        "Elba" | "Elbasan" => Some(Elbasan),
-        "Elym" | "Elymaic" => Some(Elymaic),
-        "Ethi" | "Ethiopic" => Some(Ethiopic),
-        "Geor" | "Georgian" => Some(Georgian),
-        "Glag" | "Glagolitic" => Some(Glagolitic),
-        "Goth" | "Gothic" => Some(Gothic),
-        "Gran" | "Grantha" => Some(Grantha),
-        "Grek" | "Greek" => Some(Greek),
-        "Gujr" | "Gujarati" => Some(Gujarati),
-        "Gong" | "Gunjala_Gondi" => Some(GunjalaGondi),
-        "Guru" | "Gurmukhi" => Some(Gurmukhi),
-        "Hani" | "Han" => Some(Han),
-        "Hang" | "Hangul" => Some(Hangul),
-        "Rohg" | "Hanifi_Rohingya" => Some(HanifiRohingya),
-        "Hano" | "Hanunoo" => Some(Hanunoo),
-        "Hatr" | "Hatran" => Some(Hatran),
-        "Hebr" | "Hebrew" => Some(Hebrew),
-        "Hira" | "Hiragana" => Some(Hiragana),
-        "Armi" | "Imperial_Aramaic" => Some(ImperialAramaic),
-        "Zinh" | "Qaai" | "Inherited" => Some(Inherited),
-        "Phli" | "Inscriptional_Pahlavi" => Some(InscriptionalPahlavi),
-        "Prti" | "Inscriptional_Parthian" => Some(InscriptionalParthian),
-        "Java" | "Javanese" => Some(Javanese),
-        "Kthi" | "Kaithi" => Some(Kaithi),
-        "Knda" | "Kannada" => Some(Kannada),
-        "Kana" | "Katakana" => Some(Katakana),
-        "Kali" | "Kayah_Li" => Some(KayahLi),
-        "Khar" | "Kharoshthi" => Some(Kharoshthi),
-        "Kits" | "Khitan_Small_Script" => Some(KhitanSmallScript),
-        "Khmr" | "Khmer" => Some(Khmer),
-        "Khoj" | "Khojki" => Some(Khojki),
-        "Sind" | "Khudawadi" => Some(Khudawadi),
-        "Laoo" | "Lao" => Some(Lao),
-        "Latn" | "Latin" => Some(Latin),
-        "Lepc" | "Lepcha" => Some(Lepcha),
-        "Limb" | "Limbu" => Some(Limbu),
-        "Lina" | "Linear_A" => Some(LinearA),
-        "Linb" | "Linear_B" => Some(LinearB),
-        "Lisu" => Some(Lisu),
-        "Lyci" | "Lycian" => Some(Lycian),
-        "Lydi" | "Lydian" => Some(Lydian),
-        "Mahj" | "Mahajani" => Some(Mahajani),
-        "Maka" | "Makasar" => Some(Makasar),
-        "Mlym" | "Malayalam" => Some(Malayalam),
-        "Mand" | "Mandaic" => Some(Mandaic),
-        "Mani" | "Manichaean" => Some(Manichaean),
-        "Marc" | "Marchen" => Some(Marchen),
-        "Medf" | "Medefaidrin" => Some(Medefaidrin),
-        "Gonm" | "Masaram_Gondi" => Some(MasaramGondi),
-        "Mtei" | "Meetei_Mayek" => Some(MeeteiMayek),
-        "Mend" | "Mende_Kikakui" => Some(MendeKikakui),
-        "Merc" | "Meroitic_Cursive" => Some(MeroiticCursive),
-        "Mero" | "Meroitic_Hieroglyphs" => Some(MeroiticHieroglyphs),
-        "Plrd" | "Miao" => Some(Miao),
-        "Modi" => Some(Modi),
-        "Mong" | "Mongolian" => Some(Mongolian),
-        "Mroo" | "Mro" => Some(Mro),
-        "Mult" | "Multani" => Some(Multani),
-        "Mymr" | "Myanmar" => Some(Myanmar),
-        "Nbat" | "Nabataean" => Some(Nabataean),
-        "Nand" | "Nandinagari" => Some(Nandinagari),
-        "Talu" | "New_Tai_Lue" => Some(NewTaiLue),
-        "Newa" => Some(Newa),
-        "Nkoo" | "Nko" => Some(Nko),
-        "Nshu" | "Nushu" => Some(Nushu),
-        "Hmnp" | "Nyiakeng_Puachue_Hmong" => Some(NyiakengPuachueHmong),
-        "Ogam" | "Ogham" => Some(Ogham),
-        "Olck" | "Ol_Chiki" => Some(OlChiki),
-        "Hung" | "Old_Hungarian" => Some(OldHungarian),
-        "Ital" | "Old_Italic" => Some(OldItalic),
-        "Narb" | "Old_North_Arabian" => Some(OldNorthArabian),
-        "Perm" | "Old_Permic" => Some(OldPermic),
-        "Xpeo" | "Old_Persian" => Some(OldPersian),
-        "Sogo" | "Old_Sogdian" => Some(OldSogdian),
-        "Sarb" | "Old_South_Arabian" => Some(OldSouthArabian),
-        "Orkh" | "Old_Turkic" => Some(OldTurkic),
-        "Orya" | "Oriya" => Some(Oriya),
-        "Osge" | "Osage" => Some(Osage),
-        "Osma" | "Osmanya" => Some(Osmanya),
-        "Hmng" | "Pahawh_Hmong" => Some(PahawhHmong),
-        "Palm" | "Palmyrene" => Some(Palmyrene),
-        "Pauc" | "Pau_Cin_Hau" => Some(PauCinHau),
-        "Phag" | "Phags_Pa" => Some(PhagsPa),
-        "Phnx" | "Phoenician" => Some(Phoenician),
-        "Phlp" | "Psalter_Pahlavi" => Some(PsalterPahlavi),
-        "Rjng" | "Rejang" => Some(Rejang),
-        "Runr" | "Runic" => Some(Runic),
-        "Samr" | "Samaritan" => Some(Samaritan),
-        "Saur" | "Saurashtra" => Some(Saurashtra),
-        "Shrd" | "Sharada" => Some(Sharada),
-        "Shaw" | "Shavian" => Some(Shavian),
-        "Sidd" | "Siddham" => Some(Siddham),
-        "Sgnw" | "SignWriting" => Some(SignWriting),
-        "Sinh" | "Sinhala" => Some(Sinhala),
-        "Sogd" | "Sogdian" => Some(Sogdian),
-        "Sora" | "Sora_Sompeng" => Some(SoraSompeng),
-        "Soyo" | "Soyombo" => Some(Soyombo),
-        "Sund" | "Sundanese" => Some(Sundanese),
-        "Sylo" | "Syloti_Nagri" => Some(SylotiNagri),
-        "Syrc" | "Syriac" => Some(Syriac),
-        "Tglg" | "Tagalog" => Some(Tagalog),
-        "Tagb" | "Tagbanwa" => Some(Tagbanwa),
-        "Tale" | "Tai_Le" => Some(TaiLe),
-        "Lana" | "Tai_Tham" => Some(TaiTham),
-        "Tavt" | "Tai_Viet" => Some(TaiViet),
-        "Takr" | "Takri" => Some(Takri),
-        "Taml" | "Tamil" => Some(Tamil),
-        "Tang" | "Tangut" => Some(Tangut),
-        "Telu" | "Telugu" => Some(Telugu),
-        "Thaa" | "Thaana" => Some(Thaana),
-        "Thai" => Some(Thai),
-        "Tibt" | "Tibetan" => Some(Tibetan),
-        "Tfng" | "Tifinagh" => Some(Tifinagh),
-        "Tirh" | "Tirhuta" => Some(Tirhuta),
-        "Ugar" | "Ugaritic" => Some(Ugaritic),
-        "Vaii" | "Vai" => Some(Vai),
-        "Wcho" | "Wancho" => Some(Wancho),
-        "Wara" | "Warang_Citi" => Some(WarangCiti),
-        "Yezi" | "Yezidi" => Some(Yezidi),
-        "Yiii" | "Yi" => Some(Yi),
-        "Zanb" | "Zanabazar_Square" => Some(ZanabazarSquare),
-        _ => None,
-    }
-}
-
 pub(crate) const CLOSE_PUNCTUATION: [CodePointRange; 76] = [
     CodePointRange::from(41, 1),
     CodePointRange::from(93, 1),
@@ -19917,5 +17041,2921 @@ pub fn unicode_property_value_general_category_from_str(
         "S" | "Symbol" => Some(Symbol),
         "Z" | "Separator" => Some(Separator),
         _ => None,
+    }
+}
+
+const ADLAM: [CodePointRange; 3] = [
+    CodePointRange::from(125184, 76),
+    CodePointRange::from(125264, 10),
+    CodePointRange::from(125278, 2),
+];
+
+const ADLAM_EXTENSIONS: [CodePointRange; 2] =
+    [CodePointRange::from(1567, 1), CodePointRange::from(1600, 1)];
+
+const CAUCASIAN_ALBANIAN: [CodePointRange; 2] = [
+    CodePointRange::from(66864, 52),
+    CodePointRange::from(66927, 1),
+];
+
+const AHOM: [CodePointRange; 3] = [
+    CodePointRange::from(71424, 27),
+    CodePointRange::from(71453, 15),
+    CodePointRange::from(71472, 23),
+];
+
+const ARABIC: [CodePointRange; 58] = [
+    CodePointRange::from(1536, 5),
+    CodePointRange::from(1542, 6),
+    CodePointRange::from(1549, 14),
+    CodePointRange::from(1564, 3),
+    CodePointRange::from(1568, 32),
+    CodePointRange::from(1601, 10),
+    CodePointRange::from(1622, 26),
+    CodePointRange::from(1649, 108),
+    CodePointRange::from(1758, 34),
+    CodePointRange::from(1872, 48),
+    CodePointRange::from(2160, 31),
+    CodePointRange::from(2192, 2),
+    CodePointRange::from(2200, 74),
+    CodePointRange::from(2275, 29),
+    CodePointRange::from(64336, 115),
+    CodePointRange::from(64467, 363),
+    CodePointRange::from(64832, 80),
+    CodePointRange::from(64914, 54),
+    CodePointRange::from(64975, 1),
+    CodePointRange::from(65008, 16),
+    CodePointRange::from(65136, 5),
+    CodePointRange::from(65142, 135),
+    CodePointRange::from(69216, 31),
+    CodePointRange::from(69373, 3),
+    CodePointRange::from(126464, 4),
+    CodePointRange::from(126469, 27),
+    CodePointRange::from(126497, 2),
+    CodePointRange::from(126500, 1),
+    CodePointRange::from(126503, 1),
+    CodePointRange::from(126505, 10),
+    CodePointRange::from(126516, 4),
+    CodePointRange::from(126521, 1),
+    CodePointRange::from(126523, 1),
+    CodePointRange::from(126530, 1),
+    CodePointRange::from(126535, 1),
+    CodePointRange::from(126537, 1),
+    CodePointRange::from(126539, 1),
+    CodePointRange::from(126541, 3),
+    CodePointRange::from(126545, 2),
+    CodePointRange::from(126548, 1),
+    CodePointRange::from(126551, 1),
+    CodePointRange::from(126553, 1),
+    CodePointRange::from(126555, 1),
+    CodePointRange::from(126557, 1),
+    CodePointRange::from(126559, 1),
+    CodePointRange::from(126561, 2),
+    CodePointRange::from(126564, 1),
+    CodePointRange::from(126567, 4),
+    CodePointRange::from(126572, 7),
+    CodePointRange::from(126580, 4),
+    CodePointRange::from(126585, 4),
+    CodePointRange::from(126590, 1),
+    CodePointRange::from(126592, 10),
+    CodePointRange::from(126603, 17),
+    CodePointRange::from(126625, 3),
+    CodePointRange::from(126629, 5),
+    CodePointRange::from(126635, 17),
+    CodePointRange::from(126704, 2),
+];
+
+const ARABIC_EXTENSIONS: [CodePointRange; 12] = [
+    CodePointRange::from(1548, 1),
+    CodePointRange::from(1563, 2),
+    CodePointRange::from(1567, 1),
+    CodePointRange::from(1600, 1),
+    CodePointRange::from(1611, 11),
+    CodePointRange::from(1632, 10),
+    CodePointRange::from(1648, 1),
+    CodePointRange::from(1748, 1),
+    CodePointRange::from(64830, 2),
+    CodePointRange::from(65010, 1),
+    CodePointRange::from(65021, 1),
+    CodePointRange::from(66272, 28),
+];
+
+const IMPERIAL_ARAMAIC: [CodePointRange; 2] = [
+    CodePointRange::from(67648, 22),
+    CodePointRange::from(67671, 9),
+];
+
+const ARMENIAN: [CodePointRange; 4] = [
+    CodePointRange::from(1329, 38),
+    CodePointRange::from(1369, 50),
+    CodePointRange::from(1421, 3),
+    CodePointRange::from(64275, 5),
+];
+
+const AVESTAN: [CodePointRange; 2] = [
+    CodePointRange::from(68352, 54),
+    CodePointRange::from(68409, 7),
+];
+
+const BALINESE: [CodePointRange; 2] = [
+    CodePointRange::from(6912, 77),
+    CodePointRange::from(6992, 47),
+];
+
+const BAMUM: [CodePointRange; 2] = [
+    CodePointRange::from(42656, 88),
+    CodePointRange::from(92160, 569),
+];
+
+const BASSA_VAH: [CodePointRange; 2] = [
+    CodePointRange::from(92880, 30),
+    CodePointRange::from(92912, 6),
+];
+
+const BATAK: [CodePointRange; 2] = [
+    CodePointRange::from(7104, 52),
+    CodePointRange::from(7164, 4),
+];
+
+const BENGALI: [CodePointRange; 14] = [
+    CodePointRange::from(2432, 4),
+    CodePointRange::from(2437, 8),
+    CodePointRange::from(2447, 2),
+    CodePointRange::from(2451, 22),
+    CodePointRange::from(2474, 7),
+    CodePointRange::from(2482, 1),
+    CodePointRange::from(2486, 4),
+    CodePointRange::from(2492, 9),
+    CodePointRange::from(2503, 2),
+    CodePointRange::from(2507, 4),
+    CodePointRange::from(2519, 1),
+    CodePointRange::from(2524, 2),
+    CodePointRange::from(2527, 5),
+    CodePointRange::from(2534, 25),
+];
+
+const BENGALI_EXTENSIONS: [CodePointRange; 13] = [
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(2534, 10),
+    CodePointRange::from(7376, 1),
+    CodePointRange::from(7378, 1),
+    CodePointRange::from(7381, 2),
+    CodePointRange::from(7384, 1),
+    CodePointRange::from(7393, 1),
+    CodePointRange::from(7402, 1),
+    CodePointRange::from(7405, 1),
+    CodePointRange::from(7410, 1),
+    CodePointRange::from(7413, 3),
+    CodePointRange::from(43249, 1),
+];
+
+const BHAIKSUKI: [CodePointRange; 4] = [
+    CodePointRange::from(72704, 9),
+    CodePointRange::from(72714, 45),
+    CodePointRange::from(72760, 14),
+    CodePointRange::from(72784, 29),
+];
+
+const BOPOMOFO: [CodePointRange; 3] = [
+    CodePointRange::from(746, 2),
+    CodePointRange::from(12549, 43),
+    CodePointRange::from(12704, 32),
+];
+
+const BOPOMOFO_EXTENSIONS: [CodePointRange; 9] = [
+    CodePointRange::from(12289, 3),
+    CodePointRange::from(12296, 10),
+    CodePointRange::from(12307, 13),
+    CodePointRange::from(12330, 4),
+    CodePointRange::from(12336, 1),
+    CodePointRange::from(12343, 1),
+    CodePointRange::from(12539, 1),
+    CodePointRange::from(65093, 2),
+    CodePointRange::from(65377, 5),
+];
+
+const BRAHMI: [CodePointRange; 3] = [
+    CodePointRange::from(69632, 78),
+    CodePointRange::from(69714, 36),
+    CodePointRange::from(69759, 1),
+];
+
+const BRAILLE: [CodePointRange; 1] = [CodePointRange::from(10240, 256)];
+
+const BUGINESE: [CodePointRange; 2] = [
+    CodePointRange::from(6656, 28),
+    CodePointRange::from(6686, 2),
+];
+
+const BUGINESE_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(43471, 1)];
+
+const BUHID: [CodePointRange; 1] = [CodePointRange::from(5952, 20)];
+
+const BUHID_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(5941, 2)];
+
+const CHAKMA: [CodePointRange; 2] = [
+    CodePointRange::from(69888, 53),
+    CodePointRange::from(69942, 18),
+];
+
+const CHAKMA_EXTENSIONS: [CodePointRange; 2] = [
+    CodePointRange::from(2534, 10),
+    CodePointRange::from(4160, 10),
+];
+
+const CANADIAN_ABORIGINAL: [CodePointRange; 3] = [
+    CodePointRange::from(5120, 640),
+    CodePointRange::from(6320, 70),
+    CodePointRange::from(72368, 16),
+];
+
+const CARIAN: [CodePointRange; 1] = [CodePointRange::from(66208, 49)];
+
+const CHAM: [CodePointRange; 4] = [
+    CodePointRange::from(43520, 55),
+    CodePointRange::from(43584, 14),
+    CodePointRange::from(43600, 10),
+    CodePointRange::from(43612, 4),
+];
+
+const CHEROKEE: [CodePointRange; 3] = [
+    CodePointRange::from(5024, 86),
+    CodePointRange::from(5112, 6),
+    CodePointRange::from(43888, 80),
+];
+
+const CHORASMIAN: [CodePointRange; 1] = [CodePointRange::from(69552, 28)];
+
+const COPTIC: [CodePointRange; 3] = [
+    CodePointRange::from(994, 14),
+    CodePointRange::from(11392, 116),
+    CodePointRange::from(11513, 7),
+];
+
+const COPTIC_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(66272, 28)];
+
+const CYPRO_MINOAN: [CodePointRange; 1] = [CodePointRange::from(77712, 99)];
+
+const CYPRO_MINOAN_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(65792, 2)];
+
+const CYPRIOT: [CodePointRange; 6] = [
+    CodePointRange::from(67584, 6),
+    CodePointRange::from(67592, 1),
+    CodePointRange::from(67594, 44),
+    CodePointRange::from(67639, 2),
+    CodePointRange::from(67644, 1),
+    CodePointRange::from(67647, 1),
+];
+
+const CYPRIOT_EXTENSIONS: [CodePointRange; 3] = [
+    CodePointRange::from(65792, 3),
+    CodePointRange::from(65799, 45),
+    CodePointRange::from(65847, 9),
+];
+
+const CYRILLIC: [CodePointRange; 10] = [
+    CodePointRange::from(1024, 133),
+    CodePointRange::from(1159, 169),
+    CodePointRange::from(7296, 9),
+    CodePointRange::from(7467, 1),
+    CodePointRange::from(7544, 1),
+    CodePointRange::from(11744, 32),
+    CodePointRange::from(42560, 96),
+    CodePointRange::from(65070, 2),
+    CodePointRange::from(122928, 62),
+    CodePointRange::from(123023, 1),
+];
+
+const CYRILLIC_EXTENSIONS: [CodePointRange; 4] = [
+    CodePointRange::from(1155, 5),
+    CodePointRange::from(7672, 1),
+    CodePointRange::from(11843, 1),
+    CodePointRange::from(42607, 1),
+];
+
+const DEVANAGARI: [CodePointRange; 5] = [
+    CodePointRange::from(2304, 81),
+    CodePointRange::from(2389, 15),
+    CodePointRange::from(2406, 26),
+    CodePointRange::from(43232, 32),
+    CodePointRange::from(72448, 10),
+];
+
+const DEVANAGARI_EXTENSIONS: [CodePointRange; 8] = [
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(2404, 12),
+    CodePointRange::from(7376, 39),
+    CodePointRange::from(7416, 2),
+    CodePointRange::from(8432, 1),
+    CodePointRange::from(43056, 10),
+    CodePointRange::from(43249, 1),
+    CodePointRange::from(43251, 1),
+];
+
+const DIVES_AKURU: [CodePointRange; 8] = [
+    CodePointRange::from(71936, 7),
+    CodePointRange::from(71945, 1),
+    CodePointRange::from(71948, 8),
+    CodePointRange::from(71957, 2),
+    CodePointRange::from(71960, 30),
+    CodePointRange::from(71991, 2),
+    CodePointRange::from(71995, 12),
+    CodePointRange::from(72016, 10),
+];
+
+const DOGRA: [CodePointRange; 1] = [CodePointRange::from(71680, 60)];
+
+const DOGRA_EXTENSIONS: [CodePointRange; 2] = [
+    CodePointRange::from(2404, 12),
+    CodePointRange::from(43056, 10),
+];
+
+const DESERET: [CodePointRange; 1] = [CodePointRange::from(66560, 80)];
+
+const DUPLOYAN: [CodePointRange; 5] = [
+    CodePointRange::from(113664, 107),
+    CodePointRange::from(113776, 13),
+    CodePointRange::from(113792, 9),
+    CodePointRange::from(113808, 10),
+    CodePointRange::from(113820, 4),
+];
+
+const DUPLOYAN_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(113824, 4)];
+
+const EGYPTIAN_HIEROGLYPHS: [CodePointRange; 1] = [CodePointRange::from(77824, 1110)];
+
+const ELBASAN: [CodePointRange; 1] = [CodePointRange::from(66816, 40)];
+
+const ELYMAIC: [CodePointRange; 1] = [CodePointRange::from(69600, 23)];
+
+const ETHIOPIC: [CodePointRange; 36] = [
+    CodePointRange::from(4608, 73),
+    CodePointRange::from(4682, 4),
+    CodePointRange::from(4688, 7),
+    CodePointRange::from(4696, 1),
+    CodePointRange::from(4698, 4),
+    CodePointRange::from(4704, 41),
+    CodePointRange::from(4746, 4),
+    CodePointRange::from(4752, 33),
+    CodePointRange::from(4786, 4),
+    CodePointRange::from(4792, 7),
+    CodePointRange::from(4800, 1),
+    CodePointRange::from(4802, 4),
+    CodePointRange::from(4808, 15),
+    CodePointRange::from(4824, 57),
+    CodePointRange::from(4882, 4),
+    CodePointRange::from(4888, 67),
+    CodePointRange::from(4957, 32),
+    CodePointRange::from(4992, 26),
+    CodePointRange::from(11648, 23),
+    CodePointRange::from(11680, 7),
+    CodePointRange::from(11688, 7),
+    CodePointRange::from(11696, 7),
+    CodePointRange::from(11704, 7),
+    CodePointRange::from(11712, 7),
+    CodePointRange::from(11720, 7),
+    CodePointRange::from(11728, 7),
+    CodePointRange::from(11736, 7),
+    CodePointRange::from(43777, 6),
+    CodePointRange::from(43785, 6),
+    CodePointRange::from(43793, 6),
+    CodePointRange::from(43808, 7),
+    CodePointRange::from(43816, 7),
+    CodePointRange::from(124896, 7),
+    CodePointRange::from(124904, 4),
+    CodePointRange::from(124909, 2),
+    CodePointRange::from(124912, 15),
+];
+
+const GEORGIAN: [CodePointRange; 10] = [
+    CodePointRange::from(4256, 38),
+    CodePointRange::from(4295, 1),
+    CodePointRange::from(4301, 1),
+    CodePointRange::from(4304, 43),
+    CodePointRange::from(4348, 4),
+    CodePointRange::from(7312, 43),
+    CodePointRange::from(7357, 3),
+    CodePointRange::from(11520, 38),
+    CodePointRange::from(11559, 1),
+    CodePointRange::from(11565, 1),
+];
+
+const GEORGIAN_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(4347, 1)];
+
+const GLAGOLITIC: [CodePointRange; 6] = [
+    CodePointRange::from(11264, 96),
+    CodePointRange::from(122880, 7),
+    CodePointRange::from(122888, 17),
+    CodePointRange::from(122907, 7),
+    CodePointRange::from(122915, 2),
+    CodePointRange::from(122918, 5),
+];
+
+const GLAGOLITIC_EXTENSIONS: [CodePointRange; 4] = [
+    CodePointRange::from(1156, 1),
+    CodePointRange::from(1159, 1),
+    CodePointRange::from(11843, 1),
+    CodePointRange::from(42607, 1),
+];
+
+const GUNJALA_GONDI: [CodePointRange; 6] = [
+    CodePointRange::from(73056, 6),
+    CodePointRange::from(73063, 2),
+    CodePointRange::from(73066, 37),
+    CodePointRange::from(73104, 2),
+    CodePointRange::from(73107, 6),
+    CodePointRange::from(73120, 10),
+];
+
+const GUNJALA_GONDI_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(2404, 2)];
+
+const MASARAM_GONDI: [CodePointRange; 7] = [
+    CodePointRange::from(72960, 7),
+    CodePointRange::from(72968, 2),
+    CodePointRange::from(72971, 44),
+    CodePointRange::from(73018, 1),
+    CodePointRange::from(73020, 2),
+    CodePointRange::from(73023, 9),
+    CodePointRange::from(73040, 10),
+];
+
+const MASARAM_GONDI_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(2404, 2)];
+
+const GOTHIC: [CodePointRange; 1] = [CodePointRange::from(66352, 27)];
+
+const GRANTHA: [CodePointRange; 15] = [
+    CodePointRange::from(70400, 4),
+    CodePointRange::from(70405, 8),
+    CodePointRange::from(70415, 2),
+    CodePointRange::from(70419, 22),
+    CodePointRange::from(70442, 7),
+    CodePointRange::from(70450, 2),
+    CodePointRange::from(70453, 5),
+    CodePointRange::from(70460, 9),
+    CodePointRange::from(70471, 2),
+    CodePointRange::from(70475, 3),
+    CodePointRange::from(70480, 1),
+    CodePointRange::from(70487, 1),
+    CodePointRange::from(70493, 7),
+    CodePointRange::from(70502, 7),
+    CodePointRange::from(70512, 5),
+];
+
+const GRANTHA_EXTENSIONS: [CodePointRange; 13] = [
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(3046, 14),
+    CodePointRange::from(7376, 1),
+    CodePointRange::from(7378, 2),
+    CodePointRange::from(7410, 3),
+    CodePointRange::from(7416, 2),
+    CodePointRange::from(8432, 1),
+    CodePointRange::from(70401, 1),
+    CodePointRange::from(70403, 1),
+    CodePointRange::from(70459, 2),
+    CodePointRange::from(73680, 2),
+    CodePointRange::from(73683, 1),
+];
+
+const GREEK: [CodePointRange; 36] = [
+    CodePointRange::from(880, 4),
+    CodePointRange::from(885, 3),
+    CodePointRange::from(890, 4),
+    CodePointRange::from(895, 1),
+    CodePointRange::from(900, 1),
+    CodePointRange::from(902, 1),
+    CodePointRange::from(904, 3),
+    CodePointRange::from(908, 1),
+    CodePointRange::from(910, 20),
+    CodePointRange::from(931, 63),
+    CodePointRange::from(1008, 16),
+    CodePointRange::from(7462, 5),
+    CodePointRange::from(7517, 5),
+    CodePointRange::from(7526, 5),
+    CodePointRange::from(7615, 1),
+    CodePointRange::from(7936, 22),
+    CodePointRange::from(7960, 6),
+    CodePointRange::from(7968, 38),
+    CodePointRange::from(8008, 6),
+    CodePointRange::from(8016, 8),
+    CodePointRange::from(8025, 1),
+    CodePointRange::from(8027, 1),
+    CodePointRange::from(8029, 1),
+    CodePointRange::from(8031, 31),
+    CodePointRange::from(8064, 53),
+    CodePointRange::from(8118, 15),
+    CodePointRange::from(8134, 14),
+    CodePointRange::from(8150, 6),
+    CodePointRange::from(8157, 19),
+    CodePointRange::from(8178, 3),
+    CodePointRange::from(8182, 9),
+    CodePointRange::from(8486, 1),
+    CodePointRange::from(43877, 1),
+    CodePointRange::from(65856, 79),
+    CodePointRange::from(65952, 1),
+    CodePointRange::from(119296, 70),
+];
+
+const GREEK_EXTENSIONS: [CodePointRange; 3] = [
+    CodePointRange::from(834, 1),
+    CodePointRange::from(837, 1),
+    CodePointRange::from(7616, 2),
+];
+
+const GUJARATI: [CodePointRange; 14] = [
+    CodePointRange::from(2689, 3),
+    CodePointRange::from(2693, 9),
+    CodePointRange::from(2703, 3),
+    CodePointRange::from(2707, 22),
+    CodePointRange::from(2730, 7),
+    CodePointRange::from(2738, 2),
+    CodePointRange::from(2741, 5),
+    CodePointRange::from(2748, 10),
+    CodePointRange::from(2759, 3),
+    CodePointRange::from(2763, 3),
+    CodePointRange::from(2768, 1),
+    CodePointRange::from(2784, 4),
+    CodePointRange::from(2790, 12),
+    CodePointRange::from(2809, 7),
+];
+
+const GUJARATI_EXTENSIONS: [CodePointRange; 4] = [
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(2790, 10),
+    CodePointRange::from(43056, 10),
+];
+
+const GURMUKHI: [CodePointRange; 16] = [
+    CodePointRange::from(2561, 3),
+    CodePointRange::from(2565, 6),
+    CodePointRange::from(2575, 2),
+    CodePointRange::from(2579, 22),
+    CodePointRange::from(2602, 7),
+    CodePointRange::from(2610, 2),
+    CodePointRange::from(2613, 2),
+    CodePointRange::from(2616, 2),
+    CodePointRange::from(2620, 1),
+    CodePointRange::from(2622, 5),
+    CodePointRange::from(2631, 2),
+    CodePointRange::from(2635, 3),
+    CodePointRange::from(2641, 1),
+    CodePointRange::from(2649, 4),
+    CodePointRange::from(2654, 1),
+    CodePointRange::from(2662, 17),
+];
+
+const GURMUKHI_EXTENSIONS: [CodePointRange; 4] = [
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(2662, 10),
+    CodePointRange::from(43056, 10),
+];
+
+const HANGUL: [CodePointRange; 16] = [
+    CodePointRange::from(4352, 256),
+    CodePointRange::from(12334, 2),
+    CodePointRange::from(12593, 94),
+    CodePointRange::from(12800, 31),
+    CodePointRange::from(12896, 31),
+    CodePointRange::from(43360, 29),
+    CodePointRange::from(44032, 4096),
+    CodePointRange::from(48128, 4096),
+    CodePointRange::from(52224, 2980),
+    CodePointRange::from(55216, 23),
+    CodePointRange::from(55243, 49),
+    CodePointRange::from(65440, 31),
+    CodePointRange::from(65474, 6),
+    CodePointRange::from(65482, 6),
+    CodePointRange::from(65490, 6),
+    CodePointRange::from(65498, 3),
+];
+
+const HANGUL_EXTENSIONS: [CodePointRange; 8] = [
+    CodePointRange::from(12289, 3),
+    CodePointRange::from(12296, 10),
+    CodePointRange::from(12307, 13),
+    CodePointRange::from(12336, 1),
+    CodePointRange::from(12343, 1),
+    CodePointRange::from(12539, 1),
+    CodePointRange::from(65093, 2),
+    CodePointRange::from(65377, 5),
+];
+
+const HAN: [CodePointRange; 42] = [
+    CodePointRange::from(11904, 26),
+    CodePointRange::from(11931, 89),
+    CodePointRange::from(12032, 214),
+    CodePointRange::from(12293, 1),
+    CodePointRange::from(12295, 1),
+    CodePointRange::from(12321, 9),
+    CodePointRange::from(12344, 4),
+    CodePointRange::from(13312, 4096),
+    CodePointRange::from(17408, 2496),
+    CodePointRange::from(19968, 4096),
+    CodePointRange::from(24064, 4096),
+    CodePointRange::from(28160, 4096),
+    CodePointRange::from(32256, 4096),
+    CodePointRange::from(36352, 4096),
+    CodePointRange::from(40448, 512),
+    CodePointRange::from(63744, 366),
+    CodePointRange::from(64112, 106),
+    CodePointRange::from(94178, 2),
+    CodePointRange::from(94192, 2),
+    CodePointRange::from(131072, 4096),
+    CodePointRange::from(135168, 4096),
+    CodePointRange::from(139264, 4096),
+    CodePointRange::from(143360, 4096),
+    CodePointRange::from(147456, 4096),
+    CodePointRange::from(151552, 4096),
+    CodePointRange::from(155648, 4096),
+    CodePointRange::from(159744, 4096),
+    CodePointRange::from(163840, 4096),
+    CodePointRange::from(167936, 4096),
+    CodePointRange::from(172032, 1760),
+    CodePointRange::from(173824, 4096),
+    CodePointRange::from(177920, 58),
+    CodePointRange::from(177984, 222),
+    CodePointRange::from(178208, 4096),
+    CodePointRange::from(182304, 1666),
+    CodePointRange::from(183984, 4096),
+    CodePointRange::from(188080, 3377),
+    CodePointRange::from(194560, 542),
+    CodePointRange::from(196608, 4096),
+    CodePointRange::from(200704, 843),
+    CodePointRange::from(201552, 4096),
+    CodePointRange::from(205648, 96),
+];
+
+const HAN_EXTENSIONS: [CodePointRange; 23] = [
+    CodePointRange::from(12289, 3),
+    CodePointRange::from(12294, 1),
+    CodePointRange::from(12296, 10),
+    CodePointRange::from(12307, 13),
+    CodePointRange::from(12330, 4),
+    CodePointRange::from(12336, 1),
+    CodePointRange::from(12343, 1),
+    CodePointRange::from(12348, 4),
+    CodePointRange::from(12539, 1),
+    CodePointRange::from(12688, 16),
+    CodePointRange::from(12736, 36),
+    CodePointRange::from(12832, 40),
+    CodePointRange::from(12928, 49),
+    CodePointRange::from(12992, 12),
+    CodePointRange::from(13055, 1),
+    CodePointRange::from(13144, 25),
+    CodePointRange::from(13179, 5),
+    CodePointRange::from(13280, 31),
+    CodePointRange::from(42752, 8),
+    CodePointRange::from(65093, 2),
+    CodePointRange::from(65377, 5),
+    CodePointRange::from(119648, 18),
+    CodePointRange::from(127568, 2),
+];
+
+const HANUNOO: [CodePointRange; 1] = [CodePointRange::from(5920, 21)];
+
+const HANUNOO_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(5941, 2)];
+
+const HATRAN: [CodePointRange; 3] = [
+    CodePointRange::from(67808, 19),
+    CodePointRange::from(67828, 2),
+    CodePointRange::from(67835, 5),
+];
+
+const HEBREW: [CodePointRange; 9] = [
+    CodePointRange::from(1425, 55),
+    CodePointRange::from(1488, 27),
+    CodePointRange::from(1519, 6),
+    CodePointRange::from(64285, 26),
+    CodePointRange::from(64312, 5),
+    CodePointRange::from(64318, 1),
+    CodePointRange::from(64320, 2),
+    CodePointRange::from(64323, 2),
+    CodePointRange::from(64326, 10),
+];
+
+const HIRAGANA: [CodePointRange; 6] = [
+    CodePointRange::from(12353, 86),
+    CodePointRange::from(12445, 3),
+    CodePointRange::from(110593, 287),
+    CodePointRange::from(110898, 1),
+    CodePointRange::from(110928, 3),
+    CodePointRange::from(127488, 1),
+];
+
+const HIRAGANA_EXTENSIONS: [CodePointRange; 13] = [
+    CodePointRange::from(12289, 3),
+    CodePointRange::from(12296, 10),
+    CodePointRange::from(12307, 13),
+    CodePointRange::from(12336, 6),
+    CodePointRange::from(12343, 1),
+    CodePointRange::from(12348, 2),
+    CodePointRange::from(12441, 4),
+    CodePointRange::from(12448, 1),
+    CodePointRange::from(12539, 2),
+    CodePointRange::from(65093, 2),
+    CodePointRange::from(65377, 5),
+    CodePointRange::from(65392, 1),
+    CodePointRange::from(65438, 2),
+];
+
+const ANATOLIAN_HIEROGLYPHS: [CodePointRange; 1] = [CodePointRange::from(82944, 583)];
+
+const PAHAWH_HMONG: [CodePointRange; 5] = [
+    CodePointRange::from(92928, 70),
+    CodePointRange::from(93008, 10),
+    CodePointRange::from(93019, 7),
+    CodePointRange::from(93027, 21),
+    CodePointRange::from(93053, 19),
+];
+
+const NYIAKENG_PUACHUE_HMONG: [CodePointRange; 4] = [
+    CodePointRange::from(123136, 45),
+    CodePointRange::from(123184, 14),
+    CodePointRange::from(123200, 10),
+    CodePointRange::from(123214, 2),
+];
+
+const OLD_HUNGARIAN: [CodePointRange; 3] = [
+    CodePointRange::from(68736, 51),
+    CodePointRange::from(68800, 51),
+    CodePointRange::from(68858, 6),
+];
+
+const OLD_ITALIC: [CodePointRange; 2] = [
+    CodePointRange::from(66304, 36),
+    CodePointRange::from(66349, 3),
+];
+
+const JAVANESE: [CodePointRange; 3] = [
+    CodePointRange::from(43392, 78),
+    CodePointRange::from(43472, 10),
+    CodePointRange::from(43486, 2),
+];
+
+const JAVANESE_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(43471, 1)];
+
+const KAYAH_LI: [CodePointRange; 2] = [
+    CodePointRange::from(43264, 46),
+    CodePointRange::from(43311, 1),
+];
+
+const KAYAH_LI_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(43310, 1)];
+
+const KATAKANA: [CodePointRange; 14] = [
+    CodePointRange::from(12449, 90),
+    CodePointRange::from(12541, 3),
+    CodePointRange::from(12784, 16),
+    CodePointRange::from(13008, 47),
+    CodePointRange::from(13056, 88),
+    CodePointRange::from(65382, 10),
+    CodePointRange::from(65393, 45),
+    CodePointRange::from(110576, 4),
+    CodePointRange::from(110581, 7),
+    CodePointRange::from(110589, 2),
+    CodePointRange::from(110592, 1),
+    CodePointRange::from(110880, 3),
+    CodePointRange::from(110933, 1),
+    CodePointRange::from(110948, 4),
+];
+
+const KATAKANA_EXTENSIONS: [CodePointRange; 13] = [
+    CodePointRange::from(12289, 3),
+    CodePointRange::from(12296, 10),
+    CodePointRange::from(12307, 13),
+    CodePointRange::from(12336, 6),
+    CodePointRange::from(12343, 1),
+    CodePointRange::from(12348, 2),
+    CodePointRange::from(12441, 4),
+    CodePointRange::from(12448, 1),
+    CodePointRange::from(12539, 2),
+    CodePointRange::from(65093, 2),
+    CodePointRange::from(65377, 5),
+    CodePointRange::from(65392, 1),
+    CodePointRange::from(65438, 2),
+];
+
+const KAWI: [CodePointRange; 3] = [
+    CodePointRange::from(73472, 17),
+    CodePointRange::from(73490, 41),
+    CodePointRange::from(73534, 28),
+];
+
+const KHAROSHTHI: [CodePointRange; 8] = [
+    CodePointRange::from(68096, 4),
+    CodePointRange::from(68101, 2),
+    CodePointRange::from(68108, 8),
+    CodePointRange::from(68117, 3),
+    CodePointRange::from(68121, 29),
+    CodePointRange::from(68152, 3),
+    CodePointRange::from(68159, 10),
+    CodePointRange::from(68176, 9),
+];
+
+const KHMER: [CodePointRange; 4] = [
+    CodePointRange::from(6016, 94),
+    CodePointRange::from(6112, 10),
+    CodePointRange::from(6128, 10),
+    CodePointRange::from(6624, 32),
+];
+
+const KHOJKI: [CodePointRange; 2] = [
+    CodePointRange::from(70144, 18),
+    CodePointRange::from(70163, 47),
+];
+
+const KHOJKI_EXTENSIONS: [CodePointRange; 2] = [
+    CodePointRange::from(2790, 10),
+    CodePointRange::from(43056, 10),
+];
+
+const KHITAN_SMALL_SCRIPT: [CodePointRange; 2] = [
+    CodePointRange::from(94180, 1),
+    CodePointRange::from(101120, 470),
+];
+
+const KANNADA: [CodePointRange; 13] = [
+    CodePointRange::from(3200, 13),
+    CodePointRange::from(3214, 3),
+    CodePointRange::from(3218, 23),
+    CodePointRange::from(3242, 10),
+    CodePointRange::from(3253, 5),
+    CodePointRange::from(3260, 9),
+    CodePointRange::from(3270, 3),
+    CodePointRange::from(3274, 4),
+    CodePointRange::from(3285, 2),
+    CodePointRange::from(3293, 2),
+    CodePointRange::from(3296, 4),
+    CodePointRange::from(3302, 10),
+    CodePointRange::from(3313, 3),
+];
+
+const KANNADA_EXTENSIONS: [CodePointRange; 9] = [
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(3302, 10),
+    CodePointRange::from(7376, 1),
+    CodePointRange::from(7378, 1),
+    CodePointRange::from(7386, 1),
+    CodePointRange::from(7410, 1),
+    CodePointRange::from(7412, 1),
+    CodePointRange::from(43056, 6),
+];
+
+const KAITHI: [CodePointRange; 2] = [
+    CodePointRange::from(69760, 67),
+    CodePointRange::from(69837, 1),
+];
+
+const KAITHI_EXTENSIONS: [CodePointRange; 2] = [
+    CodePointRange::from(2406, 10),
+    CodePointRange::from(43056, 10),
+];
+
+const TAI_THAM: [CodePointRange; 5] = [
+    CodePointRange::from(6688, 63),
+    CodePointRange::from(6752, 29),
+    CodePointRange::from(6783, 11),
+    CodePointRange::from(6800, 10),
+    CodePointRange::from(6816, 14),
+];
+
+const LAO: [CodePointRange; 11] = [
+    CodePointRange::from(3713, 2),
+    CodePointRange::from(3716, 1),
+    CodePointRange::from(3718, 5),
+    CodePointRange::from(3724, 24),
+    CodePointRange::from(3749, 1),
+    CodePointRange::from(3751, 23),
+    CodePointRange::from(3776, 5),
+    CodePointRange::from(3782, 1),
+    CodePointRange::from(3784, 7),
+    CodePointRange::from(3792, 10),
+    CodePointRange::from(3804, 4),
+];
+
+const LATIN: [CodePointRange; 39] = [
+    CodePointRange::from(65, 26),
+    CodePointRange::from(97, 26),
+    CodePointRange::from(170, 1),
+    CodePointRange::from(186, 1),
+    CodePointRange::from(192, 23),
+    CodePointRange::from(216, 31),
+    CodePointRange::from(248, 449),
+    CodePointRange::from(736, 5),
+    CodePointRange::from(7424, 38),
+    CodePointRange::from(7468, 49),
+    CodePointRange::from(7522, 4),
+    CodePointRange::from(7531, 13),
+    CodePointRange::from(7545, 70),
+    CodePointRange::from(7680, 256),
+    CodePointRange::from(8305, 1),
+    CodePointRange::from(8319, 1),
+    CodePointRange::from(8336, 13),
+    CodePointRange::from(8490, 2),
+    CodePointRange::from(8498, 1),
+    CodePointRange::from(8526, 1),
+    CodePointRange::from(8544, 41),
+    CodePointRange::from(11360, 32),
+    CodePointRange::from(42786, 102),
+    CodePointRange::from(42891, 64),
+    CodePointRange::from(42960, 2),
+    CodePointRange::from(42963, 1),
+    CodePointRange::from(42965, 5),
+    CodePointRange::from(42994, 14),
+    CodePointRange::from(43824, 43),
+    CodePointRange::from(43868, 9),
+    CodePointRange::from(43878, 4),
+    CodePointRange::from(64256, 7),
+    CodePointRange::from(65313, 26),
+    CodePointRange::from(65345, 26),
+    CodePointRange::from(67456, 6),
+    CodePointRange::from(67463, 42),
+    CodePointRange::from(67506, 9),
+    CodePointRange::from(122624, 31),
+    CodePointRange::from(122661, 6),
+];
+
+const LATIN_EXTENSIONS: [CodePointRange; 8] = [
+    CodePointRange::from(867, 13),
+    CodePointRange::from(1157, 2),
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(4347, 1),
+    CodePointRange::from(8239, 1),
+    CodePointRange::from(8432, 1),
+    CodePointRange::from(42752, 8),
+    CodePointRange::from(43310, 1),
+];
+
+const LEPCHA: [CodePointRange; 3] = [
+    CodePointRange::from(7168, 56),
+    CodePointRange::from(7227, 15),
+    CodePointRange::from(7245, 3),
+];
+
+const LIMBU: [CodePointRange; 5] = [
+    CodePointRange::from(6400, 31),
+    CodePointRange::from(6432, 12),
+    CodePointRange::from(6448, 12),
+    CodePointRange::from(6464, 1),
+    CodePointRange::from(6468, 12),
+];
+
+const LIMBU_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(2405, 1)];
+
+const LINEAR_A: [CodePointRange; 3] = [
+    CodePointRange::from(67072, 311),
+    CodePointRange::from(67392, 22),
+    CodePointRange::from(67424, 8),
+];
+
+const LINEAR_A_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(65799, 45)];
+
+const LINEAR_B: [CodePointRange; 7] = [
+    CodePointRange::from(65536, 12),
+    CodePointRange::from(65549, 26),
+    CodePointRange::from(65576, 19),
+    CodePointRange::from(65596, 2),
+    CodePointRange::from(65599, 15),
+    CodePointRange::from(65616, 14),
+    CodePointRange::from(65664, 123),
+];
+
+const LINEAR_B_EXTENSIONS: [CodePointRange; 3] = [
+    CodePointRange::from(65792, 3),
+    CodePointRange::from(65799, 45),
+    CodePointRange::from(65847, 9),
+];
+
+const LISU: [CodePointRange; 2] = [
+    CodePointRange::from(42192, 48),
+    CodePointRange::from(73648, 1),
+];
+
+const LYCIAN: [CodePointRange; 1] = [CodePointRange::from(66176, 29)];
+
+const LYDIAN: [CodePointRange; 2] = [
+    CodePointRange::from(67872, 26),
+    CodePointRange::from(67903, 1),
+];
+
+const MAHAJANI: [CodePointRange; 1] = [CodePointRange::from(69968, 39)];
+
+const MAHAJANI_EXTENSIONS: [CodePointRange; 2] = [
+    CodePointRange::from(2404, 12),
+    CodePointRange::from(43056, 10),
+];
+
+const MAKASAR: [CodePointRange; 1] = [CodePointRange::from(73440, 25)];
+
+const MANDAIC: [CodePointRange; 2] = [
+    CodePointRange::from(2112, 28),
+    CodePointRange::from(2142, 1),
+];
+
+const MANDAIC_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(1600, 1)];
+
+const MANICHAEAN: [CodePointRange; 2] = [
+    CodePointRange::from(68288, 39),
+    CodePointRange::from(68331, 12),
+];
+
+const MANICHAEAN_EXTENSIONS: [CodePointRange; 2] = [
+    CodePointRange::from(1600, 1),
+    CodePointRange::from(68338, 1),
+];
+
+const MARCHEN: [CodePointRange; 3] = [
+    CodePointRange::from(72816, 32),
+    CodePointRange::from(72850, 22),
+    CodePointRange::from(72873, 14),
+];
+
+const MEDEFAIDRIN: [CodePointRange; 1] = [CodePointRange::from(93760, 91)];
+
+const MENDE_KIKAKUI: [CodePointRange; 2] = [
+    CodePointRange::from(124928, 197),
+    CodePointRange::from(125127, 16),
+];
+
+const MEROITIC_CURSIVE: [CodePointRange; 3] = [
+    CodePointRange::from(68000, 24),
+    CodePointRange::from(68028, 20),
+    CodePointRange::from(68050, 46),
+];
+
+const MEROITIC_HIEROGLYPHS: [CodePointRange; 1] = [CodePointRange::from(67968, 32)];
+
+const MALAYALAM: [CodePointRange; 7] = [
+    CodePointRange::from(3328, 13),
+    CodePointRange::from(3342, 3),
+    CodePointRange::from(3346, 51),
+    CodePointRange::from(3398, 3),
+    CodePointRange::from(3402, 6),
+    CodePointRange::from(3412, 16),
+    CodePointRange::from(3430, 26),
+];
+
+const MALAYALAM_EXTENSIONS: [CodePointRange; 4] = [
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(7386, 1),
+    CodePointRange::from(43056, 3),
+];
+
+const MODI: [CodePointRange; 2] = [
+    CodePointRange::from(71168, 69),
+    CodePointRange::from(71248, 10),
+];
+
+const MODI_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(43056, 10)];
+
+const MONGOLIAN: [CodePointRange; 6] = [
+    CodePointRange::from(6144, 2),
+    CodePointRange::from(6148, 1),
+    CodePointRange::from(6150, 20),
+    CodePointRange::from(6176, 89),
+    CodePointRange::from(6272, 43),
+    CodePointRange::from(71264, 13),
+];
+
+const MONGOLIAN_EXTENSIONS: [CodePointRange; 3] = [
+    CodePointRange::from(6146, 2),
+    CodePointRange::from(6149, 1),
+    CodePointRange::from(8239, 1),
+];
+
+const MRO: [CodePointRange; 3] = [
+    CodePointRange::from(92736, 31),
+    CodePointRange::from(92768, 10),
+    CodePointRange::from(92782, 2),
+];
+
+const MEETEI_MAYEK: [CodePointRange; 3] = [
+    CodePointRange::from(43744, 23),
+    CodePointRange::from(43968, 46),
+    CodePointRange::from(44016, 10),
+];
+
+const MULTANI: [CodePointRange; 5] = [
+    CodePointRange::from(70272, 7),
+    CodePointRange::from(70280, 1),
+    CodePointRange::from(70282, 4),
+    CodePointRange::from(70287, 15),
+    CodePointRange::from(70303, 11),
+];
+
+const MULTANI_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(2662, 10)];
+
+const MYANMAR: [CodePointRange; 3] = [
+    CodePointRange::from(4096, 160),
+    CodePointRange::from(43488, 31),
+    CodePointRange::from(43616, 32),
+];
+
+const MYANMAR_EXTENSIONS: [CodePointRange; 2] = [
+    CodePointRange::from(4160, 10),
+    CodePointRange::from(43310, 1),
+];
+
+const NAG_MUNDARI: [CodePointRange; 1] = [CodePointRange::from(124112, 42)];
+
+const NANDINAGARI: [CodePointRange; 3] = [
+    CodePointRange::from(72096, 8),
+    CodePointRange::from(72106, 46),
+    CodePointRange::from(72154, 11),
+];
+
+const NANDINAGARI_EXTENSIONS: [CodePointRange; 6] = [
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(3302, 10),
+    CodePointRange::from(7401, 1),
+    CodePointRange::from(7410, 1),
+    CodePointRange::from(7418, 1),
+    CodePointRange::from(43056, 6),
+];
+
+const OLD_NORTH_ARABIAN: [CodePointRange; 1] = [CodePointRange::from(68224, 32)];
+
+const NABATAEAN: [CodePointRange; 2] = [
+    CodePointRange::from(67712, 31),
+    CodePointRange::from(67751, 9),
+];
+
+const NEWA: [CodePointRange; 2] = [
+    CodePointRange::from(70656, 92),
+    CodePointRange::from(70749, 5),
+];
+
+const NKO: [CodePointRange; 2] = [
+    CodePointRange::from(1984, 59),
+    CodePointRange::from(2045, 3),
+];
+
+const NKO_EXTENSIONS: [CodePointRange; 4] = [
+    CodePointRange::from(1548, 1),
+    CodePointRange::from(1563, 1),
+    CodePointRange::from(1567, 1),
+    CodePointRange::from(64830, 2),
+];
+
+const NUSHU: [CodePointRange; 2] = [
+    CodePointRange::from(94177, 1),
+    CodePointRange::from(110960, 396),
+];
+
+const OGHAM: [CodePointRange; 1] = [CodePointRange::from(5760, 29)];
+
+const OL_CHIKI: [CodePointRange; 1] = [CodePointRange::from(7248, 48)];
+
+const OLD_TURKIC: [CodePointRange; 1] = [CodePointRange::from(68608, 73)];
+
+const ORIYA: [CodePointRange; 14] = [
+    CodePointRange::from(2817, 3),
+    CodePointRange::from(2821, 8),
+    CodePointRange::from(2831, 2),
+    CodePointRange::from(2835, 22),
+    CodePointRange::from(2858, 7),
+    CodePointRange::from(2866, 2),
+    CodePointRange::from(2869, 5),
+    CodePointRange::from(2876, 9),
+    CodePointRange::from(2887, 2),
+    CodePointRange::from(2891, 3),
+    CodePointRange::from(2901, 3),
+    CodePointRange::from(2908, 2),
+    CodePointRange::from(2911, 5),
+    CodePointRange::from(2918, 18),
+];
+
+const ORIYA_EXTENSIONS: [CodePointRange; 4] = [
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(7386, 1),
+    CodePointRange::from(7410, 1),
+];
+
+const OSAGE: [CodePointRange; 2] = [
+    CodePointRange::from(66736, 36),
+    CodePointRange::from(66776, 36),
+];
+
+const OSMANYA: [CodePointRange; 2] = [
+    CodePointRange::from(66688, 30),
+    CodePointRange::from(66720, 10),
+];
+
+const OLD_UYGHUR: [CodePointRange; 1] = [CodePointRange::from(69488, 26)];
+
+const OLD_UYGHUR_EXTENSIONS: [CodePointRange; 2] = [
+    CodePointRange::from(1600, 1),
+    CodePointRange::from(68338, 1),
+];
+
+const PALMYRENE: [CodePointRange; 1] = [CodePointRange::from(67680, 32)];
+
+const PAU_CIN_HAU: [CodePointRange; 1] = [CodePointRange::from(72384, 57)];
+
+const OLD_PERMIC: [CodePointRange; 1] = [CodePointRange::from(66384, 43)];
+
+const OLD_PERMIC_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(1155, 1)];
+
+const PHAGS_PA: [CodePointRange; 1] = [CodePointRange::from(43072, 56)];
+
+const PHAGS_PA_EXTENSIONS: [CodePointRange; 2] =
+    [CodePointRange::from(6146, 2), CodePointRange::from(6149, 1)];
+
+const INSCRIPTIONAL_PAHLAVI: [CodePointRange; 2] = [
+    CodePointRange::from(68448, 19),
+    CodePointRange::from(68472, 8),
+];
+
+const PSALTER_PAHLAVI: [CodePointRange; 3] = [
+    CodePointRange::from(68480, 18),
+    CodePointRange::from(68505, 4),
+    CodePointRange::from(68521, 7),
+];
+
+const PSALTER_PAHLAVI_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(1600, 1)];
+
+const PHOENICIAN: [CodePointRange; 2] = [
+    CodePointRange::from(67840, 28),
+    CodePointRange::from(67871, 1),
+];
+
+const MIAO: [CodePointRange; 3] = [
+    CodePointRange::from(93952, 75),
+    CodePointRange::from(94031, 57),
+    CodePointRange::from(94095, 17),
+];
+
+const INSCRIPTIONAL_PARTHIAN: [CodePointRange; 2] = [
+    CodePointRange::from(68416, 22),
+    CodePointRange::from(68440, 8),
+];
+
+const REJANG: [CodePointRange; 2] = [
+    CodePointRange::from(43312, 36),
+    CodePointRange::from(43359, 1),
+];
+
+const HANIFI_ROHINGYA: [CodePointRange; 2] = [
+    CodePointRange::from(68864, 40),
+    CodePointRange::from(68912, 10),
+];
+
+const HANIFI_ROHINGYA_EXTENSIONS: [CodePointRange; 5] = [
+    CodePointRange::from(1548, 1),
+    CodePointRange::from(1563, 1),
+    CodePointRange::from(1567, 1),
+    CodePointRange::from(1600, 1),
+    CodePointRange::from(1748, 1),
+];
+
+const RUNIC: [CodePointRange; 2] = [
+    CodePointRange::from(5792, 75),
+    CodePointRange::from(5870, 11),
+];
+
+const SAMARITAN: [CodePointRange; 2] = [
+    CodePointRange::from(2048, 46),
+    CodePointRange::from(2096, 15),
+];
+
+const OLD_SOUTH_ARABIAN: [CodePointRange; 1] = [CodePointRange::from(68192, 32)];
+
+const SAURASHTRA: [CodePointRange; 2] = [
+    CodePointRange::from(43136, 70),
+    CodePointRange::from(43214, 12),
+];
+
+const SIGNWRITING: [CodePointRange; 3] = [
+    CodePointRange::from(120832, 652),
+    CodePointRange::from(121499, 5),
+    CodePointRange::from(121505, 15),
+];
+
+const SHAVIAN: [CodePointRange; 1] = [CodePointRange::from(66640, 48)];
+
+const SHARADA: [CodePointRange; 1] = [CodePointRange::from(70016, 96)];
+
+const SHARADA_EXTENSIONS: [CodePointRange; 5] = [
+    CodePointRange::from(2385, 1),
+    CodePointRange::from(7383, 1),
+    CodePointRange::from(7385, 1),
+    CodePointRange::from(7388, 2),
+    CodePointRange::from(7392, 1),
+];
+
+const SIDDHAM: [CodePointRange; 2] = [
+    CodePointRange::from(71040, 54),
+    CodePointRange::from(71096, 38),
+];
+
+const KHUDAWADI: [CodePointRange; 2] = [
+    CodePointRange::from(70320, 59),
+    CodePointRange::from(70384, 10),
+];
+
+const KHUDAWADI_EXTENSIONS: [CodePointRange; 2] = [
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(43056, 10),
+];
+
+const SINHALA: [CodePointRange; 13] = [
+    CodePointRange::from(3457, 3),
+    CodePointRange::from(3461, 18),
+    CodePointRange::from(3482, 24),
+    CodePointRange::from(3507, 9),
+    CodePointRange::from(3517, 1),
+    CodePointRange::from(3520, 7),
+    CodePointRange::from(3530, 1),
+    CodePointRange::from(3535, 6),
+    CodePointRange::from(3542, 1),
+    CodePointRange::from(3544, 8),
+    CodePointRange::from(3558, 10),
+    CodePointRange::from(3570, 3),
+    CodePointRange::from(70113, 20),
+];
+
+const SINHALA_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(2404, 2)];
+
+const SOGDIAN: [CodePointRange; 1] = [CodePointRange::from(69424, 42)];
+
+const SOGDIAN_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(1600, 1)];
+
+const OLD_SOGDIAN: [CodePointRange; 1] = [CodePointRange::from(69376, 40)];
+
+const SORA_SOMPENG: [CodePointRange; 2] = [
+    CodePointRange::from(69840, 25),
+    CodePointRange::from(69872, 10),
+];
+
+const SOYOMBO: [CodePointRange; 1] = [CodePointRange::from(72272, 83)];
+
+const SUNDANESE: [CodePointRange; 2] = [
+    CodePointRange::from(7040, 64),
+    CodePointRange::from(7360, 8),
+];
+
+const SYLOTI_NAGRI: [CodePointRange; 1] = [CodePointRange::from(43008, 45)];
+
+const SYLOTI_NAGRI_EXTENSIONS: [CodePointRange; 2] = [
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(2534, 10),
+];
+
+const SYRIAC: [CodePointRange; 4] = [
+    CodePointRange::from(1792, 14),
+    CodePointRange::from(1807, 60),
+    CodePointRange::from(1869, 3),
+    CodePointRange::from(2144, 11),
+];
+
+const SYRIAC_EXTENSIONS: [CodePointRange; 8] = [
+    CodePointRange::from(1548, 1),
+    CodePointRange::from(1563, 2),
+    CodePointRange::from(1567, 1),
+    CodePointRange::from(1600, 1),
+    CodePointRange::from(1611, 11),
+    CodePointRange::from(1648, 1),
+    CodePointRange::from(7672, 1),
+    CodePointRange::from(7674, 1),
+];
+
+const TAGBANWA: [CodePointRange; 3] = [
+    CodePointRange::from(5984, 13),
+    CodePointRange::from(5998, 3),
+    CodePointRange::from(6002, 2),
+];
+
+const TAGBANWA_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(5941, 2)];
+
+const TAKRI: [CodePointRange; 2] = [
+    CodePointRange::from(71296, 58),
+    CodePointRange::from(71360, 10),
+];
+
+const TAKRI_EXTENSIONS: [CodePointRange; 2] = [
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(43056, 10),
+];
+
+const TAI_LE: [CodePointRange; 2] = [
+    CodePointRange::from(6480, 30),
+    CodePointRange::from(6512, 5),
+];
+
+const TAI_LE_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(4160, 10)];
+
+const NEW_TAI_LUE: [CodePointRange; 4] = [
+    CodePointRange::from(6528, 44),
+    CodePointRange::from(6576, 26),
+    CodePointRange::from(6608, 11),
+    CodePointRange::from(6622, 2),
+];
+
+const TAMIL: [CodePointRange; 18] = [
+    CodePointRange::from(2946, 2),
+    CodePointRange::from(2949, 6),
+    CodePointRange::from(2958, 3),
+    CodePointRange::from(2962, 4),
+    CodePointRange::from(2969, 2),
+    CodePointRange::from(2972, 1),
+    CodePointRange::from(2974, 2),
+    CodePointRange::from(2979, 2),
+    CodePointRange::from(2984, 3),
+    CodePointRange::from(2990, 12),
+    CodePointRange::from(3006, 5),
+    CodePointRange::from(3014, 3),
+    CodePointRange::from(3018, 4),
+    CodePointRange::from(3024, 1),
+    CodePointRange::from(3031, 1),
+    CodePointRange::from(3046, 21),
+    CodePointRange::from(73664, 50),
+    CodePointRange::from(73727, 1),
+];
+
+const TAMIL_EXTENSIONS: [CodePointRange; 10] = [
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(3046, 14),
+    CodePointRange::from(7386, 1),
+    CodePointRange::from(43251, 1),
+    CodePointRange::from(70401, 1),
+    CodePointRange::from(70403, 1),
+    CodePointRange::from(70459, 2),
+    CodePointRange::from(73680, 2),
+    CodePointRange::from(73683, 1),
+];
+
+const TANGUT: [CodePointRange; 5] = [
+    CodePointRange::from(94176, 1),
+    CodePointRange::from(94208, 4096),
+    CodePointRange::from(98304, 2040),
+    CodePointRange::from(100352, 768),
+    CodePointRange::from(101632, 9),
+];
+
+const TAI_VIET: [CodePointRange; 2] = [
+    CodePointRange::from(43648, 67),
+    CodePointRange::from(43739, 5),
+];
+
+const TELUGU: [CodePointRange; 13] = [
+    CodePointRange::from(3072, 13),
+    CodePointRange::from(3086, 3),
+    CodePointRange::from(3090, 23),
+    CodePointRange::from(3114, 16),
+    CodePointRange::from(3132, 9),
+    CodePointRange::from(3142, 3),
+    CodePointRange::from(3146, 4),
+    CodePointRange::from(3157, 2),
+    CodePointRange::from(3160, 3),
+    CodePointRange::from(3165, 1),
+    CodePointRange::from(3168, 4),
+    CodePointRange::from(3174, 10),
+    CodePointRange::from(3191, 9),
+];
+
+const TELUGU_EXTENSIONS: [CodePointRange; 4] = [
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(7386, 1),
+    CodePointRange::from(7410, 1),
+];
+
+const TIFINAGH: [CodePointRange; 3] = [
+    CodePointRange::from(11568, 56),
+    CodePointRange::from(11631, 2),
+    CodePointRange::from(11647, 1),
+];
+
+const TAGALOG: [CodePointRange; 2] = [
+    CodePointRange::from(5888, 22),
+    CodePointRange::from(5919, 1),
+];
+
+const TAGALOG_EXTENSIONS: [CodePointRange; 1] = [CodePointRange::from(5941, 2)];
+
+const THAANA: [CodePointRange; 1] = [CodePointRange::from(1920, 50)];
+
+const THAANA_EXTENSIONS: [CodePointRange; 6] = [
+    CodePointRange::from(1548, 1),
+    CodePointRange::from(1563, 2),
+    CodePointRange::from(1567, 1),
+    CodePointRange::from(1632, 10),
+    CodePointRange::from(65010, 1),
+    CodePointRange::from(65021, 1),
+];
+
+const THAI: [CodePointRange; 2] = [
+    CodePointRange::from(3585, 58),
+    CodePointRange::from(3648, 28),
+];
+
+const TIBETAN: [CodePointRange; 7] = [
+    CodePointRange::from(3840, 72),
+    CodePointRange::from(3913, 36),
+    CodePointRange::from(3953, 39),
+    CodePointRange::from(3993, 36),
+    CodePointRange::from(4030, 15),
+    CodePointRange::from(4046, 7),
+    CodePointRange::from(4057, 2),
+];
+
+const TIRHUTA: [CodePointRange; 2] = [
+    CodePointRange::from(70784, 72),
+    CodePointRange::from(70864, 10),
+];
+
+const TIRHUTA_EXTENSIONS: [CodePointRange; 4] = [
+    CodePointRange::from(2385, 2),
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(7410, 1),
+    CodePointRange::from(43056, 10),
+];
+
+const TANGSA: [CodePointRange; 2] = [
+    CodePointRange::from(92784, 79),
+    CodePointRange::from(92864, 10),
+];
+
+const TOTO: [CodePointRange; 1] = [CodePointRange::from(123536, 31)];
+
+const UGARITIC: [CodePointRange; 2] = [
+    CodePointRange::from(66432, 30),
+    CodePointRange::from(66463, 1),
+];
+
+const VAI: [CodePointRange; 1] = [CodePointRange::from(42240, 300)];
+
+const VITHKUQI: [CodePointRange; 8] = [
+    CodePointRange::from(66928, 11),
+    CodePointRange::from(66940, 15),
+    CodePointRange::from(66956, 7),
+    CodePointRange::from(66964, 2),
+    CodePointRange::from(66967, 11),
+    CodePointRange::from(66979, 15),
+    CodePointRange::from(66995, 7),
+    CodePointRange::from(67003, 2),
+];
+
+const WARANG_CITI: [CodePointRange; 2] = [
+    CodePointRange::from(71840, 83),
+    CodePointRange::from(71935, 1),
+];
+
+const WANCHO: [CodePointRange; 2] = [
+    CodePointRange::from(123584, 58),
+    CodePointRange::from(123647, 1),
+];
+
+const OLD_PERSIAN: [CodePointRange; 2] = [
+    CodePointRange::from(66464, 36),
+    CodePointRange::from(66504, 14),
+];
+
+const CUNEIFORM: [CodePointRange; 4] = [
+    CodePointRange::from(73728, 922),
+    CodePointRange::from(74752, 111),
+    CodePointRange::from(74864, 5),
+    CodePointRange::from(74880, 196),
+];
+
+const YEZIDI: [CodePointRange; 3] = [
+    CodePointRange::from(69248, 42),
+    CodePointRange::from(69291, 3),
+    CodePointRange::from(69296, 2),
+];
+
+const YEZIDI_EXTENSIONS: [CodePointRange; 4] = [
+    CodePointRange::from(1548, 1),
+    CodePointRange::from(1563, 1),
+    CodePointRange::from(1567, 1),
+    CodePointRange::from(1632, 10),
+];
+
+const YI: [CodePointRange; 2] = [
+    CodePointRange::from(40960, 1165),
+    CodePointRange::from(42128, 55),
+];
+
+const YI_EXTENSIONS: [CodePointRange; 5] = [
+    CodePointRange::from(12289, 2),
+    CodePointRange::from(12296, 10),
+    CodePointRange::from(12308, 8),
+    CodePointRange::from(12539, 1),
+    CodePointRange::from(65377, 5),
+];
+
+const ZANABAZAR_SQUARE: [CodePointRange; 1] = [CodePointRange::from(72192, 72)];
+
+const INHERITED: [CodePointRange; 29] = [
+    CodePointRange::from(768, 112),
+    CodePointRange::from(1157, 2),
+    CodePointRange::from(1611, 11),
+    CodePointRange::from(1648, 1),
+    CodePointRange::from(2385, 4),
+    CodePointRange::from(6832, 31),
+    CodePointRange::from(7376, 3),
+    CodePointRange::from(7380, 13),
+    CodePointRange::from(7394, 7),
+    CodePointRange::from(7405, 1),
+    CodePointRange::from(7412, 1),
+    CodePointRange::from(7416, 2),
+    CodePointRange::from(7616, 64),
+    CodePointRange::from(8204, 2),
+    CodePointRange::from(8400, 33),
+    CodePointRange::from(12330, 4),
+    CodePointRange::from(12441, 2),
+    CodePointRange::from(65024, 16),
+    CodePointRange::from(65056, 14),
+    CodePointRange::from(66045, 1),
+    CodePointRange::from(66272, 1),
+    CodePointRange::from(70459, 1),
+    CodePointRange::from(118528, 46),
+    CodePointRange::from(118576, 23),
+    CodePointRange::from(119143, 3),
+    CodePointRange::from(119163, 8),
+    CodePointRange::from(119173, 7),
+    CodePointRange::from(119210, 4),
+    CodePointRange::from(917760, 240),
+];
+
+const COMMON: [CodePointRange; 173] = [
+    CodePointRange::from(0, 65),
+    CodePointRange::from(91, 6),
+    CodePointRange::from(123, 47),
+    CodePointRange::from(171, 15),
+    CodePointRange::from(187, 5),
+    CodePointRange::from(215, 1),
+    CodePointRange::from(247, 1),
+    CodePointRange::from(697, 39),
+    CodePointRange::from(741, 5),
+    CodePointRange::from(748, 20),
+    CodePointRange::from(884, 1),
+    CodePointRange::from(894, 1),
+    CodePointRange::from(901, 1),
+    CodePointRange::from(903, 1),
+    CodePointRange::from(1541, 1),
+    CodePointRange::from(1548, 1),
+    CodePointRange::from(1563, 1),
+    CodePointRange::from(1567, 1),
+    CodePointRange::from(1600, 1),
+    CodePointRange::from(1757, 1),
+    CodePointRange::from(2274, 1),
+    CodePointRange::from(2404, 2),
+    CodePointRange::from(3647, 1),
+    CodePointRange::from(4053, 4),
+    CodePointRange::from(4347, 1),
+    CodePointRange::from(5867, 3),
+    CodePointRange::from(5941, 2),
+    CodePointRange::from(6146, 2),
+    CodePointRange::from(6149, 1),
+    CodePointRange::from(7379, 1),
+    CodePointRange::from(7393, 1),
+    CodePointRange::from(7401, 4),
+    CodePointRange::from(7406, 6),
+    CodePointRange::from(7413, 3),
+    CodePointRange::from(7418, 1),
+    CodePointRange::from(8192, 12),
+    CodePointRange::from(8206, 87),
+    CodePointRange::from(8294, 11),
+    CodePointRange::from(8308, 11),
+    CodePointRange::from(8320, 15),
+    CodePointRange::from(8352, 33),
+    CodePointRange::from(8448, 38),
+    CodePointRange::from(8487, 3),
+    CodePointRange::from(8492, 6),
+    CodePointRange::from(8499, 27),
+    CodePointRange::from(8527, 17),
+    CodePointRange::from(8585, 3),
+    CodePointRange::from(8592, 663),
+    CodePointRange::from(9280, 11),
+    CodePointRange::from(9312, 928),
+    CodePointRange::from(10496, 628),
+    CodePointRange::from(11126, 32),
+    CodePointRange::from(11159, 105),
+    CodePointRange::from(11776, 94),
+    CodePointRange::from(12272, 12),
+    CodePointRange::from(12288, 5),
+    CodePointRange::from(12294, 1),
+    CodePointRange::from(12296, 25),
+    CodePointRange::from(12336, 8),
+    CodePointRange::from(12348, 4),
+    CodePointRange::from(12443, 2),
+    CodePointRange::from(12448, 1),
+    CodePointRange::from(12539, 2),
+    CodePointRange::from(12688, 16),
+    CodePointRange::from(12736, 36),
+    CodePointRange::from(12832, 64),
+    CodePointRange::from(12927, 81),
+    CodePointRange::from(13055, 1),
+    CodePointRange::from(13144, 168),
+    CodePointRange::from(19904, 64),
+    CodePointRange::from(42752, 34),
+    CodePointRange::from(42888, 3),
+    CodePointRange::from(43056, 10),
+    CodePointRange::from(43310, 1),
+    CodePointRange::from(43471, 1),
+    CodePointRange::from(43867, 1),
+    CodePointRange::from(43882, 2),
+    CodePointRange::from(64830, 2),
+    CodePointRange::from(65040, 10),
+    CodePointRange::from(65072, 35),
+    CodePointRange::from(65108, 19),
+    CodePointRange::from(65128, 4),
+    CodePointRange::from(65279, 1),
+    CodePointRange::from(65281, 32),
+    CodePointRange::from(65339, 6),
+    CodePointRange::from(65371, 11),
+    CodePointRange::from(65392, 1),
+    CodePointRange::from(65438, 2),
+    CodePointRange::from(65504, 7),
+    CodePointRange::from(65512, 7),
+    CodePointRange::from(65529, 5),
+    CodePointRange::from(65792, 3),
+    CodePointRange::from(65799, 45),
+    CodePointRange::from(65847, 9),
+    CodePointRange::from(65936, 13),
+    CodePointRange::from(66000, 45),
+    CodePointRange::from(66273, 27),
+    CodePointRange::from(113824, 4),
+    CodePointRange::from(118608, 116),
+    CodePointRange::from(118784, 246),
+    CodePointRange::from(119040, 39),
+    CodePointRange::from(119081, 62),
+    CodePointRange::from(119146, 17),
+    CodePointRange::from(119171, 2),
+    CodePointRange::from(119180, 30),
+    CodePointRange::from(119214, 61),
+    CodePointRange::from(119488, 20),
+    CodePointRange::from(119520, 20),
+    CodePointRange::from(119552, 87),
+    CodePointRange::from(119648, 25),
+    CodePointRange::from(119808, 85),
+    CodePointRange::from(119894, 71),
+    CodePointRange::from(119966, 2),
+    CodePointRange::from(119970, 1),
+    CodePointRange::from(119973, 2),
+    CodePointRange::from(119977, 4),
+    CodePointRange::from(119982, 12),
+    CodePointRange::from(119995, 1),
+    CodePointRange::from(119997, 7),
+    CodePointRange::from(120005, 65),
+    CodePointRange::from(120071, 4),
+    CodePointRange::from(120077, 8),
+    CodePointRange::from(120086, 7),
+    CodePointRange::from(120094, 28),
+    CodePointRange::from(120123, 4),
+    CodePointRange::from(120128, 5),
+    CodePointRange::from(120134, 1),
+    CodePointRange::from(120138, 7),
+    CodePointRange::from(120146, 340),
+    CodePointRange::from(120488, 292),
+    CodePointRange::from(120782, 50),
+    CodePointRange::from(126065, 68),
+    CodePointRange::from(126209, 61),
+    CodePointRange::from(126976, 44),
+    CodePointRange::from(127024, 100),
+    CodePointRange::from(127136, 15),
+    CodePointRange::from(127153, 15),
+    CodePointRange::from(127169, 15),
+    CodePointRange::from(127185, 37),
+    CodePointRange::from(127232, 174),
+    CodePointRange::from(127462, 26),
+    CodePointRange::from(127489, 2),
+    CodePointRange::from(127504, 44),
+    CodePointRange::from(127552, 9),
+    CodePointRange::from(127568, 2),
+    CodePointRange::from(127584, 6),
+    CodePointRange::from(127744, 984),
+    CodePointRange::from(128732, 17),
+    CodePointRange::from(128752, 13),
+    CodePointRange::from(128768, 119),
+    CodePointRange::from(128891, 95),
+    CodePointRange::from(128992, 12),
+    CodePointRange::from(129008, 1),
+    CodePointRange::from(129024, 12),
+    CodePointRange::from(129040, 56),
+    CodePointRange::from(129104, 10),
+    CodePointRange::from(129120, 40),
+    CodePointRange::from(129168, 30),
+    CodePointRange::from(129200, 2),
+    CodePointRange::from(129280, 340),
+    CodePointRange::from(129632, 14),
+    CodePointRange::from(129648, 13),
+    CodePointRange::from(129664, 9),
+    CodePointRange::from(129680, 46),
+    CodePointRange::from(129727, 7),
+    CodePointRange::from(129742, 14),
+    CodePointRange::from(129760, 9),
+    CodePointRange::from(129776, 9),
+    CodePointRange::from(129792, 147),
+    CodePointRange::from(129940, 55),
+    CodePointRange::from(130032, 10),
+    CodePointRange::from(917505, 1),
+    CodePointRange::from(917536, 96),
+];
+
+#[derive(Debug, Clone, Copy)]
+pub enum UnicodePropertyValueScript {
+    Adlam,
+    CaucasianAlbanian,
+    Ahom,
+    Arabic,
+    ImperialAramaic,
+    Armenian,
+    Avestan,
+    Balinese,
+    Bamum,
+    BassaVah,
+    Batak,
+    Bengali,
+    Bhaiksuki,
+    Bopomofo,
+    Brahmi,
+    Braille,
+    Buginese,
+    Buhid,
+    Chakma,
+    CanadianAboriginal,
+    Carian,
+    Cham,
+    Cherokee,
+    Chorasmian,
+    Coptic,
+    CyproMinoan,
+    Cypriot,
+    Cyrillic,
+    Devanagari,
+    DivesAkuru,
+    Dogra,
+    Deseret,
+    Duployan,
+    EgyptianHieroglyphs,
+    Elbasan,
+    Elymaic,
+    Ethiopic,
+    Georgian,
+    Glagolitic,
+    GunjalaGondi,
+    MasaramGondi,
+    Gothic,
+    Grantha,
+    Greek,
+    Gujarati,
+    Gurmukhi,
+    Hangul,
+    Han,
+    Hanunoo,
+    Hatran,
+    Hebrew,
+    Hiragana,
+    AnatolianHieroglyphs,
+    PahawhHmong,
+    NyiakengPuachueHmong,
+    OldHungarian,
+    OldItalic,
+    Javanese,
+    KayahLi,
+    Katakana,
+    Kawi,
+    Kharoshthi,
+    Khmer,
+    Khojki,
+    KhitanSmallScript,
+    Kannada,
+    Kaithi,
+    TaiTham,
+    Lao,
+    Latin,
+    Lepcha,
+    Limbu,
+    LinearA,
+    LinearB,
+    Lisu,
+    Lycian,
+    Lydian,
+    Mahajani,
+    Makasar,
+    Mandaic,
+    Manichaean,
+    Marchen,
+    Medefaidrin,
+    MendeKikakui,
+    MeroiticCursive,
+    MeroiticHieroglyphs,
+    Malayalam,
+    Modi,
+    Mongolian,
+    Mro,
+    MeeteiMayek,
+    Multani,
+    Myanmar,
+    NagMundari,
+    Nandinagari,
+    OldNorthArabian,
+    Nabataean,
+    Newa,
+    Nko,
+    Nushu,
+    Ogham,
+    OlChiki,
+    OldTurkic,
+    Oriya,
+    Osage,
+    Osmanya,
+    OldUyghur,
+    Palmyrene,
+    PauCinHau,
+    OldPermic,
+    PhagsPa,
+    InscriptionalPahlavi,
+    PsalterPahlavi,
+    Phoenician,
+    Miao,
+    InscriptionalParthian,
+    Rejang,
+    HanifiRohingya,
+    Runic,
+    Samaritan,
+    OldSouthArabian,
+    Saurashtra,
+    SignWriting,
+    Shavian,
+    Sharada,
+    Siddham,
+    Khudawadi,
+    Sinhala,
+    Sogdian,
+    OldSogdian,
+    SoraSompeng,
+    Soyombo,
+    Sundanese,
+    SylotiNagri,
+    Syriac,
+    Tagbanwa,
+    Takri,
+    TaiLe,
+    NewTaiLue,
+    Tamil,
+    Tangut,
+    TaiViet,
+    Telugu,
+    Tifinagh,
+    Tagalog,
+    Thaana,
+    Thai,
+    Tibetan,
+    Tirhuta,
+    Tangsa,
+    Toto,
+    Ugaritic,
+    Vai,
+    Vithkuqi,
+    WarangCiti,
+    Wancho,
+    OldPersian,
+    Cuneiform,
+    Yezidi,
+    Yi,
+    ZanabazarSquare,
+    Inherited,
+    Common,
+}
+
+pub(crate) fn unicode_property_value_script_from_str(
+    s: &str,
+) -> Option<UnicodePropertyValueScript> {
+    use UnicodePropertyValueScript::*;
+    match s {
+        "Adlam" | "Adlm" => Some(Adlam),
+        "Caucasian_Albanian" | "Aghb" => Some(CaucasianAlbanian),
+        "Ahom" => Some(Ahom),
+        "Arabic" | "Arab" => Some(Arabic),
+        "Imperial_Aramaic" | "Armi" => Some(ImperialAramaic),
+        "Armenian" | "Armn" => Some(Armenian),
+        "Avestan" | "Avst" => Some(Avestan),
+        "Balinese" | "Bali" => Some(Balinese),
+        "Bamum" | "Bamu" => Some(Bamum),
+        "Bassa_Vah" | "Bass" => Some(BassaVah),
+        "Batak" | "Batk" => Some(Batak),
+        "Bengali" | "Beng" => Some(Bengali),
+        "Bhaiksuki" | "Bhks" => Some(Bhaiksuki),
+        "Bopomofo" | "Bopo" => Some(Bopomofo),
+        "Brahmi" | "Brah" => Some(Brahmi),
+        "Braille" | "Brai" => Some(Braille),
+        "Buginese" | "Bugi" => Some(Buginese),
+        "Buhid" | "Buhd" => Some(Buhid),
+        "Chakma" | "Cakm" => Some(Chakma),
+        "Canadian_Aboriginal" | "Cans" => Some(CanadianAboriginal),
+        "Carian" | "Cari" => Some(Carian),
+        "Cham" => Some(Cham),
+        "Cherokee" | "Cher" => Some(Cherokee),
+        "Chorasmian" | "Chrs" => Some(Chorasmian),
+        "Coptic" | "Copt" | "Qaac" => Some(Coptic),
+        "Cypro_Minoan" | "Cpmn" => Some(CyproMinoan),
+        "Cypriot" | "Cprt" => Some(Cypriot),
+        "Cyrillic" | "Cyrl" => Some(Cyrillic),
+        "Devanagari" | "Deva" => Some(Devanagari),
+        "Dives_Akuru" | "Diak" => Some(DivesAkuru),
+        "Dogra" | "Dogr" => Some(Dogra),
+        "Deseret" | "Dsrt" => Some(Deseret),
+        "Duployan" | "Dupl" => Some(Duployan),
+        "Egyptian_Hieroglyphs" | "Egyp" => Some(EgyptianHieroglyphs),
+        "Elbasan" | "Elba" => Some(Elbasan),
+        "Elymaic" | "Elym" => Some(Elymaic),
+        "Ethiopic" | "Ethi" => Some(Ethiopic),
+        "Georgian" | "Geor" => Some(Georgian),
+        "Glagolitic" | "Glag" => Some(Glagolitic),
+        "Gunjala_Gondi" | "Gong" => Some(GunjalaGondi),
+        "Masaram_Gondi" | "Gonm" => Some(MasaramGondi),
+        "Gothic" | "Goth" => Some(Gothic),
+        "Grantha" | "Gran" => Some(Grantha),
+        "Greek" | "Grek" => Some(Greek),
+        "Gujarati" | "Gujr" => Some(Gujarati),
+        "Gurmukhi" | "Guru" => Some(Gurmukhi),
+        "Hangul" | "Hang" => Some(Hangul),
+        "Han" | "Hani" => Some(Han),
+        "Hanunoo" | "Hano" => Some(Hanunoo),
+        "Hatran" | "Hatr" => Some(Hatran),
+        "Hebrew" | "Hebr" => Some(Hebrew),
+        "Hiragana" | "Hira" => Some(Hiragana),
+        "Anatolian_Hieroglyphs" | "Hluw" => Some(AnatolianHieroglyphs),
+        "Pahawh_Hmong" | "Hmng" => Some(PahawhHmong),
+        "Nyiakeng_Puachue_Hmong" | "Hmnp" => Some(NyiakengPuachueHmong),
+        "Old_Hungarian" | "Hung" => Some(OldHungarian),
+        "Old_Italic" | "Ital" => Some(OldItalic),
+        "Javanese" | "Java" => Some(Javanese),
+        "Kayah_Li" | "Kali" => Some(KayahLi),
+        "Katakana" | "Kana" => Some(Katakana),
+        "Kawi" => Some(Kawi),
+        "Kharoshthi" | "Khar" => Some(Kharoshthi),
+        "Khmer" | "Khmr" => Some(Khmer),
+        "Khojki" | "Khoj" => Some(Khojki),
+        "Khitan_Small_Script" | "Kits" => Some(KhitanSmallScript),
+        "Kannada" | "Knda" => Some(Kannada),
+        "Kaithi" | "Kthi" => Some(Kaithi),
+        "Tai_Tham" | "Lana" => Some(TaiTham),
+        "Lao" | "Laoo" => Some(Lao),
+        "Latin" | "Latn" => Some(Latin),
+        "Lepcha" | "Lepc" => Some(Lepcha),
+        "Limbu" | "Limb" => Some(Limbu),
+        "Linear_A" | "Lina" => Some(LinearA),
+        "Linear_B" | "Linb" => Some(LinearB),
+        "Lisu" => Some(Lisu),
+        "Lycian" | "Lyci" => Some(Lycian),
+        "Lydian" | "Lydi" => Some(Lydian),
+        "Mahajani" | "Mahj" => Some(Mahajani),
+        "Makasar" | "Maka" => Some(Makasar),
+        "Mandaic" | "Mand" => Some(Mandaic),
+        "Manichaean" | "Mani" => Some(Manichaean),
+        "Marchen" | "Marc" => Some(Marchen),
+        "Medefaidrin" | "Medf" => Some(Medefaidrin),
+        "Mende_Kikakui" | "Mend" => Some(MendeKikakui),
+        "Meroitic_Cursive" | "Merc" => Some(MeroiticCursive),
+        "Meroitic_Hieroglyphs" | "Mero" => Some(MeroiticHieroglyphs),
+        "Malayalam" | "Mlym" => Some(Malayalam),
+        "Modi" => Some(Modi),
+        "Mongolian" | "Mong" => Some(Mongolian),
+        "Mro" | "Mroo" => Some(Mro),
+        "Meetei_Mayek" | "Mtei" => Some(MeeteiMayek),
+        "Multani" | "Mult" => Some(Multani),
+        "Myanmar" | "Mymr" => Some(Myanmar),
+        "Nag_Mundari" | "Nagm" => Some(NagMundari),
+        "Nandinagari" | "Nand" => Some(Nandinagari),
+        "Old_North_Arabian" | "Narb" => Some(OldNorthArabian),
+        "Nabataean" | "Nbat" => Some(Nabataean),
+        "Newa" => Some(Newa),
+        "Nko" | "Nkoo" => Some(Nko),
+        "Nushu" | "Nshu" => Some(Nushu),
+        "Ogham" | "Ogam" => Some(Ogham),
+        "Ol_Chiki" | "Olck" => Some(OlChiki),
+        "Old_Turkic" | "Orkh" => Some(OldTurkic),
+        "Oriya" | "Orya" => Some(Oriya),
+        "Osage" | "Osge" => Some(Osage),
+        "Osmanya" | "Osma" => Some(Osmanya),
+        "Old_Uyghur" | "Ougr" => Some(OldUyghur),
+        "Palmyrene" | "Palm" => Some(Palmyrene),
+        "Pau_Cin_Hau" | "Pauc" => Some(PauCinHau),
+        "Old_Permic" | "Perm" => Some(OldPermic),
+        "Phags_Pa" | "Phag" => Some(PhagsPa),
+        "Inscriptional_Pahlavi" | "Phli" => Some(InscriptionalPahlavi),
+        "Psalter_Pahlavi" | "Phlp" => Some(PsalterPahlavi),
+        "Phoenician" | "Phnx" => Some(Phoenician),
+        "Miao" | "Plrd" => Some(Miao),
+        "Inscriptional_Parthian" | "Prti" => Some(InscriptionalParthian),
+        "Rejang" | "Rjng" => Some(Rejang),
+        "Hanifi_Rohingya" | "Rohg" => Some(HanifiRohingya),
+        "Runic" | "Runr" => Some(Runic),
+        "Samaritan" | "Samr" => Some(Samaritan),
+        "Old_South_Arabian" | "Sarb" => Some(OldSouthArabian),
+        "Saurashtra" | "Saur" => Some(Saurashtra),
+        "SignWriting" | "Sgnw" => Some(SignWriting),
+        "Shavian" | "Shaw" => Some(Shavian),
+        "Sharada" | "Shrd" => Some(Sharada),
+        "Siddham" | "Sidd" => Some(Siddham),
+        "Khudawadi" | "Sind" => Some(Khudawadi),
+        "Sinhala" | "Sinh" => Some(Sinhala),
+        "Sogdian" | "Sogd" => Some(Sogdian),
+        "Old_Sogdian" | "Sogo" => Some(OldSogdian),
+        "Sora_Sompeng" | "Sora" => Some(SoraSompeng),
+        "Soyombo" | "Soyo" => Some(Soyombo),
+        "Sundanese" | "Sund" => Some(Sundanese),
+        "Syloti_Nagri" | "Sylo" => Some(SylotiNagri),
+        "Syriac" | "Syrc" => Some(Syriac),
+        "Tagbanwa" | "Tagb" => Some(Tagbanwa),
+        "Takri" | "Takr" => Some(Takri),
+        "Tai_Le" | "Tale" => Some(TaiLe),
+        "New_Tai_Lue" | "Talu" => Some(NewTaiLue),
+        "Tamil" | "Taml" => Some(Tamil),
+        "Tangut" | "Tang" => Some(Tangut),
+        "Tai_Viet" | "Tavt" => Some(TaiViet),
+        "Telugu" | "Telu" => Some(Telugu),
+        "Tifinagh" | "Tfng" => Some(Tifinagh),
+        "Tagalog" | "Tglg" => Some(Tagalog),
+        "Thaana" | "Thaa" => Some(Thaana),
+        "Thai" => Some(Thai),
+        "Tibetan" | "Tibt" => Some(Tibetan),
+        "Tirhuta" | "Tirh" => Some(Tirhuta),
+        "Tangsa" | "Tnsa" => Some(Tangsa),
+        "Toto" => Some(Toto),
+        "Ugaritic" | "Ugar" => Some(Ugaritic),
+        "Vai" | "Vaii" => Some(Vai),
+        "Vithkuqi" | "Vith" => Some(Vithkuqi),
+        "Warang_Citi" | "Wara" => Some(WarangCiti),
+        "Wancho" | "Wcho" => Some(Wancho),
+        "Old_Persian" | "Xpeo" => Some(OldPersian),
+        "Cuneiform" | "Xsux" => Some(Cuneiform),
+        "Yezidi" | "Yezi" => Some(Yezidi),
+        "Yi" | "Yiii" => Some(Yi),
+        "Zanabazar_Square" | "Zanb" => Some(ZanabazarSquare),
+        "Inherited" | "Zinh" | "Qaai" => Some(Inherited),
+        "Common" | "Zyyy" => Some(Common),
+        _ => None,
+    }
+}
+
+pub(crate) fn is_property_value_script(c: u32, value: &UnicodePropertyValueScript) -> bool {
+    use UnicodePropertyValueScript::*;
+    match value {
+        Adlam => ADLAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        CaucasianAlbanian => CAUCASIAN_ALBANIAN
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Ahom => AHOM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Arabic => ARABIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        ImperialAramaic => IMPERIAL_ARAMAIC
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Armenian => ARMENIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Avestan => AVESTAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Balinese => BALINESE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Bamum => BAMUM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        BassaVah => BASSA_VAH.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Batak => BATAK.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Bengali => BENGALI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Bhaiksuki => BHAIKSUKI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Bopomofo => BOPOMOFO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Brahmi => BRAHMI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Braille => BRAILLE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Buginese => BUGINESE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Buhid => BUHID.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Chakma => CHAKMA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        CanadianAboriginal => CANADIAN_ABORIGINAL
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Carian => CARIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Cham => CHAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Cherokee => CHEROKEE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Chorasmian => CHORASMIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Coptic => COPTIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        CyproMinoan => CYPRO_MINOAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Cypriot => CYPRIOT.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Cyrillic => CYRILLIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Devanagari => DEVANAGARI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        DivesAkuru => DIVES_AKURU.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Dogra => DOGRA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Deseret => DESERET.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Duployan => DUPLOYAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        EgyptianHieroglyphs => EGYPTIAN_HIEROGLYPHS
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Elbasan => ELBASAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Elymaic => ELYMAIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Ethiopic => ETHIOPIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Georgian => GEORGIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Glagolitic => GLAGOLITIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        GunjalaGondi => GUNJALA_GONDI
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        MasaramGondi => MASARAM_GONDI
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Gothic => GOTHIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Grantha => GRANTHA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Greek => GREEK.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Gujarati => GUJARATI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Gurmukhi => GURMUKHI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Hangul => HANGUL.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Han => HAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Hanunoo => HANUNOO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Hatran => HATRAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Hebrew => HEBREW.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Hiragana => HIRAGANA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        AnatolianHieroglyphs => ANATOLIAN_HIEROGLYPHS
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        PahawhHmong => PAHAWH_HMONG.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        NyiakengPuachueHmong => NYIAKENG_PUACHUE_HMONG
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        OldHungarian => OLD_HUNGARIAN
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        OldItalic => OLD_ITALIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Javanese => JAVANESE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        KayahLi => KAYAH_LI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Katakana => KATAKANA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Kawi => KAWI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Kharoshthi => KHAROSHTHI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Khmer => KHMER.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Khojki => KHOJKI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        KhitanSmallScript => KHITAN_SMALL_SCRIPT
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Kannada => KANNADA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Kaithi => KAITHI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        TaiTham => TAI_THAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Lao => LAO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Latin => LATIN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Lepcha => LEPCHA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Limbu => LIMBU.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        LinearA => LINEAR_A.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        LinearB => LINEAR_B.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Lisu => LISU.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Lycian => LYCIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Lydian => LYDIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Mahajani => MAHAJANI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Makasar => MAKASAR.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Mandaic => MANDAIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Manichaean => MANICHAEAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Marchen => MARCHEN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Medefaidrin => MEDEFAIDRIN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        MendeKikakui => MENDE_KIKAKUI
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        MeroiticCursive => MEROITIC_CURSIVE
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        MeroiticHieroglyphs => MEROITIC_HIEROGLYPHS
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Malayalam => MALAYALAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Modi => MODI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Mongolian => MONGOLIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Mro => MRO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        MeeteiMayek => MEETEI_MAYEK.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Multani => MULTANI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Myanmar => MYANMAR.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        NagMundari => NAG_MUNDARI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Nandinagari => NANDINAGARI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldNorthArabian => OLD_NORTH_ARABIAN
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Nabataean => NABATAEAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Newa => NEWA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Nko => NKO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Nushu => NUSHU.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Ogham => OGHAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OlChiki => OL_CHIKI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldTurkic => OLD_TURKIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Oriya => ORIYA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Osage => OSAGE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Osmanya => OSMANYA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldUyghur => OLD_UYGHUR.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Palmyrene => PALMYRENE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        PauCinHau => PAU_CIN_HAU.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldPermic => OLD_PERMIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        PhagsPa => PHAGS_PA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        InscriptionalPahlavi => INSCRIPTIONAL_PAHLAVI
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        PsalterPahlavi => PSALTER_PAHLAVI
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Phoenician => PHOENICIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Miao => MIAO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        InscriptionalParthian => INSCRIPTIONAL_PARTHIAN
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Rejang => REJANG.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        HanifiRohingya => HANIFI_ROHINGYA
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Runic => RUNIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Samaritan => SAMARITAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldSouthArabian => OLD_SOUTH_ARABIAN
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Saurashtra => SAURASHTRA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        SignWriting => SIGNWRITING.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Shavian => SHAVIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Sharada => SHARADA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Siddham => SIDDHAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Khudawadi => KHUDAWADI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Sinhala => SINHALA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Sogdian => SOGDIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldSogdian => OLD_SOGDIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        SoraSompeng => SORA_SOMPENG.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Soyombo => SOYOMBO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Sundanese => SUNDANESE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        SylotiNagri => SYLOTI_NAGRI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Syriac => SYRIAC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tagbanwa => TAGBANWA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Takri => TAKRI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        TaiLe => TAI_LE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        NewTaiLue => NEW_TAI_LUE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tamil => TAMIL.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tangut => TANGUT.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        TaiViet => TAI_VIET.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Telugu => TELUGU.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tifinagh => TIFINAGH.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tagalog => TAGALOG.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Thaana => THAANA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Thai => THAI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tibetan => TIBETAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tirhuta => TIRHUTA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tangsa => TANGSA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Toto => TOTO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Ugaritic => UGARITIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Vai => VAI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Vithkuqi => VITHKUQI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        WarangCiti => WARANG_CITI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Wancho => WANCHO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldPersian => OLD_PERSIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Cuneiform => CUNEIFORM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Yezidi => YEZIDI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Yi => YI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        ZanabazarSquare => ZANABAZAR_SQUARE
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Inherited => INHERITED.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Common => COMMON.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+    }
+}
+
+pub(crate) fn is_property_value_script_extensions(
+    c: u32,
+    value: &UnicodePropertyValueScript,
+) -> bool {
+    use UnicodePropertyValueScript::*;
+    match value {
+        Adlam => {
+            ADLAM_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || ADLAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        CaucasianAlbanian => CAUCASIAN_ALBANIAN
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Ahom => AHOM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Arabic => {
+            ARABIC_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || ARABIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        ImperialAramaic => IMPERIAL_ARAMAIC
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Armenian => ARMENIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Avestan => AVESTAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Balinese => BALINESE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Bamum => BAMUM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        BassaVah => BASSA_VAH.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Batak => BATAK.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Bengali => {
+            BENGALI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || BENGALI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Bhaiksuki => BHAIKSUKI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Bopomofo => {
+            BOPOMOFO_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || BOPOMOFO.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Brahmi => BRAHMI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Braille => BRAILLE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Buginese => {
+            BUGINESE_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || BUGINESE.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Buhid => {
+            BUHID_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || BUHID.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Chakma => {
+            CHAKMA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || CHAKMA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        CanadianAboriginal => CANADIAN_ABORIGINAL
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Carian => CARIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Cham => CHAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Cherokee => CHEROKEE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Chorasmian => CHORASMIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Coptic => {
+            COPTIC_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || COPTIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        CyproMinoan => {
+            CYPRO_MINOAN_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || CYPRO_MINOAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Cypriot => {
+            CYPRIOT_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || CYPRIOT.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Cyrillic => {
+            CYRILLIC_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || CYRILLIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Devanagari => {
+            DEVANAGARI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || DEVANAGARI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        DivesAkuru => DIVES_AKURU.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Dogra => {
+            DOGRA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || DOGRA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Deseret => DESERET.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Duployan => {
+            DUPLOYAN_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || DUPLOYAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        EgyptianHieroglyphs => EGYPTIAN_HIEROGLYPHS
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Elbasan => ELBASAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Elymaic => ELYMAIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Ethiopic => ETHIOPIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Georgian => {
+            GEORGIAN_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || GEORGIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Glagolitic => {
+            GLAGOLITIC_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || GLAGOLITIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        GunjalaGondi => {
+            GUNJALA_GONDI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || GUNJALA_GONDI
+                    .binary_search_by(|&cpr| cpr.compare(c))
+                    .is_ok()
+        }
+        MasaramGondi => {
+            MASARAM_GONDI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || MASARAM_GONDI
+                    .binary_search_by(|&cpr| cpr.compare(c))
+                    .is_ok()
+        }
+        Gothic => GOTHIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Grantha => {
+            GRANTHA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || GRANTHA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Greek => {
+            GREEK_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || GREEK.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Gujarati => {
+            GUJARATI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || GUJARATI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Gurmukhi => {
+            GURMUKHI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || GURMUKHI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Hangul => {
+            HANGUL_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || HANGUL.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Han => {
+            HAN_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || HAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Hanunoo => {
+            HANUNOO_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || HANUNOO.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Hatran => HATRAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Hebrew => HEBREW.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Hiragana => {
+            HIRAGANA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || HIRAGANA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        AnatolianHieroglyphs => ANATOLIAN_HIEROGLYPHS
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        PahawhHmong => PAHAWH_HMONG.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        NyiakengPuachueHmong => NYIAKENG_PUACHUE_HMONG
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        OldHungarian => OLD_HUNGARIAN
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        OldItalic => OLD_ITALIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Javanese => {
+            JAVANESE_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || JAVANESE.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        KayahLi => {
+            KAYAH_LI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || KAYAH_LI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Katakana => {
+            KATAKANA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || KATAKANA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Kawi => KAWI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Kharoshthi => KHAROSHTHI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Khmer => KHMER.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Khojki => {
+            KHOJKI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || KHOJKI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        KhitanSmallScript => KHITAN_SMALL_SCRIPT
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Kannada => {
+            KANNADA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || KANNADA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Kaithi => {
+            KAITHI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || KAITHI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        TaiTham => TAI_THAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Lao => LAO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Latin => {
+            LATIN_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || LATIN.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Lepcha => LEPCHA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Limbu => {
+            LIMBU_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || LIMBU.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        LinearA => {
+            LINEAR_A_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || LINEAR_A.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        LinearB => {
+            LINEAR_B_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || LINEAR_B.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Lisu => LISU.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Lycian => LYCIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Lydian => LYDIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Mahajani => {
+            MAHAJANI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || MAHAJANI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Makasar => MAKASAR.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Mandaic => {
+            MANDAIC_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || MANDAIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Manichaean => {
+            MANICHAEAN_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || MANICHAEAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Marchen => MARCHEN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Medefaidrin => MEDEFAIDRIN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        MendeKikakui => MENDE_KIKAKUI
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        MeroiticCursive => MEROITIC_CURSIVE
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        MeroiticHieroglyphs => MEROITIC_HIEROGLYPHS
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Malayalam => {
+            MALAYALAM_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || MALAYALAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Modi => {
+            MODI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || MODI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Mongolian => {
+            MONGOLIAN_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || MONGOLIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Mro => MRO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        MeeteiMayek => MEETEI_MAYEK.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Multani => {
+            MULTANI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || MULTANI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Myanmar => {
+            MYANMAR_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || MYANMAR.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        NagMundari => NAG_MUNDARI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Nandinagari => {
+            NANDINAGARI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || NANDINAGARI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        OldNorthArabian => OLD_NORTH_ARABIAN
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Nabataean => NABATAEAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Newa => NEWA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Nko => {
+            NKO_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || NKO.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Nushu => NUSHU.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Ogham => OGHAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OlChiki => OL_CHIKI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldTurkic => OLD_TURKIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Oriya => {
+            ORIYA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || ORIYA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Osage => OSAGE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Osmanya => OSMANYA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldUyghur => {
+            OLD_UYGHUR_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || OLD_UYGHUR.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Palmyrene => PALMYRENE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        PauCinHau => PAU_CIN_HAU.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldPermic => {
+            OLD_PERMIC_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || OLD_PERMIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        PhagsPa => {
+            PHAGS_PA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || PHAGS_PA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        InscriptionalPahlavi => INSCRIPTIONAL_PAHLAVI
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        PsalterPahlavi => {
+            PSALTER_PAHLAVI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || PSALTER_PAHLAVI
+                    .binary_search_by(|&cpr| cpr.compare(c))
+                    .is_ok()
+        }
+        Phoenician => PHOENICIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Miao => MIAO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        InscriptionalParthian => INSCRIPTIONAL_PARTHIAN
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Rejang => REJANG.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        HanifiRohingya => {
+            HANIFI_ROHINGYA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || HANIFI_ROHINGYA
+                    .binary_search_by(|&cpr| cpr.compare(c))
+                    .is_ok()
+        }
+        Runic => RUNIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Samaritan => SAMARITAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldSouthArabian => OLD_SOUTH_ARABIAN
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Saurashtra => SAURASHTRA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        SignWriting => SIGNWRITING.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Shavian => SHAVIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Sharada => {
+            SHARADA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || SHARADA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Siddham => SIDDHAM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Khudawadi => {
+            KHUDAWADI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || KHUDAWADI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Sinhala => {
+            SINHALA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || SINHALA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Sogdian => {
+            SOGDIAN_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || SOGDIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        OldSogdian => OLD_SOGDIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        SoraSompeng => SORA_SOMPENG.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Soyombo => SOYOMBO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Sundanese => SUNDANESE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        SylotiNagri => {
+            SYLOTI_NAGRI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || SYLOTI_NAGRI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Syriac => {
+            SYRIAC_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || SYRIAC.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Tagbanwa => {
+            TAGBANWA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || TAGBANWA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Takri => {
+            TAKRI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || TAKRI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        TaiLe => {
+            TAI_LE_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || TAI_LE.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        NewTaiLue => NEW_TAI_LUE.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tamil => {
+            TAMIL_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || TAMIL.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Tangut => TANGUT.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        TaiViet => TAI_VIET.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Telugu => {
+            TELUGU_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || TELUGU.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Tifinagh => TIFINAGH.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tagalog => {
+            TAGALOG_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || TAGALOG.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Thaana => {
+            THAANA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || THAANA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Thai => THAI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tibetan => TIBETAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Tirhuta => {
+            TIRHUTA_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || TIRHUTA.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Tangsa => TANGSA.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Toto => TOTO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Ugaritic => UGARITIC.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Vai => VAI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Vithkuqi => VITHKUQI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        WarangCiti => WARANG_CITI.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Wancho => WANCHO.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        OldPersian => OLD_PERSIAN.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Cuneiform => CUNEIFORM.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Yezidi => {
+            YEZIDI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || YEZIDI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        Yi => {
+            YI_EXTENSIONS
+                .binary_search_by(|&cpr| cpr.compare(c))
+                .is_ok()
+                || YI.binary_search_by(|&cpr| cpr.compare(c)).is_ok()
+        }
+        ZanabazarSquare => ZANABAZAR_SQUARE
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Inherited => INHERITED.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Common => COMMON.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
     }
 }

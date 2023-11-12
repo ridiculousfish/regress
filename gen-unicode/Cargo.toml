@@ -8,3 +8,4 @@ edition = "2021"
 
 [dependencies]
 codegen = "0.1.3"
+ucd-parse = "0.1.12"
