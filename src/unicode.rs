@@ -364,7 +364,7 @@ mod tests {
         for c in 0..=0x10FFFF {
             let fc = fold(c);
             if fc != c {
-                unfold_map.entry(fc).or_insert_with(Vec::new).push(c);
+                unfold_map.entry(fc).or_default().push(c);
             }
         }
 

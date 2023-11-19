@@ -218,7 +218,7 @@ impl ByteSet for AsciiBitmap {
 }
 
 /// A bitmap covering all bytes.
-#[derive(Default, Copy, Clone)]
+#[derive(Default, Copy, Clone, PartialEq, Eq)]
 #[repr(align(4))]
 pub struct ByteBitmap([u16; 16]);
 
