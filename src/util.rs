@@ -1,3 +1,5 @@
+use crate::bytesearch::ByteBitmap;
+use crate::codepointset::Interval;
 use crate::codepointset::CODE_POINT_MAX;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -89,6 +91,7 @@ pub fn to_char_sat(c: u32) -> char {
 
 /// \return the first byte of a UTF-8 encoded code point.
 /// We do not use char because we don't want to deal with failing on surrogates.
+#[inline(always)]
 pub fn utf8_first_byte(cp: u32) -> u8 {
     debug_assert!(cp <= CODE_POINT_MAX);
     if cp < 0x80 {
@@ -103,6 +106,25 @@ pub fn utf8_first_byte(cp: u32) -> u8 {
     } else {
         // Four byte encoding.
         (cp >> 18 & 0x07) as u8 | 0b1111_0000
+    }
+}
+
+/// Add all of the first bytes of a code point interval to a byte bitmap.
+pub fn add_utf8_first_bytes_to_bitmap(interval: Interval, bitmap: &mut ByteBitmap) {
+    // Note this is an inclusive interval.
+    let Interval { first, last } = interval;
+    let ranges = [
+        (first, last.min(0x7F)),              // 1 byte range
+        (first.max(0x80), last.min(0x7FF)),   // 2 byte range
+        (first.max(0x800), last.min(0xFFFF)), // 3 byte range
+        (first.max(0x10000), last),           // 4 byte range
+    ];
+    for (first, last) in ranges.into_iter() {
+        if first <= last {
+            for byte in utf8_first_byte(first)..=utf8_first_byte(last) {
+                bitmap.set(byte);
+            }
+        }
     }
 }
 
@@ -184,9 +206,10 @@ pub fn utf8_w4(b0: u8, b1: u8, b2: u8, b3: u8) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use super::{add_utf8_first_bytes_to_bitmap, utf8_first_byte, ByteBitmap, Interval, SliceHelp};
+
     #[test]
     fn ranges() {
-        use super::SliceHelp;
         let vals = [0, 1, 2, 3, 4, 4, 4, 7, 8, 9, 9];
         let fast_er = |needle: usize| vals.equal_range_by(|v| v.cmp(&needle));
         let slow_er = |needle: usize| {
@@ -228,7 +251,7 @@ mod tests {
             let mut buff = [0; 4];
             let s = core::char::from_u32(cp).unwrap().encode_utf8(&mut buff);
             let bytes = s.as_bytes();
-            assert_eq!(bytes[0], super::utf8_first_byte(cp));
+            assert_eq!(bytes[0], utf8_first_byte(cp));
 
             match bytes.len() {
                 1 => assert_eq!(bytes[0] as u32, cp),
@@ -236,6 +259,27 @@ mod tests {
                 3 => assert_eq!(utf8_w3(bytes[0], bytes[1], bytes[2]), cp),
                 4 => assert_eq!(utf8_w4(bytes[0], bytes[1], bytes[2], bytes[3]), cp),
                 _ => panic!("Unexpected utf8 sequence length"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_add_utf8_first_bytes_to_bitmap() {
+        let locs = [
+            0, 1, 2, 3, 17, 25, 34, 99, 127, 128, 150, 255, 256, 257, 511, 512, 513, 0x7FF, 0x800,
+            0x905, 0xA123, 0xFF0F, 0xFFFF, 0x10000, 0x10001, 0x1FFFF, 0x20001, 0x2FFF7, 0x50001,
+            0x100000, 0x10FFFE, 0x10FFFF,
+        ];
+        for (idx, &first) in locs.iter().enumerate() {
+            let mut expected = ByteBitmap::default();
+            for &last in locs[idx..].iter() {
+                assert!(first <= last);
+                for cp in first..=last {
+                    expected.set(utf8_first_byte(cp));
+                }
+                let mut bitmap = ByteBitmap::default();
+                add_utf8_first_bytes_to_bitmap(Interval { first, last }, &mut bitmap);
+                assert_eq!(bitmap, expected);
             }
         }
     }

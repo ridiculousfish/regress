@@ -3,10 +3,9 @@ use crate::codepointset;
 use crate::insn::StartPredicate;
 use crate::ir;
 use crate::ir::Node;
-use crate::util::utf8_first_byte;
+use crate::util::{add_utf8_first_bytes_to_bitmap, utf8_first_byte};
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
-use core::cmp;
 use core::convert::TryInto;
 
 /// Support for quickly finding potential match locations.
@@ -15,32 +14,9 @@ use core::convert::TryInto;
 /// That is, make a list of all of the possible first bytes of every contained
 /// code point, and store that in a bitmap.
 fn cps_to_first_byte_bitmap(input: &codepointset::CodePointSet) -> Box<ByteBitmap> {
-    // Rather than walking over all contained codepoints, which could be very
-    // expensive, we perform searches over all bytes.
-    // Note that UTF-8 first-bytes increase monotone and contiguously.
-    // Increasing a code point will either increase the first byte by 1 or 0.
     let mut bitmap = Box::<ByteBitmap>::default();
-    let mut ivs = input.intervals();
-    for target_byte in 0..=255 {
-        let search = ivs.binary_search_by(|iv| {
-            let left_byte = utf8_first_byte(iv.first);
-            let right_byte = utf8_first_byte(iv.last);
-            debug_assert!(left_byte <= right_byte);
-            if left_byte <= target_byte && target_byte <= right_byte {
-                cmp::Ordering::Equal
-            } else if left_byte > target_byte {
-                cmp::Ordering::Greater
-            } else {
-                debug_assert!(right_byte < target_byte, "Binary search logic is wrong");
-                cmp::Ordering::Less
-            }
-        });
-        if let Ok(idx) = search {
-            bitmap.set(target_byte);
-            // Since our bytes are strictly increasing, previous intervals will never hold
-            // the next byte. Help out our binary search by removing previous intervals.
-            ivs = &ivs[idx..];
-        }
+    for iv in input.intervals() {
+        add_utf8_first_bytes_to_bitmap(*iv, &mut bitmap);
     }
     bitmap
 }
