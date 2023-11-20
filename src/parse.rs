@@ -8,7 +8,9 @@ use crate::{
         BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
         MAX_LOOPS,
     },
-    unicode::{self, unicode_property_value_from_str, PropertyEscape},
+    unicode::{
+        self, unicode_property_name_from_str, unicode_property_value_from_str, PropertyEscape,
+    },
     unicodetables::{is_id_continue, is_id_start},
     util::to_char_sat,
 };
@@ -1088,57 +1090,30 @@ where
             return error("Invalid character at property escape start");
         }
 
-        let mut name = String::new();
+        let mut buffer = String::new();
+        let mut name = None;
 
         while let Some(c) = self.peek().and_then(char::from_u32) {
             match c {
                 '}' => {
                     self.consume(c);
-                    if let Some(value) = unicode_property_value_from_str(&name) {
-                        return Ok(PropertyEscape { name: None, value });
+                    if let Some(value) = unicode_property_value_from_str(&buffer, name) {
+                        return Ok(PropertyEscape { name, value });
                     } else {
                         return error("Invalid property name");
                     }
                 }
-                '=' => {
+                '=' if name.is_none() => {
                     self.consume(c);
-                    break;
-                }
-                c if c.is_ascii_alphanumeric() || c == '_' => {
-                    self.consume(c);
-                    name.push(c);
-                }
-                _ => {
-                    return error("Invalid property name");
-                }
-            }
-        }
-
-        let mut value = String::new();
-
-        while let Some(c) = self.peek().and_then(char::from_u32) {
-            match c {
-                '}' => {
-                    self.consume(c);
-                    let name = if let Some(name) = unicode::unicode_property_name_from_str(&name) {
-                        name
-                    } else {
+                    let Some(n) = unicode_property_name_from_str(&buffer) else {
                         return error("Invalid property name");
                     };
-                    let value =
-                        if let Some(value) = unicode::unicode_property_value_from_str(&value) {
-                            value
-                        } else {
-                            return error("Invalid property name");
-                        };
-                    return Ok(PropertyEscape {
-                        name: Some(name),
-                        value,
-                    });
+                    name = Some(n);
+                    buffer.clear();
                 }
                 c if c.is_ascii_alphanumeric() || c == '_' => {
                     self.consume(c);
-                    value.push(c);
+                    buffer.push(c);
                 }
                 _ => {
                     return error("Invalid property name");

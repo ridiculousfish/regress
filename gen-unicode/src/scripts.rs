@@ -1,328 +1,225 @@
-use crate::{chars_to_code_point_ranges, pack_adjacent_chars, parse_line};
-use std::fs::File;
-use std::io::{self, BufRead};
+use crate::{chars_to_code_point_ranges, pack_adjacent_chars, GenUnicode};
+use codegen::{Block, Enum, Function};
+use ucd_parse::Codepoints;
 
-use codegen::{Block, Enum, Function, Scope};
+struct Script {
+    long: String,
+    names: Vec<String>,
+    enum_name: String,
+    codepoints_sc_name: String,
+    codepoints_scx_name: String,
+    codepoints_sc: Vec<(u32, u32)>,
+    codepoints_scx: Vec<(u32, u32)>,
+}
 
-pub(crate) fn generate(scope: &mut Scope) {
-    let mut property_enum = Enum::new("UnicodePropertyValueScript");
-    property_enum
-        .vis("pub")
-        .derive("Debug")
-        .derive("Clone")
-        .derive("Copy");
+// TODO: Wait for https://github.com/tc39/ecma262/issues/3190 to be resolved.
+const EXCLUDED_SCRIPTS: [&str; 2] = ["Unknown", "Katakana_Or_Hiragana"];
 
-    let mut is_property_fn = Function::new("is_property_value_script");
-    is_property_fn
-        .vis("pub(crate)")
-        .arg("c", "char")
-        .arg("value", "&UnicodePropertyValueScript")
-        .ret("bool")
-        .line("use UnicodePropertyValueScript::*;");
-    let mut is_property_fn_match_block = Block::new("match value");
+impl GenUnicode {
+    pub(crate) fn generate_scripts(&mut self) {
+        let mut scripts = Vec::new();
 
-    let mut property_from_str_fn = Function::new("unicode_property_value_script_from_str");
-    property_from_str_fn
-        .arg("s", "&str")
-        .ret("Option<UnicodePropertyValueScript>")
-        .vis("pub")
-        .line("use UnicodePropertyValueScript::*;");
-    let mut property_from_str_fn_match_block = Block::new("match s");
+        for alias in &self.property_value_aliases {
+            if alias.property == "sc" && !EXCLUDED_SCRIPTS.contains(&alias.long.as_str()) {
+                let mut names = Vec::new();
+                names.push(alias.long.clone());
+                if alias.long != alias.abbreviation {
+                    names.push(alias.abbreviation.clone());
+                }
+                names.extend(alias.aliases.clone());
 
-    for (alias0, alias1, orig_name, name) in SCRIPTS {
-        let file = File::open("Scripts.txt").expect("could not open Scripts.txt");
-        let lines = io::BufReader::new(file).lines();
-        let mut chars = Vec::new();
+                let mut script_ranges: Vec<_> = self
+                    .scripts
+                    .iter()
+                    .filter_map(|sc| {
+                        if sc.script == alias.long {
+                            Some(codepoints_to_range(&sc.codepoints))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                script_ranges.sort();
+                pack_adjacent_chars(&mut script_ranges);
 
-        for line in lines {
-            parse_line(&line.unwrap(), &mut chars, orig_name);
+                let mut script_extension_ranges: Vec<_> = self
+                    .script_extensions
+                    .iter()
+                    .filter_map(|scx| {
+                        if scx.scripts.contains(&alias.abbreviation) {
+                            Some(codepoints_to_range(&scx.codepoints))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                script_extension_ranges.sort();
+                pack_adjacent_chars(&mut script_extension_ranges);
+
+                scripts.push(Script {
+                    long: alias.long.clone(),
+                    names,
+                    enum_name: alias.long.replace('_', ""),
+                    codepoints_sc_name: alias.long.to_uppercase(),
+                    codepoints_scx_name: format!("{}_EXTENSIONS", alias.long.to_uppercase()),
+                    codepoints_sc: script_ranges,
+                    codepoints_scx: script_extension_ranges,
+                });
+            }
         }
 
-        pack_adjacent_chars(&mut chars);
+        let mut property_enum = Enum::new("UnicodePropertyValueScript");
+        property_enum
+            .vis("pub")
+            .derive("Debug")
+            .derive("Clone")
+            .derive("Copy");
 
-        let ranges = chars_to_code_point_ranges(&chars);
-
-        scope.raw(&format!(
-            "pub(crate) const {}: [CodePointRange; {}] = [\n    {}\n];",
-            orig_name.to_uppercase(),
-            ranges.len(),
-            ranges.join("\n    ")
-        ));
-
-        scope
-            .new_fn(&format!("is_{}", orig_name.to_lowercase()))
+        let mut is_property_fn_sc = Function::new("is_property_value_script");
+        is_property_fn_sc
             .vis("pub(crate)")
-            .arg("c", "char")
+            .arg("c", "u32")
+            .arg("value", "&UnicodePropertyValueScript")
             .ret("bool")
-            .line(&format!(
-                "{}.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()",
-                orig_name.to_uppercase()
-            ))
-            .doc(&format!(
-                "Return whether c has the '{}' Unicode property.",
-                orig_name
+            .line("use UnicodePropertyValueScript::*;");
+        let mut is_property_fn_match_block_sc = Block::new("match value");
+
+        let mut is_property_fn_scx = Function::new("is_property_value_script_extensions");
+        is_property_fn_scx
+            .vis("pub(crate)")
+            .arg("c", "u32")
+            .arg("value", "&UnicodePropertyValueScript")
+            .ret("bool")
+            .line("use UnicodePropertyValueScript::*;");
+        let mut is_property_fn_match_block_scx = Block::new("match value");
+
+        let mut property_from_str_fn = Function::new("unicode_property_value_script_from_str");
+        property_from_str_fn
+            .arg("s", "&str")
+            .ret("Option<UnicodePropertyValueScript>")
+            .vis("pub(crate)")
+            .line("use UnicodePropertyValueScript::*;");
+        let mut property_from_str_fn_match_block = Block::new("match s");
+
+        for script in &scripts {
+            property_enum.new_variant(&script.enum_name);
+
+            property_from_str_fn_match_block.line(format!(
+                "{} => Some({}),",
+                script
+                    .names
+                    .iter()
+                    .map(|s| format!("\"{}\"", s))
+                    .collect::<Vec<_>>()
+                    .join("| "),
+                script.enum_name,
             ));
 
-        property_enum.new_variant(name);
+            let ranges = chars_to_code_point_ranges(&script.codepoints_sc);
 
-        is_property_fn_match_block.line(format!("{} => is_{}(c),", name, orig_name.to_lowercase()));
-
-        property_from_str_fn_match_block.line(if alias0.is_empty() && alias1.is_empty() {
-            format!("\"{}\" => Some({}),", orig_name, name)
-        } else if alias0.is_empty() {
-            format!("\"{}\" | \"{}\" => Some({}),", alias1, orig_name, name)
-        } else {
-            format!(
-                "\"{}\" | \"{}\" | \"{}\" => Some({}),",
-                alias0, alias1, orig_name, name
-            )
-        });
-    }
-
-    is_property_fn.push_block(is_property_fn_match_block);
-
-    property_from_str_fn_match_block.line("_ => None,");
-    property_from_str_fn.push_block(property_from_str_fn_match_block);
-
-    scope
-        .push_fn(is_property_fn)
-        .push_enum(property_enum)
-        .push_fn(property_from_str_fn);
-}
-
-pub(crate) fn generate_tests(scope: &mut Scope) {
-    for (alias0, alias1, orig_name, name) in SCRIPTS {
-        let file = File::open("Scripts.txt").expect("could not open Scripts.txt");
-        let lines = io::BufReader::new(file).lines();
-        let mut chars = Vec::new();
-
-        for line in lines {
-            parse_line(&line.unwrap(), &mut chars, orig_name);
-        }
-
-        scope
-            .new_fn(&format!(
-                "unicode_escape_property_script_{}",
-                name.to_lowercase()
-            ))
-            .attr("test")
-            .line(format!(
-                "test_with_configs(unicode_escape_property_script_{}_tc)",
-                name.to_lowercase()
+            self.scope.raw(&format!(
+                "const {}: [CodePointRange; {}] = [\n    {}\n];",
+                script.codepoints_sc_name,
+                ranges.len(),
+                ranges.join("\n    ")
             ));
 
-        let f = scope.new_fn(&format!(
-            "unicode_escape_property_script_{}_tc",
-            name.to_lowercase()
-        ));
+            is_property_fn_match_block_sc.line(format!(
+                "{} => {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),",
+                script.enum_name, script.codepoints_sc_name,
+            ));
 
-        f.arg("tc", "TestConfig");
+            if script.codepoints_scx.is_empty() {
+                is_property_fn_match_block_scx.line(format!(
+                    "{} => {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),",
+                    script.enum_name, script.codepoints_sc_name,
+                ));
 
-        let code_points: Vec<String> = chars
-            .iter()
-            .map(|c| format!("\"\\u{{{:x}}}\"", c.0))
-            .collect();
+                continue;
+            }
 
-        f.line(format!(
-            "const CODE_POINTS: [&str; {}] = [\n    {},\n];",
-            code_points.len(),
-            code_points.join(",\n    ")
-        ));
+            is_property_fn_match_block_scx.line(&format!(
+                "{} => {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok() || {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),",
+                script.enum_name,
+                script.codepoints_scx_name,
+                script.codepoints_sc_name,
+            ));
 
-        let mut regexes = vec![
-            format!(r#""^\\p{{Script={}}}+$""#, orig_name),
-            format!(r#""^\\p{{sc={}}}+$""#, orig_name),
-        ];
+            let ranges = chars_to_code_point_ranges(&script.codepoints_scx);
 
-        if !alias0.is_empty() {
-            regexes.push(format!(r#""^\\p{{Script={}}}+$""#, alias0));
-            regexes.push(format!(r#""^\\p{{sc={}}}+$""#, alias0));
+            self.scope.raw(&format!(
+                "const {}: [CodePointRange; {}] = [\n    {}\n];",
+                script.codepoints_scx_name,
+                ranges.len(),
+                ranges.join("\n    ")
+            ));
         }
 
-        if !alias1.is_empty() {
-            regexes.push(format!(r#""^\\p{{Script={}}}+$""#, alias1));
-            regexes.push(format!(r#""^\\p{{sc={}}}+$""#, alias1));
+        property_from_str_fn_match_block.line("_ => None,");
+        property_from_str_fn.push_block(property_from_str_fn_match_block);
+
+        is_property_fn_sc.push_block(is_property_fn_match_block_sc);
+        is_property_fn_scx.push_block(is_property_fn_match_block_scx);
+
+        self.scope.push_enum(property_enum);
+        self.scope.push_fn(property_from_str_fn);
+        self.scope.push_fn(is_property_fn_sc);
+        self.scope.push_fn(is_property_fn_scx);
+
+        self.generate_scripts_tests(&scripts);
+    }
+
+    fn generate_scripts_tests(&mut self, scripts: &[Script]) {
+        for script in scripts {
+            if script.codepoints_sc.is_empty() {
+                continue;
+            }
+
+            let test_name = script.long.to_lowercase();
+
+            self.scope_tests
+                .new_fn(&format!("unicode_escape_property_script_{test_name}"))
+                .attr("test")
+                .line(format!(
+                    "test_with_configs(unicode_escape_property_script_{test_name}_tc)"
+                ));
+
+            let f = self
+                .scope_tests
+                .new_fn(&format!("unicode_escape_property_script_{test_name}_tc"))
+                .arg("tc", "TestConfig");
+
+            f.line(format!(
+                "const CODE_POINTS: [std::ops::RangeInclusive<u32>; {}] = [\n    {}\n];",
+                script.codepoints_sc.len(),
+                script
+                    .codepoints_sc
+                    .iter()
+                    .map(|(start, end)| format!("{}..={}", start, end))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            ));
+
+            let mut regexes = Vec::with_capacity(script.names.len());
+            for alias in &script.names {
+                regexes.push(format!(r#""^\\p{{Script={}}}+$""#, alias));
+                regexes.push(format!(r#""^\\p{{sc={}}}+$""#, alias));
+            }
+
+            f.line(format!(
+                "const REGEXES: [&str; {}] = [\n    {},\n];",
+                regexes.len(),
+                regexes.join(",\n    ")
+            ));
+
+            f.line(r#"for regex in REGEXES { let regex = tc.compile(regex); for range in CODE_POINTS { for cp in range { regex.test_succeeds(&char::from_u32(cp).unwrap().to_string()); } } }"#);
         }
-
-        f.line(format!(
-            "const REGEXES: [&str; {}] = [\n    {},\n];",
-            regexes.len(),
-            regexes.join(",\n    ")
-        ));
-
-        let mut b = Block::new("for regex in REGEXES");
-        b.line("let regex = tc.compile(regex);");
-
-        let mut bb = Block::new("for code_point in CODE_POINTS");
-        bb.line("regex.test_succeeds(code_point);");
-
-        b.push_block(bb);
-
-        f.push_block(b);
     }
 }
 
-// Structure: (Alias, Alias, Name, CamelCaseName)
-const SCRIPTS: &[(&str, &str, &str, &str); 156] = &[
-    ("", "Adlm", "Adlam", "Adlam"),
-    ("", "", "Ahom", "Ahom"),
-    ("", "Hluw", "Anatolian_Hieroglyphs", "AnatolianHieroglyphs"),
-    ("", "Arab", "Arabic", "Arabic"),
-    ("", "Armn", "Armenian", "Armenian"),
-    ("", "Avst", "Avestan", "Avestan"),
-    ("", "Bali", "Balinese", "Balinese"),
-    ("", "Bamu", "Bamum", "Bamum"),
-    ("", "Bass", "Bassa_Vah", "BassaVah"),
-    ("", "Batk", "Batak", "Batak"),
-    ("", "Beng", "Bengali", "Bengali"),
-    ("", "Bhks", "Bhaiksuki", "Bhaiksuki"),
-    ("", "Bopo", "Bopomofo", "Bopomofo"),
-    ("", "Brah", "Brahmi", "Brahmi"),
-    ("", "Brai", "Braille", "Braille"),
-    ("", "Bugi", "Buginese", "Buginese"),
-    ("", "Buhd", "Buhid", "Buhid"),
-    ("", "Cans", "Canadian_Aboriginal", "CanadianAboriginal"),
-    ("", "Cari", "Carian", "Carian"),
-    ("", "Aghb", "Caucasian_Albanian", "CaucasianAlbanian"),
-    ("", "Cakm", "Chakma", "Chakma"),
-    ("", "", "Cham", "Cham"),
-    ("", "Chrs", "Chorasmian", "Chorasmian"),
-    ("", "Cher", "Cherokee", "Cherokee"),
-    ("", "Zyyy", "Common", "Common"),
-    ("Copt", "Qaac", "Coptic", "Coptic"),
-    ("", "Xsux", "Cuneiform", "Cuneiform"),
-    ("", "Cprt", "Cypriot", "Cypriot"),
-    ("", "Cyrl", "Cyrillic", "Cyrillic"),
-    ("", "Dsrt", "Deseret", "Deseret"),
-    ("", "Deva", "Devanagari", "Devanagari"),
-    ("", "Diak", "Dives_Akuru", "DivesAkuru"),
-    ("", "Dogr", "Dogra", "Dogra"),
-    ("", "Dupl", "Duployan", "Duployan"),
-    ("", "Egyp", "Egyptian_Hieroglyphs", "EgyptianHieroglyphs"),
-    ("", "Elba", "Elbasan", "Elbasan"),
-    ("", "Elym", "Elymaic", "Elymaic"),
-    ("", "Ethi", "Ethiopic", "Ethiopic"),
-    ("", "Geor", "Georgian", "Georgian"),
-    ("", "Glag", "Glagolitic", "Glagolitic"),
-    ("", "Goth", "Gothic", "Gothic"),
-    ("", "Gran", "Grantha", "Grantha"),
-    ("", "Grek", "Greek", "Greek"),
-    ("", "Gujr", "Gujarati", "Gujarati"),
-    ("", "Gong", "Gunjala_Gondi", "GunjalaGondi"),
-    ("", "Guru", "Gurmukhi", "Gurmukhi"),
-    ("", "Hani", "Han", "Han"),
-    ("", "Hang", "Hangul", "Hangul"),
-    ("", "Rohg", "Hanifi_Rohingya", "HanifiRohingya"),
-    ("", "Hano", "Hanunoo", "Hanunoo"),
-    ("", "Hatr", "Hatran", "Hatran"),
-    ("", "Hebr", "Hebrew", "Hebrew"),
-    ("", "Hira", "Hiragana", "Hiragana"),
-    ("", "Armi", "Imperial_Aramaic", "ImperialAramaic"),
-    ("Zinh", "Qaai", "Inherited", "Inherited"),
-    ("", "Phli", "Inscriptional_Pahlavi", "InscriptionalPahlavi"),
-    (
-        "",
-        "Prti",
-        "Inscriptional_Parthian",
-        "InscriptionalParthian",
-    ),
-    ("", "Java", "Javanese", "Javanese"),
-    ("", "Kthi", "Kaithi", "Kaithi"),
-    ("", "Knda", "Kannada", "Kannada"),
-    ("", "Kana", "Katakana", "Katakana"),
-    ("", "Kali", "Kayah_Li", "KayahLi"),
-    ("", "Khar", "Kharoshthi", "Kharoshthi"),
-    ("", "Kits", "Khitan_Small_Script", "KhitanSmallScript"),
-    ("", "Khmr", "Khmer", "Khmer"),
-    ("", "Khoj", "Khojki", "Khojki"),
-    ("", "Sind", "Khudawadi", "Khudawadi"),
-    ("", "Laoo", "Lao", "Lao"),
-    ("", "Latn", "Latin", "Latin"),
-    ("", "Lepc", "Lepcha", "Lepcha"),
-    ("", "Limb", "Limbu", "Limbu"),
-    ("", "Lina", "Linear_A", "LinearA"),
-    ("", "Linb", "Linear_B", "LinearB"),
-    ("", "", "Lisu", "Lisu"),
-    ("", "Lyci", "Lycian", "Lycian"),
-    ("", "Lydi", "Lydian", "Lydian"),
-    ("", "Mahj", "Mahajani", "Mahajani"),
-    ("", "Maka", "Makasar", "Makasar"),
-    ("", "Mlym", "Malayalam", "Malayalam"),
-    ("", "Mand", "Mandaic", "Mandaic"),
-    ("", "Mani", "Manichaean", "Manichaean"),
-    ("", "Marc", "Marchen", "Marchen"),
-    ("", "Medf", "Medefaidrin", "Medefaidrin"),
-    ("", "Gonm", "Masaram_Gondi", "MasaramGondi"),
-    ("", "Mtei", "Meetei_Mayek", "MeeteiMayek"),
-    ("", "Mend", "Mende_Kikakui", "MendeKikakui"),
-    ("", "Merc", "Meroitic_Cursive", "MeroiticCursive"),
-    ("", "Mero", "Meroitic_Hieroglyphs", "MeroiticHieroglyphs"),
-    ("", "Plrd", "Miao", "Miao"),
-    ("", "", "Modi", "Modi"),
-    ("", "Mong", "Mongolian", "Mongolian"),
-    ("", "Mroo", "Mro", "Mro"),
-    ("", "Mult", "Multani", "Multani"),
-    ("", "Mymr", "Myanmar", "Myanmar"),
-    ("", "Nbat", "Nabataean", "Nabataean"),
-    ("", "Nand", "Nandinagari", "Nandinagari"),
-    ("", "Talu", "New_Tai_Lue", "NewTaiLue"),
-    ("", "", "Newa", "Newa"),
-    ("", "Nkoo", "Nko", "Nko"),
-    ("", "Nshu", "Nushu", "Nushu"),
-    ("", "Hmnp", "Nyiakeng_Puachue_Hmong", "NyiakengPuachueHmong"),
-    ("", "Ogam", "Ogham", "Ogham"),
-    ("", "Olck", "Ol_Chiki", "OlChiki"),
-    ("", "Hung", "Old_Hungarian", "OldHungarian"),
-    ("", "Ital", "Old_Italic", "OldItalic"),
-    ("", "Narb", "Old_North_Arabian", "OldNorthArabian"),
-    ("", "Perm", "Old_Permic", "OldPermic"),
-    ("", "Xpeo", "Old_Persian", "OldPersian"),
-    ("", "Sogo", "Old_Sogdian", "OldSogdian"),
-    ("", "Sarb", "Old_South_Arabian", "OldSouthArabian"),
-    ("", "Orkh", "Old_Turkic", "OldTurkic"),
-    ("", "Orya", "Oriya", "Oriya"),
-    ("", "Osge", "Osage", "Osage"),
-    ("", "Osma", "Osmanya", "Osmanya"),
-    ("", "Hmng", "Pahawh_Hmong", "PahawhHmong"),
-    ("", "Palm", "Palmyrene", "Palmyrene"),
-    ("", "Pauc", "Pau_Cin_Hau", "PauCinHau"),
-    ("", "Phag", "Phags_Pa", "PhagsPa"),
-    ("", "Phnx", "Phoenician", "Phoenician"),
-    ("", "Phlp", "Psalter_Pahlavi", "PsalterPahlavi"),
-    ("", "Rjng", "Rejang", "Rejang"),
-    ("", "Runr", "Runic", "Runic"),
-    ("", "Samr", "Samaritan", "Samaritan"),
-    ("", "Saur", "Saurashtra", "Saurashtra"),
-    ("", "Shrd", "Sharada", "Sharada"),
-    ("", "Shaw", "Shavian", "Shavian"),
-    ("", "Sidd", "Siddham", "Siddham"),
-    ("", "Sgnw", "SignWriting", "SignWriting"),
-    ("", "Sinh", "Sinhala", "Sinhala"),
-    ("", "Sogd", "Sogdian", "Sogdian"),
-    ("", "Sora", "Sora_Sompeng", "SoraSompeng"),
-    ("", "Soyo", "Soyombo", "Soyombo"),
-    ("", "Sund", "Sundanese", "Sundanese"),
-    ("", "Sylo", "Syloti_Nagri", "SylotiNagri"),
-    ("", "Syrc", "Syriac", "Syriac"),
-    ("", "Tglg", "Tagalog", "Tagalog"),
-    ("", "Tagb", "Tagbanwa", "Tagbanwa"),
-    ("", "Tale", "Tai_Le", "TaiLe"),
-    ("", "Lana", "Tai_Tham", "TaiTham"),
-    ("", "Tavt", "Tai_Viet", "TaiViet"),
-    ("", "Takr", "Takri", "Takri"),
-    ("", "Taml", "Tamil", "Tamil"),
-    ("", "Tang", "Tangut", "Tangut"),
-    ("", "Telu", "Telugu", "Telugu"),
-    ("", "Thaa", "Thaana", "Thaana"),
-    ("", "", "Thai", "Thai"),
-    ("", "Tibt", "Tibetan", "Tibetan"),
-    ("", "Tfng", "Tifinagh", "Tifinagh"),
-    ("", "Tirh", "Tirhuta", "Tirhuta"),
-    ("", "Ugar", "Ugaritic", "Ugaritic"),
-    ("", "Vaii", "Vai", "Vai"),
-    ("", "Wcho", "Wancho", "Wancho"),
-    ("", "Wara", "Warang_Citi", "WarangCiti"),
-    ("", "Yezi", "Yezidi", "Yezidi"),
-    ("", "Yiii", "Yi", "Yi"),
-    ("", "Zanb", "Zanabazar_Square", "ZanabazarSquare"),
-];
+fn codepoints_to_range(cp: &Codepoints) -> (u32, u32) {
+    match cp {
+        Codepoints::Single(cp) => (cp.value(), cp.value()),
+        Codepoints::Range(range) => (range.start.value(), range.end.value()),
+    }
+}
