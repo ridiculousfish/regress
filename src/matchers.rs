@@ -67,6 +67,22 @@ impl CharProperties for ASCIICharProperties {
     }
 }
 
+#[cfg(feature = "utf16")]
+pub struct Utf16CharProperties {}
+
+#[cfg(feature = "utf16")]
+impl CharProperties for Utf16CharProperties {
+    type Element = u32;
+
+    fn fold(c: Self::Element) -> Self::Element {
+        if char::from_u32(c).is_some() {
+            unicode::fold(c)
+        } else {
+            c
+        }
+    }
+}
+
 /// Check whether the \p orig_range within \p cursor matches position \p pos.
 pub fn backref<Input: InputIndexer, Dir: Direction>(
     input: &Input,
@@ -74,7 +90,7 @@ pub fn backref<Input: InputIndexer, Dir: Direction>(
     orig_range: core::ops::Range<Input::Position>,
     pos: &mut Input::Position,
 ) -> bool {
-    cursor::subrange_eq(input, dir, pos, orig_range.start, orig_range.end)
+    input.subrange_eq(dir, pos, orig_range)
 }
 
 pub fn backref_icase<Input: InputIndexer, Dir: Direction>(
@@ -82,6 +98,7 @@ pub fn backref_icase<Input: InputIndexer, Dir: Direction>(
     dir: Dir,
     orig_range: core::ops::Range<Input::Position>,
     pos: &mut Input::Position,
+    unicode: bool,
 ) -> bool {
     let ref_input = input.subinput(orig_range);
     let mut ref_pos = if Dir::FORWARD {
@@ -89,9 +106,9 @@ pub fn backref_icase<Input: InputIndexer, Dir: Direction>(
     } else {
         ref_input.right_end()
     };
-    while let Some(c1) = cursor::next(&ref_input, dir, &mut ref_pos) {
+    while let Some(c1) = cursor::next(&ref_input, dir, &mut ref_pos, unicode) {
         let mut matched = false;
-        if let Some(c2) = cursor::next(input, dir, pos) {
+        if let Some(c2) = cursor::next(input, dir, pos, unicode) {
             matched = Input::CharProps::fold_equals(c1, c2)
         }
         if !matched {

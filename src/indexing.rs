@@ -1,8 +1,12 @@
-use crate::bytesearch;
+use crate::bytesearch::{self, ByteSeq};
+use crate::cursor::Direction;
 use crate::matchers;
+#[cfg(feature = "utf16")]
+use crate::position::IndexPosition;
 use crate::position::{DefPosition, PositionType};
 use crate::util::{is_utf8_continuation, utf8_w2, utf8_w3, utf8_w4};
 use core::convert::TryInto;
+use core::ops::Range;
 use core::{ops, str};
 
 // A type which may be an Element.
@@ -15,9 +19,6 @@ pub trait ElementType:
     + core::convert::Into<u32>
     + core::convert::TryFrom<u32>
 {
-    /// Return the length of ourself in bytes.
-    fn bytelength(self) -> usize;
-
     /// Return another ElementType as self.
     #[inline(always)]
     fn try_from<Elem: ElementType>(v: Elem) -> Option<Self> {
@@ -32,26 +33,11 @@ pub trait ElementType:
     }
 }
 
-impl ElementType for u32 {
-    #[inline(always)]
-    fn bytelength(self) -> usize {
-        4
-    }
-}
+impl ElementType for char {}
 
-impl ElementType for char {
-    #[inline(always)]
-    fn bytelength(self) -> usize {
-        self.len_utf8()
-    }
-}
+impl ElementType for u8 {}
 
-impl ElementType for u8 {
-    #[inline(always)]
-    fn bytelength(self) -> usize {
-        1
-    }
-}
+impl ElementType for u32 {}
 
 // A helper type that holds a string and allows indexing into it.
 pub trait InputIndexer: core::fmt::Debug + Copy + Clone
@@ -67,27 +53,16 @@ where
     /// A type which references a position in the input string.
     type Position: PositionType;
 
-    /// \return the byte contents.
-    fn contents(&self) -> &[u8];
-
-    /// \return the length of the contents, in bytes.
-    fn bytelength(&self) -> usize {
-        self.contents().len()
-    }
-
-    /// \return a slice of the contents.
-    fn slice(&self, start: Self::Position, end: Self::Position) -> &[u8];
-
     /// \return a sub-input. Note that positions in the original may no longer be valid in the sub-input.
     fn subinput(&self, range: ops::Range<Self::Position>) -> Self;
 
     /// \return the char to the right (starting at) \p idx, or None if we are at
     /// the end. Advance the position by the amount.
-    fn next_right(&self, pos: &mut Self::Position) -> Option<Self::Element>;
+    fn next_right(&self, pos: &mut Self::Position, unicode: bool) -> Option<Self::Element>;
 
     /// \return the char to the left (ending just before) \p idx, or None if we are at
     /// the end. Retreat the position by the amount.
-    fn next_left(&self, pos: &mut Self::Position) -> Option<Self::Element>;
+    fn next_left(&self, pos: &mut Self::Position, unicode: bool) -> Option<Self::Element>;
 
     // Like next_right, but does not decode the element.
     fn next_right_pos(&self, pos: Self::Position) -> Option<Self::Position>;
@@ -130,15 +105,34 @@ where
 
     /// Peek at the char to the right of a position, without changing that position.
     #[inline(always)]
-    fn peek_right(&self, mut pos: Self::Position) -> Option<Self::Element> {
-        self.next_right(&mut pos)
+    fn peek_right(&self, mut pos: Self::Position, unicode: bool) -> Option<Self::Element> {
+        self.next_right(&mut pos, unicode)
     }
 
     /// Peek at the char to the left of a position, without changing that position.
     #[inline(always)]
-    fn peek_left(&self, mut pos: Self::Position) -> Option<Self::Element> {
-        self.next_left(&mut pos)
+    fn peek_left(&self, mut pos: Self::Position, unicode: bool) -> Option<Self::Element> {
+        self.next_left(&mut pos, unicode)
     }
+
+    /// Check if the subrange `range` is byte-for-byte equal to a range of the same length from the current position `pos`.
+    /// If `dir` is FORWARD, then the range is checked starting at `pos` and ending at `pos + range.len()`.
+    /// If `dir` is BACKWARD, then the range is checked starting at `pos - range.len()` and ending at `pos`.
+    fn subrange_eq<Dir: Direction>(
+        &self,
+        dir: Dir,
+        pos: &mut Self::Position,
+        range: Range<Self::Position>,
+    ) -> bool;
+
+    /// Return whether we match some literal bytes.
+    /// If so, update the position. If not, the position is unspecified.
+    fn match_bytes<Dir: Direction, Bytes: ByteSeq>(
+        &self,
+        dir: Dir,
+        pos: &mut Self::Position,
+        bytes: &Bytes,
+    ) -> bool;
 }
 
 /// \return the length of a UTF8 sequence starting with this byte.
@@ -170,6 +164,39 @@ pub struct Utf8Input<'a> {
 }
 
 impl<'a> Utf8Input<'a> {
+    #[inline(always)]
+    fn contents(&self) -> &[u8] {
+        self.input.as_bytes()
+    }
+
+    #[inline(always)]
+    fn bytelength(&self) -> usize {
+        self.input.as_bytes().len()
+    }
+
+    #[inline(always)]
+    fn slice(
+        &self,
+        start: <Self as InputIndexer>::Position,
+        end: <Self as InputIndexer>::Position,
+    ) -> &[u8] {
+        self.debug_assert_valid_pos(start);
+        self.debug_assert_valid_pos(end);
+        debug_assert!(end >= start, "Slice start after end");
+
+        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
+        let res = &self.contents()[core::ops::Range {
+            start: self.pos_to_offset(start),
+            end: self.pos_to_offset(end),
+        }];
+
+        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        let res = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
+
+        debug_assert!(res.len() <= self.bytelength() && res.len() == end - start);
+        res
+    }
+
     #[inline(always)]
     pub fn new(s: &'a str) -> Self {
         // The big idea of RefPosition is enforced here.
@@ -230,36 +257,12 @@ impl<'a> InputIndexer for Utf8Input<'a> {
     type CharProps = matchers::UTF8CharProperties;
 
     #[inline(always)]
-    fn contents(&self) -> &[u8] {
-        self.input.as_bytes()
-    }
-
-    #[inline(always)]
-    fn slice(&self, start: Self::Position, end: Self::Position) -> &[u8] {
-        self.debug_assert_valid_pos(start);
-        self.debug_assert_valid_pos(end);
-        debug_assert!(end >= start, "Slice start after end");
-
-        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
-        let res = &self.contents()[core::ops::Range {
-            start: self.pos_to_offset(start),
-            end: self.pos_to_offset(end),
-        }];
-
-        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
-        let res = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
-
-        debug_assert!(res.len() <= self.bytelength() && res.len() == end - start);
-        res
-    }
-
-    #[inline(always)]
     fn subinput(&self, range: ops::Range<Self::Position>) -> Self {
         Self::new(self.str_slice(range))
     }
 
     #[inline(always)]
-    fn next_right(&self, pos: &mut Self::Position) -> Option<Self::Element> {
+    fn next_right(&self, pos: &mut Self::Position, _: bool) -> Option<Self::Element> {
         self.debug_assert_boundary(*pos);
         if *pos == self.right_end() {
             return None;
@@ -311,7 +314,7 @@ impl<'a> InputIndexer for Utf8Input<'a> {
     }
 
     #[inline(always)]
-    fn next_left(&self, pos: &mut Self::Position) -> Option<Self::Element> {
+    fn next_left(&self, pos: &mut Self::Position, _: bool) -> Option<Self::Element> {
         self.debug_assert_boundary(*pos);
         if *pos == self.left_end() {
             return None;
@@ -459,6 +462,86 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         let idx = search.find_in(rem)?;
         Some(pos + idx)
     }
+
+    fn subrange_eq<Dir: Direction>(
+        &self,
+        _dir: Dir,
+        pos: &mut Self::Position,
+        range: Range<Self::Position>,
+    ) -> bool {
+        let len = range.end - range.start;
+        let (start, end) = if Dir::FORWARD {
+            if let Some(end) = self.try_move_right(*pos, len) {
+                let start = *pos;
+                *pos = end;
+                (start, end)
+            } else {
+                return false;
+            }
+        } else if let Some(start) = self.try_move_left(*pos, len) {
+            let end = *pos;
+            *pos = start;
+            (start, end)
+        } else {
+            return false;
+        };
+
+        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
+        let new_range = &self.contents()[core::ops::Range {
+            start: self.pos_to_offset(start),
+            end: self.pos_to_offset(end),
+        }];
+
+        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
+
+        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
+        let old_range = &self.contents()[core::ops::Range {
+            start: self.pos_to_offset(range.start),
+            end: self.pos_to_offset(range.end),
+        }];
+
+        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        let old_range =
+            unsafe { core::slice::from_raw_parts(range.start.ptr(), range.end - range.start) };
+
+        new_range == old_range
+    }
+
+    fn match_bytes<Dir: Direction, Bytes: ByteSeq>(
+        &self,
+        _dir: Dir,
+        pos: &mut Self::Position,
+        bytes: &Bytes,
+    ) -> bool {
+        let len = Bytes::LENGTH;
+        let (start, end) = if Dir::FORWARD {
+            if let Some(end) = self.try_move_right(*pos, len) {
+                let start = *pos;
+                *pos = end;
+                (start, end)
+            } else {
+                return false;
+            }
+        } else if let Some(start) = self.try_move_left(*pos, len) {
+            let end = *pos;
+            *pos = start;
+            (start, end)
+        } else {
+            return false;
+        };
+
+        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
+        let new_range = &self.contents()[core::ops::Range {
+            start: self.pos_to_offset(start),
+            end: self.pos_to_offset(end),
+        }];
+
+        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
+
+        bytes.equals_known_len(new_range)
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -467,6 +550,38 @@ pub struct AsciiInput<'a> {
 }
 
 impl<'a> AsciiInput<'a> {
+    #[inline(always)]
+    fn contents(&self) -> &[u8] {
+        self.input
+    }
+
+    #[inline(always)]
+    fn bytelength(&self) -> usize {
+        self.input.len()
+    }
+
+    #[inline(always)]
+    fn slice(
+        &self,
+        start: <Self as InputIndexer>::Position,
+        end: <Self as InputIndexer>::Position,
+    ) -> &[u8] {
+        self.debug_assert_valid_pos(start);
+        self.debug_assert_valid_pos(end);
+
+        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
+        let res = &self.contents()[core::ops::Range {
+            start: self.pos_to_offset(start),
+            end: self.pos_to_offset(end),
+        }];
+
+        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        let res = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
+
+        debug_assert!(res.len() <= self.bytelength() && res.len() == end - start);
+        res
+    }
+
     pub fn new(s: &'a str) -> Self {
         // The big idea of RefPosition is enforced here.
         <Self as InputIndexer>::Position::check_size();
@@ -501,29 +616,6 @@ impl<'a> InputIndexer for AsciiInput<'a> {
     type CharProps = matchers::ASCIICharProperties;
 
     #[inline(always)]
-    fn contents(&self) -> &[u8] {
-        self.input
-    }
-
-    #[inline(always)]
-    fn slice(&self, start: Self::Position, end: Self::Position) -> &[u8] {
-        self.debug_assert_valid_pos(start);
-        self.debug_assert_valid_pos(end);
-
-        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
-        let res = &self.contents()[core::ops::Range {
-            start: self.pos_to_offset(start),
-            end: self.pos_to_offset(end),
-        }];
-
-        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
-        let res = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
-
-        debug_assert!(res.len() <= self.bytelength() && res.len() == end - start);
-        res
-    }
-
-    #[inline(always)]
     fn subinput(&self, range: ops::Range<Self::Position>) -> AsciiInput<'a> {
         self.debug_assert_valid_pos(range.start);
         self.debug_assert_valid_pos(range.end);
@@ -537,7 +629,7 @@ impl<'a> InputIndexer for AsciiInput<'a> {
     }
 
     #[inline(always)]
-    fn next_right(&self, pos: &mut Self::Position) -> Option<Self::Element> {
+    fn next_right(&self, pos: &mut Self::Position, _: bool) -> Option<Self::Element> {
         self.debug_assert_valid_pos(*pos);
         if *pos == self.right_end() {
             None
@@ -550,7 +642,7 @@ impl<'a> InputIndexer for AsciiInput<'a> {
     }
 
     #[inline(always)]
-    fn next_left(&self, pos: &mut Self::Position) -> Option<Self::Element> {
+    fn next_left(&self, pos: &mut Self::Position, _: bool) -> Option<Self::Element> {
         self.debug_assert_valid_pos(*pos);
         if *pos == self.left_end() {
             None
@@ -574,12 +666,12 @@ impl<'a> InputIndexer for AsciiInput<'a> {
 
     #[inline(always)]
     fn peek_byte_right(&self, mut pos: Self::Position) -> Option<u8> {
-        self.next_right(&mut pos)
+        self.next_right(&mut pos, false)
     }
 
     #[inline(always)]
     fn peek_byte_left(&self, mut pos: Self::Position) -> Option<u8> {
-        self.next_left(&mut pos)
+        self.next_left(&mut pos, false)
     }
 
     #[cfg(feature = "index-positions")]
@@ -644,5 +736,342 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         let rem = self.slice(pos, self.right_end());
         let idx = search.find_in(rem)?;
         Some(pos + idx)
+    }
+
+    fn subrange_eq<Dir: Direction>(
+        &self,
+        _dir: Dir,
+        pos: &mut Self::Position,
+        range: Range<Self::Position>,
+    ) -> bool {
+        let len = range.end - range.start;
+        let (start, end) = if Dir::FORWARD {
+            if let Some(end) = self.try_move_right(*pos, len) {
+                let start = *pos;
+                *pos = end;
+                (start, end)
+            } else {
+                return false;
+            }
+        } else if let Some(start) = self.try_move_left(*pos, len) {
+            let end = *pos;
+            *pos = start;
+            (start, end)
+        } else {
+            return false;
+        };
+
+        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
+        let new_range = &self.contents()[core::ops::Range {
+            start: self.pos_to_offset(start),
+            end: self.pos_to_offset(end),
+        }];
+
+        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
+
+        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
+        let old_range = &self.contents()[core::ops::Range {
+            start: self.pos_to_offset(range.start),
+            end: self.pos_to_offset(range.end),
+        }];
+
+        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        let old_range =
+            unsafe { core::slice::from_raw_parts(range.start.ptr(), range.end - range.start) };
+
+        new_range == old_range
+    }
+
+    fn match_bytes<Dir: Direction, Bytes: ByteSeq>(
+        &self,
+        _dir: Dir,
+        pos: &mut Self::Position,
+        bytes: &Bytes,
+    ) -> bool {
+        let len = Bytes::LENGTH;
+        let (start, end) = if Dir::FORWARD {
+            if let Some(end) = self.try_move_right(*pos, len) {
+                let start = *pos;
+                *pos = end;
+                (start, end)
+            } else {
+                return false;
+            }
+        } else if let Some(start) = self.try_move_left(*pos, len) {
+            let end = *pos;
+            *pos = start;
+            (start, end)
+        } else {
+            return false;
+        };
+
+        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
+        let new_range = &self.contents()[core::ops::Range {
+            start: self.pos_to_offset(start),
+            end: self.pos_to_offset(end),
+        }];
+
+        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
+
+        bytes.equals_known_len(new_range)
+    }
+}
+
+#[cfg(feature = "utf16")]
+#[derive(Debug, Copy, Clone)]
+pub struct Utf16Input<'a> {
+    input: &'a [u16],
+}
+
+#[cfg(feature = "utf16")]
+impl<'a> Utf16Input<'a> {
+    pub fn new(s: &'a [u16]) -> Self {
+        Self { input: s }
+    }
+
+    #[inline(always)]
+    fn debug_assert_valid_pos(&self, pos: <Self as InputIndexer>::Position) -> &Self {
+        debug_assert!(self.left_end() <= pos && pos <= self.right_end());
+        self
+    }
+
+    const SURROGATE_HIGH_START: u16 = 0xD800;
+    const SURROGATE_HIGH_END: u16 = 0xDBFF;
+    const SURROGATE_LOW_START: u16 = 0xDC00;
+    const SURROGATE_LOW_END: u16 = 0xDFFF;
+
+    #[inline(always)]
+    fn is_high_surrogate(b: u16) -> bool {
+        b >= Self::SURROGATE_HIGH_START && b <= Self::SURROGATE_HIGH_END
+    }
+
+    #[inline(always)]
+    fn is_low_surrogate(b: u16) -> bool {
+        b >= Self::SURROGATE_LOW_START && b <= Self::SURROGATE_LOW_END
+    }
+
+    #[inline(always)]
+    fn code_point_from_surrogates(high: u16, low: u16) -> u32 {
+        (((high & 0x3ff) as u32) << 10 | (low & 0x3ff) as u32) + 0x1_0000
+    }
+}
+
+#[cfg(feature = "utf16")]
+impl<'a> InputIndexer for Utf16Input<'a> {
+    type Position = IndexPosition<'a>;
+    type Element = u32;
+    type CharProps = matchers::Utf16CharProperties;
+
+    #[inline(always)]
+    fn subinput(&self, range: ops::Range<Self::Position>) -> Utf16Input<'a> {
+        self.debug_assert_valid_pos(range.start);
+        self.debug_assert_valid_pos(range.end);
+        debug_assert!(range.end >= range.start);
+        Utf16Input {
+            input: &self.input[core::ops::Range {
+                start: self.pos_to_offset(range.start),
+                end: self.pos_to_offset(range.end),
+            }],
+        }
+    }
+
+    #[inline(always)]
+    fn next_right(&self, pos: &mut Self::Position, unicode: bool) -> Option<Self::Element> {
+        let u1 = self.input.get(self.pos_to_offset(*pos)).copied()?;
+        *pos += 1;
+
+        // If the unicode flag is not set, surrogate pairs are not decoded.
+        // If the code unit is not a high surrogate, it is not the start of a surrogate pair.
+        if !unicode || !Self::is_high_surrogate(u1) {
+            return Some(u1.into());
+        }
+
+        let Some(u2) = self.input.get(self.pos_to_offset(*pos)).copied() else {
+            return Some(u1.into());
+        };
+
+        // If the code unit is not a low surrogate, it is not a surrogate pair.
+        if !Self::is_low_surrogate(u2) {
+            return Some(u1.into());
+        }
+
+        *pos += 1;
+        Some(Self::code_point_from_surrogates(u1, u2))
+    }
+
+    #[inline(always)]
+    fn next_left(&self, pos: &mut Self::Position, unicode: bool) -> Option<Self::Element> {
+        let u2 = self.input.get(self.pos_to_offset(*pos - 1)).copied()?;
+        *pos -= 1;
+
+        // If the unicode flag is not set, surrogate pairs are not decoded.
+        // If the code unit is not a low surrogate, it is not the end of a surrogate pair.
+        if !unicode || !Self::is_low_surrogate(u2) {
+            return Some(u2.into());
+        }
+
+        let Some(u1) = self.input.get(self.pos_to_offset(*pos - 1)).copied() else {
+            return Some(u2.into());
+        };
+
+        // If the code unit is not a high surrogate, it is not a surrogate pair.
+        if !Self::is_high_surrogate(u1) {
+            return Some(u2.into());
+        }
+
+        *pos -= 1;
+        Some(Self::code_point_from_surrogates(u1, u2))
+    }
+
+    #[inline(always)]
+    fn next_right_pos(&self, pos: Self::Position) -> Option<Self::Position> {
+        self.try_move_right(pos, 1)
+    }
+
+    #[inline(always)]
+    fn next_left_pos(&self, pos: Self::Position) -> Option<Self::Position> {
+        self.try_move_left(pos, 1)
+    }
+
+    #[inline(always)]
+    fn peek_byte_right(&self, mut pos: Self::Position) -> Option<u8> {
+        if let Some(c) = self.next_right(&mut pos, false) {
+            if cfg!(target_endian = "big") {
+                Some(c.to_be_bytes()[0])
+            } else {
+                Some(c.to_le_bytes()[0])
+            }
+        } else {
+            None
+        }
+    }
+
+    #[inline(always)]
+    fn peek_byte_left(&self, mut pos: Self::Position) -> Option<u8> {
+        if let Some(c) = self.next_left(&mut pos, false) {
+            if cfg!(target_endian = "big") {
+                Some(c.to_be_bytes()[0])
+            } else {
+                Some(c.to_le_bytes()[0])
+            }
+        } else {
+            None
+        }
+    }
+
+    #[inline(always)]
+    fn left_end(&self) -> Self::Position {
+        Self::Position::new(0)
+    }
+
+    #[inline(always)]
+    fn right_end(&self) -> Self::Position {
+        Self::Position::new(self.input.len())
+    }
+
+    #[inline(always)]
+    fn pos_to_offset(&self, pos: Self::Position) -> usize {
+        debug_assert!(self.left_end() <= pos && pos <= self.right_end());
+        pos - self.left_end()
+    }
+
+    fn try_move_right(&self, mut pos: Self::Position, amt: usize) -> Option<Self::Position> {
+        self.debug_assert_valid_pos(pos);
+        if self.right_end() - pos < amt {
+            None
+        } else {
+            pos += amt;
+            self.debug_assert_valid_pos(pos);
+            Some(pos)
+        }
+    }
+
+    #[inline(always)]
+    fn try_move_left(&self, mut pos: Self::Position, amt: usize) -> Option<Self::Position> {
+        self.debug_assert_valid_pos(pos);
+        if pos - self.left_end() < amt {
+            None
+        } else {
+            pos -= amt;
+            self.debug_assert_valid_pos(pos);
+            Some(pos)
+        }
+    }
+
+    #[inline(always)]
+    fn find_bytes<Search: bytesearch::ByteSearcher>(
+        &self,
+        pos: Self::Position,
+        search: &Search,
+    ) -> Option<Self::Position> {
+        let idx = search.find_in(
+            &self.input[self.pos_to_offset(pos)..self.pos_to_offset(self.right_end())]
+                .iter()
+                .map(|c| *c as u8)
+                .collect::<Vec<_>>(),
+        )?;
+        Some(pos + idx)
+    }
+
+    fn subrange_eq<Dir: Direction>(
+        &self,
+        _dir: Dir,
+        pos: &mut Self::Position,
+        range: Range<Self::Position>,
+    ) -> bool {
+        let len = range.end - range.start;
+        let (start, end) = if Dir::FORWARD {
+            if let Some(end) = self.try_move_right(*pos, len) {
+                let start = *pos;
+                *pos = end;
+                (start, end)
+            } else {
+                return false;
+            }
+        } else if let Some(start) = self.try_move_left(*pos, len) {
+            let end = *pos;
+            *pos = start;
+            (start, end)
+        } else {
+            return false;
+        };
+
+        let new_range = &self.input[self.pos_to_offset(start)..self.pos_to_offset(end)];
+        let old_range = &self.input[self.pos_to_offset(range.start)..self.pos_to_offset(range.end)];
+
+        new_range == old_range
+    }
+
+    fn match_bytes<Dir: Direction, Bytes: ByteSeq>(
+        &self,
+        _dir: Dir,
+        pos: &mut Self::Position,
+        bytes: &Bytes,
+    ) -> bool {
+        let len = Bytes::LENGTH;
+        let (start, end) = if Dir::FORWARD {
+            if let Some(end) = self.try_move_right(*pos, len) {
+                let start = *pos;
+                *pos = end;
+                (start, end)
+            } else {
+                return false;
+            }
+        } else if let Some(start) = self.try_move_left(*pos, len) {
+            let end = *pos;
+            *pos = start;
+            (start, end)
+        } else {
+            return false;
+        };
+
+        bytes.equals_known_len(
+            &self.input[self.pos_to_offset(start)..self.pos_to_offset(end)]
+                .iter()
+                .map(|c| *c as u8)
+                .collect::<Vec<_>>(),
+        )
     }
 }

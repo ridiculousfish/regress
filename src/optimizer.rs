@@ -321,6 +321,7 @@ fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
         }
     }
     match n {
+        #[cfg(not(feature = "utf16"))]
         Node::Char { c, icase } if !*icase => {
             if let Some(c) = char::from_u32(*c) {
                 let mut buff = [0; 4];

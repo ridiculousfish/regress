@@ -6,6 +6,12 @@ use crate::insn::CompiledRegex;
 use crate::optimizer;
 use crate::parse;
 
+#[cfg(feature = "utf16")]
+use crate::{
+    classicalbacktrack::MatchAttempter,
+    indexing::{InputIndexer, Utf16Input},
+};
+
 #[cfg(feature = "backend-pikevm")]
 use crate::pikevm;
 use crate::util::to_char_sat;
@@ -376,6 +382,17 @@ impl Regex {
     #[inline]
     pub fn find_from_ascii<'r, 't>(&'r self, text: &'t str, start: usize) -> AsciiMatches<'r, 't> {
         backends::find(self, text, start)
+    }
+
+    /// Returns an iterator for matches found in 'text' starting at index `start`.
+    #[cfg(feature = "utf16")]
+    pub fn find_from_utf16<'r, 't>(
+        &'r self,
+        text: &'t [u16],
+        start: usize,
+    ) -> exec::Matches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Utf16Input<'t>>> {
+        let input = Utf16Input::new(text);
+        exec::Matches::new(super::classicalbacktrack::BacktrackExecutor::new(input, MatchAttempter::new(&self.cr, input.left_end())), start)
     }
 }
 
