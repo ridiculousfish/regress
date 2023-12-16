@@ -390,9 +390,16 @@ impl Regex {
         &'r self,
         text: &'t [u16],
         start: usize,
-    ) -> exec::Matches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Utf16Input<'t>>> {
+    ) -> exec::Matches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Utf16Input<'t>>>
+    {
         let input = Utf16Input::new(text);
-        exec::Matches::new(super::classicalbacktrack::BacktrackExecutor::new(input, MatchAttempter::new(&self.cr, input.left_end())), start)
+        exec::Matches::new(
+            super::classicalbacktrack::BacktrackExecutor::new(
+                input,
+                MatchAttempter::new(&self.cr, input.left_end()),
+            ),
+            start,
+        )
     }
 }
 

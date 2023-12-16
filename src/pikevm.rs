@@ -174,10 +174,12 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             _ => StateMatch::Fail,
         },
 
-        Insn::MatchAnyExceptLineTerminator => match cursor::next(input, dir, &mut s.pos, re.flags.unicode) {
-            Some(c2) => nextinsn_or_fail!(!Input::CharProps::is_line_terminator(c2)),
-            _ => StateMatch::Fail,
-        },
+        Insn::MatchAnyExceptLineTerminator => {
+            match cursor::next(input, dir, &mut s.pos, re.flags.unicode) {
+                Some(c2) => nextinsn_or_fail!(!Input::CharProps::is_line_terminator(c2)),
+                _ => StateMatch::Fail,
+            }
+        }
 
         &Insn::Jump { target } => {
             s.ip = target as usize;
@@ -229,7 +231,13 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             let group = &mut s.groups[group_idx as usize];
             if let Some(orig_range) = group.as_range() {
                 if re.flags.icase {
-                    matched = matchers::backref_icase(input, dir, orig_range, &mut s.pos, re.flags.unicode);
+                    matched = matchers::backref_icase(
+                        input,
+                        dir,
+                        orig_range,
+                        &mut s.pos,
+                        re.flags.unicode,
+                    );
                 } else {
                     matched = matchers::backref(input, dir, orig_range, &mut s.pos)
                 }
@@ -296,16 +304,36 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         },
 
         Insn::AsciiBracket(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(input, dir, &mut s.pos, re.flags.unicode))
+            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(
+                input,
+                dir,
+                &mut s.pos,
+                re.flags.unicode
+            ))
         }
         &Insn::ByteSet2(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos, re.flags.unicode))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(
+                input,
+                dir,
+                &mut s.pos,
+                re.flags.unicode
+            ))
         }
         &Insn::ByteSet3(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos, re.flags.unicode))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(
+                input,
+                dir,
+                &mut s.pos,
+                re.flags.unicode
+            ))
         }
         &Insn::ByteSet4(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos, re.flags.unicode))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(
+                input,
+                dir,
+                &mut s.pos,
+                re.flags.unicode
+            ))
         }
 
         &Insn::WordBoundary { invert } => {
@@ -323,9 +351,12 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             property_escape,
             negate,
         } => {
-            let m = if (scm::UnicodePropertyEscape { property_escape })
-                .matches(input, dir, &mut s.pos, re.flags.unicode)
-            {
+            let m = if (scm::UnicodePropertyEscape { property_escape }).matches(
+                input,
+                dir,
+                &mut s.pos,
+                re.flags.unicode,
+            ) {
                 !*negate
             } else {
                 *negate

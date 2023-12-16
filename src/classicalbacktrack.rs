@@ -7,9 +7,9 @@ use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
 use crate::indexing;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
-use crate::insn::{CompiledRegex, Insn, LoopFields};
 #[cfg(not(feature = "utf16"))]
 use crate::insn::StartPredicate;
+use crate::insn::{CompiledRegex, Insn, LoopFields};
 use crate::matchers;
 use crate::matchers::CharProperties;
 use crate::position::PositionType;
@@ -231,15 +231,39 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 // Note this try_from may fail, for example if our char is outside ASCII.
                 // In this case we wish to not match.
                 let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::Char { c }, self.re.flags.unicode)
+                Self::run_scm_loop_impl(
+                    input,
+                    *pos,
+                    min,
+                    max,
+                    dir,
+                    scm::Char { c },
+                    self.re.flags.unicode,
+                )
             }
             &Insn::CharICase(c) => {
                 let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::CharICase { c }, self.re.flags.unicode)
+                Self::run_scm_loop_impl(
+                    input,
+                    *pos,
+                    min,
+                    max,
+                    dir,
+                    scm::CharICase { c },
+                    self.re.flags.unicode,
+                )
             }
             &Insn::Bracket(idx) => {
                 let bc = &self.re.brackets[idx];
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::Bracket { bc }, self.re.flags.unicode)
+                Self::run_scm_loop_impl(
+                    input,
+                    *pos,
+                    min,
+                    max,
+                    dir,
+                    scm::Bracket { bc },
+                    self.re.flags.unicode,
+                )
             }
             Insn::AsciiBracket(bitmap) => Self::run_scm_loop_impl(
                 input,
@@ -247,29 +271,44 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 min,
                 max,
                 dir,
-                scm::MatchByteSet { bytes: bitmap }, self.re.flags.unicode
+                scm::MatchByteSet { bytes: bitmap },
+                self.re.flags.unicode,
             ),
-            Insn::MatchAny => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchAny::new(), self.re.flags.unicode)
-            }
+            Insn::MatchAny => Self::run_scm_loop_impl(
+                input,
+                *pos,
+                min,
+                max,
+                dir,
+                scm::MatchAny::new(),
+                self.re.flags.unicode,
+            ),
             Insn::MatchAnyExceptLineTerminator => Self::run_scm_loop_impl(
                 input,
                 *pos,
                 min,
                 max,
                 dir,
-                scm::MatchAnyExceptLineTerminator::new(), self.re.flags.unicode
+                scm::MatchAnyExceptLineTerminator::new(),
+                self.re.flags.unicode,
             ),
-            Insn::CharSet(chars) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::CharSet { chars }, self.re.flags.unicode)
-            }
+            Insn::CharSet(chars) => Self::run_scm_loop_impl(
+                input,
+                *pos,
+                min,
+                max,
+                dir,
+                scm::CharSet { chars },
+                self.re.flags.unicode,
+            ),
             &Insn::ByteSet2(bytes) => Self::run_scm_loop_impl(
                 input,
                 *pos,
                 min,
                 max,
                 dir,
-                scm::MatchByteArraySet { bytes }, self.re.flags.unicode
+                scm::MatchByteArraySet { bytes },
+                self.re.flags.unicode,
             ),
             &Insn::ByteSet3(bytes) => Self::run_scm_loop_impl(
                 input,
@@ -277,7 +316,8 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 min,
                 max,
                 dir,
-                scm::MatchByteArraySet { bytes }, self.re.flags.unicode
+                scm::MatchByteArraySet { bytes },
+                self.re.flags.unicode,
             ),
             &Insn::ByteSet4(bytes) => Self::run_scm_loop_impl(
                 input,
@@ -285,26 +325,63 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 min,
                 max,
                 dir,
-                scm::MatchByteArraySet { bytes }, self.re.flags.unicode
+                scm::MatchByteArraySet { bytes },
+                self.re.flags.unicode,
             ),
-            Insn::ByteSeq1(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.unicode)
-            }
-            Insn::ByteSeq2(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.unicode)
-            }
-            Insn::ByteSeq3(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.unicode)
-            }
-            Insn::ByteSeq4(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.unicode)
-            }
-            Insn::ByteSeq5(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.unicode)
-            }
-            Insn::ByteSeq6(bytes) => {
-                Self::run_scm_loop_impl(input, *pos, min, max, dir, scm::MatchByteSeq { bytes }, self.re.flags.unicode)
-            }
+            Insn::ByteSeq1(bytes) => Self::run_scm_loop_impl(
+                input,
+                *pos,
+                min,
+                max,
+                dir,
+                scm::MatchByteSeq { bytes },
+                self.re.flags.unicode,
+            ),
+            Insn::ByteSeq2(bytes) => Self::run_scm_loop_impl(
+                input,
+                *pos,
+                min,
+                max,
+                dir,
+                scm::MatchByteSeq { bytes },
+                self.re.flags.unicode,
+            ),
+            Insn::ByteSeq3(bytes) => Self::run_scm_loop_impl(
+                input,
+                *pos,
+                min,
+                max,
+                dir,
+                scm::MatchByteSeq { bytes },
+                self.re.flags.unicode,
+            ),
+            Insn::ByteSeq4(bytes) => Self::run_scm_loop_impl(
+                input,
+                *pos,
+                min,
+                max,
+                dir,
+                scm::MatchByteSeq { bytes },
+                self.re.flags.unicode,
+            ),
+            Insn::ByteSeq5(bytes) => Self::run_scm_loop_impl(
+                input,
+                *pos,
+                min,
+                max,
+                dir,
+                scm::MatchByteSeq { bytes },
+                self.re.flags.unicode,
+            ),
+            Insn::ByteSeq6(bytes) => Self::run_scm_loop_impl(
+                input,
+                *pos,
+                min,
+                max,
+                dir,
+                scm::MatchByteSeq { bytes },
+                self.re.flags.unicode,
+            ),
             _ => {
                 // There should be no other SCMs.
                 unreachable!("Missing SCM: {:?}", self.re.insns.iat(ip + 1));
@@ -557,25 +634,47 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     &Insn::Char(c) => {
                         let m = match <<Input as InputIndexer>::Element as ElementType>::try_from(c)
                         {
-                            Some(c) => scm::Char { c }.matches(input, dir, &mut pos, self.re.flags.unicode),
+                            Some(c) => {
+                                scm::Char { c }.matches(input, dir, &mut pos, self.re.flags.unicode)
+                            }
                             None => false,
                         };
                         next_or_bt!(m);
                     }
 
                     Insn::CharSet(chars) => {
-                        let m = scm::CharSet { chars }.matches(input, dir, &mut pos, self.re.flags.unicode);
+                        let m = scm::CharSet { chars }.matches(
+                            input,
+                            dir,
+                            &mut pos,
+                            self.re.flags.unicode,
+                        );
                         next_or_bt!(m);
                     }
 
                     &Insn::ByteSet2(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos, self.re.flags.unicode))
+                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(
+                            input,
+                            dir,
+                            &mut pos,
+                            self.re.flags.unicode
+                        ))
                     }
                     &Insn::ByteSet3(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos, self.re.flags.unicode))
+                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(
+                            input,
+                            dir,
+                            &mut pos,
+                            self.re.flags.unicode
+                        ))
                     }
                     &Insn::ByteSet4(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos, self.re.flags.unicode))
+                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(
+                            input,
+                            dir,
+                            &mut pos,
+                            self.re.flags.unicode
+                        ))
                     }
 
                     Insn::ByteSeq1(v) => {
@@ -635,24 +734,38 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         next_or_bt!(m)
                     }
 
-                    Insn::AsciiBracket(bitmap) => next_or_bt!(
-                        scm::MatchByteSet { bytes: bitmap }.matches(input, dir, &mut pos, self.re.flags.unicode)
-                    ),
+                    Insn::AsciiBracket(bitmap) => next_or_bt!(scm::MatchByteSet { bytes: bitmap }
+                        .matches(input, dir, &mut pos, self.re.flags.unicode)),
 
                     &Insn::Bracket(idx) => {
                         next_or_bt!(scm::Bracket {
                             bc: &self.re.brackets[idx]
                         }
-                        .matches(input, dir, &mut pos, self.re.flags.unicode))
+                        .matches(
+                            input,
+                            dir,
+                            &mut pos,
+                            self.re.flags.unicode
+                        ))
                     }
 
                     Insn::MatchAny => {
-                        next_or_bt!(scm::MatchAny::new().matches(input, dir, &mut pos, self.re.flags.unicode))
+                        next_or_bt!(scm::MatchAny::new().matches(
+                            input,
+                            dir,
+                            &mut pos,
+                            self.re.flags.unicode
+                        ))
                     }
 
-                    Insn::MatchAnyExceptLineTerminator => next_or_bt!(
-                        scm::MatchAnyExceptLineTerminator::new().matches(input, dir, &mut pos, self.re.flags.unicode)
-                    ),
+                    Insn::MatchAnyExceptLineTerminator => {
+                        next_or_bt!(scm::MatchAnyExceptLineTerminator::new().matches(
+                            input,
+                            dir,
+                            &mut pos,
+                            self.re.flags.unicode
+                        ))
+                    }
 
                     &Insn::WordBoundary { invert } => {
                         // Copy the positions since these destructively move them.
@@ -756,7 +869,13 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         let matched;
                         if let Some(orig_range) = cg.as_range() {
                             if re.flags.icase {
-                                matched = matchers::backref_icase(input, dir, orig_range, &mut pos, self.re.flags.unicode);
+                                matched = matchers::backref_icase(
+                                    input,
+                                    dir,
+                                    orig_range,
+                                    &mut pos,
+                                    self.re.flags.unicode,
+                                );
                             } else {
                                 matched = matchers::backref(input, dir, orig_range, &mut pos);
                             }
@@ -865,8 +984,12 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         property_escape,
                         negate,
                     } => {
-                        let m = scm::UnicodePropertyEscape { property_escape }
-                            .matches(input, dir, &mut pos, self.re.flags.unicode);
+                        let m = scm::UnicodePropertyEscape { property_escape }.matches(
+                            input,
+                            dir,
+                            &mut pos,
+                            self.re.flags.unicode,
+                        );
                         next_or_bt!(m != *negate);
                     }
 
