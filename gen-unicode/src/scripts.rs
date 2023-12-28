@@ -212,7 +212,7 @@ impl GenUnicode {
                 regexes.join(",\n    ")
             ));
 
-            f.line(r#"for regex in REGEXES { let regex = tc.compile(regex); for range in CODE_POINTS { for cp in range { regex.test_succeeds(&char::from_u32(cp).unwrap().to_string()); } } }"#);
+            f.line(r#"for regex in REGEXES { let regex = tc.compilef(regex, "u"); for range in CODE_POINTS { for cp in range { regex.test_succeeds(&char::from_u32(cp).unwrap().to_string()); } } }"#);
         }
     }
 }
