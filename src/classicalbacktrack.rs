@@ -7,7 +7,9 @@ use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
 use crate::indexing;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
-use crate::insn::{CompiledRegex, Insn, LoopFields, StartPredicate};
+#[cfg(not(feature = "utf16"))]
+use crate::insn::StartPredicate;
+use crate::insn::{CompiledRegex, Insn, LoopFields};
 use crate::matchers;
 use crate::matchers::CharProperties;
 use crate::position::PositionType;
@@ -65,14 +67,14 @@ struct State<Position: PositionType> {
 }
 
 #[derive(Debug)]
-struct MatchAttempter<'a, Input: InputIndexer> {
+pub(crate) struct MatchAttempter<'a, Input: InputIndexer> {
     re: &'a CompiledRegex,
     bts: Vec<BacktrackInsn<Input>>,
     s: State<Input::Position>,
 }
 
 impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
-    fn new(re: &'a CompiledRegex, entry: Input::Position) -> Self {
+    pub(crate) fn new(re: &'a CompiledRegex, entry: Input::Position) -> Self {
         Self {
             re,
             bts: vec![BacktrackInsn::Exhausted],
@@ -647,9 +649,11 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         next_or_bt!(scm::MatchAny::new().matches(input, dir, &mut pos))
                     }
 
-                    Insn::MatchAnyExceptLineTerminator => next_or_bt!(
-                        scm::MatchAnyExceptLineTerminator::new().matches(input, dir, &mut pos)
-                    ),
+                    Insn::MatchAnyExceptLineTerminator => {
+                        next_or_bt!(
+                            scm::MatchAnyExceptLineTerminator::new().matches(input, dir, &mut pos)
+                        )
+                    }
 
                     &Insn::WordBoundary { invert } => {
                         // Copy the positions since these destructively move them.
@@ -906,6 +910,13 @@ pub struct BacktrackExecutor<'r, Input: InputIndexer> {
     matcher: MatchAttempter<'r, Input>,
 }
 
+#[cfg(feature = "utf16")]
+impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
+    pub(crate) fn new(input: Input, matcher: MatchAttempter<'r, Input>) -> Self {
+        Self { input, matcher }
+    }
+}
+
 impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
     fn successful_match(&mut self, start: Input::Position, end: Input::Position) -> Match {
         // We want to simultaneously map our groups to offsets, and clear the groups.
@@ -970,6 +981,11 @@ impl<'a, Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'a, Inpu
         pos: Input::Position,
         next_start: &mut Option<Input::Position>,
     ) -> Option<Match> {
+        // When UTF-16 support is active prefix search is not used due to the different encoding.
+        #[cfg(feature = "utf16")]
+        return self.next_match_with_prefix_search(pos, next_start, &bytesearch::EmptyString {});
+
+        #[cfg(not(feature = "utf16"))]
         match &self.matcher.re.start_pred {
             StartPredicate::Arbitrary => {
                 self.next_match_with_prefix_search(pos, next_start, &bytesearch::EmptyString {})

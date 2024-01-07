@@ -29,6 +29,9 @@ index-positions = []
 # Prohibits all uses of unsafe code, for the paranoid.
 prohibit-unsafe = []
 
+# Enables UTF-16 support. This disables some optimizations, so it should only be used when necessary.
+utf16 = []
+
 [dependencies]
 hashbrown = "0.13.2"
 memchr = { version = "2.4.0", default-features = false }
