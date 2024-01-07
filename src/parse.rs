@@ -161,10 +161,6 @@ where
     /// Named capture group references.
     named_group_indices: HashMap<CaptureGroupName, u32>,
 
-    /// Maximum backreference encountered.
-    /// Note that values larger than will fit are early errors.
-    max_backref: u32,
-
     /// Whether a lookbehind was encountered.
     has_lookbehind: bool,
 }
@@ -264,12 +260,13 @@ where
             match to_char_sat(c) {
                 // A concatenation is terminated by closing parens or vertical bar (alternations).
                 ')' | '|' => break,
+                // Term :: Assertion :: ^
                 '^' => {
                     self.consume('^');
                     result.push(ir::Node::Anchor(ir::AnchorType::StartOfLine));
                     quantifier_allowed = false;
                 }
-
+                // Term :: Assertion :: $
                 '$' => {
                     self.consume('$');
                     result.push(ir::Node::Anchor(ir::AnchorType::EndOfLine));
@@ -278,7 +275,50 @@ where
 
                 '\\' => {
                     self.consume('\\');
-                    result.push(self.consume_atom_escape()?);
+                    let Some(c) = self.peek() else {
+                        return error("Incomplete escape");
+                    };
+                    match to_char_sat(c) {
+                        // Term :: Assertion :: \b
+                        'b' => {
+                            self.consume('b');
+                            result.push(ir::Node::WordBoundary { invert: false });
+                        }
+                        // Term :: Assertion :: \B
+                        'B' => {
+                            self.consume('B');
+                            result.push(ir::Node::WordBoundary { invert: true });
+                        }
+                        // Term :: Atom :: \ AtomEscape :: CharacterEscape :: c AsciiLetter
+                        // Term :: ExtendedAtom :: \ [lookahead = c]
+                        'c' if !self.flags.unicode => {
+                            self.consume('c');
+                            if self
+                                .peek()
+                                .and_then(char::from_u32)
+                                .map(|c| c.is_ascii_alphabetic())
+                                == Some(true)
+                            {
+                                result.push(ir::Node::Char {
+                                    c: self.next().expect("char was not next") % 32,
+                                    icase: self.flags.icase,
+                                });
+                            } else {
+                                result.push(ir::Node::Char {
+                                    c: u32::from('\\'),
+                                    icase: self.flags.icase,
+                                });
+                                result.push(ir::Node::Char {
+                                    c: u32::from('c'),
+                                    icase: self.flags.icase,
+                                });
+                            }
+                        }
+                        // Term :: Atom :: \ AtomEscape
+                        _ => {
+                            result.push(self.consume_atom_escape()?);
+                        }
+                    }
                 }
 
                 '.' => {
@@ -489,7 +529,7 @@ where
             // End of bracket.
             ']' => Ok(None),
 
-            // Escape sequence.
+            // ClassEscape
             '\\' => {
                 self.consume('\\');
                 let ec = if let Some(ec) = self.peek() {
@@ -507,6 +547,23 @@ where
                     '-' if self.flags.unicode => {
                         self.consume('-');
                         Ok(Some(ClassAtom::CodePoint(u32::from('-'))))
+                    }
+                    // ClassEscape :: [~UnicodeMode] c ClassControlLetter
+                    'c' if !self.flags.unicode => {
+                        let input = self.input.clone();
+                        self.consume('c');
+                        match self.peek().map(to_char_sat) {
+                            Some('0'..='9' | '_') => {
+                                let next = self.next().expect("char was not next");
+                                Ok(Some(ClassAtom::CodePoint(next & 0x1F)))
+                            }
+                            // ClassEscape :: CharacterEscape
+                            _ => {
+                                self.input = input;
+                                let cc = self.consume_character_escape()?;
+                                Ok(Some(ClassAtom::CodePoint(cc)))
+                            }
+                        }
                     }
                     // ClassEscape :: CharacterClassEscape :: d
                     'd' => {
@@ -708,31 +765,21 @@ where
     }
 
     fn consume_character_escape(&mut self) -> Result<u32, Error> {
-        let c = self.peek().expect("Should have a character");
-        match to_char_sat(c) {
-            'f' => {
-                self.consume('f');
-                Ok(0xC)
-            }
-            'n' => {
-                self.consume('n');
-                Ok(0xA)
-            }
-            'r' => {
-                self.consume('r');
-                Ok(0xD)
-            }
-            't' => {
-                self.consume('t');
-                Ok(0x9)
-            }
-            'v' => {
-                self.consume('v');
-                Ok(0xB)
-            }
+        let c = self.next().expect("Should have a character");
+        let ch = to_char_sat(c);
+        match ch {
+            // CharacterEscape :: ControlEscape :: f
+            'f' => Ok(0xC),
+            // CharacterEscape :: ControlEscape :: n
+            'n' => Ok(0xA),
+            // CharacterEscape :: ControlEscape :: r
+            'r' => Ok(0xD),
+            // CharacterEscape :: ControlEscape :: t
+            't' => Ok(0x9),
+            // CharacterEscape :: ControlEscape :: v
+            'v' => Ok(0xB),
+            // CharacterEscape :: c AsciiLetter
             'c' => {
-                // Control escape.
-                self.consume('c');
                 if let Some(nc) = self.next().and_then(char::from_u32) {
                     if nc.is_ascii_lowercase() || nc.is_ascii_uppercase() {
                         return Ok((nc as u32) % 32);
@@ -740,69 +787,87 @@ where
                 }
                 error("Invalid character escape")
             }
-            '0' => {
-                // CharacterEscape :: "0 [lookahead != DecimalDigit]"
-                self.consume('0');
-                match self.peek().and_then(char::from_u32) {
-                    Some(c) if c.is_ascii_digit() => error("Invalid character escape"),
-                    _ => Ok(0x0),
-                }
+            // CharacterEscape :: 0 [lookahead ∉ DecimalDigit]
+            '0' if self
+                .peek()
+                .and_then(char::from_u32)
+                .map(|c: char| c.is_ascii_digit())
+                != Some(true) =>
+            {
+                Ok(0x0)
             }
-
+            // CharacterEscape :: HexEscapeSequence :: x HexDigit HexDigit
             'x' => {
-                // HexEscapeSequence :: x HexDigit HexDigit
-                // See ES6 11.8.3 HexDigit
                 let hex_to_digit = |c: char| c.to_digit(16);
-                self.consume('x');
                 let x1 = self.next().and_then(char::from_u32).and_then(hex_to_digit);
                 let x2 = self.next().and_then(char::from_u32).and_then(hex_to_digit);
                 match (x1, x2) {
                     (Some(x1), Some(x2)) => Ok(x1 * 16 + x2),
+                    // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
+                    _ if !self.flags.unicode => Ok(c),
                     _ => error("Invalid character escape"),
                 }
             }
-
+            // CharacterEscape :: RegExpUnicodeEscapeSequence
             'u' => {
-                // Unicode escape
-                self.consume('u');
                 if let Some(c) = self.try_escape_unicode_sequence() {
+                    Ok(c)
+                } else if !self.flags.unicode {
+                    // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
                     Ok(c)
                 } else {
                     error("Invalid unicode escape")
                 }
             }
+            // CharacterEscape :: [~UnicodeMode] LegacyOctalEscapeSequence
+            '0'..='7' if !self.flags.unicode => {
+                let Some(c1) = self.peek() else {
+                    return Ok(c - '0' as u32);
+                };
+                let ch1 = to_char_sat(c1);
 
-            // Only syntax characters and / participate in IdentityEscape in Unicode regexp.
-            '^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
-            | '/' => Ok(self.consume(c)),
-
-            // TODO: currently we reject numeric characters in IdentityEscape to help some PCRE
-            // tests pass.
-            // Specifically a regex of the form [\p{Nd}]: in non-Unicode mode this is not a
-            // character property test and is expected to parse as just a bracket where \p is
-            // IdentityEscaped to p.
-            c if (!self.flags.unicode && !c.is_ascii_digit()) || c.is_ascii_alphabetic() => {
-                Ok(self.consume(c))
+                match ch {
+                    // 0 [lookahead ∈ { 8, 9 }]
+                    '0' if ('8'..='9').contains(&ch1) => Ok(0x0),
+                    // NonZeroOctalDigit [lookahead ∉ OctalDigit]
+                    _ if !('0'..='7').contains(&ch1) => Ok(c - '0' as u32),
+                    // FourToSeven OctalDigit
+                    '4'..='7' => {
+                        self.consume(c1);
+                        Ok((c - '0' as u32) * 8 + c1 - '0' as u32)
+                    }
+                    // ZeroToThree OctalDigit [lookahead ∉ OctalDigit]
+                    // ZeroToThree OctalDigit OctalDigit
+                    '0'..='3' => {
+                        self.consume(c1);
+                        if self.peek().map(|c2| ('0'..='7').contains(&to_char_sat(c2)))
+                            == Some(true)
+                        {
+                            let c2 = self.next().expect("char was not next");
+                            Ok((c - '0' as u32) * 64 + (c1 - '0' as u32) * 8 + c2 - '0' as u32)
+                        } else {
+                            Ok((c - '0' as u32) * 8 + c1 - '0' as u32)
+                        }
+                    }
+                    _ => unreachable!(),
+                }
             }
-
+            // CharacterEscape :: IdentityEscape :: [+UnicodeMode] SyntaxCharacter
+            // CharacterEscape :: IdentityEscape :: [+UnicodeMode] /
+            '^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
+            | '/' => Ok(c),
+            // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
+            _ if !self.flags.unicode => Ok(c),
             _ => error("Invalid character escape"),
         }
     }
 
+    // AtomEscape
     fn consume_atom_escape(&mut self) -> Result<ir::Node, Error> {
-        let nc = self.peek();
-        if nc.is_none() {
+        let Some(c) = self.peek() else {
             return error("Incomplete escape");
-        }
-        let c = nc.unwrap();
+        };
         match to_char_sat(c) {
-            'b' | 'B' => {
-                self.consume(c);
-                Ok(ir::Node::WordBoundary {
-                    invert: c == 'B' as u32,
-                })
-            }
-
             'd' | 'D' => {
                 self.consume(c);
                 Ok(make_bracket_class(
@@ -827,7 +892,9 @@ where
                 ))
             }
 
-            'p' | 'P' => {
+            // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
+            // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] P{ UnicodePropertyValueExpression }
+            'p' | 'P' if self.flags.unicode => {
                 self.consume(c);
 
                 let property_escape = self.try_consume_unicode_property_escape()?;
@@ -839,20 +906,33 @@ where
                 })
             }
 
-            '1'..='9' => {
-                let val = self.try_consume_decimal_integer_literal().unwrap();
-
-                // This is a backreference.
-                // Note we limit backreferences to u32 but the value may exceed that.
-                if val <= self.group_count_max as usize {
-                    if val > MAX_CAPTURE_GROUPS {
-                        return error(format!("Backreference \\{} too large", val));
-                    }
-                    let group = val as u32;
-                    self.max_backref = core::cmp::max(self.max_backref, group);
-                    Ok(ir::Node::BackRef(group))
+            // [+UnicodeMode] DecimalEscape
+            // Note: This is a backreference.
+            '1'..='9' if self.flags.unicode => {
+                let group = self.try_consume_decimal_integer_literal().unwrap();
+                if group <= self.group_count_max as usize {
+                    Ok(ir::Node::BackRef(group as u32))
                 } else {
                     error("Invalid character escape")
+                }
+            }
+
+            // [~UnicodeMode] DecimalEscape but only if the CapturingGroupNumber of DecimalEscape
+            //    is ≤ CountLeftCapturingParensWithin(the Pattern containing DecimalEscape)
+            // Note: This could be either a backreference, a legacy octal escape or an identity escape.
+            '1'..='9' => {
+                let input = self.input.clone();
+                let group = self.try_consume_decimal_integer_literal().unwrap();
+
+                if group <= self.group_count_max as usize {
+                    Ok(ir::Node::BackRef(group as u32))
+                } else {
+                    self.input = input;
+                    let c = self.consume_character_escape()?;
+                    Ok(ir::Node::Char {
+                        c: self.fold_if_icase(c),
+                        icase: self.flags.icase,
+                    })
                 }
             }
 
@@ -1147,7 +1227,6 @@ where
         group_count: 0,
         named_group_indices: HashMap::new(),
         group_count_max: 0,
-        max_backref: 0,
         has_lookbehind: false,
     };
     p.try_parse()

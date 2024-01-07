@@ -196,7 +196,7 @@ pub(crate) fn generate_tests(scope: &mut Scope) {
         ));
 
         let mut b = Block::new("for regex in REGEXES");
-        b.line("let regex = tc.compile(regex);");
+        b.line(r#"let regex = tc.compilef(regex, "u");"#);
 
         let mut bb = Block::new("for code_point in CODE_POINTS");
         bb.line("regex.test_succeeds(code_point);");

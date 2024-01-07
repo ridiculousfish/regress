@@ -315,7 +315,9 @@ fn run_misc_tests_tc(tc: TestConfig) {
             .match1_vec("baaabaac"),
         vec![Some("baaabaac"), Some("ba"), None, Some("abaac")]
     );
-    tc.compilef(r"\0", "").match1f("abc\0def").test_eq("\0");
+    tc.compilef(r"\0", "")
+        .match1f("abc\u{0}def")
+        .test_eq("\u{0}");
 }
 
 #[test]
@@ -1180,7 +1182,7 @@ fn run_regexp_named_capture_groups_tc(tc: TestConfig) {
     // Make sure that escapes are parsed correctly in the fast capture group parser.
     // This pattern should fail in unicode mode, because there is a backreference without a capture group.
     // If the `\]` is not handled correctly in the parser, the following `(.)` may be parsed as a capture group.
-    test_parse_fails(r#"/[\](.)]\1/"#);
+    test_parse_fails_flags(r#"[\](.)]\1"#, "u");
 }
 
 #[test]
@@ -1239,154 +1241,157 @@ fn run_regexp_unicode_property_classes() {
 #[rustfmt::skip]
 fn run_regexp_unicode_property_classes_tc(tc: TestConfig) {
     // TODO: tests
-    tc.compilef(r#"\p{Script=Buhid}"#, "").test_succeeds("ᝀᝁᝂᝃᝄᝅᝆᝇᝈᝉᝊᝋᝌᝍᝎᝏᝐᝑ\u{1752}\u{1753}ᝀᝁᝂᝃᝄᝅᝆᝇᝈᝉᝊᝋᝌᝍᝎᝏᝐᝑ\u{1752}\u{1753}");
+    tc.compilef(r#"\p{Script=Buhid}"#, "u").test_succeeds("ᝀᝁᝂᝃᝄᝅᝆᝇᝈᝉᝊᝋᝌᝍᝎᝏᝐᝑ\u{1752}\u{1753}ᝀᝁᝂᝃᝄᝅᝆᝇᝈᝉᝊᝋᝌᝍᝎᝏᝐᝑ\u{1752}\u{1753}");
 }
 
 #[test]
 fn property_escapes_invalid() {
     // From 262 test/built-ins/RegExp/property-escapes/
-    test_parse_fails(r#"\P{ASCII=F}"#);
-    test_parse_fails(r#"\p{ASCII=F}"#);
-    test_parse_fails(r#"\P{ASCII=Invalid}"#);
-    test_parse_fails(r#"\p{ASCII=Invalid}"#);
-    test_parse_fails(r#"\P{ASCII=N}"#);
-    test_parse_fails(r#"\p{ASCII=N}"#);
-    test_parse_fails(r#"\P{ASCII=No}"#);
-    test_parse_fails(r#"\p{ASCII=No}"#);
-    test_parse_fails(r#"\P{ASCII=T}"#);
-    test_parse_fails(r#"\p{ASCII=T}"#);
-    test_parse_fails(r#"\P{ASCII=Y}"#);
-    test_parse_fails(r#"\p{ASCII=Y}"#);
-    test_parse_fails(r#"\P{ASCII=Yes}"#);
-    test_parse_fails(r#"\p{ASCII=Yes}"#);
+    test_parse_fails_flags(r#"\P{ASCII=F}"#, "u");
+    test_parse_fails_flags(r#"\p{ASCII=F}"#, "u");
+    test_parse_fails_flags(r#"\P{ASCII=Invalid}"#, "u");
+    test_parse_fails_flags(r#"\p{ASCII=Invalid}"#, "u");
+    test_parse_fails_flags(r#"\P{ASCII=N}"#, "u");
+    test_parse_fails_flags(r#"\p{ASCII=N}"#, "u");
+    test_parse_fails_flags(r#"\P{ASCII=No}"#, "u");
+    test_parse_fails_flags(r#"\p{ASCII=No}"#, "u");
+    test_parse_fails_flags(r#"\P{ASCII=T}"#, "u");
+    test_parse_fails_flags(r#"\p{ASCII=T}"#, "u");
+    test_parse_fails_flags(r#"\P{ASCII=Y}"#, "u");
+    test_parse_fails_flags(r#"\p{ASCII=Y}"#, "u");
+    test_parse_fails_flags(r#"\P{ASCII=Yes}"#, "u");
+    test_parse_fails_flags(r#"\p{ASCII=Yes}"#, "u");
     test_parse_fails_flags(r#"[--\p{Hex}]"#, "u");
     test_parse_fails_flags(r#"[\uFFFF-\p{Hex}]"#, "u");
     test_parse_fails_flags(r#"[\p{Hex}-\uFFFF]"#, "u");
     test_parse_fails_flags(r#"[\p{Hex}--]"#, "u");
-    test_parse_fails(r#"\P{^General_Category=Letter}"#);
-    test_parse_fails(r#"\p{^General_Category=Letter}"#);
+    test_parse_fails_flags(r#"\P{^General_Category=Letter}"#, "u");
+    test_parse_fails_flags(r#"\p{^General_Category=Letter}"#, "u");
     test_parse_fails_flags(r#"[\p{}]"#, "u");
     test_parse_fails_flags(r#"[\P{}]"#, "u");
-    test_parse_fails(r#"\P{InAdlam}"#);
-    test_parse_fails(r#"\p{InAdlam}"#);
-    test_parse_fails(r#"\P{InAdlam}"#);
-    test_parse_fails(r#"\p{InAdlam}"#);
-    test_parse_fails(r#"\P{InScript=Adlam}"#);
-    test_parse_fails(r#"\p{InScript=Adlam}"#);
+    test_parse_fails_flags(r#"\P{InAdlam}"#, "u");
+    test_parse_fails_flags(r#"\p{InAdlam}"#, "u");
+    test_parse_fails_flags(r#"\P{InAdlam}"#, "u");
+    test_parse_fails_flags(r#"\p{InAdlam}"#, "u");
+    test_parse_fails_flags(r#"\P{InScript=Adlam}"#, "u");
+    test_parse_fails_flags(r#"\p{InScript=Adlam}"#, "u");
     test_parse_fails_flags(r#"[\P{invalid}]"#, "u");
     test_parse_fails_flags(r#"[\p{invalid}]"#, "u");
-    test_parse_fails(r#"\P{IsScript=Adlam}"#);
-    test_parse_fails(r#"\p{IsScript=Adlam}"#);
-    test_parse_fails(r#"\P"#);
-    test_parse_fails(r#"\PL"#);
-    test_parse_fails(r#"\pL"#);
-    test_parse_fails(r#"\p"#);
-    test_parse_fails(r#"\P{=Letter}"#);
-    test_parse_fails(r#"\p{=Letter}"#);
-    test_parse_fails(r#"\P{General_Category:Letter}"#);
-    test_parse_fails(r#"\P{=}"#);
-    test_parse_fails(r#"\p{=}"#);
-    test_parse_fails(r#"\p{General_Category:Letter}"#);
-    test_parse_fails(r#"\P{"#);
-    test_parse_fails(r#"\p{"#);
-    test_parse_fails(r#"\P}"#);
-    test_parse_fails(r#"\p}"#);
-    test_parse_fails(r#"\P{ General_Category=Uppercase_Letter }"#);
-    test_parse_fails(r#"\p{ General_Category=Uppercase_Letter }"#);
-    test_parse_fails(r#"\P{ Lowercase }"#);
-    test_parse_fails(r#"\p{ Lowercase }"#);
-    test_parse_fails(r#"\P{ANY}"#);
-    test_parse_fails(r#"\p{ANY}"#);
-    test_parse_fails(r#"\P{ASSIGNED}"#);
-    test_parse_fails(r#"\p{ASSIGNED}"#);
-    test_parse_fails(r#"\P{Ascii}"#);
-    test_parse_fails(r#"\p{Ascii}"#);
-    test_parse_fails(r#"\P{General_Category = Uppercase_Letter}"#);
-    test_parse_fails(r#"\p{General_Category = Uppercase_Letter}"#);
-    test_parse_fails(r#"\P{_-_lOwEr_C-A_S-E_-_}"#);
-    test_parse_fails(r#"\p{_-_lOwEr_C-A_S-E_-_}"#);
-    test_parse_fails(r#"\P{any}"#);
-    test_parse_fails(r#"\p{any}"#);
-    test_parse_fails(r#"\P{ascii}"#);
-    test_parse_fails(r#"\p{ascii}"#);
-    test_parse_fails(r#"\P{assigned}"#);
-    test_parse_fails(r#"\p{assigned}"#);
-    test_parse_fails(r#"\P{gC=uppercase_letter}"#);
-    test_parse_fails(r#"\p{gC=uppercase_letter}"#);
-    test_parse_fails(r#"\P{gc=uppercaseletter}"#);
-    test_parse_fails(r#"\p{gc=uppercaseletter}"#);
-    test_parse_fails(r#"\P{lowercase}"#);
-    test_parse_fails(r#"\p{lowercase}"#);
-    test_parse_fails(r#"\P{lowercase}"#);
-    test_parse_fails(r#"\p{lowercase}"#);
-    test_parse_fails(r#"\P{General_Category=}"#);
-    test_parse_fails(r#"\p{General_Category=}"#);
-    test_parse_fails(r#"\P{General_Category}"#);
-    test_parse_fails(r#"\p{General_Category}"#);
-    test_parse_fails(r#"\P{Script_Extensions=}"#);
-    test_parse_fails(r#"\p{Script_Extensions=}"#);
-    test_parse_fails(r#"\P{Script_Extensions}"#);
-    test_parse_fails(r#"\p{Script_Extensions}"#);
-    test_parse_fails(r#"\P{Script=}"#);
-    test_parse_fails(r#"\p{Script=}"#);
-    test_parse_fails(r#"\P{Script}"#);
-    test_parse_fails(r#"\p{Script}"#);
-    test_parse_fails(r#"\P{UnknownBinaryProperty}"#);
-    test_parse_fails(r#"\p{UnknownBinaryProperty}"#);
-    test_parse_fails(r#"\P{Line_Breakz=WAT}"#);
-    test_parse_fails(r#"\p{Line_Breakz=WAT}"#);
-    test_parse_fails(r#"\P{Line_Breakz=Alphabetic}"#);
-    test_parse_fails(r#"\p{Line_Breakz=Alphabetic}"#);
-    test_parse_fails_flags(r#"\\P{General_Category=WAT}"#, "u");
+    test_parse_fails_flags(r#"\P{IsScript=Adlam}"#, "u");
+    test_parse_fails_flags(r#"\p{IsScript=Adlam}"#, "u");
+    test_parse_fails_flags(r#"\P"#, "u");
+    test_parse_fails_flags(r#"\PL"#, "u");
+    test_parse_fails_flags(r#"\pL"#, "u");
+    test_parse_fails_flags(r#"\p"#, "u");
+    test_parse_fails_flags(r#"\P{=Letter}"#, "u");
+    test_parse_fails_flags(r#"\p{=Letter}"#, "u");
+    test_parse_fails_flags(r#"\P{General_Category:Letter}"#, "u");
+    test_parse_fails_flags(r#"\P{=}"#, "u");
+    test_parse_fails_flags(r#"\p{=}"#, "u");
+    test_parse_fails_flags(r#"\p{General_Category:Letter}"#, "u");
+    test_parse_fails_flags(r#"\P{"#, "u");
+    test_parse_fails_flags(r#"\p{"#, "u");
+    test_parse_fails_flags(r#"\P}"#, "u");
+    test_parse_fails_flags(r#"\p}"#, "u");
+    test_parse_fails_flags(r#"\P{ General_Category=Uppercase_Letter }"#, "u");
+    test_parse_fails_flags(r#"\p{ General_Category=Uppercase_Letter }"#, "u");
+    test_parse_fails_flags(r#"\P{ Lowercase }"#, "u");
+    test_parse_fails_flags(r#"\p{ Lowercase }"#, "u");
+    test_parse_fails_flags(r#"\P{ANY}"#, "u");
+    test_parse_fails_flags(r#"\p{ANY}"#, "u");
+    test_parse_fails_flags(r#"\P{ASSIGNED}"#, "u");
+    test_parse_fails_flags(r#"\p{ASSIGNED}"#, "u");
+    test_parse_fails_flags(r#"\P{Ascii}"#, "u");
+    test_parse_fails_flags(r#"\p{Ascii}"#, "u");
+    test_parse_fails_flags(r#"\P{General_Category = Uppercase_Letter}"#, "u");
+    test_parse_fails_flags(r#"\p{General_Category = Uppercase_Letter}"#, "u");
+    test_parse_fails_flags(r#"\P{_-_lOwEr_C-A_S-E_-_}"#, "u");
+    test_parse_fails_flags(r#"\p{_-_lOwEr_C-A_S-E_-_}"#, "u");
+    test_parse_fails_flags(r#"\P{any}"#, "u");
+    test_parse_fails_flags(r#"\p{any}"#, "u");
+    test_parse_fails_flags(r#"\P{ascii}"#, "u");
+    test_parse_fails_flags(r#"\p{ascii}"#, "u");
+    test_parse_fails_flags(r#"\P{assigned}"#, "u");
+    test_parse_fails_flags(r#"\p{assigned}"#, "u");
+    test_parse_fails_flags(r#"\P{gC=uppercase_letter}"#, "u");
+    test_parse_fails_flags(r#"\p{gC=uppercase_letter}"#, "u");
+    test_parse_fails_flags(r#"\P{gc=uppercaseletter}"#, "u");
+    test_parse_fails_flags(r#"\p{gc=uppercaseletter}"#, "u");
+    test_parse_fails_flags(r#"\P{lowercase}"#, "u");
+    test_parse_fails_flags(r#"\p{lowercase}"#, "u");
+    test_parse_fails_flags(r#"\P{lowercase}"#, "u");
+    test_parse_fails_flags(r#"\p{lowercase}"#, "u");
+    test_parse_fails_flags(r#"\P{General_Category=}"#, "u");
+    test_parse_fails_flags(r#"\p{General_Category=}"#, "u");
+    test_parse_fails_flags(r#"\P{General_Category}"#, "u");
+    test_parse_fails_flags(
+        r#"\p{General_Category}","u");
+    test_parse_fails_flags(r#"\P{Script_Extensions=}","u");
+    test_parse_fails_flags(r#"\p{Script_Extensions=}","u");
+    test_parse_fails_flags(r#"\P{Script_Extensions}","u");
+    test_parse_fails_flags(r#"\p{Script_Extensions}","u");
+    test_parse_fails_flags(r#"\P{Script=}","u");
+    test_parse_fails_flags(r#"\p{Script=}","u");
+    test_parse_fails_flags(r#"\P{Script}","u");
+    test_parse_fails_flags(r#"\p{Script}","u");
+    test_parse_fails_flags(r#"\P{UnknownBinaryProperty}","u");
+    test_parse_fails_flags(r#"\p{UnknownBinaryProperty}","u");
+    test_parse_fails_flags(r#"\P{Line_Breakz=WAT}","u");
+    test_parse_fails_flags(r#"\p{Line_Breakz=WAT}","u");
+    test_parse_fails_flags(r#"\P{Line_Breakz=Alphabetic}","u");
+    test_parse_fails_flags(r#"\p{Line_Breakz=Alphabetic}","u");
+    test_parse_fails_flags(r#"\\P{General_Category=WAT}"#,
+        "u",
+    );
     test_parse_fails_flags(r#"\\p{General_Category=WAT}"#, "u");
     test_parse_fails_flags(r#"\\P{Script_Extensions=H_e_h}"#, "u");
     test_parse_fails_flags(r#"\\p{Script_Extensions=H_e_h}"#, "u");
     test_parse_fails_flags(r#"\\P{Script=FooBarBazInvalid}"#, "u");
     test_parse_fails_flags(r#"\\p{Script=FooBarBazInvalid}"#, "u");
-    test_parse_fails(r#"\P{Composition_Exclusion}"#);
-    test_parse_fails(r#"\p{Composition_Exclusion}"#);
-    test_parse_fails(r#"\P{Expands_On_NFC}"#);
-    test_parse_fails(r#"\p{Expands_On_NFC}"#);
-    test_parse_fails(r#"\P{Expands_On_NFD}"#);
-    test_parse_fails(r#"\p{Expands_On_NFD}"#);
-    test_parse_fails(r#"\P{Expands_On_NFKC}"#);
-    test_parse_fails(r#"\p{Expands_On_NFKC}"#);
-    test_parse_fails(r#"\P{Expands_On_NFKD}"#);
-    test_parse_fails(r#"\p{Expands_On_NFKD}"#);
-    test_parse_fails(r#"\P{FC_NFKC_Closure}"#);
-    test_parse_fails(r#"\p{FC_NFKC_Closure}"#);
-    test_parse_fails(r#"\P{Full_Composition_Exclusion}"#);
-    test_parse_fails(r#"\p{Full_Composition_Exclusion}"#);
-    test_parse_fails(r#"\P{Grapheme_Link}"#);
-    test_parse_fails(r#"\p{Grapheme_Link}"#);
-    test_parse_fails(r#"\P{Hyphen}"#);
-    test_parse_fails(r#"\p{Hyphen}"#);
-    test_parse_fails(r#"\P{Other_Alphabetic}"#);
-    test_parse_fails(r#"\p{Other_Alphabetic}"#);
-    test_parse_fails(r#"\P{Other_Default_Ignorable_Code_Point}"#);
-    test_parse_fails(r#"\p{Other_Default_Ignorable_Code_Point}"#);
-    test_parse_fails(r#"\P{Other_Grapheme_Extend}"#);
-    test_parse_fails(r#"\p{Other_Grapheme_Extend}"#);
-    test_parse_fails(r#"\P{Other_ID_Continue}"#);
-    test_parse_fails(r#"\p{Other_ID_Continue}"#);
-    test_parse_fails(r#"\P{Other_ID_Start}"#);
-    test_parse_fails(r#"\p{Other_ID_Start}"#);
-    test_parse_fails(r#"\P{Other_Lowercase}"#);
-    test_parse_fails(r#"\p{Other_Lowercase}"#);
-    test_parse_fails(r#"\P{Other_Math}"#);
-    test_parse_fails(r#"\p{Other_Math}"#);
-    test_parse_fails(r#"\P{Other_Uppercase}"#);
-    test_parse_fails(r#"\p{Other_Uppercase}"#);
-    test_parse_fails(r#"\P{Prepended_Concatenation_Mark}"#);
-    test_parse_fails(r#"\p{Prepended_Concatenation_Mark}"#);
-    test_parse_fails(r#"\P{Block=Adlam}"#);
-    test_parse_fails(r#"\p{Block=Adlam}"#);
-    test_parse_fails(r#"\P{FC_NFKC_Closure}"#);
-    test_parse_fails(r#"\p{FC_NFKC_Closure}"#);
-    test_parse_fails(r#"\P{Line_Break=Alphabetic}"#);
-    test_parse_fails(r#"\P{Line_Break=Alphabetic}"#);
-    test_parse_fails(r#"\p{Line_Break=Alphabetic}"#);
-    test_parse_fails(r#"\p{Line_Break}"#);
+    test_parse_fails_flags(r#"\P{Composition_Exclusion}"#, "u");
+    test_parse_fails_flags(r#"\p{Composition_Exclusion}"#, "u");
+    test_parse_fails_flags(r#"\P{Expands_On_NFC}"#, "u");
+    test_parse_fails_flags(r#"\p{Expands_On_NFC}"#, "u");
+    test_parse_fails_flags(r#"\P{Expands_On_NFD}"#, "u");
+    test_parse_fails_flags(r#"\p{Expands_On_NFD}"#, "u");
+    test_parse_fails_flags(r#"\P{Expands_On_NFKC}"#, "u");
+    test_parse_fails_flags(r#"\p{Expands_On_NFKC}"#, "u");
+    test_parse_fails_flags(r#"\P{Expands_On_NFKD}"#, "u");
+    test_parse_fails_flags(r#"\p{Expands_On_NFKD}"#, "u");
+    test_parse_fails_flags(r#"\P{FC_NFKC_Closure}"#, "u");
+    test_parse_fails_flags(r#"\p{FC_NFKC_Closure}"#, "u");
+    test_parse_fails_flags(r#"\P{Full_Composition_Exclusion}"#, "u");
+    test_parse_fails_flags(r#"\p{Full_Composition_Exclusion}"#, "u");
+    test_parse_fails_flags(r#"\P{Grapheme_Link}"#, "u");
+    test_parse_fails_flags(r#"\p{Grapheme_Link}"#, "u");
+    test_parse_fails_flags(r#"\P{Hyphen}"#, "u");
+    test_parse_fails_flags(r#"\p{Hyphen}"#, "u");
+    test_parse_fails_flags(r#"\P{Other_Alphabetic}"#, "u");
+    test_parse_fails_flags(r#"\p{Other_Alphabetic}"#, "u");
+    test_parse_fails_flags(r#"\P{Other_Default_Ignorable_Code_Point}"#, "u");
+    test_parse_fails_flags(r#"\p{Other_Default_Ignorable_Code_Point}"#, "u");
+    test_parse_fails_flags(r#"\P{Other_Grapheme_Extend}"#, "u");
+    test_parse_fails_flags(r#"\p{Other_Grapheme_Extend}"#, "u");
+    test_parse_fails_flags(r#"\P{Other_ID_Continue}"#, "u");
+    test_parse_fails_flags(r#"\p{Other_ID_Continue}"#, "u");
+    test_parse_fails_flags(r#"\P{Other_ID_Start}"#, "u");
+    test_parse_fails_flags(r#"\p{Other_ID_Start}"#, "u");
+    test_parse_fails_flags(r#"\P{Other_Lowercase}"#, "u");
+    test_parse_fails_flags(r#"\p{Other_Lowercase}"#, "u");
+    test_parse_fails_flags(r#"\P{Other_Math}"#, "u");
+    test_parse_fails_flags(r#"\p{Other_Math}"#, "u");
+    test_parse_fails_flags(r#"\P{Other_Uppercase}"#, "u");
+    test_parse_fails_flags(r#"\p{Other_Uppercase}"#, "u");
+    test_parse_fails_flags(r#"\P{Prepended_Concatenation_Mark}"#, "u");
+    test_parse_fails_flags(r#"\p{Prepended_Concatenation_Mark}"#, "u");
+    test_parse_fails_flags(r#"\P{Block=Adlam}"#, "u");
+    test_parse_fails_flags(r#"\p{Block=Adlam}"#, "u");
+    test_parse_fails_flags(r#"\P{FC_NFKC_Closure}"#, "u");
+    test_parse_fails_flags(r#"\p{FC_NFKC_Closure}"#, "u");
+    test_parse_fails_flags(r#"\P{Line_Break=Alphabetic}"#, "u");
+    test_parse_fails_flags(r#"\P{Line_Break=Alphabetic}"#, "u");
+    test_parse_fails_flags(r#"\p{Line_Break=Alphabetic}"#, "u");
+    test_parse_fails_flags(r#"\p{Line_Break}"#, "u");
 }
 
 #[test]
@@ -1400,7 +1405,7 @@ fn unicode_escape_property_binary_ascii_tc(tc: TestConfig) {
     ];
     const REGEXES: [&str; 1] = ["^\\p{ASCII}+$"];
     for regex in REGEXES {
-        let regex = tc.compile(regex);
+        let regex = tc.compilef(regex, "u");
         for code_point in CODE_POINTS {
             regex.test_succeeds(code_point);
         }
@@ -1424,7 +1429,7 @@ fn unicode_escape_property_binary_any_tc(tc: TestConfig) {
     ];
     const REGEXES: [&str; 1] = ["^\\p{Any}+$"];
     for regex in REGEXES {
-        let regex = tc.compile(regex);
+        let regex = tc.compilef(regex, "u");
         for code_point in CODE_POINTS {
             regex.test_succeeds(code_point);
         }
@@ -1447,7 +1452,7 @@ fn unicode_escape_property_binary_assigned_tc(tc: TestConfig) {
     ];
     const REGEXES: [&str; 1] = ["^\\p{Assigned}+$"];
     for regex in REGEXES {
-        let regex = tc.compile(regex);
+        let regex = tc.compilef(regex, "u");
         for code_point in CODE_POINTS {
             regex.test_succeeds(code_point);
         }
