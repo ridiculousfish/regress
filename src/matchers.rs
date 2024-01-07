@@ -98,7 +98,6 @@ pub fn backref_icase<Input: InputIndexer, Dir: Direction>(
     dir: Dir,
     orig_range: core::ops::Range<Input::Position>,
     pos: &mut Input::Position,
-    unicode: bool,
 ) -> bool {
     let ref_input = input.subinput(orig_range);
     let mut ref_pos = if Dir::FORWARD {
@@ -106,9 +105,9 @@ pub fn backref_icase<Input: InputIndexer, Dir: Direction>(
     } else {
         ref_input.right_end()
     };
-    while let Some(c1) = cursor::next(&ref_input, dir, &mut ref_pos, unicode) {
+    while let Some(c1) = cursor::next(&ref_input, dir, &mut ref_pos) {
         let mut matched = false;
-        if let Some(c2) = cursor::next(input, dir, pos, unicode) {
+        if let Some(c2) = cursor::next(input, dir, pos) {
             matched = Input::CharProps::fold_equals(c1, c2)
         }
         if !matched {

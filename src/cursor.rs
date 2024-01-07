@@ -46,12 +46,11 @@ pub fn next<Input: InputIndexer, Dir: Direction>(
     input: &Input,
     _dir: Dir,
     pos: &mut Input::Position,
-    unicode: bool,
 ) -> Option<Input::Element> {
     if Dir::FORWARD {
-        input.next_right(pos, unicode)
+        input.next_right(pos)
     } else {
-        input.next_left(pos, unicode)
+        input.next_left(pos)
     }
 }
 

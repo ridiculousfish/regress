@@ -118,18 +118,18 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
     match &re.insns[s.ip] {
         Insn::Goal => StateMatch::Complete,
         Insn::JustFail => StateMatch::Fail,
-        &Insn::Char(c) => match cursor::next(input, dir, &mut s.pos, re.flags.unicode) {
+        &Insn::Char(c) => match cursor::next(input, dir, &mut s.pos) {
             Some(c2) => nextinsn_or_fail!(c == c2.as_u32()),
             _ => StateMatch::Fail,
         },
-        &Insn::CharICase(c) => match cursor::next(input, dir, &mut s.pos, re.flags.unicode) {
+        &Insn::CharICase(c) => match cursor::next(input, dir, &mut s.pos) {
             Some(c2) => {
                 nextinsn_or_fail!(c == c2.as_u32() || Input::CharProps::fold(c2).as_u32() == c)
             }
             _ => StateMatch::Fail,
         },
 
-        Insn::CharSet(v) => match cursor::next(input, dir, &mut s.pos, re.flags.unicode) {
+        Insn::CharSet(v) => match cursor::next(input, dir, &mut s.pos) {
             Some(c) => nextinsn_or_fail!(charset_contains(v, c.as_u32())),
             _ => StateMatch::Fail,
         },
@@ -152,7 +152,7 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         Insn::ByteSeq16(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
 
         Insn::StartOfLine => {
-            let matches = match input.peek_left(s.pos, re.flags.unicode) {
+            let matches = match input.peek_left(s.pos) {
                 None => true,
                 Some(c) if re.flags.multiline && Input::CharProps::is_line_terminator(c) => true,
                 _ => false,
@@ -161,7 +161,7 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         }
 
         Insn::EndOfLine => {
-            let matches = match input.peek_right(s.pos, re.flags.unicode) {
+            let matches = match input.peek_right(s.pos) {
                 None => true, // we're at the right of the string
                 Some(c) if re.flags.multiline && Input::CharProps::is_line_terminator(c) => true,
                 _ => false,
@@ -169,17 +169,15 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             nextinsn_or_fail!(matches)
         }
 
-        Insn::MatchAny => match cursor::next(input, dir, &mut s.pos, re.flags.unicode) {
+        Insn::MatchAny => match cursor::next(input, dir, &mut s.pos) {
             Some(_) => nextinsn_or_fail!(true),
             _ => StateMatch::Fail,
         },
 
-        Insn::MatchAnyExceptLineTerminator => {
-            match cursor::next(input, dir, &mut s.pos, re.flags.unicode) {
-                Some(c2) => nextinsn_or_fail!(!Input::CharProps::is_line_terminator(c2)),
-                _ => StateMatch::Fail,
-            }
-        }
+        Insn::MatchAnyExceptLineTerminator => match cursor::next(input, dir, &mut s.pos) {
+            Some(c2) => nextinsn_or_fail!(!Input::CharProps::is_line_terminator(c2)),
+            _ => StateMatch::Fail,
+        },
 
         &Insn::Jump { target } => {
             s.ip = target as usize;
@@ -231,13 +229,7 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             let group = &mut s.groups[group_idx as usize];
             if let Some(orig_range) = group.as_range() {
                 if re.flags.icase {
-                    matched = matchers::backref_icase(
-                        input,
-                        dir,
-                        orig_range,
-                        &mut s.pos,
-                        re.flags.unicode,
-                    );
+                    matched = matchers::backref_icase(input, dir, orig_range, &mut s.pos);
                 } else {
                     matched = matchers::backref(input, dir, orig_range, &mut s.pos)
                 }
@@ -298,50 +290,30 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             }
         }
         Insn::Loop1CharBody { .. } => panic!("Loop1CharBody unimplemented for pikevm"),
-        &Insn::Bracket(idx) => match cursor::next(input, dir, &mut s.pos, re.flags.unicode) {
+        &Insn::Bracket(idx) => match cursor::next(input, dir, &mut s.pos) {
             Some(c) => nextinsn_or_fail!(Input::CharProps::bracket(&re.brackets[idx], c)),
             _ => StateMatch::Fail,
         },
 
         Insn::AsciiBracket(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(
-                input,
-                dir,
-                &mut s.pos,
-                re.flags.unicode
-            ))
+            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(input, dir, &mut s.pos))
         }
         &Insn::ByteSet2(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(
-                input,
-                dir,
-                &mut s.pos,
-                re.flags.unicode
-            ))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos))
         }
         &Insn::ByteSet3(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(
-                input,
-                dir,
-                &mut s.pos,
-                re.flags.unicode
-            ))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos))
         }
         &Insn::ByteSet4(bytes) => {
-            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(
-                input,
-                dir,
-                &mut s.pos,
-                re.flags.unicode
-            ))
+            nextinsn_or_fail!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut s.pos))
         }
 
         &Insn::WordBoundary { invert } => {
             let prev_wordchar = input
-                .peek_left(s.pos, re.flags.unicode)
+                .peek_left(s.pos)
                 .map_or(false, Input::CharProps::is_word_char);
             let curr_wordchar = input
-                .peek_right(s.pos, re.flags.unicode)
+                .peek_right(s.pos)
                 .map_or(false, Input::CharProps::is_word_char);
             let is_boundary = prev_wordchar != curr_wordchar;
             nextinsn_or_fail!(is_boundary != invert)
@@ -351,12 +323,9 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             property_escape,
             negate,
         } => {
-            let m = if (scm::UnicodePropertyEscape { property_escape }).matches(
-                input,
-                dir,
-                &mut s.pos,
-                re.flags.unicode,
-            ) {
+            let m = if (scm::UnicodePropertyEscape { property_escape })
+                .matches(input, dir, &mut s.pos)
+            {
                 !*negate
             } else {
                 *negate
