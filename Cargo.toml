@@ -35,3 +35,6 @@ utf16 = []
 [dependencies]
 hashbrown = "0.13.2"
 memchr = { version = "2.4.0", default-features = false }
+
+[patch.crates-io]
+ucd-parse = { git = "https://github.com/raskad/ucd-generate.git", branch = "add-derived-normalization-properties" }

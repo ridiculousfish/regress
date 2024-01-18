@@ -5,7 +5,11 @@ mod scripts;
 
 use codegen::Scope;
 use std::{fs::OpenOptions, io::Write};
-use ucd_parse::{parse, PropertyValueAlias, Script, ScriptExtension};
+use ucd_parse::{
+    extracted::{DerivedBinaryProperties, DerivedGeneralCategory},
+    parse, CaseFold, Codepoints, CoreProperty, DerivedNormalizationProperty, EmojiProperty,
+    Property, PropertyValueAlias, Script, ScriptExtension,
+};
 
 // Should match unicode.rs.
 const CODE_POINT_BITS: u32 = 20;
@@ -16,23 +20,40 @@ const MAX_CODE_POINT: u32 = (1 << CODE_POINT_BITS) - 1;
 // Our length is stored with a bias of -1, so no need to subtract 1.
 const MAX_LENGTH: u32 = 1 << LENGTH_BITS;
 
+pub(crate) const UCD_PATH: &str = "/tmp/ucd-15.0.0";
+
 pub(crate) struct GenUnicode {
     pub(crate) scope: Scope,
     pub(crate) scope_tests: Scope,
+    pub(crate) case_folds: Vec<CaseFold>,
     pub(crate) property_value_aliases: Vec<PropertyValueAlias>,
     pub(crate) scripts: Vec<Script>,
     pub(crate) script_extensions: Vec<ScriptExtension>,
+    pub(crate) derived_general_category: Vec<DerivedGeneralCategory>,
+    pub(crate) core_property: Vec<CoreProperty>,
+    pub(crate) properties: Vec<Property>,
+    pub(crate) emoji_properties: Vec<EmojiProperty>,
+    pub(crate) derived_binary_properties: Vec<DerivedBinaryProperties>,
+    pub(crate) derived_normalization_properties: Vec<DerivedNormalizationProperty>,
 }
 
 fn main() {
-    let ucd_path = "/tmp/ucd-15.0.0";
-
     let mut gen = GenUnicode {
         scope: Scope::new(),
         scope_tests: Scope::new(),
-        property_value_aliases: parse(ucd_path).expect("could not parse PropertyValueAliases.txt"),
-        scripts: parse(ucd_path).expect("could not parse Scripts.txt"),
-        script_extensions: parse(ucd_path).expect("could not parse ScriptExtensions.txt"),
+        case_folds: parse(UCD_PATH).expect("could not parse CaseFolding.txt"),
+        property_value_aliases: parse(UCD_PATH).expect("could not parse PropertyValueAliases.txt"),
+        scripts: parse(UCD_PATH).expect("could not parse Scripts.txt"),
+        script_extensions: parse(UCD_PATH).expect("could not parse ScriptExtensions.txt"),
+        derived_general_category: parse(UCD_PATH)
+            .expect("could not parse extracted/DerivedGeneralCategory.txt"),
+        core_property: parse(UCD_PATH).expect("could not parse CoreProperties.txt"),
+        properties: parse(UCD_PATH).expect("could not parse PropList.txt"),
+        emoji_properties: parse(UCD_PATH).expect("could not parse emoji-data.txt"),
+        derived_binary_properties: parse(UCD_PATH)
+            .expect("could not parse extracted/DerivedBinaryProperties.txt"),
+        derived_normalization_properties: parse(UCD_PATH)
+            .expect("could not parse DerivedNormalizationProps.txt"),
     };
 
     let file_unicode_tables_path = "../src/unicodetables.rs";
@@ -64,16 +85,16 @@ fn main() {
     gen.scope.import("crate::unicode", "CodePointRangeUnpacked");
     gen.scope.import("crate::unicode", "FoldRange");
 
-    binary_properties::generate(&mut gen.scope);
-    case_folding::generate_folds(&mut gen.scope);
-    general_category_values::generate(&mut gen.scope);
+    gen.generate_binary_properties();
+    gen.generate_case_folds();
+    gen.generate_general_category();
     gen.generate_scripts();
 
     gen.scope_tests.import("common", "*");
     gen.scope_tests.raw("pub mod common;");
 
-    binary_properties::generate_tests(&mut gen.scope_tests);
-    general_category_values::generate_tests(&mut gen.scope_tests);
+    gen.generate_binary_properties_tests();
+    gen.generate_general_category_tests();
 
     file_unicode_tables
         .write_all(gen.scope.to_string().as_bytes())
@@ -96,40 +117,6 @@ fn main() {
         .arg(file_tests_path)
         .output()
         .expect("Failed to run 'cargo fmt' on tests file");
-}
-
-// Parse line from the UCD files with the following syntax:
-// 0380..0383    ; Cn #   [4] <reserved-0380>..<reserved-0383>
-// 038B          ; Cn #       <reserved-038B>
-pub(crate) fn parse_line(line: &str, chars: &mut Vec<(u32, u32)>, property: &str) {
-    if line.starts_with('#') {
-        return;
-    }
-
-    let split_str = format!("; {}", property);
-    let mut line_iter = line.split(&split_str);
-
-    if let Some(codepoint_hexes) = line_iter.next() {
-        if let Some(rest) = line_iter.next() {
-            if !rest.trim_start().starts_with('#') {
-                return;
-            }
-        } else {
-            return;
-        }
-
-        let mut iter = codepoint_hexes.split("..");
-        if let Some(first_hex) = iter.next() {
-            if let Some(second_hex) = iter.next() {
-                let first_int = u32::from_str_radix(first_hex.trim(), 16).unwrap();
-                let second_int = u32::from_str_radix(second_hex.trim(), 16).unwrap();
-                chars.push((first_int, second_int));
-            } else {
-                let i = u32::from_str_radix(first_hex.trim(), 16).unwrap();
-                chars.push((i, i))
-            }
-        }
-    }
 }
 
 // Combine unicode code point ranges, if they are adjacent.
@@ -178,4 +165,11 @@ pub(crate) fn chars_to_code_point_ranges(chars: &[(u32, u32)]) -> Vec<String> {
             res
         })
         .collect()
+}
+
+fn codepoints_to_range(cp: &Codepoints) -> (u32, u32) {
+    match cp {
+        Codepoints::Single(cp) => (cp.value(), cp.value()),
+        Codepoints::Range(range) => (range.start.value(), range.end.value()),
+    }
 }

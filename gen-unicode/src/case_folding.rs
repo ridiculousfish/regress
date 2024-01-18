@@ -1,7 +1,5 @@
-use crate::MAX_LENGTH;
-use codegen::Scope;
-use std::fs::File;
-use std::io::{self, BufRead};
+use crate::{GenUnicode, MAX_LENGTH};
+use ucd_parse::CaseStatus;
 
 type CodePoint = u32;
 
@@ -82,69 +80,43 @@ impl DeltaBlock {
     }
 }
 
-fn create_delta_blocks(fps: &[FoldPair]) -> Vec<DeltaBlock> {
-    let mut blocks: Vec<DeltaBlock> = Vec::new();
-    for &fp in fps {
-        match blocks.last_mut() {
-            Some(ref mut db) if db.can_append(fp) => db.append(fp),
-            _ => blocks.push(DeltaBlock::create(fp)),
+impl GenUnicode {
+    pub(crate) fn generate_case_folds(&mut self) {
+        let mut fold_pairs = Vec::new();
+
+        for case_fold in &self.case_folds {
+            if case_fold.status != CaseStatus::Common && case_fold.status != CaseStatus::Simple {
+                continue;
+            }
+            fold_pairs.push(FoldPair {
+                orig: case_fold.codepoint.value(),
+                folded: case_fold.mapping[0].value(),
+            });
         }
-    }
-    blocks
-}
 
-fn format_delta_blocks(scope: &mut Scope, dbs: &[DeltaBlock]) {
-    let mut lines = Vec::new();
-    for db in dbs {
-        lines.push(format!(
-            "FoldRange::from({start:#04X}, {length}, {delta}, {modulo}),",
-            start = db.first().orig,
-            length = db.length(),
-            delta = db.delta(),
-            modulo = db.stride().unwrap_or(1),
-        ));
-    }
-
-    scope.raw(&format!(
-        "pub(crate) const FOLDS: [FoldRange; {}] = [\n    {}\n];",
-        dbs.len(),
-        lines.join("\n    ")
-    ));
-}
-
-/// Parse a CaseFolding line if it is of Common type.
-/// Example line: "0051; C; 0071; # LATIN CAPITAL LETTER Q"
-fn process_simple_fold(s: &str) -> Option<FoldPair> {
-    // Trim trailing #s which are comments.
-    if let Some(s) = s.trim().split('#').next() {
-        let fields: Vec<&str> = s.split(';').map(str::trim).collect();
-        if fields.len() != 4 {
-            return None;
-        }
-        let status = fields[1];
-        if status != "C" && status != "S" {
-            return None;
-        }
-        let from_hex = |s: &str| u32::from_str_radix(s, 16).unwrap();
-        let (orig, folded) = (from_hex(fields[0]), from_hex(fields[2]));
-        return Some(FoldPair { orig, folded });
-    }
-    None
-}
-
-pub(crate) fn generate_folds(scope: &mut Scope) {
-    let file = File::open("CaseFolding.txt").expect("could not open CaseFolding.txt");
-    let lines = io::BufReader::new(file).lines();
-
-    let mut fold_pairs = Vec::new();
-    for line in lines {
-        if let Some(s) = line.unwrap().as_str().trim().split('#').next() {
-            if let Some(fp) = process_simple_fold(s) {
-                fold_pairs.push(fp);
+        let mut delta_blocks: Vec<DeltaBlock> = Vec::new();
+        for fp in &fold_pairs {
+            match delta_blocks.last_mut() {
+                Some(ref mut db) if db.can_append(*fp) => db.append(*fp),
+                _ => delta_blocks.push(DeltaBlock::create(*fp)),
             }
         }
-    }
-    let delta_blocks = create_delta_blocks(&fold_pairs);
 
-    format_delta_blocks(scope, &delta_blocks)
+        let mut lines = Vec::new();
+        for db in &delta_blocks {
+            lines.push(format!(
+                "FoldRange::from({start:#04X}, {length}, {delta}, {modulo}),",
+                start = db.first().orig,
+                length = db.length(),
+                delta = db.delta(),
+                modulo = db.stride().unwrap_or(1),
+            ));
+        }
+
+        self.scope.raw(&format!(
+            "pub(crate) const FOLDS: [FoldRange; {}] = [\n    {}\n];",
+            delta_blocks.len(),
+            lines.join("\n    ")
+        ));
+    }
 }
