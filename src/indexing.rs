@@ -902,6 +902,10 @@ impl<'a> InputIndexer for Utf16Input<'a> {
 
     #[inline(always)]
     fn next_left(&self, pos: &mut Self::Position) -> Option<Self::Element> {
+        if *pos == self.left_end() {
+            return None;
+        }
+
         let u2 = self.input.get(self.pos_to_offset(*pos - 1)).copied()?;
         *pos -= 1;
 
@@ -1122,6 +1126,10 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
 
     #[inline(always)]
     fn next_left(&self, pos: &mut Self::Position) -> Option<Self::Element> {
+        if *pos == self.left_end() {
+            return None;
+        }
+
         let u2 = self.input.get(self.pos_to_offset(*pos - 1)).copied()?;
         *pos -= 1;
 
