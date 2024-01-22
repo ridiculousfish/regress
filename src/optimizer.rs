@@ -35,22 +35,27 @@ where
 
     // Whether this pass has changed anything.
     changed: bool,
+
+    // If the regex is in unicode mode.
+    unicode: bool,
 }
 
 impl<'a, F> Pass<'a, F>
 where
     F: FnMut(&mut Node, &Walk) -> PassAction,
 {
-    fn new(func: &'a mut F) -> Self {
+    fn new(func: &'a mut F, unicode: bool) -> Self {
         Pass {
             func,
             changed: false,
+            unicode,
         }
     }
 
     fn run_postorder(&mut self, start: &mut Node) {
         walk_mut(
             true,
+            self.unicode,
             start,
             &mut |n: &mut Node, walk: &mut Walk| match (self.func)(n, walk) {
                 PassAction::Keep => {}
@@ -87,7 +92,7 @@ fn run_pass<F>(r: &mut Regex, func: &mut F) -> bool
 where
     F: FnMut(&mut Node, &Walk) -> PassAction,
 {
-    let mut p = Pass::new(func);
+    let mut p = Pass::new(func, r.flags.unicode);
     p.run_to_fixpoint(&mut r.node);
     p.changed
 }
@@ -209,8 +214,27 @@ fn decat(n: &mut Node, _w: &Walk) -> PassAction {
 /// That means for case-insensitive characters, figure out everything that they
 /// could match.
 /// TODO: should cache unfolding.
-fn unfold_icase_chars(n: &mut Node, _w: &Walk) -> PassAction {
+fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
     match *n {
+        Node::Char { c, icase } if icase && !w.unicode => {
+            let unfolded = unicode::unfold_uppercase_char(c);
+            debug_assert!(
+                unfolded.contains(&c),
+                "Char should always unfold to at least itself"
+            );
+            match unfolded.len() {
+                0 => panic!("Char should always unfold to at least itself"),
+                1 => {
+                    // Character does not fold or unfold at all.
+                    PassAction::Replace(Node::Char { c, icase: false })
+                }
+                2..=MAX_BYTE_SET_LENGTH => {
+                    // We unfolded to 2+ characters.
+                    PassAction::Replace(Node::CharSet(unfolded))
+                }
+                _ => panic!("Unfolded to more characters than we believed possible"),
+            }
+        }
         Node::Char { c, icase } if icase => {
             let unfolded = unicode::unfold_char(c);
             debug_assert!(

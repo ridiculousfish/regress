@@ -1,19 +1,14 @@
-use crate::cursor;
 use crate::cursor::Direction;
 use crate::indexing::{ElementType, InputIndexer};
 use crate::types::BracketContents;
-use crate::unicode::{self, is_character_class};
+use crate::unicode::is_character_class;
+use crate::{cursor, unicode};
 
 pub trait CharProperties {
     type Element: ElementType;
 
     /// Case-fold an element.
-    fn fold(c: Self::Element) -> Self::Element;
-
-    /// \return whether these two elements fold to the same value.
-    fn fold_equals(c1: Self::Element, c2: Self::Element) -> bool {
-        c1 == c2 || Self::fold(c1) == Self::fold(c2)
-    }
+    fn fold(c: Self::Element, unicode: bool) -> Self::Element;
 
     /// \return whether this is a word char.
     /// ES9 21.2.2.6.2.
@@ -53,8 +48,8 @@ pub struct UTF8CharProperties {}
 impl CharProperties for UTF8CharProperties {
     type Element = char;
 
-    fn fold(c: Self::Element) -> Self::Element {
-        char::from_u32(unicode::fold(c.as_u32())).unwrap()
+    fn fold(c: Self::Element, unicode: bool) -> Self::Element {
+        char::from_u32(unicode::fold_code_point(c.into(), unicode)).unwrap_or(c)
     }
 }
 
@@ -62,8 +57,8 @@ pub struct ASCIICharProperties {}
 impl CharProperties for ASCIICharProperties {
     type Element = u8;
 
-    fn fold(c: Self::Element) -> Self::Element {
-        c.to_ascii_lowercase()
+    fn fold(c: Self::Element, _: bool) -> Self::Element {
+        c.to_ascii_uppercase()
     }
 }
 
@@ -74,12 +69,8 @@ pub struct Utf16CharProperties {}
 impl CharProperties for Utf16CharProperties {
     type Element = u32;
 
-    fn fold(c: Self::Element) -> Self::Element {
-        if char::from_u32(c).is_some() {
-            unicode::fold(c)
-        } else {
-            c
-        }
+    fn fold(c: Self::Element, unicode: bool) -> Self::Element {
+        unicode::fold_code_point(c, unicode)
     }
 }
 
@@ -108,7 +99,7 @@ pub fn backref_icase<Input: InputIndexer, Dir: Direction>(
     while let Some(c1) = cursor::next(&ref_input, dir, &mut ref_pos) {
         let mut matched = false;
         if let Some(c2) = cursor::next(input, dir, pos) {
-            matched = Input::CharProps::fold_equals(c1, c2)
+            matched = input.fold_equals(c1, c2)
         }
         if !matched {
             return false;

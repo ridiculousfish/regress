@@ -261,3 +261,29 @@ where
         backend: Backend::Backtracking,
     });
 }
+
+/// Invoke `F` with each test config.
+/// Exclude ASCII tests.
+pub fn test_with_configs_no_ascii<F>(func: F)
+where
+    F: Fn(TestConfig),
+{
+    // Note we wish to be able to determine the TestConfig from the line number.
+    // Also note that optimizations are not supported for PikeVM backend, as it
+    // doesn't implement Loop1CharBody.
+    func(TestConfig {
+        ascii: false,
+        optimize: false,
+        backend: Backend::PikeVM,
+    });
+    func(TestConfig {
+        ascii: false,
+        optimize: false,
+        backend: Backend::Backtracking,
+    });
+    func(TestConfig {
+        ascii: false,
+        optimize: true,
+        backend: Backend::Backtracking,
+    });
+}

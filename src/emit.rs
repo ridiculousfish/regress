@@ -101,7 +101,11 @@ impl Emitter {
                 if !*icase {
                     self.emit_insn(Insn::Char(c))
                 } else {
-                    core::debug_assert!(unicode::fold(c) == c, "Char {:x} should be folded", c);
+                    core::debug_assert!(
+                        unicode::fold_code_point(c, self.result.flags.unicode) == c,
+                        "Char {:x} should be folded",
+                        c
+                    );
                     self.emit_insn(Insn::CharICase(c))
                 }
             }

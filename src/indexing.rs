@@ -1,6 +1,6 @@
 use crate::bytesearch::{self, ByteSeq};
 use crate::cursor::Direction;
-use crate::matchers;
+use crate::matchers::{self, CharProperties};
 #[cfg(feature = "utf16")]
 use crate::position::IndexPosition;
 use crate::position::{DefPosition, PositionType};
@@ -52,6 +52,18 @@ where
 
     /// A type which references a position in the input string.
     type Position: PositionType;
+
+    fn unicode(&self) -> bool;
+
+    /// Case-fold an element.
+    fn fold(&self, c: Self::Element) -> Self::Element {
+        Self::CharProps::fold(c, self.unicode())
+    }
+
+    /// Return whether these two elements fold to the same value.
+    fn fold_equals(&self, c1: Self::Element, c2: Self::Element) -> bool {
+        c1 == c2 || self.fold(c1) == self.fold(c2)
+    }
 
     /// \return a sub-input. Note that positions in the original may no longer be valid in the sub-input.
     fn subinput(&self, range: ops::Range<Self::Position>) -> Self;
@@ -161,6 +173,7 @@ fn is_seq_start(b: u8) -> bool {
 #[derive(Debug, Copy, Clone)]
 pub struct Utf8Input<'a> {
     input: &'a str,
+    unicode: bool,
 }
 
 impl<'a> Utf8Input<'a> {
@@ -198,11 +211,11 @@ impl<'a> Utf8Input<'a> {
     }
 
     #[inline(always)]
-    pub fn new(s: &'a str) -> Self {
+    pub fn new(s: &'a str, unicode: bool) -> Self {
         // The big idea of RefPosition is enforced here.
         <Self as InputIndexer>::Position::check_size();
 
-        Self { input: s }
+        Self { input: s, unicode }
     }
 
     /// \return a byte at a given position.
@@ -257,8 +270,13 @@ impl<'a> InputIndexer for Utf8Input<'a> {
     type CharProps = matchers::UTF8CharProperties;
 
     #[inline(always)]
+    fn unicode(&self) -> bool {
+        self.unicode
+    }
+
+    #[inline(always)]
     fn subinput(&self, range: ops::Range<Self::Position>) -> Self {
-        Self::new(self.str_slice(range))
+        Self::new(self.str_slice(range), self.unicode)
     }
 
     #[inline(always)]
@@ -616,6 +634,11 @@ impl<'a> InputIndexer for AsciiInput<'a> {
     type CharProps = matchers::ASCIICharProperties;
 
     #[inline(always)]
+    fn unicode(&self) -> bool {
+        false
+    }
+
+    #[inline(always)]
     fn subinput(&self, range: ops::Range<Self::Position>) -> AsciiInput<'a> {
         self.debug_assert_valid_pos(range.start);
         self.debug_assert_valid_pos(range.end);
@@ -865,6 +888,11 @@ impl<'a> InputIndexer for Utf16Input<'a> {
     type CharProps = matchers::Utf16CharProperties;
 
     #[inline(always)]
+    fn unicode(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
     fn subinput(&self, range: ops::Range<Self::Position>) -> Utf16Input<'a> {
         self.debug_assert_valid_pos(range.start);
         self.debug_assert_valid_pos(range.end);
@@ -1102,6 +1130,11 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
     type Position = IndexPosition<'a>;
     type Element = u32;
     type CharProps = matchers::Utf16CharProperties;
+
+    #[inline(always)]
+    fn unicode(&self) -> bool {
+        false
+    }
 
     #[inline(always)]
     fn subinput(&self, range: ops::Range<Self::Position>) -> Ucs2Input<'a> {

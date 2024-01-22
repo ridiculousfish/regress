@@ -124,7 +124,7 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         },
         &Insn::CharICase(c) => match cursor::next(input, dir, &mut s.pos) {
             Some(c2) => {
-                nextinsn_or_fail!(c == c2.as_u32() || Input::CharProps::fold(c2).as_u32() == c)
+                nextinsn_or_fail!(c == c2.as_u32() || input.fold(c2).as_u32() == c)
             }
             _ => StateMatch::Fail,
         },
@@ -407,7 +407,7 @@ impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, Utf8Input<'t>> {
     type AsAscii = PikeVMExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
-        let input = Utf8Input::new(text);
+        let input = Utf8Input::new(text, re.flags.unicode);
         Self {
             input,
             matcher: MatchAttempter::new(re),

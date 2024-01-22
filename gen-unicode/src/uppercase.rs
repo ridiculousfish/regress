@@ -1,17 +1,16 @@
 use crate::{DeltaBlock, FoldPair, GenUnicode};
-use ucd_parse::CaseStatus;
 
 impl GenUnicode {
-    pub(crate) fn generate_case_folds(&mut self) {
+    pub(crate) fn generate_uppercase(&mut self) {
         let mut fold_pairs = Vec::new();
 
-        for case_fold in &self.case_folds {
-            if case_fold.status != CaseStatus::Common && case_fold.status != CaseStatus::Simple {
+        for data in &self.data {
+            let Some(uppercase) = data.simple_uppercase_mapping else {
                 continue;
-            }
+            };
             fold_pairs.push(FoldPair {
-                orig: case_fold.codepoint.value(),
-                folded: case_fold.mapping[0].value(),
+                orig: data.codepoint.value(),
+                folded: uppercase.value(),
             });
         }
 
@@ -35,7 +34,7 @@ impl GenUnicode {
         }
 
         self.scope.raw(&format!(
-            "pub(crate) const FOLDS: [FoldRange; {}] = [\n    {}\n];",
+            "pub(crate) const TO_UPPERCASE: [FoldRange; {}] = [\n    {}\n];",
             delta_blocks.len(),
             lines.join("\n    ")
         ));

@@ -1,5 +1,5 @@
 use crate::codepointset::{CodePointSet, Interval};
-use crate::unicodetables::{self, FOLDS};
+use crate::unicodetables::{self, FOLDS, TO_UPPERCASE};
 use crate::util::SliceHelp;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -167,6 +167,16 @@ impl FoldRange {
     }
 }
 
+/// Implements the `Canonicalize` method from the [spec].
+///
+/// [spec]: https://tc39.es/ecma262/#sec-runtime-semantics-canonicalize-ch
+pub(crate) fn fold_code_point(cu: u32, unicode: bool) -> u32 {
+    if unicode {
+        return fold(cu);
+    }
+    uppercase(cu)
+}
+
 pub fn fold(cu: u32) -> u32 {
     let searched = FOLDS.binary_search_by(|fr| {
         if fr.first() > cu {
@@ -182,6 +192,28 @@ pub fn fold(cu: u32) -> u32 {
             unsafe { FOLDS.get_unchecked(index) }
         } else {
             FOLDS.get(index).expect("Invalid index")
+        };
+        fr.apply(cu)
+    } else {
+        cu
+    }
+}
+
+fn uppercase(cu: u32) -> u32 {
+    let searched = TO_UPPERCASE.binary_search_by(|fr| {
+        if fr.first() > cu {
+            Ordering::Greater
+        } else if fr.last() < cu {
+            Ordering::Less
+        } else {
+            Ordering::Equal
+        }
+    });
+    if let Ok(index) = searched {
+        let fr: &FoldRange = if cfg!(feature = "prohibit-unsafe") {
+            unsafe { TO_UPPERCASE.get_unchecked(index) }
+        } else {
+            TO_UPPERCASE.get(index).expect("Invalid index")
         };
         fr.apply(cu)
     } else {
@@ -253,6 +285,28 @@ pub fn unfold_char(c: u32) -> Vec<u32> {
         }
         for cp in tr.transformed_from().codepoints() {
             // TODO: this can be optimized.
+            let tcp = tr.apply(cp);
+            if tcp == fcp {
+                res.push(cp);
+            }
+        }
+    }
+    res.sort_unstable();
+    res.dedup();
+    res
+}
+
+pub(crate) fn unfold_uppercase_char(c: u32) -> Vec<u32> {
+    let mut res = vec![c];
+    let fcp = uppercase(c);
+    if fcp != c {
+        res.push(fcp);
+    }
+    for tr in TO_UPPERCASE.iter() {
+        if !tr.transformed_to().contains(fcp) {
+            continue;
+        }
+        for cp in tr.transformed_from().codepoints() {
             let tcp = tr.apply(cp);
             if tcp == fcp {
                 res.push(cp);
