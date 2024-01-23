@@ -369,6 +369,25 @@ fn run_unicode_tests() {
     test_parse_fails_flags(r"{a", "u");
 }
 
+/// 262 test/built-ins/RegExp/unicode_restricted_brackets.js
+#[test]
+fn run_unicode_restricted_brackets() {
+    test_parse_fails_flags(r"(", "u");
+    test_parse_fails_flags(r")", "u");
+    test_parse_fails_flags(r"[", "u");
+    test_parse_fails_flags(r"]", "u");
+    test_parse_fails_flags(r"{", "u");
+    test_parse_fails_flags(r"}", "u");
+
+    // Tests without the 'u' flag.
+    test_parse_fails(r"(");
+    test_parse_fails(r")");
+    test_parse_fails(r"[");
+    test_with_configs(|tc| tc.compile(r"]").match1f(r"]").test_eq(r"]"));
+    test_with_configs(|tc| tc.compile(r"{").match1f(r"{").test_eq(r"{"));
+    test_with_configs(|tc| tc.compile(r"}").match1f(r"}").test_eq(r"}"));
+}
+
 #[test]
 fn run_regexp_capture_test() {
     test_with_configs(run_regexp_capture_test_tc)

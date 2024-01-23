@@ -321,6 +321,7 @@ where
                     }
                 }
 
+                // Term :: Atom :: .
                 '.' => {
                     self.consume('.');
                     result.push(if self.flags.dot_all {
@@ -402,19 +403,32 @@ where
                     result.push(self.consume_bracket()?);
                 }
 
-                ']' if self.flags.unicode => {
-                    return error("Unbalanced bracket");
+                // Term :: ExtendedAtom :: InvalidBracedQuantifier
+                '{' if !self.flags.unicode => {
+                    if self.try_consume_braced_quantifier().is_some() {
+                        return error("Invalid braced quantifier");
+                    }
+
+                    // Term :: ExtendedAtom :: ExtendedPatternCharacter
+                    result.push(ir::Node::Char {
+                        c: self.consume(c),
+                        icase: self.flags.icase,
+                    })
                 }
 
+                // Term :: Atom :: PatternCharacter :: SourceCharacter but not ^ $ \ . * + ? ( ) [ ] { } |
+                '*' | '+' | '?' | ']' | '{' | '}' if self.flags.unicode => {
+                    return error("Invalid atom character");
+                }
+
+                // Term :: ExtendedAtom :: SourceCharacter but not ^ $ \ . * + ? ( ) [ |
+                '*' | '+' | '?' => {
+                    return error("Invalid atom character");
+                }
+
+                // Term :: Atom :: PatternCharacter
+                // Term :: ExtendedAtom :: ExtendedPatternCharacter
                 _ => {
-                    // It's an error if this parses successfully as a quantifier.
-                    // It's also an error if this is an invalid quantifier (with 'u' flag).
-                    // Note this covers *, +, ? as well.
-                    let saved = self.input.clone();
-                    if self.try_consume_quantifier()?.is_some() {
-                        return error("Nothing to repeat");
-                    }
-                    self.input = saved;
                     self.consume(c);
                     result.push(ir::Node::Char {
                         c: self.fold_if_icase(c),
