@@ -1186,28 +1186,42 @@ fn run_regexp_named_capture_groups_tc(tc: TestConfig) {
 }
 
 #[test]
-#[rustfmt::skip]
-fn run_regexp_named_groups_unicode_malformed_tc() {
+fn run_regexp_named_groups_unicode_malformed() {
+    test_with_configs(run_regexp_named_groups_unicode_malformed_tc)
+}
+
+fn run_regexp_named_groups_unicode_malformed_tc(tc: TestConfig) {
     // From 262 test/annexB/built-ins/RegExp/named-groups/non-unicode-malformed-lookbehind.js
-    test_parse_fails(r#"\k<a>(?<=>)a"#);
-    test_parse_fails(r#"(?<=>)\k<a>"#);
-    test_parse_fails(r#"\k<a>(?<!a)a"#);
-    test_parse_fails(r#"(?<!a>)\k<a>"#);
+    tc.compile(r#"\k<a>(?<=>)a"#).test_succeeds(r#"k<a>a"#);
+    tc.compile(r#"(?<=>)\k<a>"#).test_succeeds(r#">k<a>"#);
+    tc.compile(r#"\k<a>(?<!a)a"#).test_succeeds(r#"k<a>a"#);
+    tc.compile(r#"(?<!a>)\k<a>"#).test_succeeds(r#"k<a>"#);
+
+    // Negative parse tests in unicode mode.
+    test_parse_fails_flags(r#"\k<a>(?<=>)a"#, "u");
+    test_parse_fails_flags(r#"(?<=>)\k<a>"#, "u");
+    test_parse_fails_flags(r#"\k<a>(?<!a)a"#, "u");
+    test_parse_fails_flags(r#"(?<!a>)\k<a>"#, "u");
 
     // From 262 test/annexB/built-ins/RegExp/named-groups/non-unicode-malformed.js
-    test_parse_fails(r#"\k<a>"#);
-    test_parse_fails(r#"\k<4>"#);
-    test_parse_fails(r#"\k<a"#);
-    test_parse_fails(r#"\k"#);
+    tc.compile(r#"\k<a>"#).test_succeeds(r#"k<a>"#);
+    tc.compile(r#"\k<4>"#).test_succeeds(r#"k<4>"#);
+    tc.compile(r#"\k<a"#).test_succeeds(r#"k<a"#);
+    tc.compile(r#"\k"#).test_succeeds(r#"k"#);
+    tc.compile(r#"(?<a>\a)"#).test_succeeds(r#"a"#);
+    tc.compile(r#"\k<a>(<a>x)"#).test_succeeds(r#"k<a><a>x"#);
+    tc.compile(r#"\k<a>\1"#).test_succeeds("k<a>\u{1}");
+    tc.compile(r#"\1(b)\k<a>"#).test_succeeds(r#"bk<a>"#);
 
-    // TODO: This test fails, because we accept alphabetic ascii characters in otherwise invalid escapes, due to PCRE tests.
-    //test_parse_fails(r#"(?<a>\a)"#);
-
-    test_parse_fails(r#"\k<a>"#);
-    test_parse_fails(r#"\k<a"#);
-    test_parse_fails(r#"\k<a>(<a>x)"#);
-    test_parse_fails(r#"\k<a>\1"#);
-    test_parse_fails(r#"\1(b)\k<a>"#);
+    // Negative parse tests in unicode mode.
+    test_parse_fails_flags(r#"\k<a>"#, "u");
+    test_parse_fails_flags(r#"\k<4>"#, "u");
+    test_parse_fails_flags(r#"\k<a"#, "u");
+    test_parse_fails_flags(r#"\k"#, "u");
+    test_parse_fails_flags(r#"(?<a>\a)"#, "u");
+    test_parse_fails_flags(r#"\k<a>(<a>x)"#, "u");
+    test_parse_fails_flags(r#"\k<a>\1"#, "u");
+    test_parse_fails_flags(r#"\1(b)\k<a>"#, "u");
 
     // From 262 test/language/literals/regexp/named-groups/invalid-duplicate-groupspecifier.js
     test_parse_fails(r#"(?<a>a)(?<a>a)"#);
