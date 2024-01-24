@@ -249,7 +249,7 @@ where
         let mut result: Vec<ir::Node> = Vec::new();
         loop {
             let start_group = self.group_count;
-            let start_offset = result.len();
+            let mut start_offset = result.len();
             let mut quantifier_allowed = true;
 
             let nc = self.peek();
@@ -304,6 +304,7 @@ where
                                     icase: self.flags.icase,
                                 });
                             } else {
+                                start_offset += 1;
                                 result.push(ir::Node::Char {
                                     c: u32::from('\\'),
                                     icase: self.flags.icase,
