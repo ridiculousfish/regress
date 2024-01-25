@@ -491,8 +491,13 @@ where
             }
 
             // Parse a code point or character class.
-            let Some(first) = self.try_consume_bracket_class_atom()? else {
-                continue;
+            let first = match self.try_consume_bracket_class_atom()? {
+                Some((first, None)) => first,
+                Some((first, Some(second))) => {
+                    add_class_atom(&mut result, first);
+                    second
+                }
+                _ => continue,
             };
 
             // Check for a dash; we may have a range.
@@ -501,7 +506,7 @@ where
                 continue;
             }
 
-            let Some(second) = self.try_consume_bracket_class_atom()? else {
+            let Some((second, third)) = self.try_consume_bracket_class_atom()? else {
                 // No second atom. For example: [a-].
                 add_class_atom(&mut result, first);
                 add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
@@ -520,6 +525,11 @@ where
                     first: *c1,
                     last: *c2,
                 });
+
+                if let Some(third) = third {
+                    add_class_atom(&mut result, third);
+                }
+
                 continue;
             }
 
@@ -534,7 +544,9 @@ where
         }
     }
 
-    fn try_consume_bracket_class_atom(&mut self) -> Result<Option<ClassAtom>, Error> {
+    fn try_consume_bracket_class_atom(
+        &mut self,
+    ) -> Result<Option<(ClassAtom, Option<ClassAtom>)>, Error> {
         let c = self.peek();
         if c.is_none() {
             return Ok(None);
@@ -556,77 +568,98 @@ where
                     // ClassEscape :: b
                     'b' => {
                         self.consume('b');
-                        Ok(Some(ClassAtom::CodePoint(u32::from('\x08'))))
+                        Ok(Some((ClassAtom::CodePoint(u32::from('\x08')), None)))
                     }
                     // ClassEscape :: [+UnicodeMode] -
                     '-' if self.flags.unicode => {
                         self.consume('-');
-                        Ok(Some(ClassAtom::CodePoint(u32::from('-'))))
+                        Ok(Some((ClassAtom::CodePoint(u32::from('-')), None)))
                     }
-                    // ClassEscape :: [~UnicodeMode] c ClassControlLetter
                     'c' if !self.flags.unicode => {
-                        let input = self.input.clone();
                         self.consume('c');
                         match self.peek().map(to_char_sat) {
+                            // ClassEscape :: [~UnicodeMode] c ClassControlLetter
                             Some('0'..='9' | '_') => {
                                 let next = self.next().expect("char was not next");
-                                Ok(Some(ClassAtom::CodePoint(next & 0x1F)))
+                                Ok(Some((ClassAtom::CodePoint(next & 0x1F), None)))
                             }
-                            // ClassEscape :: CharacterEscape
-                            _ => {
-                                self.input = input;
-                                let cc = self.consume_character_escape()?;
-                                Ok(Some(ClassAtom::CodePoint(cc)))
+                            // CharacterEscape :: c AsciiLetter
+                            Some('a'..='z' | 'A'..='Z') => {
+                                let next = self.next().expect("char was not next");
+                                Ok(Some((ClassAtom::CodePoint(next % 32), None)))
                             }
+                            // ClassAtomNoDash :: \ [lookahead = c]
+                            _ => Ok(Some((
+                                ClassAtom::CodePoint(u32::from('\\')),
+                                Some(ClassAtom::CodePoint(u32::from('c'))),
+                            ))),
                         }
                     }
                     // ClassEscape :: CharacterClassEscape :: d
                     'd' => {
                         self.consume('d');
-                        Ok(Some(ClassAtom::CharacterClass {
-                            class_type: CharacterClassType::Digits,
-                            positive: true,
-                        }))
+                        Ok(Some((
+                            ClassAtom::CharacterClass {
+                                class_type: CharacterClassType::Digits,
+                                positive: true,
+                            },
+                            None,
+                        )))
                     }
                     // ClassEscape :: CharacterClassEscape :: D
                     'D' => {
                         self.consume('D');
-                        Ok(Some(ClassAtom::CharacterClass {
-                            class_type: CharacterClassType::Digits,
-                            positive: false,
-                        }))
+                        Ok(Some((
+                            ClassAtom::CharacterClass {
+                                class_type: CharacterClassType::Digits,
+                                positive: false,
+                            },
+                            None,
+                        )))
                     }
                     // ClassEscape :: CharacterClassEscape :: s
                     's' => {
                         self.consume('s');
-                        Ok(Some(ClassAtom::CharacterClass {
-                            class_type: CharacterClassType::Spaces,
-                            positive: true,
-                        }))
+                        Ok(Some((
+                            ClassAtom::CharacterClass {
+                                class_type: CharacterClassType::Spaces,
+                                positive: true,
+                            },
+                            None,
+                        )))
                     }
                     // ClassEscape :: CharacterClassEscape :: S
                     'S' => {
                         self.consume('S');
-                        Ok(Some(ClassAtom::CharacterClass {
-                            class_type: CharacterClassType::Spaces,
-                            positive: false,
-                        }))
+                        Ok(Some((
+                            ClassAtom::CharacterClass {
+                                class_type: CharacterClassType::Spaces,
+                                positive: false,
+                            },
+                            None,
+                        )))
                     }
                     // ClassEscape :: CharacterClassEscape :: w
                     'w' => {
                         self.consume('w');
-                        Ok(Some(ClassAtom::CharacterClass {
-                            class_type: CharacterClassType::Words,
-                            positive: true,
-                        }))
+                        Ok(Some((
+                            ClassAtom::CharacterClass {
+                                class_type: CharacterClassType::Words,
+                                positive: true,
+                            },
+                            None,
+                        )))
                     }
                     // ClassEscape :: CharacterClassEscape :: W
                     'W' => {
                         self.consume('W');
-                        Ok(Some(ClassAtom::CharacterClass {
-                            class_type: CharacterClassType::Words,
-                            positive: false,
-                        }))
+                        Ok(Some((
+                            ClassAtom::CharacterClass {
+                                class_type: CharacterClassType::Words,
+                                positive: false,
+                            },
+                            None,
+                        )))
                     }
                     // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
                     // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] P{ UnicodePropertyValueExpression }
@@ -634,20 +667,23 @@ where
                         self.consume(ec);
                         let property_escape = self.try_consume_unicode_property_escape()?;
                         let negate = ec == 'P' as u32;
-                        Ok(Some(ClassAtom::UnicodePropertyEscape {
-                            property_escape,
-                            negate,
-                        }))
+                        Ok(Some((
+                            ClassAtom::UnicodePropertyEscape {
+                                property_escape,
+                                negate,
+                            },
+                            None,
+                        )))
                     }
                     // ClassEscape :: CharacterEscape
                     _ => {
                         let cc = self.consume_character_escape()?;
-                        Ok(Some(ClassAtom::CodePoint(cc)))
+                        Ok(Some((ClassAtom::CodePoint(cc), None)))
                     }
                 }
             }
 
-            _ => Ok(Some(ClassAtom::CodePoint(self.consume(c)))),
+            _ => Ok(Some((ClassAtom::CodePoint(self.consume(c)), None))),
         }
     }
 
