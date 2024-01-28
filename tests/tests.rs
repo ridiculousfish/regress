@@ -1639,3 +1639,14 @@ fn test_unicode_folding_tc(tc: TestConfig) {
     tc.test_match_succeeds(r"\u{212A}", "iu", "k");
     tc.test_match_succeeds(r"\u{212A}", "iu", "K");
 }
+
+#[test]
+fn test_class_invalid_control_character() {
+    test_with_configs(test_class_invalid_control_character_tc)
+}
+
+fn test_class_invalid_control_character_tc(tc: TestConfig) {
+    tc.test_match_succeeds("[\\c\u{0}]", "", "\\");
+    tc.test_match_succeeds("[\\c\u{0}]", "", "c");
+    tc.test_match_succeeds("[\\c\u{0}]", "", "\u{0}");
+}
