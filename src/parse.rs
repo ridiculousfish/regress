@@ -335,14 +335,14 @@ where
                 '(' => {
                     if self.try_consume_str("(?=") {
                         // Positive lookahead.
-                        quantifier_allowed = false;
+                        quantifier_allowed = !self.flags.unicode;
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: false,
                             backwards: false,
                         })?);
                     } else if self.try_consume_str("(?!") {
                         // Negative lookahead.
-                        quantifier_allowed = false;
+                        quantifier_allowed = !self.flags.unicode;
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: true,
                             backwards: false,

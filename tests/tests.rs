@@ -1650,3 +1650,93 @@ fn test_class_invalid_control_character_tc(tc: TestConfig) {
     tc.test_match_succeeds("[\\c\u{0}]", "", "c");
     tc.test_match_succeeds("[\\c\u{0}]", "", "\u{0}");
 }
+
+#[test]
+fn test_quantifiable_assertion_not_followed_by() {
+    test_with_configs(test_quantifiable_assertion_not_followed_by_tc)
+}
+
+/// 262 test/annexB/language/literals/regexp/quantifiable-assertion-not-followed-by.js
+fn test_quantifiable_assertion_not_followed_by_tc(tc: TestConfig) {
+    tc.compile(r#"[a-e](?!Z)*"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("a");
+    tc.compile(r#"[a-e](?!Z)+"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("e");
+    tc.compile(r#"[a-e](?!Z)?"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("a");
+    tc.compile(r#"[a-e](?!Z){2}"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("e");
+    tc.compile(r#"[a-e](?!Z){2,}"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("e");
+    tc.compile(r#"[a-e](?!Z){2,3}"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("e");
+    tc.compile(r#"[a-e](?!Z)*?"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("a");
+    tc.compile(r#"[a-e](?!Z)+?"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("e");
+    tc.compile(r#"[a-e](?!Z)??"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("a");
+    tc.compile(r#"[a-e](?!Z){2}?"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("e");
+    tc.compile(r#"[a-e](?!Z){2,}?"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("e");
+    tc.compile(r#"[a-e](?!Z){2,3}?"#)
+        .match1f(r#"aZZZZ bZZZ cZZ dZ e"#)
+        .test_eq("e");
+}
+
+#[test]
+fn test_quantifiable_assertion_followed_by() {
+    test_with_configs(test_quantifiable_assertion_followed_by_tc)
+}
+
+/// 262 test/annexB/language/literals/regexp/quantifiable-assertion-followed-by.js
+fn test_quantifiable_assertion_followed_by_tc(tc: TestConfig) {
+    tc.compile(r#".(?=Z)*"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("a");
+    tc.compile(r#".(?=Z)+"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("b");
+    tc.compile(r#".(?=Z)?"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("a");
+    tc.compile(r#".(?=Z){2}"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("b");
+    tc.compile(r#".(?=Z){2,}"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("b");
+    tc.compile(r#".(?=Z){2,3}"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("b");
+    tc.compile(r#".(?=Z)*?"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("a");
+    tc.compile(r#".(?=Z)+?"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("b");
+    tc.compile(r#".(?=Z)??"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("a");
+    tc.compile(r#".(?=Z){2}?"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("b");
+    tc.compile(r#".(?=Z){2,}?"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("b");
+    tc.compile(r#".(?=Z){2,3}?"#)
+        .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
+        .test_eq("b");
+}
