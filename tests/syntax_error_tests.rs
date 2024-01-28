@@ -27,13 +27,13 @@ fn test_excessive_capture_groups() {
 
 #[test]
 fn test_syntax_errors() {
-    test_1_error(r"*", "Nothing to repeat");
-    test_1_error(r"x**", "Nothing to repeat");
-    test_1_error(r"?", "Nothing to repeat");
-    test_1_error(r"{3,5}", "Nothing to repeat");
+    test_1_error(r"*", "Invalid atom character");
+    test_1_error(r"x**", "Invalid atom character");
+    test_1_error(r"?", "Invalid atom character");
+    test_1_error(r"{3,5}", "Invalid atom character");
     test_1_error(r"x{5,3}", "Invalid quantifier");
 
-    test_1_error(r"]", "Unbalanced bracket");
+    test_1_error(r"]", "Invalid atom character");
     test_1_error(r"[abc", "Unbalanced bracket");
 
     test_1_error(r"(", "Unbalanced parenthesis");
