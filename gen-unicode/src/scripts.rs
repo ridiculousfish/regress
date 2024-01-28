@@ -1,6 +1,5 @@
-use crate::{chars_to_code_point_ranges, pack_adjacent_chars, GenUnicode};
+use crate::{chars_to_code_point_ranges, codepoints_to_range, pack_adjacent_chars, GenUnicode};
 use codegen::{Block, Enum, Function};
-use ucd_parse::Codepoints;
 
 struct Script {
     long: String,
@@ -214,12 +213,5 @@ impl GenUnicode {
 
             f.line(r#"for regex in REGEXES { let regex = tc.compilef(regex, "u"); for range in CODE_POINTS { for cp in range { regex.test_succeeds(&char::from_u32(cp).unwrap().to_string()); } } }"#);
         }
-    }
-}
-
-fn codepoints_to_range(cp: &Codepoints) -> (u32, u32) {
-    match cp {
-        Codepoints::Single(cp) => (cp.value(), cp.value()),
-        Codepoints::Range(range) => (range.start.value(), range.end.value()),
     }
 }
