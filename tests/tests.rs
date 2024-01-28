@@ -1615,3 +1615,12 @@ fn test_high_folds_tc(tc: TestConfig) {
     tc.test_match_fails(r"\u{1BD}", "", "\u{1BE}");
     tc.test_match_fails(r"\u{1BD}", "i", "\u{1BE}");
 }
+
+#[test]
+fn test_invalid_quantifier_loop() {
+    test_with_configs(test_invalid_quantifier_loop_tc)
+}
+
+fn test_invalid_quantifier_loop_tc(tc: TestConfig) {
+    tc.test_match_fails(r#"\c*"#, "", "\n");
+}
