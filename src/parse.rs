@@ -950,7 +950,8 @@ where
                 }
             }
 
-            'k' => {
+            // [+NamedCaptureGroups] k GroupName
+            'k' if self.flags.unicode || !self.named_group_indices.is_empty() => {
                 self.consume('k');
 
                 // The sequence `\k` must be the start of a backreference to a named capture group.
@@ -967,6 +968,16 @@ where
                     error("Unexpected end of named backreference")
                 }
             }
+
+            // [~NamedCaptureGroups] k GroupName
+            'k' => {
+                self.consume('k');
+                Ok(ir::Node::Char {
+                    c: self.fold_if_icase(c),
+                    icase: self.flags.icase,
+                })
+            }
+
             _ => {
                 let c = self.consume_character_escape()?;
                 Ok(ir::Node::Char {
