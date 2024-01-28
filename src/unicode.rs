@@ -339,6 +339,15 @@ pub struct PropertyEscape {
     pub value: UnicodePropertyValue,
 }
 
+impl PropertyEscape {
+    pub(crate) fn is_any(&self) -> bool {
+        match self.value {
+            UnicodePropertyValue::Binary(unicodetables::UnicodePropertyBinary::Any) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum UnicodePropertyName {
     GeneralCategory,
@@ -393,42 +402,34 @@ pub fn unicode_property_value_from_str(
     }
 }
 
-pub(crate) fn is_character_class(c: u32, property_escape: &PropertyEscape) -> bool {
-    if let Some(c) = char::from_u32(c) {
-        match property_escape.name {
-            Some(UnicodePropertyName::GeneralCategory) => match &property_escape.value {
-                UnicodePropertyValue::GeneralCategory(t) => {
-                    unicodetables::is_property_value_general_category(c, t)
-                }
-                _ => false,
-            },
-            Some(UnicodePropertyName::Script) => match &property_escape.value {
-                UnicodePropertyValue::Script(t) => {
-                    unicodetables::is_property_value_script(c as u32, t)
-                }
-                _ => false,
-            },
-            Some(UnicodePropertyName::ScriptExtensions) => match &property_escape.value {
-                UnicodePropertyValue::ScriptExtensions(t) => {
-                    unicodetables::is_property_value_script_extensions(c as u32, t)
-                }
-                _ => false,
-            },
-            None => match &property_escape.value {
-                UnicodePropertyValue::Binary(t) => unicodetables::is_property_binary(c, t),
-                UnicodePropertyValue::GeneralCategory(t) => {
-                    unicodetables::is_property_value_general_category(c, t)
-                }
-                UnicodePropertyValue::Script(t) => {
-                    unicodetables::is_property_value_script(c as u32, t)
-                }
-                UnicodePropertyValue::ScriptExtensions(t) => {
-                    unicodetables::is_property_value_script_extensions(c as u32, t)
-                }
-            },
-        }
-    } else {
-        false
+pub(crate) fn is_character_class(cp: u32, property_escape: &PropertyEscape) -> bool {
+    match property_escape.name {
+        Some(UnicodePropertyName::GeneralCategory) => match &property_escape.value {
+            UnicodePropertyValue::GeneralCategory(t) => {
+                unicodetables::is_property_value_general_category(cp, t)
+            }
+            _ => false,
+        },
+        Some(UnicodePropertyName::Script) => match &property_escape.value {
+            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(cp, t),
+            _ => false,
+        },
+        Some(UnicodePropertyName::ScriptExtensions) => match &property_escape.value {
+            UnicodePropertyValue::ScriptExtensions(t) => {
+                unicodetables::is_property_value_script_extensions(cp, t)
+            }
+            _ => false,
+        },
+        None => match &property_escape.value {
+            UnicodePropertyValue::Binary(t) => unicodetables::is_property_binary(cp, t),
+            UnicodePropertyValue::GeneralCategory(t) => {
+                unicodetables::is_property_value_general_category(cp, t)
+            }
+            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(cp, t),
+            UnicodePropertyValue::ScriptExtensions(t) => {
+                unicodetables::is_property_value_script_extensions(cp, t)
+            }
+        },
     }
 }
 

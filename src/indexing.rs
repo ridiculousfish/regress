@@ -930,7 +930,8 @@ impl<'a> InputIndexer for Utf16Input<'a> {
 
     #[inline(always)]
     fn next_left(&self, pos: &mut Self::Position) -> Option<Self::Element> {
-        if *pos == self.left_end() {
+        let left_end = self.left_end();
+        if *pos == left_end {
             return None;
         }
 
@@ -938,7 +939,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         *pos -= 1;
 
         // If the code unit is not a low surrogate, it is not the end of a surrogate pair.
-        if !Self::is_low_surrogate(u2) {
+        if *pos == left_end || !Self::is_low_surrogate(u2) {
             return Some(u2.into());
         }
 

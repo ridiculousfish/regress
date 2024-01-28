@@ -1,4 +1,7 @@
-use crate::{chars_to_code_point_ranges, codepoints_to_range, pack_adjacent_chars, GenUnicode};
+use crate::{
+    codepoints_to_range, codepoints_to_ranges, pack_adjacent_codepoints, remove_codepoints,
+    GenUnicode,
+};
 use codegen::{Block, Enum, Function};
 
 struct Script {
@@ -17,6 +20,7 @@ const EXCLUDED_SCRIPTS: [&str; 2] = ["Unknown", "Katakana_Or_Hiragana"];
 impl GenUnicode {
     pub(crate) fn generate_scripts(&mut self) {
         let mut scripts = Vec::new();
+        let mut scx_ranges = Vec::new();
 
         for alias in &self.property_value_aliases {
             if alias.property == "sc" && !EXCLUDED_SCRIPTS.contains(&alias.long.as_str()) {
@@ -39,7 +43,7 @@ impl GenUnicode {
                     })
                     .collect();
                 script_ranges.sort();
-                pack_adjacent_chars(&mut script_ranges);
+                pack_adjacent_codepoints(&mut script_ranges);
 
                 let mut script_extension_ranges: Vec<_> = self
                     .script_extensions
@@ -53,7 +57,8 @@ impl GenUnicode {
                     })
                     .collect();
                 script_extension_ranges.sort();
-                pack_adjacent_chars(&mut script_extension_ranges);
+                pack_adjacent_codepoints(&mut script_extension_ranges);
+                scx_ranges.extend(script_extension_ranges.clone());
 
                 scripts.push(Script {
                     long: alias.long.clone(),
@@ -64,6 +69,27 @@ impl GenUnicode {
                     codepoints_sc: script_ranges,
                     codepoints_scx: script_extension_ranges,
                 });
+            }
+        }
+
+        scx_ranges.sort();
+        pack_adjacent_codepoints(&mut scx_ranges);
+
+        // Delete script extensions ranges from the "Common" and "Inherited" script extension ranges.
+        for script in &mut scripts {
+            if script
+                .names
+                .iter()
+                .any(|name| ["Common", "Inherited"].contains(&name.as_str()))
+            {
+                script.codepoints_scx = script.codepoints_sc.clone();
+
+                for range in &scx_ranges {
+                    remove_codepoints(&mut script.codepoints_scx, *range);
+                }
+
+                script.codepoints_scx.sort();
+                pack_adjacent_codepoints(&mut script.codepoints_scx);
             }
         }
 
@@ -114,7 +140,7 @@ impl GenUnicode {
                 script.enum_name,
             ));
 
-            let ranges = chars_to_code_point_ranges(&script.codepoints_sc);
+            let ranges = codepoints_to_ranges(&script.codepoints_sc);
 
             self.scope.raw(&format!(
                 "const {}: [CodePointRange; {}] = [\n    {}\n];",
@@ -137,14 +163,25 @@ impl GenUnicode {
                 continue;
             }
 
-            is_property_fn_match_block_scx.line(&format!(
-                "{} => {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok() || {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),",
-                script.enum_name,
-                script.codepoints_scx_name,
-                script.codepoints_sc_name,
-            ));
+            if script
+                .names
+                .iter()
+                .any(|name| ["Common", "Inherited"].contains(&name.as_str()))
+            {
+                is_property_fn_match_block_scx.line(&format!(
+                    "{} => {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),",
+                    script.enum_name, script.codepoints_scx_name,
+                ));
+            } else {
+                is_property_fn_match_block_scx.line(&format!(
+                    "{} => {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok() || {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),",
+                    script.enum_name,
+                    script.codepoints_scx_name,
+                    script.codepoints_sc_name,
+                ));
+            }
 
-            let ranges = chars_to_code_point_ranges(&script.codepoints_scx);
+            let ranges = codepoints_to_ranges(&script.codepoints_scx);
 
             self.scope.raw(&format!(
                 "const {}: [CodePointRange; {}] = [\n    {}\n];",
