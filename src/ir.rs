@@ -223,7 +223,7 @@ impl Node {
 }
 
 /// A helper type for walking.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Walk {
     // It set to true, skip the children of this node.
     pub skip_children: bool,
@@ -233,6 +233,20 @@ pub struct Walk {
 
     // If true, we are in a lookbehind (and so the cursor will move backwards).
     pub in_lookbehind: bool,
+
+    // If the regex is in unicode mode.
+    pub unicode: bool,
+}
+
+impl Walk {
+    fn new(unicode: bool) -> Self {
+        Self {
+            skip_children: false,
+            depth: 0,
+            in_lookbehind: false,
+            unicode,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -384,14 +398,14 @@ where
 /// Call a function on every Node.
 /// If \p postorder is true, then process children before the node;
 /// otherwise process children after the node.
-pub fn walk<F>(postorder: bool, n: &Node, func: &mut F)
+pub fn walk<F>(postorder: bool, unicode: bool, n: &Node, func: &mut F)
 where
     F: FnMut(&Node, &mut Walk),
 {
     let mut walker = Walker {
         func,
         postorder,
-        walk: Walk::default(),
+        walk: Walk::new(unicode),
     };
     walker.process(n);
 }
@@ -402,14 +416,14 @@ where
 /// If postorder is false, the function should return true to process children,
 /// false to avoid descending into children. If postorder is true, the return
 /// value is ignored.
-pub fn walk_mut<F>(postorder: bool, n: &mut Node, func: &mut F)
+pub fn walk_mut<F>(postorder: bool, unicode: bool, n: &mut Node, func: &mut F)
 where
     F: FnMut(&mut Node, &mut Walk),
 {
     let mut walker = MutWalker {
         func,
         postorder,
-        walk: Walk::default(),
+        walk: Walk::new(unicode),
     };
     walker.process(n);
 }
@@ -540,11 +554,16 @@ impl fmt::Display for Regex {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         //display_node(&self.node, 0, f)
         let mut result = Ok(());
-        walk(false, &self.node, &mut |node: &Node, walk: &mut Walk| {
-            if result.is_ok() {
-                result = display_node(node, walk.depth, f)
-            }
-        });
+        walk(
+            false,
+            self.flags.unicode,
+            &self.node,
+            &mut |node: &Node, walk: &mut Walk| {
+                if result.is_ok() {
+                    result = display_node(node, walk.depth, f)
+                }
+            },
+        );
         result
     }
 }

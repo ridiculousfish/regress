@@ -1,15 +1,16 @@
-mod binary_properties;
-mod case_folding;
-mod general_category_values;
-mod scripts;
-
 use codegen::Scope;
 use std::{fs::OpenOptions, io::Write};
 use ucd_parse::{
     extracted::{DerivedBinaryProperties, DerivedGeneralCategory},
     parse, CaseFold, Codepoints, CoreProperty, DerivedNormalizationProperty, EmojiProperty,
-    Property, PropertyValueAlias, Script, ScriptExtension,
+    Property, PropertyValueAlias, Script, ScriptExtension, UnicodeData,
 };
+
+mod binary_properties;
+mod case_folding;
+mod general_category_values;
+mod scripts;
+mod uppercase;
 
 // Should match unicode.rs.
 const CODE_POINT_BITS: u32 = 20;
@@ -20,7 +21,7 @@ const MAX_CODE_POINT: u32 = (1 << CODE_POINT_BITS) - 1;
 // Our length is stored with a bias of -1, so no need to subtract 1.
 const MAX_LENGTH: u32 = 1 << LENGTH_BITS;
 
-pub(crate) const UCD_PATH: &str = "/tmp/ucd-15.0.0";
+const UCD_PATH: &str = "/tmp/ucd-15.0.0";
 
 pub(crate) struct GenUnicode {
     pub(crate) scope: Scope,
@@ -35,6 +36,7 @@ pub(crate) struct GenUnicode {
     pub(crate) emoji_properties: Vec<EmojiProperty>,
     pub(crate) derived_binary_properties: Vec<DerivedBinaryProperties>,
     pub(crate) derived_normalization_properties: Vec<DerivedNormalizationProperty>,
+    pub(crate) data: Vec<UnicodeData>,
 }
 
 fn main() {
@@ -54,6 +56,7 @@ fn main() {
             .expect("could not parse extracted/DerivedBinaryProperties.txt"),
         derived_normalization_properties: parse(UCD_PATH)
             .expect("could not parse DerivedNormalizationProps.txt"),
+        data: parse(UCD_PATH).expect("could not parse UnicodeData.txt"),
     };
 
     let file_unicode_tables_path = "../src/unicodetables.rs";
@@ -89,6 +92,7 @@ fn main() {
     gen.generate_case_folds();
     gen.generate_general_category();
     gen.generate_scripts();
+    gen.generate_uppercase();
 
     gen.scope_tests.import("common", "*");
     gen.scope_tests.raw("pub mod common;");
@@ -171,5 +175,84 @@ fn codepoints_to_range(cp: &Codepoints) -> (u32, u32) {
     match cp {
         Codepoints::Single(cp) => (cp.value(), cp.value()),
         Codepoints::Range(range) => (range.start.value(), range.end.value()),
+    }
+}
+
+type CodePoint = u32;
+
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct FoldPair {
+    pub(crate) orig: CodePoint,
+    pub(crate) folded: CodePoint,
+}
+
+impl FoldPair {
+    fn delta(self) -> i32 {
+        (self.folded as i32) - (self.orig as i32)
+    }
+
+    fn stride_to(self, rhs: FoldPair) -> u32 {
+        rhs.orig - self.orig
+    }
+}
+
+pub(crate) struct DeltaBlock {
+    /// Folds original -> folded.
+    folds: Vec<FoldPair>,
+}
+
+impl DeltaBlock {
+    pub(crate) fn create(fp: FoldPair) -> DeltaBlock {
+        DeltaBlock { folds: vec![fp] }
+    }
+
+    pub(crate) fn stride(&self) -> Option<u32> {
+        if self.folds.len() >= 2 {
+            Some(self.folds[0].stride_to(self.folds[1]))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn first(&self) -> FoldPair {
+        *self.folds.first().unwrap()
+    }
+
+    fn last(&self) -> FoldPair {
+        *self.folds.last().unwrap()
+    }
+
+    pub(crate) fn length(&self) -> usize {
+        (self.last().orig as usize) - (self.first().orig as usize) + 1
+    }
+
+    pub(crate) fn delta(&self) -> i32 {
+        self.first().delta()
+    }
+
+    #[allow(clippy::if_same_then_else)]
+    pub(crate) fn can_append(&self, fp: FoldPair) -> bool {
+        if self.folds.is_empty() {
+            // New block.
+            true
+        } else if fp.orig - self.first().orig > MAX_LENGTH {
+            // Length would be too big.
+            false
+        } else if self.delta() != fp.delta() {
+            // Different deltas in this block.
+            false
+        } else if let Some(stride) = self.stride() {
+            // Strides must match and be power of 2.
+            stride == self.last().stride_to(fp)
+        } else {
+            // No stride yet.
+            // Stride must be power of 2.
+            self.last().stride_to(fp).is_power_of_two()
+        }
+    }
+
+    pub(crate) fn append(&mut self, fp: FoldPair) {
+        std::debug_assert!(self.can_append(fp));
+        self.folds.push(fp)
     }
 }

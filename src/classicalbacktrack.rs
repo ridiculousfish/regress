@@ -1018,7 +1018,7 @@ impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, Utf8Input<'t>> {
     type AsAscii = BacktrackExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
-        let input = Utf8Input::new(text);
+        let input = Utf8Input::new(text, re.flags.unicode);
         Self {
             input,
             matcher: MatchAttempter::new(re, input.left_end()),

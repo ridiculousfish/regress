@@ -1624,3 +1624,18 @@ fn test_invalid_quantifier_loop() {
 fn test_invalid_quantifier_loop_tc(tc: TestConfig) {
     tc.test_match_fails(r#"\c*"#, "", "\n");
 }
+
+#[test]
+fn test_unicode_folding() {
+    test_with_configs_no_ascii(test_unicode_folding_tc)
+}
+
+/// 262 test/language/literals/regexp/u-case-mapping.js
+fn test_unicode_folding_tc(tc: TestConfig) {
+    tc.test_match_fails(r"\u{212A}", "i", "k");
+    tc.test_match_fails(r"\u{212A}", "i", "K");
+    tc.test_match_fails(r"\u{212A}", "u", "k");
+    tc.test_match_fails(r"\u{212A}", "u", "K");
+    tc.test_match_succeeds(r"\u{212A}", "iu", "k");
+    tc.test_match_succeeds(r"\u{212A}", "iu", "K");
+}

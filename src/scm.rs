@@ -36,7 +36,7 @@ impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Char
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
-            Some(c2) => c2 == self.c || Input::CharProps::fold(c2) == self.c,
+            Some(c2) => c2 == self.c || input.fold(c2) == self.c,
             _ => false,
         }
     }

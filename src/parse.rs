@@ -198,7 +198,7 @@ where
     /// Fold a character if icase.
     fn fold_if_icase(&self, c: u32) -> u32 {
         if self.flags.icase {
-            unicode::fold(c)
+            unicode::fold_code_point(c, self.flags.unicode)
         } else {
             c
         }
@@ -1234,7 +1234,12 @@ where
         debug_assert!(self.loop_count <= MAX_LOOPS as u32);
         debug_assert!(self.group_count as usize <= MAX_CAPTURE_GROUPS);
         if self.has_lookbehind {
-            ir::walk_mut(false, &mut re.node, &mut ir::Node::reverse_cats);
+            ir::walk_mut(
+                false,
+                re.flags.unicode,
+                &mut re.node,
+                &mut ir::Node::reverse_cats,
+            );
         }
         Ok(re)
     }
