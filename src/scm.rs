@@ -173,6 +173,7 @@ impl<'a, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir>
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
             Some(c2) => is_character_class(c2.into(), self.property_escape),
+            _ if self.property_escape.is_any() => true,
             _ => false,
         }
     }

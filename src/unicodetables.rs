@@ -760,11 +760,9 @@ pub(crate) const ALPHABETIC: [CodePointRange; 756] = [
     CodePointRange::from(205648, 96),
 ];
 
-/// Return whether c has the 'Alphabetic' Unicode property.
-pub(crate) fn is_alphabetic(c: char) -> bool {
-    ALPHABETIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Alphabetic' Unicode property.
+pub(crate) fn is_alphabetic(cp: u32) -> bool {
+    ALPHABETIC.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const CASE_IGNORABLE: [CodePointRange; 437] = [
@@ -1207,10 +1205,10 @@ pub(crate) const CASE_IGNORABLE: [CodePointRange; 437] = [
     CodePointRange::from(917760, 240),
 ];
 
-/// Return whether c has the 'Case_Ignorable' Unicode property.
-pub(crate) fn is_case_ignorable(c: char) -> bool {
+/// Return whether cp has the 'Case_Ignorable' Unicode property.
+pub(crate) fn is_case_ignorable(cp: u32) -> bool {
     CASE_IGNORABLE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -1374,9 +1372,9 @@ pub(crate) const CASED: [CodePointRange; 157] = [
     CodePointRange::from(127344, 26),
 ];
 
-/// Return whether c has the 'Cased' Unicode property.
-pub(crate) fn is_cased(c: char) -> bool {
-    CASED.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
+/// Return whether cp has the 'Cased' Unicode property.
+pub(crate) fn is_cased(cp: u32) -> bool {
+    CASED.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const CHANGES_WHEN_CASEFOLDED: [CodePointRange; 622] = [
@@ -2004,10 +2002,10 @@ pub(crate) const CHANGES_WHEN_CASEFOLDED: [CodePointRange; 622] = [
     CodePointRange::from(125184, 34),
 ];
 
-/// Return whether c has the 'Changes_When_Casefolded' Unicode property.
-pub(crate) fn is_changes_when_casefolded(c: char) -> bool {
+/// Return whether cp has the 'Changes_When_Casefolded' Unicode property.
+pub(crate) fn is_changes_when_casefolded(cp: u32) -> bool {
     CHANGES_WHEN_CASEFOLDED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -2145,10 +2143,10 @@ pub(crate) const CHANGES_WHEN_CASEMAPPED: [CodePointRange; 131] = [
     CodePointRange::from(125184, 68),
 ];
 
-/// Return whether c has the 'Changes_When_Casemapped' Unicode property.
-pub(crate) fn is_changes_when_casemapped(c: char) -> bool {
+/// Return whether cp has the 'Changes_When_Casemapped' Unicode property.
+pub(crate) fn is_changes_when_casemapped(cp: u32) -> bool {
     CHANGES_WHEN_CASEMAPPED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -2764,10 +2762,10 @@ pub(crate) const CHANGES_WHEN_LOWERCASED: [CodePointRange; 609] = [
     CodePointRange::from(125184, 34),
 ];
 
-/// Return whether c has the 'Changes_When_Lowercased' Unicode property.
-pub(crate) fn is_changes_when_lowercased(c: char) -> bool {
+/// Return whether cp has the 'Changes_When_Lowercased' Unicode property.
+pub(crate) fn is_changes_when_lowercased(cp: u32) -> bool {
     CHANGES_WHEN_LOWERCASED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -3400,10 +3398,10 @@ pub(crate) const CHANGES_WHEN_TITLECASED: [CodePointRange; 626] = [
     CodePointRange::from(125218, 34),
 ];
 
-/// Return whether c has the 'Changes_When_Titlecased' Unicode property.
-pub(crate) fn is_changes_when_titlecased(c: char) -> bool {
+/// Return whether cp has the 'Changes_When_Titlecased' Unicode property.
+pub(crate) fn is_changes_when_titlecased(cp: u32) -> bool {
     CHANGES_WHEN_TITLECASED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -4037,10 +4035,10 @@ pub(crate) const CHANGES_WHEN_UPPERCASED: [CodePointRange; 627] = [
     CodePointRange::from(125218, 34),
 ];
 
-/// Return whether c has the 'Changes_When_Uppercased' Unicode property.
-pub(crate) fn is_changes_when_uppercased(c: char) -> bool {
+/// Return whether cp has the 'Changes_When_Uppercased' Unicode property.
+pub(crate) fn is_changes_when_uppercased(cp: u32) -> bool {
     CHANGES_WHEN_UPPERCASED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -4064,10 +4062,10 @@ pub(crate) const DEFAULT_IGNORABLE_CODE_POINT: [CodePointRange; 17] = [
     CodePointRange::from(917504, 4096),
 ];
 
-/// Return whether c has the 'Default_Ignorable_Code_Point' Unicode property.
-pub(crate) fn is_default_ignorable_code_point(c: char) -> bool {
+/// Return whether cp has the 'Default_Ignorable_Code_Point' Unicode property.
+pub(crate) fn is_default_ignorable_code_point(cp: u32) -> bool {
     DEFAULT_IGNORABLE_CODE_POINT
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -4974,10 +4972,10 @@ pub(crate) const GRAPHEME_BASE: [CodePointRange; 900] = [
     CodePointRange::from(205648, 96),
 ];
 
-/// Return whether c has the 'Grapheme_Base' Unicode property.
-pub(crate) fn is_grapheme_base(c: char) -> bool {
+/// Return whether cp has the 'Grapheme_Base' Unicode property.
+pub(crate) fn is_grapheme_base(cp: u32) -> bool {
     GRAPHEME_BASE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -5347,10 +5345,10 @@ pub(crate) const GRAPHEME_EXTEND: [CodePointRange; 363] = [
     CodePointRange::from(917760, 240),
 ];
 
-/// Return whether c has the 'Grapheme_Extend' Unicode property.
-pub(crate) fn is_grapheme_extend(c: char) -> bool {
+/// Return whether cp has the 'Grapheme_Extend' Unicode property.
+pub(crate) fn is_grapheme_extend(cp: u32) -> bool {
     GRAPHEME_EXTEND
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -6149,11 +6147,9 @@ pub(crate) const ID_CONTINUE: [CodePointRange; 792] = [
     CodePointRange::from(917760, 240),
 ];
 
-/// Return whether c has the 'ID_Continue' Unicode property.
-pub(crate) fn is_id_continue(c: char) -> bool {
-    ID_CONTINUE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'ID_Continue' Unicode property.
+pub(crate) fn is_id_continue(cp: u32) -> bool {
+    ID_CONTINUE.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const ID_START: [CodePointRange; 683] = [
@@ -6842,11 +6838,9 @@ pub(crate) const ID_START: [CodePointRange; 683] = [
     CodePointRange::from(205648, 96),
 ];
 
-/// Return whether c has the 'ID_Start' Unicode property.
-pub(crate) fn is_id_start(c: char) -> bool {
-    ID_START
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'ID_Start' Unicode property.
+pub(crate) fn is_id_start(cp: u32) -> bool {
+    ID_START.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const MATH: [CodePointRange; 138] = [
@@ -6990,9 +6984,9 @@ pub(crate) const MATH: [CodePointRange; 138] = [
     CodePointRange::from(126704, 2),
 ];
 
-/// Return whether c has the 'Math' Unicode property.
-pub(crate) fn is_math(c: char) -> bool {
-    MATH.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
+/// Return whether cp has the 'Math' Unicode property.
+pub(crate) fn is_math(cp: u32) -> bool {
+    MATH.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const XID_CONTINUE: [CodePointRange; 799] = [
@@ -7797,10 +7791,10 @@ pub(crate) const XID_CONTINUE: [CodePointRange; 799] = [
     CodePointRange::from(917760, 240),
 ];
 
-/// Return whether c has the 'XID_Continue' Unicode property.
-pub(crate) fn is_xid_continue(c: char) -> bool {
+/// Return whether cp has the 'XID_Continue' Unicode property.
+pub(crate) fn is_xid_continue(cp: u32) -> bool {
     XID_CONTINUE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -8497,11 +8491,9 @@ pub(crate) const XID_START: [CodePointRange; 690] = [
     CodePointRange::from(205648, 96),
 ];
 
-/// Return whether c has the 'XID_Start' Unicode property.
-pub(crate) fn is_xid_start(c: char) -> bool {
-    XID_START
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'XID_Start' Unicode property.
+pub(crate) fn is_xid_start(cp: u32) -> bool {
+    XID_START.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const ASCII_HEX_DIGIT: [CodePointRange; 3] = [
@@ -8510,10 +8502,10 @@ pub(crate) const ASCII_HEX_DIGIT: [CodePointRange; 3] = [
     CodePointRange::from(97, 6),
 ];
 
-/// Return whether c has the 'ASCII_Hex_Digit' Unicode property.
-pub(crate) fn is_ascii_hex_digit(c: char) -> bool {
+/// Return whether cp has the 'ASCII_Hex_Digit' Unicode property.
+pub(crate) fn is_ascii_hex_digit(cp: u32) -> bool {
     ASCII_HEX_DIGIT
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -8524,10 +8516,10 @@ pub(crate) const BIDI_CONTROL: [CodePointRange; 4] = [
     CodePointRange::from(8294, 4),
 ];
 
-/// Return whether c has the 'Bidi_Control' Unicode property.
-pub(crate) fn is_bidi_control(c: char) -> bool {
+/// Return whether cp has the 'Bidi_Control' Unicode property.
+pub(crate) fn is_bidi_control(cp: u32) -> bool {
     BIDI_CONTROL
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -8557,9 +8549,9 @@ pub(crate) const DASH: [CodePointRange; 23] = [
     CodePointRange::from(69293, 1),
 ];
 
-/// Return whether c has the 'Dash' Unicode property.
-pub(crate) fn is_dash(c: char) -> bool {
-    DASH.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
+/// Return whether cp has the 'Dash' Unicode property.
+pub(crate) fn is_dash(cp: u32) -> bool {
+    DASH.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const DEPRECATED: [CodePointRange; 8] = [
@@ -8573,11 +8565,9 @@ pub(crate) const DEPRECATED: [CodePointRange; 8] = [
     CodePointRange::from(917505, 1),
 ];
 
-/// Return whether c has the 'Deprecated' Unicode property.
-pub(crate) fn is_deprecated(c: char) -> bool {
-    DEPRECATED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Deprecated' Unicode property.
+pub(crate) fn is_deprecated(cp: u32) -> bool {
+    DEPRECATED.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const DIACRITIC: [CodePointRange; 195] = [
@@ -8778,11 +8768,9 @@ pub(crate) const DIACRITIC: [CodePointRange; 195] = [
     CodePointRange::from(125256, 3),
 ];
 
-/// Return whether c has the 'Diacritic' Unicode property.
-pub(crate) fn is_diacritic(c: char) -> bool {
-    DIACRITIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Diacritic' Unicode property.
+pub(crate) fn is_diacritic(cp: u32) -> bool {
+    DIACRITIC.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const EXTENDER: [CodePointRange; 33] = [
@@ -8821,11 +8809,9 @@ pub(crate) const EXTENDER: [CodePointRange; 33] = [
     CodePointRange::from(125252, 3),
 ];
 
-/// Return whether c has the 'Extender' Unicode property.
-pub(crate) fn is_extender(c: char) -> bool {
-    EXTENDER
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Extender' Unicode property.
+pub(crate) fn is_extender(cp: u32) -> bool {
+    EXTENDER.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const HEX_DIGIT: [CodePointRange; 6] = [
@@ -8837,11 +8823,9 @@ pub(crate) const HEX_DIGIT: [CodePointRange; 6] = [
     CodePointRange::from(65345, 6),
 ];
 
-/// Return whether c has the 'Hex_Digit' Unicode property.
-pub(crate) fn is_hex_digit(c: char) -> bool {
-    HEX_DIGIT
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Hex_Digit' Unicode property.
+pub(crate) fn is_hex_digit(cp: u32) -> bool {
+    HEX_DIGIT.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const IDS_BINARY_OPERATOR: [CodePointRange; 2] = [
@@ -8849,19 +8833,19 @@ pub(crate) const IDS_BINARY_OPERATOR: [CodePointRange; 2] = [
     CodePointRange::from(12276, 8),
 ];
 
-/// Return whether c has the 'IDS_Binary_Operator' Unicode property.
-pub(crate) fn is_ids_binary_operator(c: char) -> bool {
+/// Return whether cp has the 'IDS_Binary_Operator' Unicode property.
+pub(crate) fn is_ids_binary_operator(cp: u32) -> bool {
     IDS_BINARY_OPERATOR
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
 pub(crate) const IDS_TRINARY_OPERATOR: [CodePointRange; 1] = [CodePointRange::from(12274, 2)];
 
-/// Return whether c has the 'IDS_Trinary_Operator' Unicode property.
-pub(crate) fn is_ids_trinary_operator(c: char) -> bool {
+/// Return whether cp has the 'IDS_Trinary_Operator' Unicode property.
+pub(crate) fn is_ids_trinary_operator(cp: u32) -> bool {
     IDS_TRINARY_OPERATOR
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -8910,19 +8894,17 @@ pub(crate) const IDEOGRAPHIC: [CodePointRange; 42] = [
     CodePointRange::from(205648, 96),
 ];
 
-/// Return whether c has the 'Ideographic' Unicode property.
-pub(crate) fn is_ideographic(c: char) -> bool {
-    IDEOGRAPHIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Ideographic' Unicode property.
+pub(crate) fn is_ideographic(cp: u32) -> bool {
+    IDEOGRAPHIC.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const JOIN_CONTROL: [CodePointRange; 1] = [CodePointRange::from(8204, 2)];
 
-/// Return whether c has the 'Join_Control' Unicode property.
-pub(crate) fn is_join_control(c: char) -> bool {
+/// Return whether cp has the 'Join_Control' Unicode property.
+pub(crate) fn is_join_control(cp: u32) -> bool {
     JOIN_CONTROL
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -8936,10 +8918,10 @@ pub(crate) const LOGICAL_ORDER_EXCEPTION: [CodePointRange; 7] = [
     CodePointRange::from(43707, 2),
 ];
 
-/// Return whether c has the 'Logical_Order_Exception' Unicode property.
-pub(crate) fn is_logical_order_exception(c: char) -> bool {
+/// Return whether cp has the 'Logical_Order_Exception' Unicode property.
+pub(crate) fn is_logical_order_exception(cp: u32) -> bool {
     LOGICAL_ORDER_EXCEPTION
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -9617,11 +9599,9 @@ pub(crate) const LOWERCASE: [CodePointRange; 671] = [
     CodePointRange::from(125218, 34),
 ];
 
-/// Return whether c has the 'Lowercase' Unicode property.
-pub(crate) fn is_lowercase(c: char) -> bool {
-    LOWERCASE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Lowercase' Unicode property.
+pub(crate) fn is_lowercase(cp: u32) -> bool {
+    LOWERCASE.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const NONCHARACTER_CODE_POINT: [CodePointRangeUnpacked; 18] = [
@@ -9645,10 +9625,10 @@ pub(crate) const NONCHARACTER_CODE_POINT: [CodePointRangeUnpacked; 18] = [
     CodePointRangeUnpacked::from(1114110, 1114111),
 ];
 
-/// Return whether c has the 'Noncharacter_Code_Point' Unicode property.
-pub(crate) fn is_noncharacter_code_point(c: char) -> bool {
+/// Return whether cp has the 'Noncharacter_Code_Point' Unicode property.
+pub(crate) fn is_noncharacter_code_point(cp: u32) -> bool {
     NONCHARACTER_CODE_POINT
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -9683,10 +9663,10 @@ pub(crate) const PATTERN_SYNTAX: [CodePointRange; 28] = [
     CodePointRange::from(65093, 2),
 ];
 
-/// Return whether c has the 'Pattern_Syntax' Unicode property.
-pub(crate) fn is_pattern_syntax(c: char) -> bool {
+/// Return whether cp has the 'Pattern_Syntax' Unicode property.
+pub(crate) fn is_pattern_syntax(cp: u32) -> bool {
     PATTERN_SYNTAX
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -9698,10 +9678,10 @@ pub(crate) const PATTERN_WHITE_SPACE: [CodePointRange; 5] = [
     CodePointRange::from(8232, 2),
 ];
 
-/// Return whether c has the 'Pattern_White_Space' Unicode property.
-pub(crate) fn is_pattern_white_space(c: char) -> bool {
+/// Return whether cp has the 'Pattern_White_Space' Unicode property.
+pub(crate) fn is_pattern_white_space(cp: u32) -> bool {
     PATTERN_WHITE_SPACE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -9721,10 +9701,10 @@ pub(crate) const QUOTATION_MARK: [CodePointRange; 13] = [
     CodePointRange::from(65378, 2),
 ];
 
-/// Return whether c has the 'Quotation_Mark' Unicode property.
-pub(crate) fn is_quotation_mark(c: char) -> bool {
+/// Return whether cp has the 'Quotation_Mark' Unicode property.
+pub(crate) fn is_quotation_mark(cp: u32) -> bool {
     QUOTATION_MARK
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -9734,19 +9714,17 @@ pub(crate) const RADICAL: [CodePointRange; 3] = [
     CodePointRange::from(12032, 214),
 ];
 
-/// Return whether c has the 'Radical' Unicode property.
-pub(crate) fn is_radical(c: char) -> bool {
-    RADICAL
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Radical' Unicode property.
+pub(crate) fn is_radical(cp: u32) -> bool {
+    RADICAL.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const REGIONAL_INDICATOR: [CodePointRange; 1] = [CodePointRange::from(127462, 26)];
 
-/// Return whether c has the 'Regional_Indicator' Unicode property.
-pub(crate) fn is_regional_indicator(c: char) -> bool {
+/// Return whether cp has the 'Regional_Indicator' Unicode property.
+pub(crate) fn is_regional_indicator(cp: u32) -> bool {
     REGIONAL_INDICATOR
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -9833,10 +9811,10 @@ pub(crate) const SENTENCE_TERMINAL: [CodePointRange; 80] = [
     CodePointRange::from(121480, 1),
 ];
 
-/// Return whether c has the 'Sentence_Terminal' Unicode property.
-pub(crate) fn is_sentence_terminal(c: char) -> bool {
+/// Return whether cp has the 'Sentence_Terminal' Unicode property.
+pub(crate) fn is_sentence_terminal(cp: u32) -> bool {
     SENTENCE_TERMINAL
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -9877,11 +9855,9 @@ pub(crate) const SOFT_DOTTED: [CodePointRange; 34] = [
     CodePointRange::from(122984, 1),
 ];
 
-/// Return whether c has the 'Soft_Dotted' Unicode property.
-pub(crate) fn is_soft_dotted(c: char) -> bool {
-    SOFT_DOTTED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Soft_Dotted' Unicode property.
+pub(crate) fn is_soft_dotted(cp: u32) -> bool {
+    SOFT_DOTTED.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const TERMINAL_PUNCTUATION: [CodePointRange; 108] = [
@@ -9995,10 +9971,10 @@ pub(crate) const TERMINAL_PUNCTUATION: [CodePointRange; 108] = [
     CodePointRange::from(121479, 4),
 ];
 
-/// Return whether c has the 'Terminal_Punctuation' Unicode property.
-pub(crate) fn is_terminal_punctuation(c: char) -> bool {
+/// Return whether cp has the 'Terminal_Punctuation' Unicode property.
+pub(crate) fn is_terminal_punctuation(cp: u32) -> bool {
     TERMINAL_PUNCTUATION
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -10042,10 +10018,10 @@ pub(crate) const UNIFIED_IDEOGRAPH: [CodePointRange; 37] = [
     CodePointRange::from(205648, 96),
 ];
 
-/// Return whether c has the 'Unified_Ideograph' Unicode property.
-pub(crate) fn is_unified_ideograph(c: char) -> bool {
+/// Return whether cp has the 'Unified_Ideograph' Unicode property.
+pub(crate) fn is_unified_ideograph(cp: u32) -> bool {
     UNIFIED_IDEOGRAPH
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -10703,11 +10679,9 @@ pub(crate) const UPPERCASE: [CodePointRange; 651] = [
     CodePointRange::from(127344, 26),
 ];
 
-/// Return whether c has the 'Uppercase' Unicode property.
-pub(crate) fn is_uppercase(c: char) -> bool {
-    UPPERCASE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Uppercase' Unicode property.
+pub(crate) fn is_uppercase(cp: u32) -> bool {
+    UPPERCASE.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const VARIATION_SELECTOR: [CodePointRange; 4] = [
@@ -10717,10 +10691,10 @@ pub(crate) const VARIATION_SELECTOR: [CodePointRange; 4] = [
     CodePointRange::from(917760, 240),
 ];
 
-/// Return whether c has the 'Variation_Selector' Unicode property.
-pub(crate) fn is_variation_selector(c: char) -> bool {
+/// Return whether cp has the 'Variation_Selector' Unicode property.
+pub(crate) fn is_variation_selector(cp: u32) -> bool {
     VARIATION_SELECTOR
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -10737,11 +10711,9 @@ pub(crate) const WHITE_SPACE: [CodePointRange; 10] = [
     CodePointRange::from(12288, 1),
 ];
 
-/// Return whether c has the 'White_Space' Unicode property.
-pub(crate) fn is_white_space(c: char) -> bool {
-    WHITE_SPACE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'White_Space' Unicode property.
+pub(crate) fn is_white_space(cp: u32) -> bool {
+    WHITE_SPACE.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const EMOJI: [CodePointRange; 151] = [
@@ -10898,9 +10870,9 @@ pub(crate) const EMOJI: [CodePointRange; 151] = [
     CodePointRange::from(129776, 9),
 ];
 
-/// Return whether c has the 'Emoji' Unicode property.
-pub(crate) fn is_emoji(c: char) -> bool {
-    EMOJI.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
+/// Return whether cp has the 'Emoji' Unicode property.
+pub(crate) fn is_emoji(cp: u32) -> bool {
+    EMOJI.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const EMOJI_COMPONENT: [CodePointRange; 10] = [
@@ -10916,19 +10888,19 @@ pub(crate) const EMOJI_COMPONENT: [CodePointRange; 10] = [
     CodePointRange::from(917536, 96),
 ];
 
-/// Return whether c has the 'Emoji_Component' Unicode property.
-pub(crate) fn is_emoji_component(c: char) -> bool {
+/// Return whether cp has the 'Emoji_Component' Unicode property.
+pub(crate) fn is_emoji_component(cp: u32) -> bool {
     EMOJI_COMPONENT
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
 pub(crate) const EMOJI_MODIFIER: [CodePointRange; 1] = [CodePointRange::from(127995, 5)];
 
-/// Return whether c has the 'Emoji_Modifier' Unicode property.
-pub(crate) fn is_emoji_modifier(c: char) -> bool {
+/// Return whether cp has the 'Emoji_Modifier' Unicode property.
+pub(crate) fn is_emoji_modifier(cp: u32) -> bool {
     EMOJI_MODIFIER
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -10975,10 +10947,10 @@ pub(crate) const EMOJI_MODIFIER_BASE: [CodePointRange; 40] = [
     CodePointRange::from(129776, 9),
 ];
 
-/// Return whether c has the 'Emoji_Modifier_Base' Unicode property.
-pub(crate) fn is_emoji_modifier_base(c: char) -> bool {
+/// Return whether cp has the 'Emoji_Modifier_Base' Unicode property.
+pub(crate) fn is_emoji_modifier_base(cp: u32) -> bool {
     EMOJI_MODIFIER_BASE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -11066,10 +11038,10 @@ pub(crate) const EMOJI_PRESENTATION: [CodePointRange; 81] = [
     CodePointRange::from(129776, 9),
 ];
 
-/// Return whether c has the 'Emoji_Presentation' Unicode property.
-pub(crate) fn is_emoji_presentation(c: char) -> bool {
+/// Return whether cp has the 'Emoji_Presentation' Unicode property.
+pub(crate) fn is_emoji_presentation(cp: u32) -> bool {
     EMOJI_PRESENTATION
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -11154,10 +11126,10 @@ pub(crate) const EXTENDED_PICTOGRAPHIC: [CodePointRange; 78] = [
     CodePointRange::from(130048, 1022),
 ];
 
-/// Return whether c has the 'Extended_Pictographic' Unicode property.
-pub(crate) fn is_extended_pictographic(c: char) -> bool {
+/// Return whether cp has the 'Extended_Pictographic' Unicode property.
+pub(crate) fn is_extended_pictographic(cp: u32) -> bool {
     EXTENDED_PICTOGRAPHIC
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -12003,10 +11975,10 @@ pub(crate) const CHANGES_WHEN_NFKC_CASEFOLDED: [CodePointRange; 839] = [
     CodePointRange::from(917504, 4096),
 ];
 
-/// Return whether c has the 'Changes_When_NFKC_Casefolded' Unicode property.
-pub(crate) fn is_changes_when_nfkc_casefolded(c: char) -> bool {
+/// Return whether cp has the 'Changes_When_NFKC_Casefolded' Unicode property.
+pub(crate) fn is_changes_when_nfkc_casefolded(cp: u32) -> bool {
     CHANGES_WHEN_NFKC_CASEFOLDED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -12127,90 +12099,88 @@ pub(crate) const BIDI_MIRRORED: [CodePointRange; 114] = [
     CodePointRange::from(120771, 1),
 ];
 
-/// Return whether c has the 'Bidi_Mirrored' Unicode property.
-pub(crate) fn is_bidi_mirrored(c: char) -> bool {
+/// Return whether cp has the 'Bidi_Mirrored' Unicode property.
+pub(crate) fn is_bidi_mirrored(cp: u32) -> bool {
     BIDI_MIRRORED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
 pub(crate) const ASCII: [CodePointRange; 1] = [CodePointRange::from(0, 128)];
 
-/// Return whether c has the 'ASCII' Unicode property.
-pub(crate) fn is_ascii(c: char) -> bool {
-    ASCII.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
+/// Return whether cp has the 'ASCII' Unicode property.
+pub(crate) fn is_ascii(cp: u32) -> bool {
+    ASCII.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const ANY: [CodePointRangeUnpacked; 1] = [CodePointRangeUnpacked::from(0, 1114111)];
 
-/// Return whether c has the 'Any' Unicode property.
-pub(crate) fn is_any(c: char) -> bool {
-    ANY.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()
+/// Return whether cp has the 'Any' Unicode property.
+pub(crate) fn is_any(cp: u32) -> bool {
+    ANY.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
-/// Return whether c has the 'Any' Unicode property.
-pub(crate) fn is_assigned(c: char) -> bool {
-    UNASSIGNED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_err()
+/// Return whether cp has the 'Any' Unicode property.
+pub(crate) fn is_assigned(cp: u32) -> bool {
+    UNASSIGNED.binary_search_by(|&cpr| cpr.compare(cp)).is_err()
 }
 
-pub(crate) fn is_property_binary(c: char, value: &UnicodePropertyBinary) -> bool {
+pub(crate) fn is_property_binary(cp: u32, value: &UnicodePropertyBinary) -> bool {
     use UnicodePropertyBinary::*;
     match value {
-        Alphabetic => is_alphabetic(c),
-        CaseIgnorable => is_case_ignorable(c),
-        Cased => is_cased(c),
-        ChangesWhenCasefolded => is_changes_when_casefolded(c),
-        ChangesWhenCasemapped => is_changes_when_casemapped(c),
-        ChangesWhenLowercased => is_changes_when_lowercased(c),
-        ChangesWhenTitlecased => is_changes_when_titlecased(c),
-        ChangesWhenUppercased => is_changes_when_uppercased(c),
-        DefaultIgnorableCodePoint => is_default_ignorable_code_point(c),
-        GraphemeBase => is_grapheme_base(c),
-        GraphemeExtend => is_grapheme_extend(c),
-        IDContinue => is_id_continue(c),
-        IDStart => is_id_start(c),
-        Math => is_math(c),
-        XIDContinue => is_xid_continue(c),
-        XIDStart => is_xid_start(c),
-        ASCIIHexDigit => is_ascii_hex_digit(c),
-        BidiControl => is_bidi_control(c),
-        Dash => is_dash(c),
-        Deprecated => is_deprecated(c),
-        Diacritic => is_diacritic(c),
-        Extender => is_extender(c),
-        HexDigit => is_hex_digit(c),
-        IDSBinaryOperator => is_ids_binary_operator(c),
-        IDSTrinaryOperator => is_ids_trinary_operator(c),
-        Ideographic => is_ideographic(c),
-        JoinControl => is_join_control(c),
-        LogicalOrderException => is_logical_order_exception(c),
-        Lowercase => is_lowercase(c),
-        NoncharacterCodePoint => is_noncharacter_code_point(c),
-        PatternSyntax => is_pattern_syntax(c),
-        PatternWhiteSpace => is_pattern_white_space(c),
-        QuotationMark => is_quotation_mark(c),
-        Radical => is_radical(c),
-        RegionalIndicator => is_regional_indicator(c),
-        SentenceTerminal => is_sentence_terminal(c),
-        SoftDotted => is_soft_dotted(c),
-        TerminalPunctuation => is_terminal_punctuation(c),
-        UnifiedIdeograph => is_unified_ideograph(c),
-        Uppercase => is_uppercase(c),
-        VariationSelector => is_variation_selector(c),
-        WhiteSpace => is_white_space(c),
-        Emoji => is_emoji(c),
-        EmojiComponent => is_emoji_component(c),
-        EmojiModifier => is_emoji_modifier(c),
-        EmojiModifierBase => is_emoji_modifier_base(c),
-        EmojiPresentation => is_emoji_presentation(c),
-        ExtendedPictographic => is_extended_pictographic(c),
-        ChangesWhenNFKCCasefolded => is_changes_when_nfkc_casefolded(c),
-        BidiMirrored => is_bidi_mirrored(c),
-        Ascii => is_ascii(c),
-        Any => is_any(c),
-        Assigned => is_assigned(c),
+        Alphabetic => is_alphabetic(cp),
+        CaseIgnorable => is_case_ignorable(cp),
+        Cased => is_cased(cp),
+        ChangesWhenCasefolded => is_changes_when_casefolded(cp),
+        ChangesWhenCasemapped => is_changes_when_casemapped(cp),
+        ChangesWhenLowercased => is_changes_when_lowercased(cp),
+        ChangesWhenTitlecased => is_changes_when_titlecased(cp),
+        ChangesWhenUppercased => is_changes_when_uppercased(cp),
+        DefaultIgnorableCodePoint => is_default_ignorable_code_point(cp),
+        GraphemeBase => is_grapheme_base(cp),
+        GraphemeExtend => is_grapheme_extend(cp),
+        IDContinue => is_id_continue(cp),
+        IDStart => is_id_start(cp),
+        Math => is_math(cp),
+        XIDContinue => is_xid_continue(cp),
+        XIDStart => is_xid_start(cp),
+        ASCIIHexDigit => is_ascii_hex_digit(cp),
+        BidiControl => is_bidi_control(cp),
+        Dash => is_dash(cp),
+        Deprecated => is_deprecated(cp),
+        Diacritic => is_diacritic(cp),
+        Extender => is_extender(cp),
+        HexDigit => is_hex_digit(cp),
+        IDSBinaryOperator => is_ids_binary_operator(cp),
+        IDSTrinaryOperator => is_ids_trinary_operator(cp),
+        Ideographic => is_ideographic(cp),
+        JoinControl => is_join_control(cp),
+        LogicalOrderException => is_logical_order_exception(cp),
+        Lowercase => is_lowercase(cp),
+        NoncharacterCodePoint => is_noncharacter_code_point(cp),
+        PatternSyntax => is_pattern_syntax(cp),
+        PatternWhiteSpace => is_pattern_white_space(cp),
+        QuotationMark => is_quotation_mark(cp),
+        Radical => is_radical(cp),
+        RegionalIndicator => is_regional_indicator(cp),
+        SentenceTerminal => is_sentence_terminal(cp),
+        SoftDotted => is_soft_dotted(cp),
+        TerminalPunctuation => is_terminal_punctuation(cp),
+        UnifiedIdeograph => is_unified_ideograph(cp),
+        Uppercase => is_uppercase(cp),
+        VariationSelector => is_variation_selector(cp),
+        WhiteSpace => is_white_space(cp),
+        Emoji => is_emoji(cp),
+        EmojiComponent => is_emoji_component(cp),
+        EmojiModifier => is_emoji_modifier(cp),
+        EmojiModifierBase => is_emoji_modifier_base(cp),
+        EmojiPresentation => is_emoji_presentation(cp),
+        ExtendedPictographic => is_extended_pictographic(cp),
+        ChangesWhenNFKCCasefolded => is_changes_when_nfkc_casefolded(cp),
+        BidiMirrored => is_bidi_mirrored(cp),
+        Ascii => is_ascii(cp),
+        Any => is_any(cp),
+        Assigned => is_assigned(cp),
     }
 }
 
@@ -12614,10 +12584,10 @@ pub(crate) const CLOSE_PUNCTUATION: [CodePointRange; 76] = [
     CodePointRange::from(65379, 1),
 ];
 
-/// Return whether c has the 'Close_Punctuation' Unicode property.
-pub(crate) fn is_close_punctuation(c: char) -> bool {
+/// Return whether cp has the 'Close_Punctuation' Unicode property.
+pub(crate) fn is_close_punctuation(cp: u32) -> bool {
     CLOSE_PUNCTUATION
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -12630,21 +12600,19 @@ pub(crate) const CONNECTOR_PUNCTUATION: [CodePointRange; 6] = [
     CodePointRange::from(65343, 1),
 ];
 
-/// Return whether c has the 'Connector_Punctuation' Unicode property.
-pub(crate) fn is_connector_punctuation(c: char) -> bool {
+/// Return whether cp has the 'Connector_Punctuation' Unicode property.
+pub(crate) fn is_connector_punctuation(cp: u32) -> bool {
     CONNECTOR_PUNCTUATION
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
 pub(crate) const CONTROL: [CodePointRange; 2] =
     [CodePointRange::from(0, 32), CodePointRange::from(127, 33)];
 
-/// Return whether c has the 'Control' Unicode property.
-pub(crate) fn is_control(c: char) -> bool {
-    CONTROL
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Control' Unicode property.
+pub(crate) fn is_control(cp: u32) -> bool {
+    CONTROL.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const CURRENCY_SYMBOL: [CodePointRange; 21] = [
@@ -12671,10 +12639,10 @@ pub(crate) const CURRENCY_SYMBOL: [CodePointRange; 21] = [
     CodePointRange::from(126128, 1),
 ];
 
-/// Return whether c has the 'Currency_Symbol' Unicode property.
-pub(crate) fn is_currency_symbol(c: char) -> bool {
+/// Return whether cp has the 'Currency_Symbol' Unicode property.
+pub(crate) fn is_currency_symbol(cp: u32) -> bool {
     CURRENCY_SYMBOL
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -12700,10 +12668,10 @@ pub(crate) const DASH_PUNCTUATION: [CodePointRange; 19] = [
     CodePointRange::from(69293, 1),
 ];
 
-/// Return whether c has the 'Dash_Punctuation' Unicode property.
-pub(crate) fn is_dash_punctuation(c: char) -> bool {
+/// Return whether cp has the 'Dash_Punctuation' Unicode property.
+pub(crate) fn is_dash_punctuation(cp: u32) -> bool {
     DASH_PUNCTUATION
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -12774,10 +12742,10 @@ pub(crate) const DECIMAL_NUMBER: [CodePointRange; 64] = [
     CodePointRange::from(130032, 10),
 ];
 
-/// Return whether c has the 'Decimal_Number' Unicode property.
-pub(crate) fn is_decimal_number(c: char) -> bool {
+/// Return whether cp has the 'Decimal_Number' Unicode property.
+pub(crate) fn is_decimal_number(cp: u32) -> bool {
     DECIMAL_NUMBER
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -12789,10 +12757,10 @@ pub(crate) const ENCLOSING_MARK: [CodePointRange; 5] = [
     CodePointRange::from(42608, 3),
 ];
 
-/// Return whether c has the 'Enclosing_Mark' Unicode property.
-pub(crate) fn is_enclosing_mark(c: char) -> bool {
+/// Return whether cp has the 'Enclosing_Mark' Unicode property.
+pub(crate) fn is_enclosing_mark(cp: u32) -> bool {
     ENCLOSING_MARK
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -12809,10 +12777,10 @@ pub(crate) const FINAL_PUNCTUATION: [CodePointRange; 10] = [
     CodePointRange::from(11809, 1),
 ];
 
-/// Return whether c has the 'Final_Punctuation' Unicode property.
-pub(crate) fn is_final_punctuation(c: char) -> bool {
+/// Return whether cp has the 'Final_Punctuation' Unicode property.
+pub(crate) fn is_final_punctuation(cp: u32) -> bool {
     FINAL_PUNCTUATION
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -12840,11 +12808,9 @@ pub(crate) const FORMAT: [CodePointRange; 21] = [
     CodePointRange::from(917536, 96),
 ];
 
-/// Return whether c has the 'Format' Unicode property.
-pub(crate) fn is_format(c: char) -> bool {
-    FORMAT
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Format' Unicode property.
+pub(crate) fn is_format(cp: u32) -> bool {
+    FORMAT.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const INITIAL_PUNCTUATION: [CodePointRange; 11] = [
@@ -12861,10 +12827,10 @@ pub(crate) const INITIAL_PUNCTUATION: [CodePointRange; 11] = [
     CodePointRange::from(11808, 1),
 ];
 
-/// Return whether c has the 'Initial_Punctuation' Unicode property.
-pub(crate) fn is_initial_punctuation(c: char) -> bool {
+/// Return whether cp has the 'Initial_Punctuation' Unicode property.
+pub(crate) fn is_initial_punctuation(cp: u32) -> bool {
     INITIAL_PUNCTUATION
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -12883,19 +12849,19 @@ pub(crate) const LETTER_NUMBER: [CodePointRange; 12] = [
     CodePointRange::from(74752, 111),
 ];
 
-/// Return whether c has the 'Letter_Number' Unicode property.
-pub(crate) fn is_letter_number(c: char) -> bool {
+/// Return whether cp has the 'Letter_Number' Unicode property.
+pub(crate) fn is_letter_number(cp: u32) -> bool {
     LETTER_NUMBER
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
 pub(crate) const LINE_SEPARATOR: [CodePointRange; 1] = [CodePointRange::from(8232, 1)];
 
-/// Return whether c has the 'Line_Separator' Unicode property.
-pub(crate) fn is_line_separator(c: char) -> bool {
+/// Return whether cp has the 'Line_Separator' Unicode property.
+pub(crate) fn is_line_separator(cp: u32) -> bool {
     LINE_SEPARATOR
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -13560,10 +13526,10 @@ pub(crate) const LOWERCASE_LETTER: [CodePointRange; 658] = [
     CodePointRange::from(125218, 34),
 ];
 
-/// Return whether c has the 'Lowercase_Letter' Unicode property.
-pub(crate) fn is_lowercase_letter(c: char) -> bool {
+/// Return whether cp has the 'Lowercase_Letter' Unicode property.
+pub(crate) fn is_lowercase_letter(cp: u32) -> bool {
     LOWERCASE_LETTER
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -13634,11 +13600,9 @@ pub(crate) const MATH_SYMBOL: [CodePointRange; 64] = [
     CodePointRange::from(126704, 2),
 ];
 
-/// Return whether c has the 'Math_Symbol' Unicode property.
-pub(crate) fn is_math_symbol(c: char) -> bool {
-    MATH_SYMBOL
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Math_Symbol' Unicode property.
+pub(crate) fn is_math_symbol(cp: u32) -> bool {
+    MATH_SYMBOL.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const MODIFIER_LETTER: [CodePointRange; 71] = [
@@ -13715,10 +13679,10 @@ pub(crate) const MODIFIER_LETTER: [CodePointRange; 71] = [
     CodePointRange::from(125259, 1),
 ];
 
-/// Return whether c has the 'Modifier_Letter' Unicode property.
-pub(crate) fn is_modifier_letter(c: char) -> bool {
+/// Return whether cp has the 'Modifier_Letter' Unicode property.
+pub(crate) fn is_modifier_letter(cp: u32) -> bool {
     MODIFIER_LETTER
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -13756,10 +13720,10 @@ pub(crate) const MODIFIER_SYMBOL: [CodePointRange; 31] = [
     CodePointRange::from(127995, 5),
 ];
 
-/// Return whether c has the 'Modifier_Symbol' Unicode property.
-pub(crate) fn is_modifier_symbol(c: char) -> bool {
+/// Return whether cp has the 'Modifier_Symbol' Unicode property.
+pub(crate) fn is_modifier_symbol(cp: u32) -> bool {
     MODIFIER_SYMBOL
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -14112,10 +14076,10 @@ pub(crate) const NONSPACING_MARK: [CodePointRange; 346] = [
     CodePointRange::from(917760, 240),
 ];
 
-/// Return whether c has the 'Nonspacing_Mark' Unicode property.
-pub(crate) fn is_nonspacing_mark(c: char) -> bool {
+/// Return whether cp has the 'Nonspacing_Mark' Unicode property.
+pub(crate) fn is_nonspacing_mark(cp: u32) -> bool {
     NONSPACING_MARK
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -14201,10 +14165,10 @@ pub(crate) const OPEN_PUNCTUATION: [CodePointRange; 79] = [
     CodePointRange::from(65378, 1),
 ];
 
-/// Return whether c has the 'Open_Punctuation' Unicode property.
-pub(crate) fn is_open_punctuation(c: char) -> bool {
+/// Return whether cp has the 'Open_Punctuation' Unicode property.
+pub(crate) fn is_open_punctuation(cp: u32) -> bool {
     OPEN_PUNCTUATION
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -14745,10 +14709,10 @@ pub(crate) const OTHER_LETTER: [CodePointRange; 534] = [
     CodePointRange::from(205648, 96),
 ];
 
-/// Return whether c has the 'Other_Letter' Unicode property.
-pub(crate) fn is_other_letter(c: char) -> bool {
+/// Return whether cp has the 'Other_Letter' Unicode property.
+pub(crate) fn is_other_letter(cp: u32) -> bool {
     OTHER_LETTER
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -14827,10 +14791,10 @@ pub(crate) const OTHER_NUMBER: [CodePointRange; 72] = [
     CodePointRange::from(127232, 13),
 ];
 
-/// Return whether c has the 'Other_Number' Unicode property.
-pub(crate) fn is_other_number(c: char) -> bool {
+/// Return whether cp has the 'Other_Number' Unicode property.
+pub(crate) fn is_other_number(cp: u32) -> bool {
     OTHER_NUMBER
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -15024,10 +14988,10 @@ pub(crate) const OTHER_PUNCTUATION: [CodePointRange; 187] = [
     CodePointRange::from(125278, 2),
 ];
 
-/// Return whether c has the 'Other_Punctuation' Unicode property.
-pub(crate) fn is_other_punctuation(c: char) -> bool {
+/// Return whether cp has the 'Other_Punctuation' Unicode property.
+pub(crate) fn is_other_punctuation(cp: u32) -> bool {
     OTHER_PUNCTUATION
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -15218,19 +15182,19 @@ pub(crate) const OTHER_SYMBOL: [CodePointRange; 184] = [
     CodePointRange::from(129940, 55),
 ];
 
-/// Return whether c has the 'Other_Symbol' Unicode property.
-pub(crate) fn is_other_symbol(c: char) -> bool {
+/// Return whether cp has the 'Other_Symbol' Unicode property.
+pub(crate) fn is_other_symbol(cp: u32) -> bool {
     OTHER_SYMBOL
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
 pub(crate) const PARAGRAPH_SEPARATOR: [CodePointRange; 1] = [CodePointRange::from(8233, 1)];
 
-/// Return whether c has the 'Paragraph_Separator' Unicode property.
-pub(crate) fn is_paragraph_separator(c: char) -> bool {
+/// Return whether cp has the 'Paragraph_Separator' Unicode property.
+pub(crate) fn is_paragraph_separator(cp: u32) -> bool {
     PARAGRAPH_SEPARATOR
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -15240,11 +15204,9 @@ pub(crate) const PRIVATE_USE: [CodePointRangeUnpacked; 3] = [
     CodePointRangeUnpacked::from(1048576, 1114109),
 ];
 
-/// Return whether c has the 'Private_Use' Unicode property.
-pub(crate) fn is_private_use(c: char) -> bool {
-    PRIVATE_USE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Private_Use' Unicode property.
+pub(crate) fn is_private_use(cp: u32) -> bool {
+    PRIVATE_USE.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const SPACE_SEPARATOR: [CodePointRange; 7] = [
@@ -15257,10 +15219,10 @@ pub(crate) const SPACE_SEPARATOR: [CodePointRange; 7] = [
     CodePointRange::from(12288, 1),
 ];
 
-/// Return whether c has the 'Space_Separator' Unicode property.
-pub(crate) fn is_space_separator(c: char) -> bool {
+/// Return whether cp has the 'Space_Separator' Unicode property.
+pub(crate) fn is_space_separator(cp: u32) -> bool {
     SPACE_SEPARATOR
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -15449,20 +15411,18 @@ pub(crate) const SPACING_MARK: [CodePointRange; 182] = [
     CodePointRange::from(119149, 6),
 ];
 
-/// Return whether c has the 'Spacing_Mark' Unicode property.
-pub(crate) fn is_spacing_mark(c: char) -> bool {
+/// Return whether cp has the 'Spacing_Mark' Unicode property.
+pub(crate) fn is_spacing_mark(cp: u32) -> bool {
     SPACING_MARK
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
 pub(crate) const SURROGATE: [CodePointRange; 1] = [CodePointRange::from(55296, 2048)];
 
-/// Return whether c has the 'Surrogate' Unicode property.
-pub(crate) fn is_surrogate(c: char) -> bool {
-    SURROGATE
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Surrogate' Unicode property.
+pub(crate) fn is_surrogate(cp: u32) -> bool {
+    SURROGATE.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const TITLECASE_LETTER: [CodePointRange; 10] = [
@@ -15478,10 +15438,10 @@ pub(crate) const TITLECASE_LETTER: [CodePointRange; 10] = [
     CodePointRange::from(8188, 1),
 ];
 
-/// Return whether c has the 'Titlecase_Letter' Unicode property.
-pub(crate) fn is_titlecase_letter(c: char) -> bool {
+/// Return whether cp has the 'Titlecase_Letter' Unicode property.
+pub(crate) fn is_titlecase_letter(cp: u32) -> bool {
     TITLECASE_LETTER
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
@@ -16195,11 +16155,9 @@ pub(crate) const UNASSIGNED: [CodePointRangeUnpacked; 707] = [
     CodePointRangeUnpacked::from(1114110, 1114111),
 ];
 
-/// Return whether c has the 'Unassigned' Unicode property.
-pub(crate) fn is_unassigned(c: char) -> bool {
-    UNASSIGNED
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
-        .is_ok()
+/// Return whether cp has the 'Unassigned' Unicode property.
+pub(crate) fn is_unassigned(cp: u32) -> bool {
+    UNASSIGNED.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()
 }
 
 pub(crate) const UPPERCASE_LETTER: [CodePointRange; 646] = [
@@ -16851,107 +16809,107 @@ pub(crate) const UPPERCASE_LETTER: [CodePointRange; 646] = [
     CodePointRange::from(125184, 34),
 ];
 
-/// Return whether c has the 'Uppercase_Letter' Unicode property.
-pub(crate) fn is_uppercase_letter(c: char) -> bool {
+/// Return whether cp has the 'Uppercase_Letter' Unicode property.
+pub(crate) fn is_uppercase_letter(cp: u32) -> bool {
     UPPERCASE_LETTER
-        .binary_search_by(|&cpr| cpr.compare(c as u32))
+        .binary_search_by(|&cpr| cpr.compare(cp))
         .is_ok()
 }
 
-/// Return whether c has the 'Cased_Letter' Unicode property.
-pub(crate) fn is_cased_letter(c: char) -> bool {
-    is_lowercase_letter(c) || is_titlecase_letter(c) || is_uppercase_letter(c)
+/// Return whether cp has the 'Cased_Letter' Unicode property.
+pub(crate) fn is_cased_letter(cp: u32) -> bool {
+    is_lowercase_letter(cp) || is_titlecase_letter(cp) || is_uppercase_letter(cp)
 }
 
-/// Return whether c has the 'Other' Unicode property.
-pub(crate) fn is_other(c: char) -> bool {
-    is_control(c) || is_format(c) || is_surrogate(c) || is_unassigned(c) || is_private_use(c)
+/// Return whether cp has the 'Other' Unicode property.
+pub(crate) fn is_other(cp: u32) -> bool {
+    is_control(cp) || is_format(cp) || is_surrogate(cp) || is_unassigned(cp) || is_private_use(cp)
 }
 
-/// Return whether c has the 'Letter' Unicode property.
-pub(crate) fn is_letter(c: char) -> bool {
-    is_lowercase_letter(c)
-        || is_modifier_letter(c)
-        || is_other_letter(c)
-        || is_titlecase_letter(c)
-        || is_uppercase_letter(c)
+/// Return whether cp has the 'Letter' Unicode property.
+pub(crate) fn is_letter(cp: u32) -> bool {
+    is_lowercase_letter(cp)
+        || is_modifier_letter(cp)
+        || is_other_letter(cp)
+        || is_titlecase_letter(cp)
+        || is_uppercase_letter(cp)
 }
 
-/// Return whether c has the 'Mark' Unicode property.
-pub(crate) fn is_mark(c: char) -> bool {
-    is_spacing_mark(c) || is_enclosing_mark(c) || is_nonspacing_mark(c)
+/// Return whether cp has the 'Mark' Unicode property.
+pub(crate) fn is_mark(cp: u32) -> bool {
+    is_spacing_mark(cp) || is_enclosing_mark(cp) || is_nonspacing_mark(cp)
 }
 
-/// Return whether c has the 'Number' Unicode property.
-pub(crate) fn is_number(c: char) -> bool {
-    is_decimal_number(c) || is_letter_number(c) || is_other_number(c)
+/// Return whether cp has the 'Number' Unicode property.
+pub(crate) fn is_number(cp: u32) -> bool {
+    is_decimal_number(cp) || is_letter_number(cp) || is_other_number(cp)
 }
 
-/// Return whether c has the 'Punctuation' Unicode property.
-pub(crate) fn is_punctuation(c: char) -> bool {
-    is_connector_punctuation(c)
-        || is_dash_punctuation(c)
-        || is_close_punctuation(c)
-        || is_final_punctuation(c)
-        || is_initial_punctuation(c)
-        || is_other_punctuation(c)
-        || is_open_punctuation(c)
+/// Return whether cp has the 'Punctuation' Unicode property.
+pub(crate) fn is_punctuation(cp: u32) -> bool {
+    is_connector_punctuation(cp)
+        || is_dash_punctuation(cp)
+        || is_close_punctuation(cp)
+        || is_final_punctuation(cp)
+        || is_initial_punctuation(cp)
+        || is_other_punctuation(cp)
+        || is_open_punctuation(cp)
 }
 
-/// Return whether c has the 'Symbol' Unicode property.
-pub(crate) fn is_symbol(c: char) -> bool {
-    is_currency_symbol(c) || is_modifier_symbol(c) || is_math_symbol(c) || is_other_symbol(c)
+/// Return whether cp has the 'Symbol' Unicode property.
+pub(crate) fn is_symbol(cp: u32) -> bool {
+    is_currency_symbol(cp) || is_modifier_symbol(cp) || is_math_symbol(cp) || is_other_symbol(cp)
 }
 
-/// Return whether c has the 'Separator' Unicode property.
-pub(crate) fn is_separator(c: char) -> bool {
-    is_line_separator(c) || is_paragraph_separator(c) || is_space_separator(c)
+/// Return whether cp has the 'Separator' Unicode property.
+pub(crate) fn is_separator(cp: u32) -> bool {
+    is_line_separator(cp) || is_paragraph_separator(cp) || is_space_separator(cp)
 }
 
 pub(crate) fn is_property_value_general_category(
-    c: char,
+    cp: u32,
     value: &UnicodePropertyValueGeneralCategory,
 ) -> bool {
     use UnicodePropertyValueGeneralCategory::*;
     match value {
-        ClosePunctuation => is_close_punctuation(c),
-        ConnectorPunctuation => is_connector_punctuation(c),
-        Control => is_control(c),
-        CurrencySymbol => is_currency_symbol(c),
-        DashPunctuation => is_dash_punctuation(c),
-        DecimalNumber => is_decimal_number(c),
-        EnclosingMark => is_enclosing_mark(c),
-        FinalPunctuation => is_final_punctuation(c),
-        Format => is_format(c),
-        InitialPunctuation => is_initial_punctuation(c),
-        LetterNumber => is_letter_number(c),
-        LineSeparator => is_line_separator(c),
-        LowercaseLetter => is_lowercase_letter(c),
-        MathSymbol => is_math_symbol(c),
-        ModifierLetter => is_modifier_letter(c),
-        ModifierSymbol => is_modifier_symbol(c),
-        NonspacingMark => is_nonspacing_mark(c),
-        OpenPunctuation => is_open_punctuation(c),
-        OtherLetter => is_other_letter(c),
-        OtherNumber => is_other_number(c),
-        OtherPunctuation => is_other_punctuation(c),
-        OtherSymbol => is_other_symbol(c),
-        ParagraphSeparator => is_paragraph_separator(c),
-        PrivateUse => is_private_use(c),
-        SpaceSeparator => is_space_separator(c),
-        SpacingMark => is_spacing_mark(c),
-        Surrogate => is_surrogate(c),
-        TitlecaseLetter => is_titlecase_letter(c),
-        Unassigned => is_unassigned(c),
-        UppercaseLetter => is_uppercase_letter(c),
-        CasedLetter => is_cased_letter(c),
-        Other => is_other(c),
-        Letter => is_letter(c),
-        Mark => is_mark(c),
-        Number => is_number(c),
-        Punctuation => is_punctuation(c),
-        Symbol => is_symbol(c),
-        Separator => is_separator(c),
+        ClosePunctuation => is_close_punctuation(cp),
+        ConnectorPunctuation => is_connector_punctuation(cp),
+        Control => is_control(cp),
+        CurrencySymbol => is_currency_symbol(cp),
+        DashPunctuation => is_dash_punctuation(cp),
+        DecimalNumber => is_decimal_number(cp),
+        EnclosingMark => is_enclosing_mark(cp),
+        FinalPunctuation => is_final_punctuation(cp),
+        Format => is_format(cp),
+        InitialPunctuation => is_initial_punctuation(cp),
+        LetterNumber => is_letter_number(cp),
+        LineSeparator => is_line_separator(cp),
+        LowercaseLetter => is_lowercase_letter(cp),
+        MathSymbol => is_math_symbol(cp),
+        ModifierLetter => is_modifier_letter(cp),
+        ModifierSymbol => is_modifier_symbol(cp),
+        NonspacingMark => is_nonspacing_mark(cp),
+        OpenPunctuation => is_open_punctuation(cp),
+        OtherLetter => is_other_letter(cp),
+        OtherNumber => is_other_number(cp),
+        OtherPunctuation => is_other_punctuation(cp),
+        OtherSymbol => is_other_symbol(cp),
+        ParagraphSeparator => is_paragraph_separator(cp),
+        PrivateUse => is_private_use(cp),
+        SpaceSeparator => is_space_separator(cp),
+        SpacingMark => is_spacing_mark(cp),
+        Surrogate => is_surrogate(cp),
+        TitlecaseLetter => is_titlecase_letter(cp),
+        Unassigned => is_unassigned(cp),
+        UppercaseLetter => is_uppercase_letter(cp),
+        CasedLetter => is_cased_letter(cp),
+        Other => is_other(cp),
+        Letter => is_letter(cp),
+        Mark => is_mark(cp),
+        Number => is_number(cp),
+        Punctuation => is_punctuation(cp),
+        Symbol => is_symbol(cp),
+        Separator => is_separator(cp),
     }
 }
 
@@ -18684,6 +18642,29 @@ const INHERITED: [CodePointRange; 29] = [
     CodePointRange::from(917760, 240),
 ];
 
+const INHERITED_EXTENSIONS: [CodePointRange; 20] = [
+    CodePointRange::from(768, 66),
+    CodePointRange::from(835, 2),
+    CodePointRange::from(838, 29),
+    CodePointRange::from(2387, 2),
+    CodePointRange::from(6832, 31),
+    CodePointRange::from(7618, 54),
+    CodePointRange::from(7673, 1),
+    CodePointRange::from(7675, 5),
+    CodePointRange::from(8204, 2),
+    CodePointRange::from(8400, 32),
+    CodePointRange::from(65024, 16),
+    CodePointRange::from(65056, 14),
+    CodePointRange::from(66045, 1),
+    CodePointRange::from(118528, 46),
+    CodePointRange::from(118576, 23),
+    CodePointRange::from(119143, 3),
+    CodePointRange::from(119163, 8),
+    CodePointRange::from(119173, 7),
+    CodePointRange::from(119210, 4),
+    CodePointRange::from(917760, 240),
+];
+
 const COMMON: [CodePointRange; 173] = [
     CodePointRange::from(0, 65),
     CodePointRange::from(91, 6),
@@ -18830,6 +18811,156 @@ const COMMON: [CodePointRange; 173] = [
     CodePointRange::from(127504, 44),
     CodePointRange::from(127552, 9),
     CodePointRange::from(127568, 2),
+    CodePointRange::from(127584, 6),
+    CodePointRange::from(127744, 984),
+    CodePointRange::from(128732, 17),
+    CodePointRange::from(128752, 13),
+    CodePointRange::from(128768, 119),
+    CodePointRange::from(128891, 95),
+    CodePointRange::from(128992, 12),
+    CodePointRange::from(129008, 1),
+    CodePointRange::from(129024, 12),
+    CodePointRange::from(129040, 56),
+    CodePointRange::from(129104, 10),
+    CodePointRange::from(129120, 40),
+    CodePointRange::from(129168, 30),
+    CodePointRange::from(129200, 2),
+    CodePointRange::from(129280, 340),
+    CodePointRange::from(129632, 14),
+    CodePointRange::from(129648, 13),
+    CodePointRange::from(129664, 9),
+    CodePointRange::from(129680, 46),
+    CodePointRange::from(129727, 7),
+    CodePointRange::from(129742, 14),
+    CodePointRange::from(129760, 9),
+    CodePointRange::from(129776, 9),
+    CodePointRange::from(129792, 147),
+    CodePointRange::from(129940, 55),
+    CodePointRange::from(130032, 10),
+    CodePointRange::from(917505, 1),
+    CodePointRange::from(917536, 96),
+];
+
+const COMMON_EXTENSIONS: [CodePointRange; 147] = [
+    CodePointRange::from(0, 65),
+    CodePointRange::from(91, 6),
+    CodePointRange::from(123, 47),
+    CodePointRange::from(171, 15),
+    CodePointRange::from(187, 5),
+    CodePointRange::from(215, 1),
+    CodePointRange::from(247, 1),
+    CodePointRange::from(697, 39),
+    CodePointRange::from(741, 5),
+    CodePointRange::from(748, 20),
+    CodePointRange::from(884, 1),
+    CodePointRange::from(894, 1),
+    CodePointRange::from(901, 1),
+    CodePointRange::from(903, 1),
+    CodePointRange::from(1541, 1),
+    CodePointRange::from(1757, 1),
+    CodePointRange::from(2274, 1),
+    CodePointRange::from(3647, 1),
+    CodePointRange::from(4053, 4),
+    CodePointRange::from(5867, 3),
+    CodePointRange::from(8192, 12),
+    CodePointRange::from(8206, 33),
+    CodePointRange::from(8240, 53),
+    CodePointRange::from(8294, 11),
+    CodePointRange::from(8308, 11),
+    CodePointRange::from(8320, 15),
+    CodePointRange::from(8352, 33),
+    CodePointRange::from(8448, 38),
+    CodePointRange::from(8487, 3),
+    CodePointRange::from(8492, 6),
+    CodePointRange::from(8499, 27),
+    CodePointRange::from(8527, 17),
+    CodePointRange::from(8585, 3),
+    CodePointRange::from(8592, 663),
+    CodePointRange::from(9280, 11),
+    CodePointRange::from(9312, 928),
+    CodePointRange::from(10496, 628),
+    CodePointRange::from(11126, 32),
+    CodePointRange::from(11159, 105),
+    CodePointRange::from(11776, 67),
+    CodePointRange::from(11844, 26),
+    CodePointRange::from(12272, 12),
+    CodePointRange::from(12288, 1),
+    CodePointRange::from(12292, 1),
+    CodePointRange::from(12306, 1),
+    CodePointRange::from(12320, 1),
+    CodePointRange::from(12342, 1),
+    CodePointRange::from(12872, 24),
+    CodePointRange::from(12927, 1),
+    CodePointRange::from(12977, 15),
+    CodePointRange::from(13004, 4),
+    CodePointRange::from(13169, 10),
+    CodePointRange::from(13184, 96),
+    CodePointRange::from(13311, 1),
+    CodePointRange::from(19904, 64),
+    CodePointRange::from(42760, 26),
+    CodePointRange::from(42888, 3),
+    CodePointRange::from(43867, 1),
+    CodePointRange::from(43882, 2),
+    CodePointRange::from(65040, 10),
+    CodePointRange::from(65072, 21),
+    CodePointRange::from(65095, 12),
+    CodePointRange::from(65108, 19),
+    CodePointRange::from(65128, 4),
+    CodePointRange::from(65279, 1),
+    CodePointRange::from(65281, 32),
+    CodePointRange::from(65339, 6),
+    CodePointRange::from(65371, 6),
+    CodePointRange::from(65504, 7),
+    CodePointRange::from(65512, 7),
+    CodePointRange::from(65529, 5),
+    CodePointRange::from(65936, 13),
+    CodePointRange::from(66000, 45),
+    CodePointRange::from(118608, 116),
+    CodePointRange::from(118784, 246),
+    CodePointRange::from(119040, 39),
+    CodePointRange::from(119081, 62),
+    CodePointRange::from(119146, 17),
+    CodePointRange::from(119171, 2),
+    CodePointRange::from(119180, 30),
+    CodePointRange::from(119214, 61),
+    CodePointRange::from(119488, 20),
+    CodePointRange::from(119520, 20),
+    CodePointRange::from(119552, 87),
+    CodePointRange::from(119666, 7),
+    CodePointRange::from(119808, 85),
+    CodePointRange::from(119894, 71),
+    CodePointRange::from(119966, 2),
+    CodePointRange::from(119970, 1),
+    CodePointRange::from(119973, 2),
+    CodePointRange::from(119977, 4),
+    CodePointRange::from(119982, 12),
+    CodePointRange::from(119995, 1),
+    CodePointRange::from(119997, 7),
+    CodePointRange::from(120005, 65),
+    CodePointRange::from(120071, 4),
+    CodePointRange::from(120077, 8),
+    CodePointRange::from(120086, 7),
+    CodePointRange::from(120094, 28),
+    CodePointRange::from(120123, 4),
+    CodePointRange::from(120128, 5),
+    CodePointRange::from(120134, 1),
+    CodePointRange::from(120138, 7),
+    CodePointRange::from(120146, 340),
+    CodePointRange::from(120488, 292),
+    CodePointRange::from(120782, 50),
+    CodePointRange::from(126065, 68),
+    CodePointRange::from(126209, 61),
+    CodePointRange::from(126976, 44),
+    CodePointRange::from(127024, 100),
+    CodePointRange::from(127136, 15),
+    CodePointRange::from(127153, 15),
+    CodePointRange::from(127169, 15),
+    CodePointRange::from(127185, 37),
+    CodePointRange::from(127232, 174),
+    CodePointRange::from(127462, 26),
+    CodePointRange::from(127489, 2),
+    CodePointRange::from(127504, 44),
+    CodePointRange::from(127552, 9),
     CodePointRange::from(127584, 6),
     CodePointRange::from(127744, 984),
     CodePointRange::from(128732, 17),
@@ -19955,8 +20086,12 @@ pub(crate) fn is_property_value_script_extensions(
         ZanabazarSquare => ZANABAZAR_SQUARE
             .binary_search_by(|&cpr| cpr.compare(c))
             .is_ok(),
-        Inherited => INHERITED.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
-        Common => COMMON.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),
+        Inherited => INHERITED_EXTENSIONS
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
+        Common => COMMON_EXTENSIONS
+            .binary_search_by(|&cpr| cpr.compare(c))
+            .is_ok(),
     }
 }
 

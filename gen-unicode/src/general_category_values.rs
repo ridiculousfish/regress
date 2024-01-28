@@ -1,4 +1,4 @@
-use crate::{chars_to_code_point_ranges, codepoints_to_range, pack_adjacent_chars, GenUnicode};
+use crate::{codepoints_to_range, codepoints_to_ranges, pack_adjacent_codepoints, GenUnicode};
 use codegen::{Block, Enum, Function};
 use std::collections::HashMap;
 
@@ -14,7 +14,7 @@ impl GenUnicode {
         let mut is_property_fn = Function::new("is_property_value_general_category");
         is_property_fn
             .vis("pub(crate)")
-            .arg("c", "char")
+            .arg("cp", "u32")
             .arg("value", "&UnicodePropertyValueGeneralCategory")
             .ret("bool")
             .line("use UnicodePropertyValueGeneralCategory::*;");
@@ -30,30 +30,30 @@ impl GenUnicode {
         let mut property_from_str_fn_match_block = Block::new("match s");
 
         for (alias0, alias1, orig_name, name) in GENERAL_CATEGORY_VALUES {
-            let mut chars = Vec::new();
+            let mut codepoints = Vec::new();
 
             for row in &self.derived_general_category {
                 if row.general_category == *alias1 {
-                    chars.push(codepoints_to_range(&row.codepoints));
+                    codepoints.push(codepoints_to_range(&row.codepoints));
                 }
             }
 
-            pack_adjacent_chars(&mut chars);
+            pack_adjacent_codepoints(&mut codepoints);
 
             // Some properties cannot be packed into a CodePointRange.
             if ["Unassigned", "Private_Use"].contains(orig_name) {
                 self.scope.raw(&format!(
                     "pub(crate) const {}: [CodePointRangeUnpacked; {}] = [\n    {}\n];",
                     orig_name.to_uppercase(),
-                    chars.len(),
-                    chars
+                    codepoints.len(),
+                    codepoints
                         .iter()
                         .map(|cs| format!("CodePointRangeUnpacked::from({}, {}),", cs.0, cs.1))
                         .collect::<Vec<String>>()
                         .join("\n    ")
                 ));
             } else {
-                let ranges = chars_to_code_point_ranges(&chars);
+                let ranges = codepoints_to_ranges(&codepoints);
                 self.scope.raw(&format!(
                     "pub(crate) const {}: [CodePointRange; {}] = [\n    {}\n];",
                     orig_name.to_uppercase(),
@@ -65,21 +65,21 @@ impl GenUnicode {
             self.scope
                 .new_fn(&format!("is_{}", orig_name.to_lowercase()))
                 .vis("pub(crate)")
-                .arg("c", "char")
+                .arg("cp", "u32")
                 .ret("bool")
                 .line(&format!(
-                    "{}.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()",
+                    "{}.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()",
                     orig_name.to_uppercase()
                 ))
                 .doc(&format!(
-                    "Return whether c has the '{}' Unicode property.",
+                    "Return whether cp has the '{}' Unicode property.",
                     orig_name
                 ));
 
             property_enum.new_variant(*name);
 
             is_property_fn_match_block.line(format!(
-                "{} => is_{}(c),",
+                "{} => is_{}(cp),",
                 name,
                 orig_name.to_lowercase()
             ));
@@ -97,24 +97,24 @@ impl GenUnicode {
         for (alias0, alias1, orig_name, name, value_names_str) in GENERAL_CATEGORY_VALUES_DERIVED {
             let value_name_ifs: Vec<String> = value_names_str
                 .split(',')
-                .map(|name| format!("is_{}(c)", name.to_lowercase()))
+                .map(|name| format!("is_{}(cp)", name.to_lowercase()))
                 .collect();
 
             self.scope
                 .new_fn(&format!("is_{}", orig_name.to_lowercase()))
                 .vis("pub(crate)")
-                .arg("c", "char")
+                .arg("cp", "u32")
                 .ret("bool")
                 .line(value_name_ifs.join(" || "))
                 .doc(&format!(
-                    "Return whether c has the '{}' Unicode property.",
+                    "Return whether cp has the '{}' Unicode property.",
                     orig_name
                 ));
 
             property_enum.new_variant(*name);
 
             is_property_fn_match_block.line(format!(
-                "{} => is_{}(c),",
+                "{} => is_{}(cp),",
                 name,
                 orig_name.to_lowercase()
             ));

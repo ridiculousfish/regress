@@ -1,4 +1,4 @@
-use crate::{chars_to_code_point_ranges, codepoints_to_range, pack_adjacent_chars, GenUnicode};
+use crate::{codepoints_to_range, codepoints_to_ranges, pack_adjacent_codepoints, GenUnicode};
 use codegen::{Block, Enum, Function};
 
 impl GenUnicode {
@@ -13,7 +13,7 @@ impl GenUnicode {
         let mut is_property_fn = Function::new("is_property_binary");
         is_property_fn
             .vis("pub(crate)")
-            .arg("c", "char")
+            .arg("cp", "u32")
             .arg("value", "&UnicodePropertyBinary")
             .ret("bool")
             .line("use UnicodePropertyBinary::*;");
@@ -28,24 +28,24 @@ impl GenUnicode {
         let mut property_from_str_fn_match_block = Block::new("match s");
 
         for (alias, orig_name, name, ucd_file) in BINARY_PROPERTIES {
-            let mut chars = ucd_file.chars(orig_name, self);
+            let mut codepoints = ucd_file.chars(orig_name, self);
 
-            pack_adjacent_chars(&mut chars);
+            pack_adjacent_codepoints(&mut codepoints);
 
             // Some properties cannot be packed into a CodePointRange.
             if ["Noncharacter_Code_Point"].contains(orig_name) {
                 self.scope.raw(&format!(
                     "pub(crate) const {}: [CodePointRangeUnpacked; {}] = [\n    {}\n];",
                     orig_name.to_uppercase(),
-                    chars.len(),
-                    chars
+                    codepoints.len(),
+                    codepoints
                         .iter()
                         .map(|cs| format!("CodePointRangeUnpacked::from({}, {}),", cs.0, cs.1))
                         .collect::<Vec<String>>()
                         .join("\n    ")
                 ));
             } else {
-                let ranges = chars_to_code_point_ranges(&chars);
+                let ranges = codepoints_to_ranges(&codepoints);
                 self.scope.raw(&format!(
                     "pub(crate) const {}: [CodePointRange; {}] = [\n    {}\n];",
                     orig_name.to_uppercase(),
@@ -57,21 +57,21 @@ impl GenUnicode {
             self.scope
                 .new_fn(&format!("is_{}", orig_name.to_lowercase()))
                 .vis("pub(crate)")
-                .arg("c", "char")
+                .arg("cp", "u32")
                 .ret("bool")
                 .line(&format!(
-                    "{}.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()",
+                    "{}.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()",
                     orig_name.to_uppercase()
                 ))
                 .doc(&format!(
-                    "Return whether c has the '{}' Unicode property.",
+                    "Return whether cp has the '{}' Unicode property.",
                     orig_name
                 ));
 
             property_enum.new_variant(*name);
 
             is_property_fn_match_block.line(format!(
-                "{} => is_{}(c),",
+                "{} => is_{}(cp),",
                 name,
                 orig_name.to_lowercase()
             ));
@@ -88,7 +88,7 @@ impl GenUnicode {
         property_enum.new_variant("Any");
         property_enum.new_variant("Assigned");
 
-        let ascii_ranges = chars_to_code_point_ranges(&[(0, 127)]);
+        let ascii_ranges = codepoints_to_ranges(&[(0, 127)]);
 
         self.scope.raw(&format!(
             "pub(crate) const ASCII: [CodePointRange; 1] = [\n    {}\n];",
@@ -98,32 +98,32 @@ impl GenUnicode {
         self.scope
             .new_fn("is_ascii")
             .vis("pub(crate)")
-            .arg("c", "char")
+            .arg("cp", "u32")
             .ret("bool")
-            .line("ASCII.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()")
-            .doc("Return whether c has the 'ASCII' Unicode property.");
+            .line("ASCII.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()")
+            .doc("Return whether cp has the 'ASCII' Unicode property.");
 
         self.scope.raw("pub(crate) const ANY: [CodePointRangeUnpacked; 1] = [\n    CodePointRangeUnpacked::from(0, 1114111)\n];");
 
         self.scope
             .new_fn("is_any")
             .vis("pub(crate)")
-            .arg("c", "char")
+            .arg("cp", "u32")
             .ret("bool")
-            .line("ANY.binary_search_by(|&cpr| cpr.compare(c as u32)).is_ok()")
-            .doc("Return whether c has the 'Any' Unicode property.");
+            .line("ANY.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()")
+            .doc("Return whether cp has the 'Any' Unicode property.");
 
         self.scope
             .new_fn("is_assigned")
             .vis("pub(crate)")
-            .arg("c", "char")
+            .arg("cp", "u32")
             .ret("bool")
-            .line("UNASSIGNED.binary_search_by(|&cpr| cpr.compare(c as u32)).is_err()")
-            .doc("Return whether c has the 'Any' Unicode property.");
+            .line("UNASSIGNED.binary_search_by(|&cpr| cpr.compare(cp)).is_err()")
+            .doc("Return whether cp has the 'Any' Unicode property.");
 
-        is_property_fn_match_block.line("Ascii => is_ascii(c),");
-        is_property_fn_match_block.line("Any => is_any(c),");
-        is_property_fn_match_block.line("Assigned => is_assigned(c),");
+        is_property_fn_match_block.line("Ascii => is_ascii(cp),");
+        is_property_fn_match_block.line("Any => is_any(cp),");
+        is_property_fn_match_block.line("Assigned => is_assigned(cp),");
 
         property_from_str_fn_match_block.line("\"ASCII\" => Some(Ascii),");
         property_from_str_fn_match_block.line("\"Any\" => Some(Any),");
@@ -208,47 +208,47 @@ enum UCDFile {
 
 impl UCDFile {
     fn chars(&self, property: &str, gen_unicode: &GenUnicode) -> Vec<(u32, u32)> {
-        let mut chars = Vec::new();
+        let mut codepoints = Vec::new();
 
         match self {
             Self::CoreProperty => {
                 for row in &gen_unicode.core_property {
                     if row.property == *property {
-                        chars.push(codepoints_to_range(&row.codepoints));
+                        codepoints.push(codepoints_to_range(&row.codepoints));
                     }
                 }
             }
             Self::Property => {
                 for row in &gen_unicode.properties {
                     if row.property == *property {
-                        chars.push(codepoints_to_range(&row.codepoints));
+                        codepoints.push(codepoints_to_range(&row.codepoints));
                     }
                 }
             }
             Self::EmojiProperty => {
                 for row in &gen_unicode.emoji_properties {
                     if row.property == *property {
-                        chars.push(codepoints_to_range(&row.codepoints));
+                        codepoints.push(codepoints_to_range(&row.codepoints));
                     }
                 }
             }
             Self::DerivedBinaryProperties => {
                 for row in &gen_unicode.derived_binary_properties {
                     if row.property == *property {
-                        chars.push(codepoints_to_range(&row.codepoints));
+                        codepoints.push(codepoints_to_range(&row.codepoints));
                     }
                 }
             }
             Self::DerivedNormalizationProperty => {
                 for row in &gen_unicode.derived_normalization_properties {
                     if row.property == *property {
-                        chars.push(codepoints_to_range(&row.codepoints));
+                        codepoints.push(codepoints_to_range(&row.codepoints));
                     }
                 }
             }
         }
 
-        chars
+        codepoints
     }
 }
 

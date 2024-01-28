@@ -124,30 +124,50 @@ fn main() {
 }
 
 // Combine unicode code point ranges, if they are adjacent.
-pub(crate) fn pack_adjacent_chars(chars: &mut Vec<(u32, u32)>) {
-    let chars_orig = chars.clone();
-    let mut chars_iter = chars_orig.iter().cloned().peekable();
+pub(crate) fn pack_adjacent_codepoints(codepoints: &mut Vec<(u32, u32)>) {
+    let codepoints_original = codepoints.clone();
+    let mut codepoints_iter = codepoints_original.iter().cloned().peekable();
 
-    chars.clear();
+    codepoints.clear();
 
-    while let Some((start, mut end)) = chars_iter.next() {
-        while let Some((next_start, next_end)) = chars_iter.peek() {
+    while let Some((start, mut end)) = codepoints_iter.next() {
+        while let Some((next_start, next_end)) = codepoints_iter.peek() {
             if end + 1 == *next_start {
                 end = *next_end;
-                chars_iter.next();
+                codepoints_iter.next();
             } else {
                 break;
             }
         }
 
-        chars.push((start, end));
+        codepoints.push((start, end));
+    }
+}
+
+// Remove a unicode code point range from the given ranges.
+pub(crate) fn remove_codepoints(codepoints: &mut Vec<(u32, u32)>, range: (u32, u32)) {
+    let codepoints_original = codepoints.clone();
+
+    codepoints.clear();
+
+    for (start, end) in codepoints_original {
+        if start > range.1 || end < range.0 {
+            codepoints.push((start, end));
+        } else if start < range.0 && end > range.1 {
+            codepoints.push((start, range.0 - 1));
+            codepoints.push((range.1 + 1, end));
+        } else if start < range.0 {
+            codepoints.push((start, range.0 - 1));
+        } else if end > range.1 {
+            codepoints.push((range.1 + 1, end));
+        }
     }
 }
 
 // Given a list of inclusive ranges of code points, return a list of strings creating corresponding CodePointRange.
 // If a range is too big, it is split into smaller abutting ranges.
-pub(crate) fn chars_to_code_point_ranges(chars: &[(u32, u32)]) -> Vec<String> {
-    chars
+pub(crate) fn codepoints_to_ranges(codepoints: &[(u32, u32)]) -> Vec<String> {
+    codepoints
         .iter()
         .flat_map(|p| {
             let (mut start, end) = *p;

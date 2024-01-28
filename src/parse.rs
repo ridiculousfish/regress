@@ -1102,7 +1102,7 @@ where
                 }
             }
 
-            if is_id_start(c) || c == '$' || c == '_' {
+            if is_id_start(c.into()) || c == '$' || c == '_' {
                 group_name.push(c);
             } else {
                 self.input = orig_input;
@@ -1130,7 +1130,7 @@ where
                     break;
                 }
 
-                if is_id_continue(c) || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
+                if is_id_continue(c.into()) || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
                 /* <ZWJ> */
                 {
                     group_name.push(c);
