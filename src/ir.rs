@@ -2,7 +2,6 @@
 
 use crate::api;
 use crate::types::{BracketContents, CaptureGroupID, CaptureGroupName};
-use crate::unicode::PropertyEscape;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::fmt;
@@ -101,12 +100,6 @@ pub enum Node {
     Loop1CharBody {
         loopee: Box<Node>,
         quant: Quantifier,
-    },
-
-    // TODO: doc comment
-    UnicodePropertyEscape {
-        property_escape: PropertyEscape,
-        negate: bool,
     },
 }
 
@@ -211,13 +204,6 @@ impl Node {
                     contents: Box::new((*contents).duplicate()),
                 }
             }
-            Node::UnicodePropertyEscape {
-                property_escape,
-                negate: negated,
-            } => Node::UnicodePropertyEscape {
-                property_escape: *property_escape,
-                negate: *negated,
-            },
         }
     }
 }
@@ -274,7 +260,6 @@ where
             | Node::WordBoundary { .. }
             | Node::BackRef { .. }
             | Node::Bracket { .. }
-            | Node::UnicodePropertyEscape { .. }
             | Node::MatchAny
             | Node::MatchAnyExceptLineTerminator
             | Node::Anchor { .. } => {}
@@ -349,8 +334,7 @@ where
             | Node::Anchor { .. }
             | Node::WordBoundary { .. }
             | Node::BackRef { .. }
-            | Node::Bracket { .. }
-            | Node::UnicodePropertyEscape { .. } => {}
+            | Node::Bracket { .. } => {}
             Node::Cat(nodes) => {
                 nodes.iter_mut().for_each(|node| self.process(node));
             }
@@ -532,18 +516,6 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
                 f,
                 "LookaroundAssertion {} {} {:?} {:?}",
                 sense, direction, start_group, end_group
-            )?;
-        }
-        Node::UnicodePropertyEscape {
-            property_escape,
-            negate,
-        } => {
-            let sense = if *negate { "negative" } else { "" };
-
-            writeln!(
-                f,
-                "UnicodePropertyEscape {} {:?} {:?}",
-                sense, property_escape.name, property_escape.value
             )?;
         }
     }

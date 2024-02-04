@@ -1,4 +1,4 @@
-use crate::{codepoints_to_range, codepoints_to_ranges, pack_adjacent_codepoints, GenUnicode};
+use crate::{codepoints_to_range, format_interval_table, pack_adjacent_codepoints, GenUnicode};
 use codegen::{Block, Enum, Function};
 use std::collections::HashMap;
 
@@ -11,14 +11,13 @@ impl GenUnicode {
             .derive("Clone")
             .derive("Copy");
 
-        let mut is_property_fn = Function::new("is_property_value_general_category");
-        is_property_fn
+        let mut as_ranges_fn = Function::new("general_category_property_value_ranges");
+        as_ranges_fn
             .vis("pub(crate)")
-            .arg("cp", "u32")
             .arg("value", "&UnicodePropertyValueGeneralCategory")
-            .ret("bool")
+            .ret("&'static [Interval]")
             .line("use UnicodePropertyValueGeneralCategory::*;");
-        let mut is_property_fn_match_block = Block::new("match value");
+        let mut as_ranges_fn_match_block = Block::new("match value");
 
         let mut property_from_str_fn =
             Function::new("unicode_property_value_general_category_from_str");
@@ -38,48 +37,75 @@ impl GenUnicode {
                 }
             }
 
+            codepoints.sort();
             pack_adjacent_codepoints(&mut codepoints);
 
-            // Some properties cannot be packed into a CodePointRange.
-            if ["Unassigned", "Private_Use"].contains(orig_name) {
-                self.scope.raw(&format!(
-                    "pub(crate) const {}: [CodePointRangeUnpacked; {}] = [\n    {}\n];",
-                    orig_name.to_uppercase(),
-                    codepoints.len(),
-                    codepoints
-                        .iter()
-                        .map(|cs| format!("CodePointRangeUnpacked::from({}, {}),", cs.0, cs.1))
-                        .collect::<Vec<String>>()
-                        .join("\n    ")
+            self.scope.raw(format_interval_table(
+                &orig_name.to_uppercase(),
+                &codepoints,
+            ));
+
+            self.scope
+                .new_fn(&format!("{}_ranges", orig_name.to_lowercase()))
+                .vis("pub(crate)")
+                .ret("&'static [Interval]")
+                .line(&format!("&{}", orig_name.to_uppercase()))
+                .doc(&format!(
+                    "Return the code point ranges of the '{}' Unicode property.",
+                    orig_name
                 ));
+
+            property_enum.new_variant(*name);
+
+            as_ranges_fn_match_block.line(format!(
+                "{} => {}_ranges(),",
+                name,
+                orig_name.to_lowercase()
+            ));
+
+            property_from_str_fn_match_block.line(if alias0.is_empty() {
+                format!("\"{}\" | \"{}\" => Some({}),", alias1, orig_name, name)
             } else {
-                let ranges = codepoints_to_ranges(&codepoints);
-                self.scope.raw(&format!(
-                    "pub(crate) const {}: [CodePointRange; {}] = [\n    {}\n];",
-                    orig_name.to_uppercase(),
-                    ranges.len(),
-                    ranges.join("\n    ")
-                ));
+                format!(
+                    "\"{}\" | \"{}\" | \"{}\" => Some({}),",
+                    alias0, alias1, orig_name, name
+                )
+            });
+        }
+
+        for (alias0, alias1, orig_name, name, _, alias1_names) in GENERAL_CATEGORY_VALUES_DERIVED {
+            let alias1_strings: Vec<&str> = alias1_names.split(',').collect();
+
+            let mut codepoints = Vec::new();
+
+            for row in &self.derived_general_category {
+                if alias1_strings.contains(&row.general_category.as_str()) {
+                    codepoints.push(codepoints_to_range(&row.codepoints));
+                }
             }
 
+            codepoints.sort();
+            pack_adjacent_codepoints(&mut codepoints);
+
+            self.scope.raw(format_interval_table(
+                &orig_name.to_uppercase(),
+                &codepoints,
+            ));
+
             self.scope
-                .new_fn(&format!("is_{}", orig_name.to_lowercase()))
+                .new_fn(&format!("{}_ranges", orig_name.to_lowercase()))
                 .vis("pub(crate)")
-                .arg("cp", "u32")
-                .ret("bool")
-                .line(&format!(
-                    "{}.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()",
-                    orig_name.to_uppercase()
-                ))
+                .ret("&'static [Interval]")
+                .line(&format!("&{}", orig_name.to_uppercase()))
                 .doc(&format!(
-                    "Return whether cp has the '{}' Unicode property.",
+                    "Return the code point ranges of the '{}' Unicode property.",
                     orig_name
                 ));
 
             property_enum.new_variant(*name);
 
-            is_property_fn_match_block.line(format!(
-                "{} => is_{}(cp),",
+            as_ranges_fn_match_block.line(format!(
+                "{} => {}_ranges(),",
                 name,
                 orig_name.to_lowercase()
             ));
@@ -94,48 +120,13 @@ impl GenUnicode {
             });
         }
 
-        for (alias0, alias1, orig_name, name, value_names_str) in GENERAL_CATEGORY_VALUES_DERIVED {
-            let value_name_ifs: Vec<String> = value_names_str
-                .split(',')
-                .map(|name| format!("is_{}(cp)", name.to_lowercase()))
-                .collect();
-
-            self.scope
-                .new_fn(&format!("is_{}", orig_name.to_lowercase()))
-                .vis("pub(crate)")
-                .arg("cp", "u32")
-                .ret("bool")
-                .line(value_name_ifs.join(" || "))
-                .doc(&format!(
-                    "Return whether cp has the '{}' Unicode property.",
-                    orig_name
-                ));
-
-            property_enum.new_variant(*name);
-
-            is_property_fn_match_block.line(format!(
-                "{} => is_{}(cp),",
-                name,
-                orig_name.to_lowercase()
-            ));
-
-            property_from_str_fn_match_block.line(if alias0.is_empty() {
-                format!("\"{}\" | \"{}\" => Some({}),", alias1, orig_name, name)
-            } else {
-                format!(
-                    "\"{}\" | \"{}\" | \"{}\" => Some({}),",
-                    alias0, alias1, orig_name, name
-                )
-            });
-        }
-
-        is_property_fn.push_block(is_property_fn_match_block);
+        as_ranges_fn.push_block(as_ranges_fn_match_block);
 
         property_from_str_fn_match_block.line("_ => None,");
         property_from_str_fn.push_block(property_from_str_fn_match_block);
 
         self.scope
-            .push_fn(is_property_fn)
+            .push_fn(as_ranges_fn)
             .push_enum(property_enum)
             .push_fn(property_from_str_fn);
     }
@@ -223,7 +214,8 @@ impl GenUnicode {
             f.push_block(b);
         }
 
-        for (alias0, alias1, orig_name, name, value_names_str) in GENERAL_CATEGORY_VALUES_DERIVED {
+        for (alias0, alias1, orig_name, name, value_names_str, _) in GENERAL_CATEGORY_VALUES_DERIVED
+        {
             let mut chars = Vec::new();
 
             for value_name in value_names_str.split(',') {
@@ -299,15 +291,15 @@ impl GenUnicode {
 }
 
 // Structure: (Alias, Alias, Name, CamelCaseName, CommaSeparatedValueNames)
-const GENERAL_CATEGORY_VALUES_DERIVED: &[(&str, &str,&str, &str, &str); 8] = &[
-    ("", "LC", "Cased_Letter", "CasedLetter", "Lowercase_Letter,Titlecase_Letter,Uppercase_Letter"),
-    ("", "C", "Other", "Other", "Control,Format,Surrogate,Unassigned,Private_Use"),
-    ("", "L", "Letter", "Letter", "Lowercase_Letter,Modifier_Letter,Other_Letter,Titlecase_Letter,Uppercase_Letter"),
-    ("Combining_Mark", "M", "Mark", "Mark", "Spacing_Mark,Enclosing_Mark,Nonspacing_Mark"),
-    ("", "N", "Number", "Number","Decimal_Number,Letter_Number,Other_Number"),
-    ("punct", "P", "Punctuation", "Punctuation", "Connector_Punctuation,Dash_Punctuation,Close_Punctuation,Final_Punctuation,Initial_Punctuation,Other_Punctuation,Open_Punctuation"),
-    ("", "S", "Symbol", "Symbol", "Currency_Symbol,Modifier_Symbol,Math_Symbol,Other_Symbol"),
-    ("", "Z", "Separator", "Separator", "Line_Separator,Paragraph_Separator,Space_Separator"),
+const GENERAL_CATEGORY_VALUES_DERIVED: &[(&str, &str, &str, &str, &str, &str); 8] = &[
+    ("", "LC", "Cased_Letter", "CasedLetter", "Lowercase_Letter,Titlecase_Letter,Uppercase_Letter", "Ll,Lt,Lu"),
+    ("", "C", "Other", "Other", "Control,Format,Surrogate,Unassigned,Private_Use", "Cc,Cf,Cs,Cn,Co"),
+    ("", "L", "Letter", "Letter", "Lowercase_Letter,Modifier_Letter,Other_Letter,Titlecase_Letter,Uppercase_Letter", "Ll,Lm,Lo,Lt,Lu"),
+    ("Combining_Mark", "M", "Mark", "Mark", "Spacing_Mark,Enclosing_Mark,Nonspacing_Mark", "Mc,Me,Mn"),
+    ("", "N", "Number", "Number","Decimal_Number,Letter_Number,Other_Number", "Nd,Nl,No"),
+    ("punct", "P", "Punctuation", "Punctuation", "Connector_Punctuation,Dash_Punctuation,Close_Punctuation,Final_Punctuation,Initial_Punctuation,Other_Punctuation,Open_Punctuation", "Pc,Pd,Pe,Pf,Pi,Po,Ps"),
+    ("", "S", "Symbol", "Symbol", "Currency_Symbol,Modifier_Symbol,Math_Symbol,Other_Symbol", "Sc,Sk,Sm,So"),
+    ("", "Z", "Separator", "Separator", "Line_Separator,Paragraph_Separator,Space_Separator", "Zl,Zp,Zs"),
 ];
 
 // Structure: (Alias, Alias, Name, CamelCaseName)

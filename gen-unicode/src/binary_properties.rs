@@ -1,4 +1,4 @@
-use crate::{codepoints_to_range, codepoints_to_ranges, pack_adjacent_codepoints, GenUnicode};
+use crate::{codepoints_to_range, format_interval_table, pack_adjacent_codepoints, GenUnicode};
 use codegen::{Block, Enum, Function};
 
 impl GenUnicode {
@@ -10,14 +10,13 @@ impl GenUnicode {
             .derive("Clone")
             .derive("Copy");
 
-        let mut is_property_fn = Function::new("is_property_binary");
-        is_property_fn
+        let mut as_ranges_fn = Function::new("binary_property_ranges");
+        as_ranges_fn
             .vis("pub(crate)")
-            .arg("cp", "u32")
             .arg("value", "&UnicodePropertyBinary")
-            .ret("bool")
+            .ret("&'static [Interval]")
             .line("use UnicodePropertyBinary::*;");
-        let mut is_property_fn_match_block = Block::new("match value");
+        let mut as_ranges_fn_match_block = Block::new("match value");
 
         let mut property_from_str_fn = Function::new("unicode_property_binary_from_str");
         property_from_str_fn
@@ -30,48 +29,28 @@ impl GenUnicode {
         for (alias, orig_name, name, ucd_file) in BINARY_PROPERTIES {
             let mut codepoints = ucd_file.chars(orig_name, self);
 
+            codepoints.sort();
             pack_adjacent_codepoints(&mut codepoints);
 
-            // Some properties cannot be packed into a CodePointRange.
-            if ["Noncharacter_Code_Point"].contains(orig_name) {
-                self.scope.raw(&format!(
-                    "pub(crate) const {}: [CodePointRangeUnpacked; {}] = [\n    {}\n];",
-                    orig_name.to_uppercase(),
-                    codepoints.len(),
-                    codepoints
-                        .iter()
-                        .map(|cs| format!("CodePointRangeUnpacked::from({}, {}),", cs.0, cs.1))
-                        .collect::<Vec<String>>()
-                        .join("\n    ")
-                ));
-            } else {
-                let ranges = codepoints_to_ranges(&codepoints);
-                self.scope.raw(&format!(
-                    "pub(crate) const {}: [CodePointRange; {}] = [\n    {}\n];",
-                    orig_name.to_uppercase(),
-                    ranges.len(),
-                    ranges.join("\n    ")
-                ));
-            }
+            self.scope.raw(format_interval_table(
+                &orig_name.to_uppercase(),
+                &codepoints,
+            ));
 
             self.scope
-                .new_fn(&format!("is_{}", orig_name.to_lowercase()))
+                .new_fn(&format!("{}_ranges", orig_name.to_lowercase()))
                 .vis("pub(crate)")
-                .arg("cp", "u32")
-                .ret("bool")
-                .line(&format!(
-                    "{}.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()",
-                    orig_name.to_uppercase()
-                ))
+                .ret("&'static [Interval]")
+                .line(&format!("&{}", orig_name.to_uppercase()))
                 .doc(&format!(
-                    "Return whether cp has the '{}' Unicode property.",
+                    "Return the code point ranges of the '{}' Unicode property.",
                     orig_name
                 ));
 
             property_enum.new_variant(*name);
 
-            is_property_fn_match_block.line(format!(
-                "{} => is_{}(cp),",
+            as_ranges_fn_match_block.line(format!(
+                "{} => {}_ranges(),",
                 name,
                 orig_name.to_lowercase()
             ));
@@ -88,54 +67,71 @@ impl GenUnicode {
         property_enum.new_variant("Any");
         property_enum.new_variant("Assigned");
 
-        let ascii_ranges = codepoints_to_ranges(&[(0, 127)]);
-
-        self.scope.raw(&format!(
-            "pub(crate) const ASCII: [CodePointRange; 1] = [\n    {}\n];",
-            ascii_ranges.join("\n    ")
-        ));
+        self.scope
+            .raw("pub(crate) const ASCII: [Interval; 1] = [Interval::new(0, 127)];");
 
         self.scope
-            .new_fn("is_ascii")
+            .new_fn("ascii_ranges")
             .vis("pub(crate)")
-            .arg("cp", "u32")
-            .ret("bool")
-            .line("ASCII.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()")
-            .doc("Return whether cp has the 'ASCII' Unicode property.");
-
-        self.scope.raw("pub(crate) const ANY: [CodePointRangeUnpacked; 1] = [\n    CodePointRangeUnpacked::from(0, 1114111)\n];");
+            .ret("&'static [Interval]")
+            .line("&ASCII")
+            .doc("Return the code point ranges of the 'ASCII' Unicode property.");
 
         self.scope
-            .new_fn("is_any")
-            .vis("pub(crate)")
-            .arg("cp", "u32")
-            .ret("bool")
-            .line("ANY.binary_search_by(|&cpr| cpr.compare(cp)).is_ok()")
-            .doc("Return whether cp has the 'Any' Unicode property.");
+            .raw("pub(crate) const ANY: [Interval; 1] = [Interval::new(0, 1114111)];");
 
         self.scope
-            .new_fn("is_assigned")
+            .new_fn("any_ranges")
             .vis("pub(crate)")
-            .arg("cp", "u32")
-            .ret("bool")
-            .line("UNASSIGNED.binary_search_by(|&cpr| cpr.compare(cp)).is_err()")
-            .doc("Return whether cp has the 'Any' Unicode property.");
+            .ret("&'static [Interval]")
+            .line("&ANY")
+            .doc("Return the code point ranges of the 'ANY' Unicode property.");
 
-        is_property_fn_match_block.line("Ascii => is_ascii(cp),");
-        is_property_fn_match_block.line("Any => is_any(cp),");
-        is_property_fn_match_block.line("Assigned => is_assigned(cp),");
+        let mut unassigned_codepoints = Vec::new();
+        for row in &self.derived_general_category {
+            if row.general_category == "Cn" {
+                unassigned_codepoints.push(codepoints_to_range(&row.codepoints));
+            }
+        }
+        unassigned_codepoints.sort();
+        pack_adjacent_codepoints(&mut unassigned_codepoints);
+        let mut assigned_codepoints = Vec::new();
+        let mut start = 0;
+        for iv in unassigned_codepoints {
+            if start < iv.0 {
+                assigned_codepoints.push((start, iv.0 - 1))
+            }
+            start = iv.1 + 1;
+        }
+        if start <= 0x10FFFF {
+            assigned_codepoints.push((start, 0x10FFFF))
+        }
+
+        self.scope
+            .raw(format_interval_table("ASSIGNED", &assigned_codepoints));
+
+        self.scope
+            .new_fn("assigned_ranges")
+            .vis("pub(crate)")
+            .ret("&'static [Interval]")
+            .line("&ASSIGNED")
+            .doc("Return the code point ranges of the 'ANY' Unicode property.");
+
+        as_ranges_fn_match_block.line("Ascii => ascii_ranges(),");
+        as_ranges_fn_match_block.line("Any => any_ranges(),");
+        as_ranges_fn_match_block.line("Assigned => assigned_ranges(),");
 
         property_from_str_fn_match_block.line("\"ASCII\" => Some(Ascii),");
         property_from_str_fn_match_block.line("\"Any\" => Some(Any),");
         property_from_str_fn_match_block.line("\"Assigned\" => Some(Assigned),");
 
-        is_property_fn.push_block(is_property_fn_match_block);
+        as_ranges_fn.push_block(as_ranges_fn_match_block);
 
         property_from_str_fn_match_block.line("_ => None,");
         property_from_str_fn.push_block(property_from_str_fn_match_block);
 
         self.scope
-            .push_fn(is_property_fn)
+            .push_fn(as_ranges_fn)
             .push_enum(property_enum)
             .push_fn(property_from_str_fn);
     }

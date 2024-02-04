@@ -171,7 +171,6 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
                 PassAction::Keep
             }
         }
-        Node::UnicodePropertyEscape { .. } => PassAction::Keep,
     }
 }
 
@@ -434,11 +433,6 @@ fn try_reduce_bracket(bc: &BracketContents) -> Option<Node> {
 fn simplify_brackets(n: &mut Node, _walk: &Walk) -> PassAction {
     match n {
         Node::Bracket(bc) => {
-            // Give up. TODO: we could try to optimize this.
-            if !bc.unicode_property.is_empty() {
-                return PassAction::Keep;
-            }
-
             if let Some(new_node) = try_reduce_bracket(bc) {
                 return PassAction::Replace(new_node);
             }

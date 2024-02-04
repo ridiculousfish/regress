@@ -13,12 +13,28 @@ pub const CODE_POINT_MAX: CodePoint = 0x10FFFF;
 /// around the Option<bool>.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Interval {
-    pub first: CodePoint,
-    pub last: CodePoint,
+    pub(crate) first: CodePoint,
+    pub(crate) last: CodePoint,
 }
 
 /// A list of sorted, inclusive, non-empty ranges of code points.
 impl Interval {
+    pub(crate) const fn new(first: CodePoint, last: CodePoint) -> Interval {
+        debug_assert!(first <= last);
+        Interval { first, last }
+    }
+
+    #[inline(always)]
+    pub fn compare(self, cp: u32) -> Ordering {
+        if self.first > cp {
+            Ordering::Greater
+        } else if self.last < cp {
+            Ordering::Less
+        } else {
+            Ordering::Equal
+        }
+    }
+
     /// Return whether self is before rhs.
     fn is_before(self, other: Interval) -> bool {
         self.last < other.first
@@ -72,6 +88,10 @@ impl Interval {
     }
 }
 
+pub(crate) fn interval_contains(interval: &[Interval], cp: u32) -> bool {
+    interval.binary_search_by(|iv| iv.compare(cp)).is_ok()
+}
+
 /// Merge two intervals, which must be overlapping or abutting.
 fn merge_intervals(x: Interval, y: &Interval) -> Interval {
     debug_assert!(x.mergeable(*y), "Ranges not mergeable");
@@ -90,6 +110,10 @@ pub struct CodePointSet {
 impl CodePointSet {
     pub fn new() -> CodePointSet {
         CodePointSet { ivs: Vec::new() }
+    }
+
+    pub(crate) fn contains(&self, cp: u32) -> bool {
+        interval_contains(&self.ivs, cp)
     }
 
     #[inline]

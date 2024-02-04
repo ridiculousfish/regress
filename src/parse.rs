@@ -2,7 +2,7 @@
 
 use crate::{
     api, charclasses,
-    codepointset::{CodePointSet, Interval},
+    codepointset::{interval_contains, CodePointSet, Interval},
     ir,
     types::{
         BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
@@ -11,7 +11,7 @@ use crate::{
     unicode::{
         self, unicode_property_name_from_str, unicode_property_value_from_str, PropertyEscape,
     },
-    unicodetables::{is_id_continue, is_id_start},
+    unicodetables::{id_continue_ranges, id_start_ranges},
     util::to_char_sat,
 };
 use core::{fmt, iter::Peekable};
@@ -50,8 +50,8 @@ enum ClassAtom {
         class_type: CharacterClassType,
         positive: bool,
     },
-    UnicodePropertyEscape {
-        property_escape: PropertyEscape,
+    Range {
+        iv: CodePointSet,
         negate: bool,
     },
 }
@@ -113,7 +113,6 @@ fn make_bracket_class(ct: CharacterClassType, positive: bool) -> ir::Node {
     ir::Node::Bracket(BracketContents {
         invert: false,
         cps: codepoints_from_class(ct, positive),
-        unicode_property: Vec::new(),
     })
 }
 
@@ -126,10 +125,13 @@ fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom) {
         } => {
             bc.cps.add_set(codepoints_from_class(class_type, positive));
         }
-        ClassAtom::UnicodePropertyEscape {
-            property_escape,
-            negate,
-        } => bc.unicode_property.push((property_escape, negate)),
+        ClassAtom::Range { iv, negate } => {
+            if negate {
+                bc.cps.add_set(iv.inverted());
+            } else {
+                bc.cps.add_set(iv);
+            }
+        }
     }
 }
 
@@ -472,7 +474,6 @@ where
         let mut result = BracketContents {
             invert,
             cps: CodePointSet::default(),
-            unicode_property: Vec::new(),
         };
 
         loop {
@@ -639,8 +640,11 @@ where
                         self.consume(ec);
                         let property_escape = self.try_consume_unicode_property_escape()?;
                         let negate = ec == 'P' as u32;
-                        Ok(Some(ClassAtom::UnicodePropertyEscape {
-                            property_escape,
+
+                        Ok(Some(ClassAtom::Range {
+                            iv: CodePointSet::from_sorted_disjoint_intervals(
+                                unicode::character_class_range(&property_escape).to_vec(),
+                            ),
                             negate,
                         }))
                     }
@@ -920,10 +924,12 @@ where
                 let property_escape = self.try_consume_unicode_property_escape()?;
                 let negate = c == 'P' as u32;
 
-                Ok(ir::Node::UnicodePropertyEscape {
-                    property_escape,
-                    negate,
-                })
+                Ok(ir::Node::Bracket(BracketContents {
+                    invert: negate,
+                    cps: CodePointSet::from_sorted_disjoint_intervals(
+                        unicode::character_class_range(&property_escape).to_vec(),
+                    ),
+                }))
             }
 
             // [+UnicodeMode] DecimalEscape
@@ -1102,7 +1108,7 @@ where
                 }
             }
 
-            if is_id_start(c.into()) || c == '$' || c == '_' {
+            if interval_contains(id_start_ranges(), c.into()) || c == '$' || c == '_' {
                 group_name.push(c);
             } else {
                 self.input = orig_input;
@@ -1130,7 +1136,7 @@ where
                     break;
                 }
 
-                if is_id_continue(c.into()) || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
+                if interval_contains(id_continue_ranges(), c.into()) || c == '$' || c == '_' || c == '\u{200C}' /* <ZWNJ> */ || c == '\u{200D}'
                 /* <ZWJ> */
                 {
                     group_name.push(c);

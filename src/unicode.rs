@@ -48,41 +48,6 @@ impl CodePointRange {
     pub const fn last(self) -> u32 {
         self.first() + self.len_minus_1()
     }
-
-    /// \return whether this range is strictly less than, contains, or strictly greater than a given code point.
-    #[inline(always)]
-    pub fn compare(self, cp: u32) -> Ordering {
-        if self.first() > cp {
-            Ordering::Greater
-        } else if self.last() < cp {
-            Ordering::Less
-        } else {
-            Ordering::Equal
-        }
-    }
-}
-
-/// CodePointRangeUnpacked is used when the max of CodePointRange would be exceeded.
-#[derive(Copy, Clone, Debug)]
-pub struct CodePointRangeUnpacked(u32, u32);
-
-impl CodePointRangeUnpacked {
-    #[inline(always)]
-    pub const fn from(start: u32, end: u32) -> Self {
-        CodePointRangeUnpacked(start, end)
-    }
-
-    // Compares the range to a single codepoint.
-    #[inline(always)]
-    pub fn compare(self, cp: u32) -> Ordering {
-        if cp < self.0 {
-            core::cmp::Ordering::Greater
-        } else if cp > self.1 {
-            core::cmp::Ordering::Less
-        } else {
-            core::cmp::Ordering::Equal
-        }
-    }
 }
 
 // The "extra" field contains a predicate mask in the low bits and a signed delta amount in the high bits.
@@ -339,15 +304,6 @@ pub struct PropertyEscape {
     pub value: UnicodePropertyValue,
 }
 
-impl PropertyEscape {
-    pub(crate) fn is_any(&self) -> bool {
-        match self.value {
-            UnicodePropertyValue::Binary(unicodetables::UnicodePropertyBinary::Any) => true,
-            _ => false,
-        }
-    }
-}
-
 #[derive(Debug, Copy, Clone)]
 pub enum UnicodePropertyName {
     GeneralCategory,
@@ -402,32 +358,32 @@ pub fn unicode_property_value_from_str(
     }
 }
 
-pub(crate) fn is_character_class(cp: u32, property_escape: &PropertyEscape) -> bool {
+pub(crate) fn character_class_range(property_escape: &PropertyEscape) -> &'static [Interval] {
     match property_escape.name {
         Some(UnicodePropertyName::GeneralCategory) => match &property_escape.value {
             UnicodePropertyValue::GeneralCategory(t) => {
-                unicodetables::is_property_value_general_category(cp, t)
+                unicodetables::general_category_property_value_ranges(t)
             }
-            _ => false,
+            _ => unreachable!(),
         },
         Some(UnicodePropertyName::Script) => match &property_escape.value {
-            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(cp, t),
-            _ => false,
+            UnicodePropertyValue::Script(t) => unicodetables::script_value_ranges(t),
+            _ => unreachable!(),
         },
         Some(UnicodePropertyName::ScriptExtensions) => match &property_escape.value {
             UnicodePropertyValue::ScriptExtensions(t) => {
-                unicodetables::is_property_value_script_extensions(cp, t)
+                unicodetables::script_extensions_value_ranges(t)
             }
-            _ => false,
+            _ => unreachable!(),
         },
         None => match &property_escape.value {
-            UnicodePropertyValue::Binary(t) => unicodetables::is_property_binary(cp, t),
+            UnicodePropertyValue::Binary(t) => unicodetables::binary_property_ranges(t),
             UnicodePropertyValue::GeneralCategory(t) => {
-                unicodetables::is_property_value_general_category(cp, t)
+                unicodetables::general_category_property_value_ranges(t)
             }
-            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(cp, t),
+            UnicodePropertyValue::Script(t) => unicodetables::script_value_ranges(t),
             UnicodePropertyValue::ScriptExtensions(t) => {
-                unicodetables::is_property_value_script_extensions(cp, t)
+                unicodetables::script_extensions_value_ranges(t)
             }
         },
     }
