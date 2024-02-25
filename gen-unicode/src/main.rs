@@ -10,6 +10,7 @@ mod binary_properties;
 mod case_folding;
 mod general_category_values;
 mod scripts;
+mod string_properties;
 mod uppercase;
 
 // Should match unicode.rs.
@@ -90,6 +91,7 @@ fn main() {
     gen.generate_general_category();
     gen.generate_scripts();
     gen.generate_uppercase();
+    gen.generate_string_properties();
 
     gen.scope_tests.import("common", "*");
     gen.scope_tests.raw("pub mod common;");

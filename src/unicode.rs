@@ -1,5 +1,10 @@
 use crate::codepointset::{CodePointSet, Interval};
-use crate::unicodetables::{self, FOLDS, TO_UPPERCASE};
+use crate::unicodetables::{
+    binary_property_ranges, general_category_property_value_ranges, script_extensions_value_ranges,
+    script_value_ranges, string_property_sets, unicode_property_binary_from_str,
+    unicode_property_value_general_category_from_str, unicode_property_value_script_from_str,
+    unicode_string_property_from_str, FOLDS, TO_UPPERCASE,
+};
 use crate::util::SliceHelp;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -298,20 +303,19 @@ pub fn add_icase_code_points(mut input: CodePointSet) -> CodePointSet {
     input
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct PropertyEscape {
-    pub name: Option<UnicodePropertyName>,
-    pub value: UnicodePropertyValue,
+pub(crate) enum PropertyEscapeKind {
+    CharacterClass(&'static [Interval]),
+    StringSet(&'static [&'static [u32]]),
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum UnicodePropertyName {
+pub(crate) enum UnicodePropertyName {
     GeneralCategory,
     Script,
     ScriptExtensions,
 }
 
-pub fn unicode_property_name_from_str(s: &str) -> Option<UnicodePropertyName> {
+pub(crate) fn unicode_property_name_from_str(s: &str) -> Option<UnicodePropertyName> {
     use UnicodePropertyName::*;
 
     match s {
@@ -322,70 +326,40 @@ pub fn unicode_property_name_from_str(s: &str) -> Option<UnicodePropertyName> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum UnicodePropertyValue {
-    Binary(unicodetables::UnicodePropertyBinary),
-    GeneralCategory(unicodetables::UnicodePropertyValueGeneralCategory),
-    Script(unicodetables::UnicodePropertyValueScript),
-    ScriptExtensions(unicodetables::UnicodePropertyValueScript),
-}
-
-pub fn unicode_property_value_from_str(
+pub(crate) fn unicode_property_from_str(
     s: &str,
     name: Option<UnicodePropertyName>,
-) -> Option<UnicodePropertyValue> {
+    unicode_sets: bool,
+) -> Option<PropertyEscapeKind> {
     match name {
-        Some(UnicodePropertyName::GeneralCategory) => {
-            unicodetables::unicode_property_value_general_category_from_str(s)
-                .map(UnicodePropertyValue::GeneralCategory)
-        }
-        Some(UnicodePropertyName::Script) => {
-            unicodetables::unicode_property_value_script_from_str(s)
-                .map(UnicodePropertyValue::Script)
-        }
-        Some(UnicodePropertyName::ScriptExtensions) => {
-            unicodetables::unicode_property_value_script_from_str(s)
-                .map(UnicodePropertyValue::ScriptExtensions)
-        }
+        Some(UnicodePropertyName::GeneralCategory) => Some(PropertyEscapeKind::CharacterClass(
+            general_category_property_value_ranges(
+                &unicode_property_value_general_category_from_str(s)?,
+            ),
+        )),
+        Some(UnicodePropertyName::Script) => Some(PropertyEscapeKind::CharacterClass(
+            script_value_ranges(&unicode_property_value_script_from_str(s)?),
+        )),
+        Some(UnicodePropertyName::ScriptExtensions) => Some(PropertyEscapeKind::CharacterClass(
+            script_extensions_value_ranges(&unicode_property_value_script_from_str(s)?),
+        )),
         None => {
-            if let Some(binary) = unicodetables::unicode_property_binary_from_str(s) {
-                Some(UnicodePropertyValue::Binary(binary))
-            } else {
-                unicodetables::unicode_property_value_general_category_from_str(s)
-                    .map(UnicodePropertyValue::GeneralCategory)
+            if let Some(value) = unicode_property_binary_from_str(s) {
+                return Some(PropertyEscapeKind::CharacterClass(binary_property_ranges(
+                    &value,
+                )));
             }
+            if unicode_sets {
+                if let Some(value) = unicode_string_property_from_str(s) {
+                    return Some(PropertyEscapeKind::StringSet(string_property_sets(&value)));
+                }
+            }
+            Some(PropertyEscapeKind::CharacterClass(
+                general_category_property_value_ranges(
+                    &unicode_property_value_general_category_from_str(s)?,
+                ),
+            ))
         }
-    }
-}
-
-pub(crate) fn character_class_range(property_escape: &PropertyEscape) -> &'static [Interval] {
-    match property_escape.name {
-        Some(UnicodePropertyName::GeneralCategory) => match &property_escape.value {
-            UnicodePropertyValue::GeneralCategory(t) => {
-                unicodetables::general_category_property_value_ranges(t)
-            }
-            _ => unreachable!(),
-        },
-        Some(UnicodePropertyName::Script) => match &property_escape.value {
-            UnicodePropertyValue::Script(t) => unicodetables::script_value_ranges(t),
-            _ => unreachable!(),
-        },
-        Some(UnicodePropertyName::ScriptExtensions) => match &property_escape.value {
-            UnicodePropertyValue::ScriptExtensions(t) => {
-                unicodetables::script_extensions_value_ranges(t)
-            }
-            _ => unreachable!(),
-        },
-        None => match &property_escape.value {
-            UnicodePropertyValue::Binary(t) => unicodetables::binary_property_ranges(t),
-            UnicodePropertyValue::GeneralCategory(t) => {
-                unicodetables::general_category_property_value_ranges(t)
-            }
-            UnicodePropertyValue::Script(t) => unicodetables::script_value_ranges(t),
-            UnicodePropertyValue::ScriptExtensions(t) => {
-                unicodetables::script_extensions_value_ranges(t)
-            }
-        },
     }
 }
 
