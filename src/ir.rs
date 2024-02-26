@@ -141,18 +141,31 @@ impl Node {
 
     /// Duplicate a node, perhaps assigning new loop IDs. Note we must never
     /// copy a capture group.
-    pub fn duplicate(&self) -> Node {
-        match self {
+    ///
+    /// Returns None if the depth is too high.
+    pub fn try_duplicate(&self, mut depth: usize) -> Option<Node> {
+        if depth > 100 {
+            return None;
+        }
+        depth += 1;
+        Some(match self {
             Node::Empty => Node::Empty,
             Node::Goal => Node::Goal,
             &Node::Char { c, icase } => Node::Char { c, icase },
             Node::ByteSequence(bytes) => Node::ByteSequence(bytes.clone()),
             Node::ByteSet(bytes) => Node::ByteSet(bytes.clone()),
             Node::CharSet(chars) => Node::CharSet(chars.clone()),
-            Node::Cat(nodes) => Node::Cat(nodes.iter().map(|n| n.duplicate()).collect()),
-            Node::Alt(left, right) => {
-                Node::Alt(Box::new(left.duplicate()), Box::new(right.duplicate()))
+            Node::Cat(nodes) => {
+                let mut new_nodes = Vec::with_capacity(nodes.len());
+                for n in nodes {
+                    new_nodes.push(n.try_duplicate(depth)?);
+                }
+                Node::Cat(new_nodes)
             }
+            Node::Alt(left, right) => Node::Alt(
+                Box::new(left.try_duplicate(depth)?),
+                Box::new(right.try_duplicate(depth)?),
+            ),
             Node::MatchAny => Node::MatchAny,
             Node::MatchAnyExceptLineTerminator => Node::MatchAnyExceptLineTerminator,
             &Node::Anchor(anchor_type) => Node::Anchor(anchor_type),
@@ -167,14 +180,14 @@ impl Node {
                     "Cannot duplicate a loop with enclosed groups"
                 );
                 Node::Loop {
-                    loopee: Box::new(loopee.as_ref().duplicate()),
+                    loopee: Box::new(loopee.as_ref().try_duplicate(depth)?),
                     quant: *quant,
                     enclosed_groups: enclosed_groups.clone(),
                 }
             }
 
             Node::Loop1CharBody { loopee, quant } => Node::Loop1CharBody {
-                loopee: Box::new(loopee.as_ref().duplicate()),
+                loopee: Box::new(loopee.as_ref().try_duplicate(depth)?),
                 quant: *quant,
             },
 
@@ -201,10 +214,10 @@ impl Node {
                     backwards: *backwards,
                     start_group: *start_group,
                     end_group: *end_group,
-                    contents: Box::new((*contents).duplicate()),
+                    contents: Box::new((*contents).try_duplicate(depth)?),
                 }
             }
-        }
+        })
     }
 }
 

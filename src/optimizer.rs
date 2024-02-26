@@ -279,7 +279,10 @@ fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
             // We made it through. Replace us with a cat.
             let mut unrolled = Vec::new();
             for _ in 0..quant.min {
-                unrolled.push(loopee.as_mut().duplicate());
+                let Some(node) = loopee.try_duplicate(0) else {
+                    return PassAction::Keep;
+                };
+                unrolled.push(node);
             }
 
             // We unrolled 'min' elements.
