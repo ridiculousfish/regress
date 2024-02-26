@@ -171,7 +171,6 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
                 PassAction::Keep
             }
         }
-        Node::UnicodePropertyEscape { .. } => PassAction::Keep,
     }
 }
 
@@ -280,7 +279,10 @@ fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
             // We made it through. Replace us with a cat.
             let mut unrolled = Vec::new();
             for _ in 0..quant.min {
-                unrolled.push(loopee.as_mut().duplicate());
+                let Some(node) = loopee.try_duplicate(0) else {
+                    return PassAction::Keep;
+                };
+                unrolled.push(node);
             }
 
             // We unrolled 'min' elements.
@@ -434,11 +436,6 @@ fn try_reduce_bracket(bc: &BracketContents) -> Option<Node> {
 fn simplify_brackets(n: &mut Node, _walk: &Walk) -> PassAction {
     match n {
         Node::Bracket(bc) => {
-            // Give up. TODO: we could try to optimize this.
-            if !bc.unicode_property.is_empty() {
-                return PassAction::Keep;
-            }
-
             if let Some(new_node) = try_reduce_bracket(bc) {
                 return PassAction::Replace(new_node);
             }

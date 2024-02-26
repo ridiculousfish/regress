@@ -2,7 +2,6 @@
 
 use crate::api;
 use crate::types::{BracketContents, CaptureGroupID, CaptureGroupName};
-use crate::unicode::PropertyEscape;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::fmt;
@@ -102,12 +101,6 @@ pub enum Node {
         loopee: Box<Node>,
         quant: Quantifier,
     },
-
-    // TODO: doc comment
-    UnicodePropertyEscape {
-        property_escape: PropertyEscape,
-        negate: bool,
-    },
 }
 
 pub type NodeList = Vec<Node>;
@@ -148,18 +141,31 @@ impl Node {
 
     /// Duplicate a node, perhaps assigning new loop IDs. Note we must never
     /// copy a capture group.
-    pub fn duplicate(&self) -> Node {
-        match self {
+    ///
+    /// Returns None if the depth is too high.
+    pub fn try_duplicate(&self, mut depth: usize) -> Option<Node> {
+        if depth > 100 {
+            return None;
+        }
+        depth += 1;
+        Some(match self {
             Node::Empty => Node::Empty,
             Node::Goal => Node::Goal,
             &Node::Char { c, icase } => Node::Char { c, icase },
             Node::ByteSequence(bytes) => Node::ByteSequence(bytes.clone()),
             Node::ByteSet(bytes) => Node::ByteSet(bytes.clone()),
             Node::CharSet(chars) => Node::CharSet(chars.clone()),
-            Node::Cat(nodes) => Node::Cat(nodes.iter().map(|n| n.duplicate()).collect()),
-            Node::Alt(left, right) => {
-                Node::Alt(Box::new(left.duplicate()), Box::new(right.duplicate()))
+            Node::Cat(nodes) => {
+                let mut new_nodes = Vec::with_capacity(nodes.len());
+                for n in nodes {
+                    new_nodes.push(n.try_duplicate(depth)?);
+                }
+                Node::Cat(new_nodes)
             }
+            Node::Alt(left, right) => Node::Alt(
+                Box::new(left.try_duplicate(depth)?),
+                Box::new(right.try_duplicate(depth)?),
+            ),
             Node::MatchAny => Node::MatchAny,
             Node::MatchAnyExceptLineTerminator => Node::MatchAnyExceptLineTerminator,
             &Node::Anchor(anchor_type) => Node::Anchor(anchor_type),
@@ -174,14 +180,14 @@ impl Node {
                     "Cannot duplicate a loop with enclosed groups"
                 );
                 Node::Loop {
-                    loopee: Box::new(loopee.as_ref().duplicate()),
+                    loopee: Box::new(loopee.as_ref().try_duplicate(depth)?),
                     quant: *quant,
                     enclosed_groups: enclosed_groups.clone(),
                 }
             }
 
             Node::Loop1CharBody { loopee, quant } => Node::Loop1CharBody {
-                loopee: Box::new(loopee.as_ref().duplicate()),
+                loopee: Box::new(loopee.as_ref().try_duplicate(depth)?),
                 quant: *quant,
             },
 
@@ -208,17 +214,10 @@ impl Node {
                     backwards: *backwards,
                     start_group: *start_group,
                     end_group: *end_group,
-                    contents: Box::new((*contents).duplicate()),
+                    contents: Box::new((*contents).try_duplicate(depth)?),
                 }
             }
-            Node::UnicodePropertyEscape {
-                property_escape,
-                negate: negated,
-            } => Node::UnicodePropertyEscape {
-                property_escape: *property_escape,
-                negate: *negated,
-            },
-        }
+        })
     }
 }
 
@@ -274,7 +273,6 @@ where
             | Node::WordBoundary { .. }
             | Node::BackRef { .. }
             | Node::Bracket { .. }
-            | Node::UnicodePropertyEscape { .. }
             | Node::MatchAny
             | Node::MatchAnyExceptLineTerminator
             | Node::Anchor { .. } => {}
@@ -349,8 +347,7 @@ where
             | Node::Anchor { .. }
             | Node::WordBoundary { .. }
             | Node::BackRef { .. }
-            | Node::Bracket { .. }
-            | Node::UnicodePropertyEscape { .. } => {}
+            | Node::Bracket { .. } => {}
             Node::Cat(nodes) => {
                 nodes.iter_mut().for_each(|node| self.process(node));
             }
@@ -532,18 +529,6 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
                 f,
                 "LookaroundAssertion {} {} {:?} {:?}",
                 sense, direction, start_group, end_group
-            )?;
-        }
-        Node::UnicodePropertyEscape {
-            property_escape,
-            negate,
-        } => {
-            let sense = if *negate { "negative" } else { "" };
-
-            writeln!(
-                f,
-                "UnicodePropertyEscape {} {:?} {:?}",
-                sense, property_escape.name, property_escape.value
             )?;
         }
     }

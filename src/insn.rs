@@ -11,7 +11,6 @@ use {
 use crate::api;
 use crate::bytesearch::{AsciiBitmap, ByteArraySet, ByteBitmap};
 use crate::types::{BracketContents, CaptureGroupID, LoopID};
-use crate::unicode::PropertyEscape;
 
 type JumpTarget = u32;
 
@@ -153,12 +152,6 @@ pub enum Insn {
     ByteSeq14([u8; 14]),
     ByteSeq15([u8; 15]),
     ByteSeq16([u8; 16]),
-
-    // TODO: doc comment
-    UnicodePropertyEscape {
-        property_escape: PropertyEscape,
-        negate: bool,
-    },
 
     /// An instruction that always fails, which may be produced in weird cases
     /// like an inverted bracket which matches everything.

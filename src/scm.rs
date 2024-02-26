@@ -5,7 +5,6 @@ use crate::indexing::{ElementType, InputIndexer};
 use crate::insn::MAX_CHAR_SET_LENGTH;
 use crate::matchers::CharProperties;
 use crate::types::BracketContents;
-use crate::unicode::{is_character_class, PropertyEscape};
 
 /// A trait for things that match a single Element.
 pub trait SingleCharMatcher<Input: InputIndexer, Dir: Direction> {
@@ -158,23 +157,5 @@ impl<'a, Input: InputIndexer, Dir: Direction, Bytes: ByteSeq> SingleCharMatcher<
             "This looks like it could match more than one char"
         );
         cursor::try_match_lit(input, dir, pos, self.bytes)
-    }
-}
-
-/// TODO: doc comment
-pub struct UnicodePropertyEscape<'a> {
-    pub property_escape: &'a PropertyEscape,
-}
-
-impl<'a, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir>
-    for UnicodePropertyEscape<'a>
-{
-    #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
-        match cursor::next(input, dir, pos) {
-            Some(c2) => is_character_class(c2.into(), self.property_escape),
-            _ if self.property_escape.is_any() => true,
-            _ => false,
-        }
     }
 }

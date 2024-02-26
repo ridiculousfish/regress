@@ -177,9 +177,6 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
             }
         }
 
-        // TODO: see Node::UnicodePropertyEscape
-        Node::Bracket(bc) if !bc.unicode_property.is_empty() => arbitrary,
-
         // Brackets get a bitmap.
         Node::Bracket(bc) => {
             // If our bracket is inverted, construct the set of code points not contained.
@@ -193,9 +190,6 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
             let bitmap = cps_to_first_byte_bitmap(cps);
             Some(AbstractStartPredicate::Set(bitmap))
         }
-
-        // TODO: not sure if we can do something here
-        Node::UnicodePropertyEscape { .. } => arbitrary,
     }
 }
 

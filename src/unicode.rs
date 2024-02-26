@@ -1,5 +1,10 @@
 use crate::codepointset::{CodePointSet, Interval};
-use crate::unicodetables::{self, FOLDS, TO_UPPERCASE};
+use crate::unicodetables::{
+    binary_property_ranges, general_category_property_value_ranges, script_extensions_value_ranges,
+    script_value_ranges, string_property_sets, unicode_property_binary_from_str,
+    unicode_property_value_general_category_from_str, unicode_property_value_script_from_str,
+    unicode_string_property_from_str, FOLDS, TO_UPPERCASE,
+};
 use crate::util::SliceHelp;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -47,41 +52,6 @@ impl CodePointRange {
     #[inline(always)]
     pub const fn last(self) -> u32 {
         self.first() + self.len_minus_1()
-    }
-
-    /// \return whether this range is strictly less than, contains, or strictly greater than a given code point.
-    #[inline(always)]
-    pub fn compare(self, cp: u32) -> Ordering {
-        if self.first() > cp {
-            Ordering::Greater
-        } else if self.last() < cp {
-            Ordering::Less
-        } else {
-            Ordering::Equal
-        }
-    }
-}
-
-/// CodePointRangeUnpacked is used when the max of CodePointRange would be exceeded.
-#[derive(Copy, Clone, Debug)]
-pub struct CodePointRangeUnpacked(u32, u32);
-
-impl CodePointRangeUnpacked {
-    #[inline(always)]
-    pub const fn from(start: u32, end: u32) -> Self {
-        CodePointRangeUnpacked(start, end)
-    }
-
-    // Compares the range to a single codepoint.
-    #[inline(always)]
-    pub fn compare(self, cp: u32) -> Ordering {
-        if cp < self.0 {
-            core::cmp::Ordering::Greater
-        } else if cp > self.1 {
-            core::cmp::Ordering::Less
-        } else {
-            core::cmp::Ordering::Equal
-        }
     }
 }
 
@@ -333,29 +303,19 @@ pub fn add_icase_code_points(mut input: CodePointSet) -> CodePointSet {
     input
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct PropertyEscape {
-    pub name: Option<UnicodePropertyName>,
-    pub value: UnicodePropertyValue,
-}
-
-impl PropertyEscape {
-    pub(crate) fn is_any(&self) -> bool {
-        match self.value {
-            UnicodePropertyValue::Binary(unicodetables::UnicodePropertyBinary::Any) => true,
-            _ => false,
-        }
-    }
+pub(crate) enum PropertyEscapeKind {
+    CharacterClass(&'static [Interval]),
+    StringSet(&'static [&'static [u32]]),
 }
 
 #[derive(Debug, Copy, Clone)]
-pub enum UnicodePropertyName {
+pub(crate) enum UnicodePropertyName {
     GeneralCategory,
     Script,
     ScriptExtensions,
 }
 
-pub fn unicode_property_name_from_str(s: &str) -> Option<UnicodePropertyName> {
+pub(crate) fn unicode_property_name_from_str(s: &str) -> Option<UnicodePropertyName> {
     use UnicodePropertyName::*;
 
     match s {
@@ -366,70 +326,40 @@ pub fn unicode_property_name_from_str(s: &str) -> Option<UnicodePropertyName> {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub enum UnicodePropertyValue {
-    Binary(unicodetables::UnicodePropertyBinary),
-    GeneralCategory(unicodetables::UnicodePropertyValueGeneralCategory),
-    Script(unicodetables::UnicodePropertyValueScript),
-    ScriptExtensions(unicodetables::UnicodePropertyValueScript),
-}
-
-pub fn unicode_property_value_from_str(
+pub(crate) fn unicode_property_from_str(
     s: &str,
     name: Option<UnicodePropertyName>,
-) -> Option<UnicodePropertyValue> {
+    unicode_sets: bool,
+) -> Option<PropertyEscapeKind> {
     match name {
-        Some(UnicodePropertyName::GeneralCategory) => {
-            unicodetables::unicode_property_value_general_category_from_str(s)
-                .map(UnicodePropertyValue::GeneralCategory)
-        }
-        Some(UnicodePropertyName::Script) => {
-            unicodetables::unicode_property_value_script_from_str(s)
-                .map(UnicodePropertyValue::Script)
-        }
-        Some(UnicodePropertyName::ScriptExtensions) => {
-            unicodetables::unicode_property_value_script_from_str(s)
-                .map(UnicodePropertyValue::ScriptExtensions)
-        }
+        Some(UnicodePropertyName::GeneralCategory) => Some(PropertyEscapeKind::CharacterClass(
+            general_category_property_value_ranges(
+                &unicode_property_value_general_category_from_str(s)?,
+            ),
+        )),
+        Some(UnicodePropertyName::Script) => Some(PropertyEscapeKind::CharacterClass(
+            script_value_ranges(&unicode_property_value_script_from_str(s)?),
+        )),
+        Some(UnicodePropertyName::ScriptExtensions) => Some(PropertyEscapeKind::CharacterClass(
+            script_extensions_value_ranges(&unicode_property_value_script_from_str(s)?),
+        )),
         None => {
-            if let Some(binary) = unicodetables::unicode_property_binary_from_str(s) {
-                Some(UnicodePropertyValue::Binary(binary))
-            } else {
-                unicodetables::unicode_property_value_general_category_from_str(s)
-                    .map(UnicodePropertyValue::GeneralCategory)
+            if let Some(value) = unicode_property_binary_from_str(s) {
+                return Some(PropertyEscapeKind::CharacterClass(binary_property_ranges(
+                    &value,
+                )));
             }
+            if unicode_sets {
+                if let Some(value) = unicode_string_property_from_str(s) {
+                    return Some(PropertyEscapeKind::StringSet(string_property_sets(&value)));
+                }
+            }
+            Some(PropertyEscapeKind::CharacterClass(
+                general_category_property_value_ranges(
+                    &unicode_property_value_general_category_from_str(s)?,
+                ),
+            ))
         }
-    }
-}
-
-pub(crate) fn is_character_class(cp: u32, property_escape: &PropertyEscape) -> bool {
-    match property_escape.name {
-        Some(UnicodePropertyName::GeneralCategory) => match &property_escape.value {
-            UnicodePropertyValue::GeneralCategory(t) => {
-                unicodetables::is_property_value_general_category(cp, t)
-            }
-            _ => false,
-        },
-        Some(UnicodePropertyName::Script) => match &property_escape.value {
-            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(cp, t),
-            _ => false,
-        },
-        Some(UnicodePropertyName::ScriptExtensions) => match &property_escape.value {
-            UnicodePropertyValue::ScriptExtensions(t) => {
-                unicodetables::is_property_value_script_extensions(cp, t)
-            }
-            _ => false,
-        },
-        None => match &property_escape.value {
-            UnicodePropertyValue::Binary(t) => unicodetables::is_property_binary(cp, t),
-            UnicodePropertyValue::GeneralCategory(t) => {
-                unicodetables::is_property_value_general_category(cp, t)
-            }
-            UnicodePropertyValue::Script(t) => unicodetables::is_property_value_script(cp, t),
-            UnicodePropertyValue::ScriptExtensions(t) => {
-                unicodetables::is_property_value_script_extensions(cp, t)
-            }
-        },
     }
 }
 

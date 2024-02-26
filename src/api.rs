@@ -49,6 +49,10 @@ pub struct Flags {
     /// If set, the regex is interpreted as a Unicode regex.
     /// Equivalent to the 'u' flag in JavaScript.
     pub unicode: bool,
+
+    /// If set, the regex is interpreted as a UnicodeSets regex.
+    /// Equivalent to the 'v' flag in JavaScript.
+    pub unicode_sets: bool,
 }
 
 impl Flags {
@@ -72,6 +76,9 @@ impl Flags {
                 }
                 'u' => {
                     result.unicode = true;
+                }
+                'v' => {
+                    result.unicode_sets = true;
                 }
                 _ => {
                     // Silently skip unsupported flags.

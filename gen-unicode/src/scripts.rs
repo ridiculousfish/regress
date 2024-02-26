@@ -1,5 +1,5 @@
 use crate::{
-    codepoints_to_range, codepoints_to_ranges, pack_adjacent_codepoints, remove_codepoints,
+    codepoints_to_range, format_interval_table, pack_adjacent_codepoints, remove_codepoints,
     GenUnicode,
 };
 use codegen::{Block, Enum, Function};
@@ -100,23 +100,21 @@ impl GenUnicode {
             .derive("Clone")
             .derive("Copy");
 
-        let mut is_property_fn_sc = Function::new("is_property_value_script");
-        is_property_fn_sc
+        let mut as_ranges_fn_sc = Function::new("script_value_ranges");
+        as_ranges_fn_sc
             .vis("pub(crate)")
-            .arg("c", "u32")
             .arg("value", "&UnicodePropertyValueScript")
-            .ret("bool")
+            .ret("&'static [Interval]")
             .line("use UnicodePropertyValueScript::*;");
-        let mut is_property_fn_match_block_sc = Block::new("match value");
+        let mut as_ranges_fn_sc_match_block = Block::new("match value");
 
-        let mut is_property_fn_scx = Function::new("is_property_value_script_extensions");
-        is_property_fn_scx
+        let mut as_ranges_fn_scx = Function::new("script_extensions_value_ranges");
+        as_ranges_fn_scx
             .vis("pub(crate)")
-            .arg("c", "u32")
             .arg("value", "&UnicodePropertyValueScript")
-            .ret("bool")
+            .ret("&'static [Interval]")
             .line("use UnicodePropertyValueScript::*;");
-        let mut is_property_fn_match_block_scx = Block::new("match value");
+        let mut as_ranges_fn_scx_match_block = Block::new("match value");
 
         let mut property_from_str_fn = Function::new("unicode_property_value_script_from_str");
         property_from_str_fn
@@ -140,24 +138,20 @@ impl GenUnicode {
                 script.enum_name,
             ));
 
-            let ranges = codepoints_to_ranges(&script.codepoints_sc);
-
-            self.scope.raw(&format!(
-                "const {}: [CodePointRange; {}] = [\n    {}\n];",
-                script.codepoints_sc_name,
-                ranges.len(),
-                ranges.join("\n    ")
+            self.scope.raw(format_interval_table(
+                &script.codepoints_sc_name,
+                &script.codepoints_sc,
             ));
 
-            is_property_fn_match_block_sc.line(format!(
-                "{} => {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),",
-                script.enum_name, script.codepoints_sc_name,
+            as_ranges_fn_sc_match_block.line(format!(
+                "{} => &{},",
+                script.enum_name, script.codepoints_sc_name
             ));
 
             if script.codepoints_scx.is_empty() {
-                is_property_fn_match_block_scx.line(format!(
-                    "{} => {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),",
-                    script.enum_name, script.codepoints_sc_name,
+                as_ranges_fn_scx_match_block.line(format!(
+                    "{} => &{},",
+                    script.enum_name, script.codepoints_sc_name
                 ));
 
                 continue;
@@ -168,39 +162,43 @@ impl GenUnicode {
                 .iter()
                 .any(|name| ["Common", "Inherited"].contains(&name.as_str()))
             {
-                is_property_fn_match_block_scx.line(&format!(
-                    "{} => {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),",
-                    script.enum_name, script.codepoints_scx_name,
+                self.scope.raw(format_interval_table(
+                    &script.codepoints_scx_name,
+                    &script.codepoints_scx,
+                ));
+
+                as_ranges_fn_scx_match_block.line(format!(
+                    "{} => &{},",
+                    script.enum_name, script.codepoints_scx_name
                 ));
             } else {
-                is_property_fn_match_block_scx.line(&format!(
-                    "{} => {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok() || {}.binary_search_by(|&cpr| cpr.compare(c)).is_ok(),",
-                    script.enum_name,
-                    script.codepoints_scx_name,
-                    script.codepoints_sc_name,
+                let mut codepoints = script.codepoints_sc.clone();
+                codepoints.extend(&script.codepoints_scx);
+                codepoints.sort();
+                pack_adjacent_codepoints(&mut codepoints);
+
+                self.scope.raw(format_interval_table(
+                    &script.codepoints_scx_name,
+                    &codepoints,
+                ));
+
+                as_ranges_fn_scx_match_block.line(format!(
+                    "{} => &{},",
+                    script.enum_name, script.codepoints_scx_name
                 ));
             }
-
-            let ranges = codepoints_to_ranges(&script.codepoints_scx);
-
-            self.scope.raw(&format!(
-                "const {}: [CodePointRange; {}] = [\n    {}\n];",
-                script.codepoints_scx_name,
-                ranges.len(),
-                ranges.join("\n    ")
-            ));
         }
 
         property_from_str_fn_match_block.line("_ => None,");
         property_from_str_fn.push_block(property_from_str_fn_match_block);
 
-        is_property_fn_sc.push_block(is_property_fn_match_block_sc);
-        is_property_fn_scx.push_block(is_property_fn_match_block_scx);
+        as_ranges_fn_sc.push_block(as_ranges_fn_sc_match_block);
+        as_ranges_fn_scx.push_block(as_ranges_fn_scx_match_block);
 
         self.scope.push_enum(property_enum);
         self.scope.push_fn(property_from_str_fn);
-        self.scope.push_fn(is_property_fn_sc);
-        self.scope.push_fn(is_property_fn_scx);
+        self.scope.push_fn(as_ranges_fn_sc);
+        self.scope.push_fn(as_ranges_fn_scx);
 
         self.generate_scripts_tests(&scripts);
     }

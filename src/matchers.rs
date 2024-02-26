@@ -1,7 +1,6 @@
 use crate::cursor::Direction;
 use crate::indexing::{ElementType, InputIndexer};
 use crate::types::BracketContents;
-use crate::unicode::is_character_class;
 use crate::{cursor, unicode};
 
 pub trait CharProperties {
@@ -30,13 +29,7 @@ pub trait CharProperties {
     #[inline(always)]
     fn bracket(bc: &BracketContents, cp: Self::Element) -> bool {
         let cp = cp.into();
-        if bc.cps.intervals().iter().any(|r| r.contains(cp)) {
-            return !bc.invert;
-        }
-        if bc.unicode_property.iter().any(|(prop, invert)| {
-            let contained = is_character_class(cp, prop);
-            contained ^ invert
-        }) {
+        if bc.cps.contains(cp) {
             return !bc.invert;
         }
         bc.invert

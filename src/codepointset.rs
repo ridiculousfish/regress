@@ -13,12 +13,28 @@ pub const CODE_POINT_MAX: CodePoint = 0x10FFFF;
 /// around the Option<bool>.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Interval {
-    pub first: CodePoint,
-    pub last: CodePoint,
+    pub(crate) first: CodePoint,
+    pub(crate) last: CodePoint,
 }
 
 /// A list of sorted, inclusive, non-empty ranges of code points.
 impl Interval {
+    pub(crate) const fn new(first: CodePoint, last: CodePoint) -> Interval {
+        debug_assert!(first <= last);
+        Interval { first, last }
+    }
+
+    #[inline(always)]
+    pub fn compare(self, cp: u32) -> Ordering {
+        if self.first > cp {
+            Ordering::Greater
+        } else if self.last < cp {
+            Ordering::Less
+        } else {
+            Ordering::Equal
+        }
+    }
+
     /// Return whether self is before rhs.
     fn is_before(self, other: Interval) -> bool {
         self.last < other.first
@@ -72,6 +88,10 @@ impl Interval {
     }
 }
 
+pub(crate) fn interval_contains(interval: &[Interval], cp: u32) -> bool {
+    interval.binary_search_by(|iv| iv.compare(cp)).is_ok()
+}
+
 /// Merge two intervals, which must be overlapping or abutting.
 fn merge_intervals(x: Interval, y: &Interval) -> Interval {
     debug_assert!(x.mergeable(*y), "Ranges not mergeable");
@@ -90,6 +110,18 @@ pub struct CodePointSet {
 impl CodePointSet {
     pub fn new() -> CodePointSet {
         CodePointSet { ivs: Vec::new() }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.ivs.clear();
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.ivs.is_empty()
+    }
+
+    pub(crate) fn contains(&self, cp: u32) -> bool {
+        interval_contains(&self.ivs, cp)
     }
 
     #[inline]
@@ -227,6 +259,60 @@ impl CodePointSet {
             })
         }
         CodePointSet::from_sorted_disjoint_intervals(inverted_ivs)
+    }
+
+    /// Remove the the given intervals from the set.
+    ///
+    /// Invariants: The intervals must be sorted and disjoint.
+    pub(crate) fn remove(&mut self, intervals: &[Interval]) {
+        let mut result = Vec::new();
+        let mut remove_iter = intervals.iter().peekable();
+        let mut current_remove = remove_iter.next();
+
+        for iv in &mut self.ivs {
+            while let Some(remove_iv) = current_remove {
+                if remove_iv.last < iv.first {
+                    current_remove = remove_iter.next();
+                } else if remove_iv.first > iv.last {
+                    result.push(*iv);
+                    break;
+                } else {
+                    if remove_iv.first > iv.first {
+                        result.push(Interval {
+                            first: iv.first,
+                            last: remove_iv.first - 1,
+                        });
+                    }
+                    if remove_iv.last < iv.last {
+                        iv.first = remove_iv.last + 1;
+                        current_remove = remove_iter.next();
+                    } else {
+                        break;
+                    }
+                }
+            }
+            if current_remove.is_none() {
+                result.push(*iv);
+            }
+        }
+
+        self.ivs = result;
+    }
+
+    /// Intersect the set with the given intervals.
+    pub(crate) fn intersect(&mut self, intervals: &[Interval]) {
+        let mut new_ivs = Vec::new();
+        for iv in intervals {
+            for self_iv in self.intervals() {
+                if iv.overlaps(*self_iv) {
+                    new_ivs.push(Interval {
+                        first: cmp::max(iv.first, self_iv.first),
+                        last: cmp::min(iv.last, self_iv.last),
+                    });
+                }
+            }
+        }
+        self.ivs = new_ivs;
     }
 }
 
