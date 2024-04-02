@@ -957,13 +957,55 @@ impl<'a> InputIndexer for Utf16Input<'a> {
     }
 
     #[inline(always)]
-    fn next_right_pos(&self, pos: Self::Position) -> Option<Self::Position> {
-        self.try_move_right(pos, 1)
+    fn next_right_pos(&self, mut pos: Self::Position) -> Option<Self::Position> {
+        let u1 = self.input.get(self.pos_to_offset(pos)).copied()?;
+        pos += 1;
+
+        // If the code unit is not a high surrogate, it is not the start of a surrogate pair.
+        if !Self::is_high_surrogate(u1) {
+            return Some(pos);
+        }
+
+        let Some(u2) = self.input.get(self.pos_to_offset(pos)).copied() else {
+            return Some(pos);
+        };
+
+        // If the code unit is not a low surrogate, it is not a surrogate pair.
+        if !Self::is_low_surrogate(u2) {
+            return Some(pos);
+        }
+
+        pos += 1;
+
+        Some(pos)
     }
 
     #[inline(always)]
-    fn next_left_pos(&self, pos: Self::Position) -> Option<Self::Position> {
-        self.try_move_left(pos, 1)
+    fn next_left_pos(&self, mut pos: Self::Position) -> Option<Self::Position> {
+        let left_end = self.left_end();
+        if pos == left_end {
+            return None;
+        }
+
+        let u2 = self.input.get(self.pos_to_offset(pos - 1)).copied()?;
+        pos -= 1;
+
+        // If the code unit is not a low surrogate, it is not the end of a surrogate pair.
+        if pos == left_end || !Self::is_low_surrogate(u2) {
+            return Some(pos);
+        }
+
+        let Some(u1) = self.input.get(self.pos_to_offset(pos - 1)).copied() else {
+            return Some(pos);
+        };
+
+        // If the code unit is not a high surrogate, it is not a surrogate pair.
+        if !Self::is_high_surrogate(u1) {
+            return Some(pos);
+        }
+
+        pos -= 1;
+        Some(pos)
     }
 
     #[inline(always)]
