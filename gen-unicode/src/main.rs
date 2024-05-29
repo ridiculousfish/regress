@@ -20,7 +20,7 @@ const LENGTH_BITS: u32 = 32 - CODE_POINT_BITS;
 // Our length is stored with a bias of -1, so no need to subtract 1.
 const MAX_LENGTH: u32 = 1 << LENGTH_BITS;
 
-const UCD_PATH: &str = "/tmp/ucd-15.0.0";
+const UCD_PATH: &str = "/tmp/ucd-15.1.0";
 
 pub(crate) struct GenUnicode {
     pub(crate) scope: Scope,
