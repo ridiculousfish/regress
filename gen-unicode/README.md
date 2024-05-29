@@ -7,12 +7,12 @@ This crate generates unicode tables and code specific for regress.
 1. Download the needed unicode source files:
 
     ```sh
-    mkdir /tmp/ucd-15.0.0
-    cd /tmp/ucd-15.0.0
-    curl -LO https://www.unicode.org/Public/zipped/15.0.0/UCD.zip
+    mkdir /tmp/ucd-15.1.0
+    cd /tmp/ucd-15.1.0
+    curl -LO https://www.unicode.org/Public/zipped/15.1.0/UCD.zip
     unzip UCD.zip
-    curl -LO https://www.unicode.org/Public/emoji/15.0/emoji-sequences.txt
-    curl -LO https://www.unicode.org/Public/emoji/15.0/emoji-zwj-sequences.txt
+    curl -LO https://www.unicode.org/Public/emoji/15.1/emoji-sequences.txt
+    curl -LO https://www.unicode.org/Public/emoji/15.1/emoji-zwj-sequences.txt
     ```
 
 2. Run this crate and redirect the output in the specific rs file in the regress crate:
