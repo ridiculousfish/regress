@@ -107,6 +107,11 @@ fancy-regex wraps the regex crate and extends it with PCRE-style syntactic featu
 regress has a parser, intermediate representation, optimizer which acts on the IR, bytecode emitter, and two bytecode interpreters, referred to as "backends".
 
 The major interpreter is the "classical backtracking" which uses an explicit backtracking stack, similar to JS implementations. There is also the "PikeVM" pseudo-toy backend which is mainly used for testing and verification.
+
+# Crate features
+
+- **utf16**. When enabled, additional APIs are made available that allow matching text formatted in UTF-16 and UCS-2 (`&[u16]`) without going through a conversion to and from UTF-8 (`&str`) first. This is particularly useful when interacting with and/or (re)implementing existing systems that use those encodings, such as JavaScript, Windows, and the JVM.
+
 */
 
 #![cfg_attr(not(feature = "std"), no_std)]
