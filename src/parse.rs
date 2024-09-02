@@ -1250,7 +1250,7 @@ where
                 self.consume('+');
                 Ok(Some(ir::Quantifier {
                     min: 1,
-                    max: core::usize::MAX,
+                    max: usize::MAX,
                     greedy: true,
                 }))
             }
@@ -1258,7 +1258,7 @@ where
                 self.consume('*');
                 Ok(Some(ir::Quantifier {
                     min: 0,
-                    max: core::usize::MAX,
+                    max: usize::MAX,
                     greedy: true,
                 }))
             }
@@ -1306,7 +1306,7 @@ where
                 quant.max = max;
             } else {
                 // Like {3,}
-                quant.max = usize::max_value();
+                quant.max = usize::MAX;
             }
         } else {
             // Like {3}.
