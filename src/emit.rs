@@ -8,8 +8,6 @@ use crate::startpredicate;
 use crate::types::{BracketContents, CaptureGroupID, LoopID};
 use crate::unicode;
 use core::convert::TryInto;
-#[cfg(feature = "std")]
-use std::collections::HashMap;
 #[cfg(not(feature = "std"))]
 use {alloc::vec::Vec, hashbrown::HashMap};
 
@@ -48,6 +46,9 @@ struct Emitter {
 
     // Number of loops seen so far.
     next_loop_id: LoopID,
+
+    // List of group names, in order, with empties for unnamed groups.
+    group_names: Vec<Box<str>>,
 }
 
 impl Emitter {
@@ -255,6 +256,7 @@ impl Emitter {
                     Node::CaptureGroup(contents, group) => {
                         let group = *group as CaptureGroupID;
                         self.result.groups += 1;
+                        self.group_names.push("".into());
                         self.emit_insn(Insn::BeginCaptureGroup(group));
                         stack.push(Emitter::EndCaptureGroup { group });
                         stack.push(Emitter::Node(contents));
@@ -262,7 +264,7 @@ impl Emitter {
                     Node::NamedCaptureGroup(contents, group, name) => {
                         let group = *group as CaptureGroupID;
                         self.result.groups += 1;
-                        self.result.named_group_indices.insert(name.clone(), group);
+                        self.group_names.push(name.as_str().into());
                         self.emit_insn(Insn::BeginCaptureGroup(group));
                         stack.push(Emitter::EndCaptureGroup { group });
                         stack.push(Emitter::Node(contents));
@@ -351,16 +353,29 @@ impl Emitter {
 pub fn emit(n: &ir::Regex) -> CompiledRegex {
     let mut emitter = Emitter {
         next_loop_id: 0,
+        group_names: Vec::new(),
         result: CompiledRegex {
             insns: Vec::new(),
             brackets: Vec::new(),
             loops: 0,
             groups: 0,
-            named_group_indices: HashMap::new(),
+            group_names: Box::new([]),
             flags: n.flags,
             start_pred: startpredicate::predicate_for_re(n),
         },
     };
     emitter.emit_node(&n.node);
-    emitter.result
+    let mut result = emitter.result;
+    // Populate group names, unless all are empty.
+    debug_assert!(
+        result.group_names.is_empty(),
+        "Group names should not be set"
+    );
+    if emitter.group_names.iter().any(|s| !s.is_empty()) {
+        result.group_names = emitter.group_names.into_boxed_slice();
+    }
+    debug_assert!(
+        result.group_names.is_empty() || result.group_names.len() == result.groups as usize
+    );
+    result
 }

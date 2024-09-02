@@ -18,7 +18,6 @@ use crate::util::to_char_sat;
 
 use core::{fmt, str::FromStr};
 #[cfg(feature = "std")]
-use std::collections::{hash_map::Iter, HashMap};
 #[cfg(not(feature = "std"))]
 use {
     alloc::{string::String, vec::Vec},
@@ -142,7 +141,11 @@ pub struct Match {
     /// enclosed range.
     pub captures: Vec<Option<Range>>,
 
-    pub(crate) named_captures: HashMap<String, u16>,
+    // A list of capture group names. This is either:
+    //   - Empty, if there were no named capture groups.
+    //   - A list of names with length `captures.len()`, corresponding to the
+    //     capture group names in order. Groups without names have an empty string.
+    pub(crate) group_names: Box<[Box<str>]>,
 }
 
 impl Match {
@@ -161,8 +164,12 @@ impl Match {
     /// Access a named group by name.
     #[inline]
     pub fn named_group(&self, name: &str) -> Option<Range> {
-        let idx = *self.named_captures.get(name)?;
-        self.captures[idx as usize].clone()
+        // Empty strings are used as sentinels to indicate unnamed group.
+        if name.is_empty() {
+            return None;
+        }
+        let pos = self.group_names.iter().position(|s| s.as_ref() == name)?;
+        self.captures[pos].clone()
     }
 
     /// Return an iterator over the named groups of a Match.
@@ -248,7 +255,7 @@ impl<'m> Iterator for Groups<'m> {
 #[derive(Clone)]
 pub struct NamedGroups<'m> {
     mat: &'m Match,
-    named_groups_iter: Iter<'m, String, u16>,
+    next_group_name_idx: usize,
 }
 
 impl<'m> NamedGroups<'m> {
@@ -256,7 +263,7 @@ impl<'m> NamedGroups<'m> {
     fn new(mat: &'m Match) -> Self {
         Self {
             mat,
-            named_groups_iter: mat.named_captures.iter(),
+            next_group_name_idx: 0,
         }
     }
 }
@@ -266,18 +273,20 @@ impl<'m> Iterator for NamedGroups<'m> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((name, idx)) = self.named_groups_iter.next() {
-            if let Some(r) = self.mat.captures.get(*idx as usize) {
-                match r {
-                    Some(range) => Some((name.as_str(), Some(range.clone()))),
-                    None => Some((name.as_str(), None)),
-                }
-            } else {
-                Some((name.as_str(), None))
-            }
-        } else {
-            None
+        // Increment next_group_name_idx until we find a non-empty name.
+        debug_assert!(self.next_group_name_idx <= self.mat.group_names.len());
+        let end = self.mat.group_names.len();
+        let mut idx = self.next_group_name_idx;
+        while idx < end && self.mat.group_names[idx].is_empty() {
+            idx += 1;
         }
+        if idx == end {
+            return None;
+        }
+        let name = self.mat.group_names[idx].as_ref();
+        let range = self.mat.captures[idx].clone();
+        self.next_group_name_idx = idx + 1;
+        Some((name, range))
     }
 }
 

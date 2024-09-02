@@ -1,7 +1,5 @@
 //! Bytecode instructions for a compiled regex
 
-#[cfg(feature = "std")]
-use std::collections::HashMap;
 #[cfg(not(feature = "std"))]
 use {
     alloc::{string::String, vec::Vec},
@@ -180,11 +178,27 @@ pub enum StartPredicate {
 
 #[derive(Debug, Clone)]
 pub struct CompiledRegex {
+    // Sequence of instructions.
     pub insns: Vec<Insn>,
+
+    // The bracket contents, indexed by the value of the `Bracket` instruction.
     pub brackets: Vec<BracketContents>,
+
+    // Predicate to rapidly find the first potential match.
     pub start_pred: StartPredicate,
+
+    // Number of loops, used to populate loop data.
     pub loops: u32,
+
+    // Number of capture groups, used to populate capture group data.
     pub groups: u32,
-    pub named_group_indices: HashMap<String, u16>,
+
+    // A list of capture group names. This is either:
+    //   - Empty, if there were no named capture groups.
+    //   - A list of names with length `groups`, corresponding to the capture
+    //     group names in order. Groups without names have an empty string.
+    pub group_names: Box<[Box<str>]>,
+
+    // Flags controlling matching.
     pub flags: api::Flags,
 }
