@@ -144,7 +144,6 @@ jobs:
       - uses: actions-rs/cargo@v1.0.3
         with:
           command: clippy
-          args: -- --verbose
 
   doc:
     name: Documentation check
