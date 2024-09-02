@@ -1078,6 +1078,55 @@ fn run_regexp_regexp_tc(tc: TestConfig) {
     tc.compilef("\\uDB88|\\uDBEC|aa", "").test_fails("");
 }
 
+fn named_capture_groups_in_order_tc(tc: TestConfig) {
+    // Named capture groups are returned in their definition order.
+    let re = tc.compile("(?<zoo>a)(?<apple>b)(?<space>c)(?<nothing>d)?");
+    let m = re.find("abc").unwrap();
+    assert_eq!(
+        m.named_groups().collect::<Vec<_>>(),
+        [
+            ("zoo", Some(0..1)),
+            ("apple", Some(1..2)),
+            ("space", Some(2..3)),
+            ("nothing", None),
+        ]
+    );
+
+    let re = tc.compile(
+        r#"(abc)\s+(?<big>(?:(?:(?:(?<zoo>def)(qqq)(?<ack>def\s+))+)+)+(?<hmm>def)(?<wut>rrr)?)"#,
+    );
+    let m = re
+        .find("blah blah abc defqqqdef defqqqdef defqqqdef def blah blah")
+        .unwrap();
+    assert_eq!(
+        m.named_groups().collect::<Vec<_>>(),
+        [
+            ("big", Some(14..47)),
+            ("zoo", Some(34..37)),
+            ("ack", Some(40..44)),
+            ("hmm", Some(44..47)),
+            ("wut", None),
+        ]
+    );
+
+    assert_eq!(m.named_group(""), None);
+    assert_eq!(m.named_group("not_here"), None);
+    assert_eq!(m.named_group("123"), None);
+    assert_eq!(m.named_group("bi"), None);
+    assert_eq!(m.named_group("bigg"), None);
+    assert_eq!(m.named_group("BIG"), None);
+    assert_eq!(m.named_group("big"), Some(14..47));
+    assert_eq!(m.named_group("zoo"), Some(34..37));
+    assert_eq!(m.named_group("ack"), Some(40..44));
+    assert_eq!(m.named_group("hmm"), Some(44..47));
+    assert_eq!(m.named_group("wut"), None);
+}
+
+#[test]
+fn named_capture_groups_in_order() {
+    test_with_configs(named_capture_groups_in_order_tc)
+}
+
 #[test]
 fn run_regexp_named_capture_groups() {
     test_with_configs(run_regexp_named_capture_groups_tc)
@@ -1202,6 +1251,12 @@ fn run_regexp_named_capture_groups_tc(tc: TestConfig) {
     // This pattern should fail in unicode mode, because there is a backreference without a capture group.
     // If the `\]` is not handled correctly in the parser, the following `(.)` may be parsed as a capture group.
     test_parse_fails_flags(r#"[\](.)]\1"#, "u");
+
+    // Empty group names are not allowed.
+    test_parse_fails_flags(r#"(?<>)a"#, "u");
+
+    // Duplicate group names are not allowed.
+    test_parse_fails_flags(r#"(?<alpha>a) (abc) (?<beta>a) (?<alpha>a)"#, "u");
 }
 
 #[test]

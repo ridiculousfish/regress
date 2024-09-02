@@ -929,7 +929,7 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
         Match {
             range: self.input.pos_to_offset(start)..self.input.pos_to_offset(end),
             captures,
-            named_captures: self.matcher.re.named_group_indices.clone(),
+            group_names: self.matcher.re.group_names.clone(),
         }
     }
 

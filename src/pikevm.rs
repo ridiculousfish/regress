@@ -14,14 +14,9 @@ use crate::scm;
 use crate::scm::SingleCharMatcher;
 use crate::types::{GroupData, LoopData};
 use crate::util::DebugCheckIndex;
-use core::ops::Range;
-#[cfg(feature = "std")]
-use std::collections::HashMap;
 #[cfg(not(feature = "std"))]
-use {
-    alloc::{string::String, vec::Vec},
-    hashbrown::HashMap,
-};
+use alloc::{string::String, vec::Vec};
+use core::ops::Range;
 
 #[derive(Debug, Clone)]
 struct State<Position: PositionType> {
@@ -325,7 +320,7 @@ fn successful_match<Input: InputIndexer>(
     input: Input,
     start: Input::Position,
     state: &State<Input::Position>,
-    named_captures: HashMap<String, u16>,
+    group_names: Box<[Box<str>]>,
 ) -> Match {
     let group_to_offset = |mr: &GroupData<Input::Position>| -> Option<Range<usize>> {
         mr.as_range().map(|r| Range {
@@ -337,7 +332,7 @@ fn successful_match<Input: InputIndexer>(
     Match {
         range: input.pos_to_offset(start)..input.pos_to_offset(state.pos),
         captures,
-        named_captures,
+        group_names,
     }
 }
 
@@ -449,7 +444,7 @@ impl<'a, Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'a, Input> 
                     self.input,
                     start,
                     &state,
-                    re.named_group_indices.clone(),
+                    re.group_names.clone(),
                 ));
             }
             match self.input.next_right_pos(start) {
