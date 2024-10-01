@@ -33,5 +33,5 @@ prohibit-unsafe = []
 utf16 = []
 
 [dependencies]
-hashbrown = "0.14.3"
+hashbrown = "0.15.0"
 memchr = { version = "2.4.0", default-features = false }
