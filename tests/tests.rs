@@ -1681,6 +1681,19 @@ fn test_invalid_quantifier_loop_tc(tc: TestConfig) {
 }
 
 #[test]
+fn test_empty_brackets() {
+    // Regression test for issue 99.
+    test_with_configs(|tc: TestConfig| {
+        tc.test_match_succeeds(r#"[x]*a"#, "", "a");
+        tc.test_match_succeeds(r#"[]*a"#, "", "a");
+        tc.test_match_succeeds(r#"[^\s\S]*a"#, "", "a");
+        tc.test_match_fails(r#"[x]*a"#, "", "b");
+        tc.test_match_fails(r#"[]*a"#, "", "b");
+        tc.test_match_fails(r#"[^\s\S]a"#, "", "a");
+    })
+}
+
+#[test]
 fn test_unicode_folding() {
     test_with_configs_no_ascii(test_unicode_folding_tc)
 }

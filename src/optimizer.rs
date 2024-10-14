@@ -415,7 +415,6 @@ fn try_reduce_bracket(bc: &BracketContents) -> Option<Node> {
         // Too many code points.
         return None;
     }
-
     // Ok, we want to make a char set.
     // Note we cannot make a char out of surrogates; should char conversion fail we
     // just give up.
