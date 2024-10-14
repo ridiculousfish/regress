@@ -308,10 +308,14 @@ impl Emitter {
                     Node::ByteSet(bytes) => self.emit_insn(self.make_byte_set_insn(bytes)),
 
                     Node::CharSet(chars) => {
-                        debug_assert!(!chars.is_empty() && chars.len() <= MAX_CHAR_SET_LENGTH);
-                        let mut arr = [chars[0]; MAX_CHAR_SET_LENGTH];
-                        arr[..chars.len()].copy_from_slice(chars.as_slice());
-                        self.emit_insn(Insn::CharSet(arr))
+                        debug_assert!(chars.len() <= MAX_CHAR_SET_LENGTH);
+                        if chars.is_empty() {
+                            self.emit_insn(Insn::JustFail);
+                        } else {
+                            let mut arr = [chars[0]; MAX_CHAR_SET_LENGTH];
+                            arr[..chars.len()].copy_from_slice(chars.as_slice());
+                            self.emit_insn(Insn::CharSet(arr))
+                        }
                     }
 
                     #[allow(clippy::assertions_on_constants)]

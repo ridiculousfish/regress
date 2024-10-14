@@ -1694,6 +1694,18 @@ fn test_empty_brackets() {
 }
 
 #[test]
+fn test_just_fails() {
+    test_with_configs(|tc: TestConfig| {
+        // Test cases where some part of the regex is guaranteed to fail.
+        tc.test_match_fails(r#"abc[]def"#, "", "abcdef");
+        tc.test_match_fails(r#"abc[^\s\S]def"#, "", "abcdef");
+        tc.test_match_succeeds(r#"(:?fail[])|x"#, "", "x");
+        tc.test_match_succeeds(r#"(fail[])|x"#, "", "x");
+        tc.test_match_succeeds(r#"(fail[^\s\S])|x"#, "", "x");
+    })
+}
+
+#[test]
 fn test_unicode_folding() {
     test_with_configs_no_ascii(test_unicode_folding_tc)
 }
