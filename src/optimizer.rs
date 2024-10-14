@@ -174,6 +174,56 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
     }
 }
 
+// If a node can never match, replace it with an always fails node.
+fn propagate_early_fails(n: &mut Node, _w: &Walk) -> PassAction {
+    match n {
+        Node::Cat(nodes) => {
+            // If any child is an early fail, we are an early fail.
+            // Note this assumes that there is no node after a Goal node.
+            if nodes.iter().any(|nn| nn.match_always_fails()) {
+                PassAction::Replace(Node::make_always_fails())
+            } else {
+                PassAction::Keep
+            }
+        }
+        Node::Alt(ref mut left, ref mut right) => {
+            // If both sides are early fails, we are an early fail.
+            let left_fails = left.match_always_fails();
+            let right_fails = right.match_always_fails();
+            match (left_fails, right_fails) {
+                (true, true) => PassAction::Replace(Node::make_always_fails()),
+                (false, false) => PassAction::Keep,
+                (true, false) | (false, true) => {
+                    // Here either our left or right node always fails.
+                    // "Steal" the other and return it, replacing us.
+                    let mut new_node = Node::Empty;
+                    core::mem::swap(
+                        &mut new_node,
+                        if left_fails { &mut *right } else { &mut *left },
+                    );
+                    PassAction::Replace(new_node)
+                }
+            }
+        }
+        Node::Loop {
+            loopee,
+            quant,
+            enclosed_groups,
+        } => {
+            if enclosed_groups.start < enclosed_groups.end {
+                return PassAction::Keep;
+            }
+            // If the loop body always fails, we always fail.
+            if quant.min > 0 && loopee.match_always_fails() {
+                PassAction::Replace(Node::make_always_fails())
+            } else {
+                PassAction::Keep
+            }
+        }
+        _ => PassAction::Keep,
+    }
+}
+
 // Remove excess cats.
 fn decat(n: &mut Node, _w: &Walk) -> PassAction {
     match n {
@@ -464,6 +514,7 @@ pub fn optimize(r: &mut Regex) {
         changed |= run_pass(r, &mut promote_1char_loops);
         changed |= run_pass(r, &mut form_literal_bytes);
         changed |= run_pass(r, &mut remove_empties);
+        changed |= run_pass(r, &mut propagate_early_fails);
         if !changed {
             break;
         }

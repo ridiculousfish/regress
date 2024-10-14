@@ -106,6 +106,11 @@ pub enum Node {
 pub type NodeList = Vec<Node>;
 
 impl Node {
+    /// Helper to return an "always fails" node.
+    pub fn make_always_fails() -> Node {
+        Node::CharSet(Vec::new())
+    }
+
     /// Reverse the children of \p self if in a lookbehind.
     /// Used as a parameter to walk_mut.
     pub fn reverse_cats(&mut self, w: &mut Walk) {
@@ -135,6 +140,19 @@ impl Node {
             Node::Bracket(contents) => !contents.is_empty(),
             Node::MatchAny => true,
             Node::MatchAnyExceptLineTerminator => true,
+            _ => false,
+        }
+    }
+
+    /// \return true if this node will always fail to match.
+    /// Note this is different than matching the empty string.
+    /// For example, an empty bracket /[]/ tries to match one char
+    /// from an empty set.
+    pub fn match_always_fails(&self) -> bool {
+        match self {
+            Node::ByteSet(bytes) => bytes.is_empty(),
+            Node::CharSet(contents) => contents.is_empty(),
+            Node::Bracket(contents) => contents.is_empty(),
             _ => false,
         }
     }
