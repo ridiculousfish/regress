@@ -32,6 +32,16 @@ pub struct BracketContents {
     pub cps: CodePointSet,
 }
 
+impl BracketContents {
+    // Return true if the bracket is empty.
+    pub fn is_empty(&self) -> bool {
+        match self.invert {
+            false => self.cps.is_empty(),
+            true => self.cps.contains_all_codepoints(),
+        }
+    }
+}
+
 /// An instruction pointer.
 pub type IP = usize;
 

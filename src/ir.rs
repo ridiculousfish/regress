@@ -41,11 +41,11 @@ pub enum Node {
     /// Match a literal sequence of bytes.
     ByteSequence(Vec<u8>),
 
-    /// Match any of a sequence of *bytes*.
+    /// Match any of a set of *bytes*.
     /// This may not exceed length MAX_BYTE_SET_LENGTH.
     ByteSet(Vec<u8>),
 
-    /// Match any of a sequence of *chars*, case-insensitive.
+    /// Match any of a set of *chars*, case-insensitive.
     /// This may not exceed length MAX_CHAR_SET_LENGTH.
     CharSet(Vec<u32>),
 
@@ -131,8 +131,8 @@ impl Node {
     pub fn matches_exactly_one_char(&self) -> bool {
         match self {
             Node::Char { .. } => true,
-            Node::CharSet { .. } => true,
-            Node::Bracket { .. } => true,
+            Node::CharSet(contents) => !contents.is_empty(),
+            Node::Bracket(contents) => !contents.is_empty(),
             Node::MatchAny => true,
             Node::MatchAnyExceptLineTerminator => true,
             _ => false,
