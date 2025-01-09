@@ -1820,3 +1820,54 @@ fn test_quantifiable_assertion_followed_by_tc(tc: TestConfig) {
         .match1f(r#"a bZ cZZ dZZZ eZZZZ"#)
         .test_eq("b");
 }
+
+#[cfg(feature = "utf16")]
+mod utf16_tests {
+    use super::*;
+
+    #[test]
+    fn test_utf16_regression_100() {
+        test_with_configs(test_utf16_regression_100_tc)
+    }
+
+    fn test_utf16_regression_100_tc(tc: TestConfig) {
+        // Ensure the leading bytes of UTF-16 characters don't match against brackets.
+        let input = "赔"; // U+8D54
+
+        let re = tc.compile(r"[A-Z]"); // 0x41 - 0x5A
+        let matched = re.find_utf16(&input);
+        assert!(matched.is_none());
+
+        let matched = re.find_ucs2(&input);
+        assert!(matched.is_none());
+    }
+
+    #[test]
+    fn test_utf16_byte_sequences() {
+        test_with_configs(test_utf16_byte_sequences_tc)
+    }
+
+    fn test_utf16_byte_sequences_tc(tc: TestConfig) {
+        // Regress emits byte sequences for e.g. 'abc'.
+        // Ensure these are properly decoded in UTF-16/UCS2.
+        let re = tc.compile(r"abc");
+
+        let input = "abc";
+        let matched = re.find_utf16(&input);
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap().range, 0..3);
+
+        let matched = re.find_ucs2(&input);
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap().range, 0..3);
+
+        let input = "xxxabczzz";
+        let matched = re.find_utf16(&input);
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap().range, 3..6);
+
+        let matched = re.find_ucs2(&input);
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap().range, 3..6);
+    }
+}

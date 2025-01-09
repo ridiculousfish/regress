@@ -62,6 +62,10 @@ pub fn next_byte<Input: InputIndexer, Dir: Direction>(
     _dir: Dir,
     pos: &mut Input::Position,
 ) -> Option<u8> {
+    assert!(
+        Input::CODE_UNITS_ARE_BYTES,
+        "Not implemented for non-byte input"
+    );
     let res;
     if Dir::FORWARD {
         res = input.peek_byte_right(*pos);

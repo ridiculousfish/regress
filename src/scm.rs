@@ -115,10 +115,14 @@ impl<'a, Input: InputIndexer, Dir: Direction, Bytes: ByteSet> SingleCharMatcher<
 {
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
-        if let Some(b) = cursor::next_byte(input, dir, pos) {
-            self.bytes.contains(b)
+        if Input::CODE_UNITS_ARE_BYTES {
+            // Code units are bytes so we can skip decoding the full element.
+            cursor::next_byte(input, dir, pos).map_or(false, |b| self.bytes.contains(b))
         } else {
-            false
+            // Must decode the full element.
+            cursor::next(input, dir, pos)
+                .and_then(|c| c.as_u32().try_into().ok())
+                .map_or(false, |c| self.bytes.contains(c))
         }
     }
 }

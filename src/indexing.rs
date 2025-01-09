@@ -53,6 +53,11 @@ where
     /// A type which references a position in the input string.
     type Position: PositionType;
 
+    /// Whether we have bytes as code units. This can optimize some operations.
+    /// This is true for ASCII and UTF8, but not for UCS2 or UTF16.
+    const CODE_UNITS_ARE_BYTES: bool;
+
+    /// \return whether we are using unicode for case-folding.
     fn unicode(&self) -> bool;
 
     /// Case-fold an element.
@@ -83,11 +88,11 @@ where
     fn next_left_pos(&self, pos: Self::Position) -> Option<Self::Position>;
 
     /// \return the byte to the right (starting at) \p idx, or None if we are at
-    /// the end.
+    /// the end. This panics if CODE_UNITS_ARE_BYTES is false.
     fn peek_byte_right(&self, pos: Self::Position) -> Option<u8>;
 
     /// \return the byte to the left (ending just before) \p idx, or None if we
-    /// are at the start.
+    /// are at the start. This panics if CODE_UNITS_ARE_BYTES is false.
     fn peek_byte_left(&self, pos: Self::Position) -> Option<u8>;
 
     /// \return a position at the left end of this input.
@@ -268,6 +273,7 @@ impl<'a> InputIndexer for Utf8Input<'a> {
     type Position = DefPosition<'a>;
     type Element = char;
     type CharProps = matchers::UTF8CharProperties;
+    const CODE_UNITS_ARE_BYTES: bool = true;
 
     #[inline(always)]
     fn unicode(&self) -> bool {
@@ -632,6 +638,7 @@ impl<'a> InputIndexer for AsciiInput<'a> {
     type Position = DefPosition<'a>;
     type Element = u8;
     type CharProps = matchers::ASCIICharProperties;
+    const CODE_UNITS_ARE_BYTES: bool = true;
 
     #[inline(always)]
     fn unicode(&self) -> bool {
@@ -886,6 +893,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
     type Position = IndexPosition<'a>;
     type Element = u32;
     type CharProps = matchers::Utf16CharProperties;
+    const CODE_UNITS_ARE_BYTES: bool = false;
 
     #[inline(always)]
     fn unicode(&self) -> bool {
@@ -1009,29 +1017,13 @@ impl<'a> InputIndexer for Utf16Input<'a> {
     }
 
     #[inline(always)]
-    fn peek_byte_right(&self, mut pos: Self::Position) -> Option<u8> {
-        if let Some(c) = self.next_right(&mut pos) {
-            if cfg!(target_endian = "big") {
-                Some(c.to_be_bytes()[0])
-            } else {
-                Some(c.to_le_bytes()[0])
-            }
-        } else {
-            None
-        }
+    fn peek_byte_right(&self, _pos: Self::Position) -> Option<u8> {
+        panic!("Should never be inspecting bytes for utf16");
     }
 
     #[inline(always)]
-    fn peek_byte_left(&self, mut pos: Self::Position) -> Option<u8> {
-        if let Some(c) = self.next_left(&mut pos) {
-            if cfg!(target_endian = "big") {
-                Some(c.to_be_bytes()[0])
-            } else {
-                Some(c.to_le_bytes()[0])
-            }
-        } else {
-            None
-        }
+    fn peek_byte_left(&self, _pos: Self::Position) -> Option<u8> {
+        panic!("Should never be inspecting bytes for utf16");
     }
 
     #[inline(always)]
@@ -1076,16 +1068,10 @@ impl<'a> InputIndexer for Utf16Input<'a> {
     #[inline(always)]
     fn find_bytes<Search: bytesearch::ByteSearcher>(
         &self,
-        pos: Self::Position,
-        search: &Search,
+        _pos: Self::Position,
+        _search: &Search,
     ) -> Option<Self::Position> {
-        let idx = search.find_in(
-            &self.input[self.pos_to_offset(pos)..self.pos_to_offset(self.right_end())]
-                .iter()
-                .map(|c| *c as u8)
-                .collect::<Vec<_>>(),
-        )?;
-        Some(pos + idx)
+        panic!("Should never be finding bytes for utf16");
     }
 
     fn subrange_eq<Dir: Direction>(
@@ -1120,32 +1106,10 @@ impl<'a> InputIndexer for Utf16Input<'a> {
     fn match_bytes<Dir: Direction, Bytes: ByteSeq>(
         &self,
         _dir: Dir,
-        pos: &mut Self::Position,
-        bytes: &Bytes,
+        _pos: &mut Self::Position,
+        _bytes: &Bytes,
     ) -> bool {
-        let len = Bytes::LENGTH;
-        let (start, end) = if Dir::FORWARD {
-            if let Some(end) = self.try_move_right(*pos, len) {
-                let start = *pos;
-                *pos = end;
-                (start, end)
-            } else {
-                return false;
-            }
-        } else if let Some(start) = self.try_move_left(*pos, len) {
-            let end = *pos;
-            *pos = start;
-            (start, end)
-        } else {
-            return false;
-        };
-
-        bytes.equals_known_len(
-            &self.input[self.pos_to_offset(start)..self.pos_to_offset(end)]
-                .iter()
-                .map(|c| *c as u8)
-                .collect::<Vec<_>>(),
-        )
+        panic!("Should never be matching bytes for utf16");
     }
 }
 
@@ -1173,6 +1137,7 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
     type Position = IndexPosition<'a>;
     type Element = u32;
     type CharProps = matchers::Utf16CharProperties;
+    const CODE_UNITS_ARE_BYTES: bool = false;
 
     #[inline(always)]
     fn unicode(&self) -> bool {
@@ -1223,29 +1188,13 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
     }
 
     #[inline(always)]
-    fn peek_byte_right(&self, mut pos: Self::Position) -> Option<u8> {
-        if let Some(c) = self.next_right(&mut pos) {
-            if cfg!(target_endian = "big") {
-                Some(c.to_be_bytes()[0])
-            } else {
-                Some(c.to_le_bytes()[0])
-            }
-        } else {
-            None
-        }
+    fn peek_byte_right(&self, _pos: Self::Position) -> Option<u8> {
+        panic!("Should never be inspecting bytes for ucs2");
     }
 
     #[inline(always)]
-    fn peek_byte_left(&self, mut pos: Self::Position) -> Option<u8> {
-        if let Some(c) = self.next_left(&mut pos) {
-            if cfg!(target_endian = "big") {
-                Some(c.to_be_bytes()[0])
-            } else {
-                Some(c.to_le_bytes()[0])
-            }
-        } else {
-            None
-        }
+    fn peek_byte_left(&self, _pos: Self::Position) -> Option<u8> {
+        panic!("Should never be inspecting bytes for ucs2");
     }
 
     #[inline(always)]
@@ -1290,16 +1239,10 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
     #[inline(always)]
     fn find_bytes<Search: bytesearch::ByteSearcher>(
         &self,
-        pos: Self::Position,
-        search: &Search,
+        _pos: Self::Position,
+        _search: &Search,
     ) -> Option<Self::Position> {
-        let idx = search.find_in(
-            &self.input[self.pos_to_offset(pos)..self.pos_to_offset(self.right_end())]
-                .iter()
-                .map(|c| *c as u8)
-                .collect::<Vec<_>>(),
-        )?;
-        Some(pos + idx)
+        panic!("Should never be finding bytes for ucs2");
     }
 
     fn subrange_eq<Dir: Direction>(
@@ -1334,31 +1277,9 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
     fn match_bytes<Dir: Direction, Bytes: ByteSeq>(
         &self,
         _dir: Dir,
-        pos: &mut Self::Position,
-        bytes: &Bytes,
+        _pos: &mut Self::Position,
+        _bytes: &Bytes,
     ) -> bool {
-        let len = Bytes::LENGTH;
-        let (start, end) = if Dir::FORWARD {
-            if let Some(end) = self.try_move_right(*pos, len) {
-                let start = *pos;
-                *pos = end;
-                (start, end)
-            } else {
-                return false;
-            }
-        } else if let Some(start) = self.try_move_left(*pos, len) {
-            let end = *pos;
-            *pos = start;
-            (start, end)
-        } else {
-            return false;
-        };
-
-        bytes.equals_known_len(
-            &self.input[self.pos_to_offset(start)..self.pos_to_offset(end)]
-                .iter()
-                .map(|c| *c as u8)
-                .collect::<Vec<_>>(),
-        )
+        panic!("Should never be matching bytes for ucs2");
     }
 }

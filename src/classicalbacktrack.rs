@@ -944,7 +944,11 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
         let inp = self.input;
         loop {
             // Find the next start location, or None if none.
-            pos = inp.find_bytes(pos, prefix_search)?;
+            // Don't try this unless CODE_UNITS_ARE_BYTES - i.e. don't do byte searches
+            // on UTF-16 or UCS2.
+            if Input::CODE_UNITS_ARE_BYTES {
+                pos = inp.find_bytes(pos, prefix_search)?;
+            }
             if let Some(end) = self.matcher.try_at_pos(inp, 0, pos, Forward::new()) {
                 // If we matched the empty string, we have to increment.
                 if end != pos {
