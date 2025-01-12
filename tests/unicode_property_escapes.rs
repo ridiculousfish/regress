@@ -4505,7 +4505,7 @@ fn unicode_escape_property_binary_alphabetic() {
 }
 
 fn unicode_escape_property_binary_alphabetic_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1141] = [
+    static CODE_POINTS: [&str; 1141] = [
         "\u{41}",
         "\u{61}",
         "\u{aa}",
@@ -9106,7 +9106,7 @@ fn unicode_escape_property_binary_graphemebase() {
 }
 
 fn unicode_escape_property_binary_graphemebase_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1743] = [
+    static CODE_POINTS: [&str; 1743] = [
         "\u{20}",
         "\u{21}",
         "\u{24}",
@@ -11259,7 +11259,7 @@ fn unicode_escape_property_binary_idcontinue() {
 }
 
 fn unicode_escape_property_binary_idcontinue_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1344] = [
+    static CODE_POINTS: [&str; 1344] = [
         "\u{30}",
         "\u{41}",
         "\u{5f}",
@@ -13634,7 +13634,7 @@ fn unicode_escape_property_binary_xidcontinue() {
 }
 
 fn unicode_escape_property_binary_xidcontinue_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1348] = [
+    static CODE_POINTS: [&str; 1348] = [
         "\u{30}",
         "\u{41}",
         "\u{5f}",
@@ -25301,7 +25301,7 @@ fn unicode_escape_property_gc_casedletter() {
 }
 
 fn unicode_escape_property_gc_casedletter_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1314] = [
+    static CODE_POINTS: [&str; 1314] = [
         "\u{61}",
         "\u{b5}",
         "\u{df}",
@@ -27396,7 +27396,7 @@ fn unicode_escape_property_gc_letter() {
 }
 
 fn unicode_escape_property_gc_letter_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1896] = [
+    static CODE_POINTS: [&str; 1896] = [
         "\u{61}",
         "\u{b5}",
         "\u{df}",

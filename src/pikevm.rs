@@ -306,10 +306,10 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         &Insn::WordBoundary { invert } => {
             let prev_wordchar = input
                 .peek_left(s.pos)
-                .map_or(false, Input::CharProps::is_word_char);
+                .is_some_and(Input::CharProps::is_word_char);
             let curr_wordchar = input
                 .peek_right(s.pos)
-                .map_or(false, Input::CharProps::is_word_char);
+                .is_some_and(Input::CharProps::is_word_char);
             let is_boundary = prev_wordchar != curr_wordchar;
             nextinsn_or_fail!(is_boundary != invert)
         }
@@ -408,7 +408,7 @@ impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, AsciiInput<'t>> {
     }
 }
 
-impl<'a, Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'a, Input> {
+impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
     type Position = Input::Position;
 
     fn initial_position(&self, offset: usize) -> Option<Self::Position> {

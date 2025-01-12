@@ -231,7 +231,7 @@ impl<'m> Groups<'m> {
     }
 }
 
-impl<'m> Iterator for Groups<'m> {
+impl Iterator for Groups<'_> {
     type Item = Option<Range>;
 
     #[inline]

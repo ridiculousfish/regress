@@ -659,10 +659,10 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         // Copy the positions since these destructively move them.
                         let prev_wordchar = input
                             .peek_left(pos)
-                            .map_or(false, Input::CharProps::is_word_char);
+                            .is_some_and(Input::CharProps::is_word_char);
                         let curr_wordchar = input
                             .peek_right(pos)
-                            .map_or(false, Input::CharProps::is_word_char);
+                            .is_some_and(Input::CharProps::is_word_char);
                         let is_boundary = prev_wordchar != curr_wordchar;
                         next_or_bt!(is_boundary != invert)
                     }
@@ -908,7 +908,7 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
     }
 }
 
-impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
+impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
     fn successful_match(&mut self, start: Input::Position, end: Input::Position) -> Match {
         // We want to simultaneously map our groups to offsets, and clear the groups.
         // A for loop is the easiest way to do this while satisfying the borrow checker.
@@ -964,7 +964,7 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
     }
 }
 
-impl<'a, Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'a, Input> {
+impl<Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'_, Input> {
     type Position = Input::Position;
 
     fn initial_position(&self, offset: usize) -> Option<Self::Position> {

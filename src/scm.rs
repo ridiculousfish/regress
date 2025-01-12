@@ -46,7 +46,7 @@ pub struct CharSet<'a> {
     pub chars: &'a [u32; MAX_CHAR_SET_LENGTH],
 }
 
-impl<'a, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for CharSet<'a> {
+impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for CharSet<'_> {
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
@@ -61,7 +61,7 @@ pub struct Bracket<'a> {
     pub bc: &'a BracketContents,
 }
 
-impl<'a, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Bracket<'a> {
+impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Bracket<'_> {
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
@@ -110,19 +110,19 @@ pub struct MatchByteSet<'a, Bytes: ByteSet> {
     pub bytes: &'a Bytes,
 }
 
-impl<'a, Input: InputIndexer, Dir: Direction, Bytes: ByteSet> SingleCharMatcher<Input, Dir>
-    for MatchByteSet<'a, Bytes>
+impl<Input: InputIndexer, Dir: Direction, Bytes: ByteSet> SingleCharMatcher<Input, Dir>
+    for MatchByteSet<'_, Bytes>
 {
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         if Input::CODE_UNITS_ARE_BYTES {
             // Code units are bytes so we can skip decoding the full element.
-            cursor::next_byte(input, dir, pos).map_or(false, |b| self.bytes.contains(b))
+            cursor::next_byte(input, dir, pos).is_some_and(|b| self.bytes.contains(b))
         } else {
             // Must decode the full element.
             cursor::next(input, dir, pos)
                 .and_then(|c| c.as_u32().try_into().ok())
-                .map_or(false, |c| self.bytes.contains(c))
+                .is_some_and(|c| self.bytes.contains(c))
         }
     }
 }
@@ -151,8 +151,8 @@ pub struct MatchByteSeq<'a, Bytes: ByteSeq> {
     pub bytes: &'a Bytes,
 }
 
-impl<'a, Input: InputIndexer, Dir: Direction, Bytes: ByteSeq> SingleCharMatcher<Input, Dir>
-    for MatchByteSeq<'a, Bytes>
+impl<Input: InputIndexer, Dir: Direction, Bytes: ByteSeq> SingleCharMatcher<Input, Dir>
+    for MatchByteSeq<'_, Bytes>
 {
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {

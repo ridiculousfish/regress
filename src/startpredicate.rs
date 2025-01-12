@@ -1,3 +1,4 @@
+//! Support for quickly finding potential match locations.
 use crate::bytesearch::ByteBitmap;
 use crate::codepointset;
 use crate::insn::StartPredicate;
@@ -7,8 +8,6 @@ use crate::util::{add_utf8_first_bytes_to_bitmap, utf8_first_byte};
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
 use core::convert::TryInto;
-
-/// Support for quickly finding potential match locations.
 
 /// Convert the code point set to a first-byte bitmap.
 /// That is, make a list of all of the possible first bytes of every contained

@@ -276,7 +276,7 @@ where
     walk: Walk,
 }
 
-impl<'a, F> Walker<'a, F>
+impl<F> Walker<'_, F>
 where
     F: FnMut(&Node, &mut Walk),
 {
@@ -348,7 +348,7 @@ where
     walk: Walk,
 }
 
-impl<'a, F> MutWalker<'a, F>
+impl<F> MutWalker<'_, F>
 where
     F: FnMut(&mut Node, &mut Walk),
 {

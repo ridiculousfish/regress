@@ -1835,10 +1835,10 @@ mod utf16_tests {
         let input = "赔"; // U+8D54
 
         let re = tc.compile(r"[A-Z]"); // 0x41 - 0x5A
-        let matched = re.find_utf16(&input);
+        let matched = re.find_utf16(input);
         assert!(matched.is_none());
 
-        let matched = re.find_ucs2(&input);
+        let matched = re.find_ucs2(input);
         assert!(matched.is_none());
     }
 
@@ -1853,20 +1853,20 @@ mod utf16_tests {
         let re = tc.compile(r"abc");
 
         let input = "abc";
-        let matched = re.find_utf16(&input);
+        let matched = re.find_utf16(input);
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().range, 0..3);
 
-        let matched = re.find_ucs2(&input);
+        let matched = re.find_ucs2(input);
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().range, 0..3);
 
         let input = "xxxabczzz";
-        let matched = re.find_utf16(&input);
+        let matched = re.find_utf16(input);
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().range, 3..6);
 
-        let matched = re.find_ucs2(&input);
+        let matched = re.find_ucs2(input);
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().range, 3..6);
     }

@@ -29,7 +29,7 @@ pub type DefPosition<'a> = RefPosition<'a>;
 pub struct IndexPosition<'a>(usize, PhantomData<&'a ()>);
 
 #[allow(dead_code)]
-impl<'a> IndexPosition<'a> {
+impl IndexPosition<'_> {
     /// IndexPosition does not enforce its size.
     #[inline(always)]
     pub fn check_size() {}

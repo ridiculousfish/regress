@@ -86,7 +86,7 @@ impl TestCompiledRegex {
     #[track_caller]
     pub fn find_utf16(&self, input: &str) -> Option<regress::Match> {
         let input = input.encode_utf16().collect::<Vec<_>>();
-        self.re.find_from_utf16(&input, 0).into_iter().next()
+        self.re.find_from_utf16(&input, 0).next()
     }
 
     /// Encode a string as UTF16, and match against it as UCS2.
@@ -94,7 +94,7 @@ impl TestCompiledRegex {
     #[track_caller]
     pub fn find_ucs2(&self, input: &str) -> Option<regress::Match> {
         let input = input.encode_utf16().collect::<Vec<_>>();
-        self.re.find_from_ucs2(&input, 0).into_iter().next()
+        self.re.find_from_ucs2(&input, 0).next()
     }
 
     /// Match against a string, returning the first formatted match.

@@ -189,7 +189,7 @@ impl<'a> Utf8Input<'a> {
 
     #[inline(always)]
     fn bytelength(&self) -> usize {
-        self.input.as_bytes().len()
+        self.input.len()
     }
 
     #[inline(always)]
