@@ -57,6 +57,19 @@ jobs:
   test_on_linux:
     name: Test Suite on Linux
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features:
+          [
+            "",
+            "index-positions",
+            "prohibit-unsafe",
+            "utf16",
+            "index-positions,prohibit-unsafe",
+            "index-positions,utf16",
+            "prohibit-unsafe,utf16",
+            "index-positions,prohibit-unsafe,utf16",
+          ]
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
@@ -82,11 +95,24 @@ jobs:
       - uses: actions-rs/cargo@v1.0.3
         with:
           command: test
-          args: -v
+          args: --features "${{ matrix.features }}" -v
 
   test_on_windows:
     name: Test Suite on Windows
     runs-on: windows-latest
+    strategy:
+      matrix:
+        features:
+          [
+            "",
+            "index-positions",
+            "prohibit-unsafe",
+            "utf16",
+            "index-positions,prohibit-unsafe",
+            "index-positions,utf16",
+            "prohibit-unsafe,utf16",
+            "index-positions,prohibit-unsafe,utf16",
+          ]
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rs/toolchain@v1
@@ -97,7 +123,7 @@ jobs:
       - uses: actions-rs/cargo@v1.0.3
         with:
           command: test
-          args: -v
+          args: --features "${{ matrix.features }}" -v
 
   fmt:
     name: Rustfmt
