@@ -387,7 +387,9 @@ fn promote_1char_loops(n: &mut Node, _w: &Walk) -> PassAction {
 
 /// Replace Cat(Char) with ByteSeq.
 /// Also replace chars with literal bytes.
+/// Don't do this in utf16 mode because UTF-16 should never match against bytes.
 /// TODO: this seems to do too much; consider breaking this up.
+#[cfg(not(feature = "utf16"))]
 fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
     // Helper to return a mutable reference to the nodes of a literal bytes.
     fn get_literal_bytes(n: &mut Node) -> Option<&mut Vec<u8>> {
@@ -397,7 +399,6 @@ fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
         }
     }
     match n {
-        #[cfg(not(feature = "utf16"))]
         Node::Char { c, icase } if !*icase => {
             if let Some(c) = char::from_u32(*c) {
                 let mut buff = [0; 4];
@@ -512,7 +513,10 @@ pub fn optimize(r: &mut Regex) {
         }
         changed |= run_pass(r, &mut unroll_loops);
         changed |= run_pass(r, &mut promote_1char_loops);
-        changed |= run_pass(r, &mut form_literal_bytes);
+        #[cfg(not(feature = "utf16"))]
+        {
+            changed |= run_pass(r, &mut form_literal_bytes);
+        }
         changed |= run_pass(r, &mut remove_empties);
         changed |= run_pass(r, &mut propagate_early_fails);
         if !changed {

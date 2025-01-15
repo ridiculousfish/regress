@@ -1850,24 +1850,40 @@ mod utf16_tests {
     fn test_utf16_byte_sequences_tc(tc: TestConfig) {
         // Regress emits byte sequences for e.g. 'abc'.
         // Ensure these are properly decoded in UTF-16/UCS2.
-        let re = tc.compile(r"abc");
+        for flags in ["", "i", "u", "iu"] {
+            let re = tc.compilef(r"abc", flags);
 
-        let input = "abc";
-        let matched = re.find_utf16(input);
-        assert!(matched.is_some());
-        assert_eq!(matched.unwrap().range, 0..3);
+            let input = "abc";
+            let matched = re.find_utf16(input);
+            assert!(matched.is_some());
+            assert_eq!(matched.unwrap().range, 0..3);
 
-        let matched = re.find_ucs2(input);
-        assert!(matched.is_some());
-        assert_eq!(matched.unwrap().range, 0..3);
+            let matched = re.find_ucs2(input);
+            assert!(matched.is_some());
+            assert_eq!(matched.unwrap().range, 0..3);
 
-        let input = "xxxabczzz";
-        let matched = re.find_utf16(input);
-        assert!(matched.is_some());
-        assert_eq!(matched.unwrap().range, 3..6);
+            let input = "xxxabczzz";
+            let matched = re.find_utf16(input);
+            assert!(matched.is_some());
+            assert_eq!(matched.unwrap().range, 3..6);
 
-        let matched = re.find_ucs2(input);
-        assert!(matched.is_some());
-        assert_eq!(matched.unwrap().range, 3..6);
+            let matched = re.find_ucs2(input);
+            assert!(matched.is_some());
+            assert_eq!(matched.unwrap().range, 3..6);
+        }
+    }
+
+    #[test]
+    fn test_utf16_regression_101() {
+        test_with_configs(test_utf16_regression_101_tc)
+    }
+
+    fn test_utf16_regression_101_tc(tc: TestConfig) {
+        for flags in ["", "i", "u", "iu"] {
+            let re = tc.compilef(r"foo", flags);
+            let matched = re.find_ucs2("football");
+            assert!(matched.is_some());
+            assert_eq!(matched.unwrap().range, 0..3);
+        }
     }
 }
