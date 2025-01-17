@@ -408,7 +408,7 @@ impl Regex {
         start: usize,
     ) -> exec::Matches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Utf16Input<'t>>>
     {
-        let input = Utf16Input::new(text);
+        let input = Utf16Input::new(text, self.cr.flags.unicode);
         exec::Matches::new(
             super::classicalbacktrack::BacktrackExecutor::new(
                 input,
@@ -426,7 +426,7 @@ impl Regex {
         start: usize,
     ) -> exec::Matches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Ucs2Input<'t>>>
     {
-        let input = Ucs2Input::new(text);
+        let input = Ucs2Input::new(text, self.cr.flags.unicode);
         exec::Matches::new(
             super::classicalbacktrack::BacktrackExecutor::new(
                 input,

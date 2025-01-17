@@ -853,12 +853,13 @@ impl<'a> InputIndexer for AsciiInput<'a> {
 #[derive(Debug, Copy, Clone)]
 pub struct Utf16Input<'a> {
     input: &'a [u16],
+    unicode: bool,
 }
 
 #[cfg(feature = "utf16")]
 impl<'a> Utf16Input<'a> {
-    pub fn new(s: &'a [u16]) -> Self {
-        Self { input: s }
+    pub fn new(s: &'a [u16], unicode: bool) -> Self {
+        Self { input: s, unicode }
     }
 
     #[inline(always)]
@@ -897,7 +898,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
 
     #[inline(always)]
     fn unicode(&self) -> bool {
-        true
+        self.unicode
     }
 
     #[inline(always)]
@@ -910,6 +911,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
                 start: self.pos_to_offset(range.start),
                 end: self.pos_to_offset(range.end),
             }],
+            unicode: self.unicode(),
         }
     }
 
@@ -1117,12 +1119,13 @@ impl<'a> InputIndexer for Utf16Input<'a> {
 #[derive(Debug, Copy, Clone)]
 pub struct Ucs2Input<'a> {
     input: &'a [u16],
+    unicode: bool,
 }
 
 #[cfg(feature = "utf16")]
 impl<'a> Ucs2Input<'a> {
-    pub fn new(s: &'a [u16]) -> Self {
-        Self { input: s }
+    pub fn new(s: &'a [u16], unicode: bool) -> Self {
+        Self { input: s, unicode }
     }
 
     #[inline(always)]
@@ -1141,7 +1144,7 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
 
     #[inline(always)]
     fn unicode(&self) -> bool {
-        false
+        self.unicode
     }
 
     #[inline(always)]
@@ -1154,6 +1157,7 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
                 start: self.pos_to_offset(range.start),
                 end: self.pos_to_offset(range.end),
             }],
+            unicode: self.unicode(),
         }
     }
 
