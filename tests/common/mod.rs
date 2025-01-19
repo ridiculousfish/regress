@@ -22,6 +22,25 @@ fn format_match(r: &regress::Match, input: &str) -> String {
     result
 }
 
+/// Encode a string as UTF16.
+pub fn to_utf16(input: &str) -> Vec<u16> {
+    input.encode_utf16().collect()
+}
+
+/// Given a range of a string encoded as UTF16, return the corresponding
+/// range in the original string (UTF-8).
+pub fn range_from_utf16(utf16: &[u16], r: regress::Range) -> regress::Range {
+    use std::char::decode_utf16;
+    // Figure out start.
+    let start_utf8: usize = decode_utf16(utf16[0..r.start].iter().copied())
+        .map(|r| r.expect("Invalid UTF16").len_utf8())
+        .sum();
+    let len_utf8: usize = decode_utf16(utf16[r].iter().copied())
+        .map(|r| r.expect("Invalid UTF16").len_utf8())
+        .sum();
+    start_utf8..(start_utf8 + len_utf8)
+}
+
 pub trait StringTestHelpers {
     /// "Fluent" style helper for testing that a String is equal to a str.
     fn test_eq(&self, s: &str);
@@ -54,8 +73,24 @@ pub struct TestCompiledRegex {
 
 impl TestCompiledRegex {
     /// Search for self in \p input, returning a list of all matches.
+    #[track_caller]
     pub fn matches(&'_ self, input: &'_ str, start: usize) -> Vec<regress::Match> {
         use regress::backends as rbe;
+        #[cfg(feature = "utf16")]
+        {
+            // We don't test the PikeVM backend with UTF16 or UCS2.
+            if self.tc.encoding == Encoding::Utf16 {
+                return self.match_utf16(input, start);
+            } else if self.tc.encoding == Encoding::Ucs2 {
+                // Don't test with UCS-2 if the input contains a surrogate pair,
+                // as the tests expect these to pass. UCS-2 is tested separately
+                // in other places.
+                if input.chars().any(|c| c > '\u{FFFF}') {
+                    return self.match_utf16(input, start);
+                }
+                return self.match_ucs2(input, start);
+            }
+        }
         match (self.tc.use_ascii(input), self.tc.backend) {
             (true, Backend::PikeVM) => {
                 rbe::find::<rbe::PikeVMExecutor>(&self.re, input, start).collect()
@@ -75,26 +110,58 @@ impl TestCompiledRegex {
         }
     }
 
+    /// Encode a string as UTF16, and match against it as UTF16.
+    /// 'start' is given as the byte offset into the UTF8 string.
+    #[cfg(feature = "utf16")]
+    #[track_caller]
+    pub fn match_utf16(&self, input: &str, start: usize) -> Vec<regress::Match> {
+        // convert the input and start to UTF16.
+        let u16_start = input[..start].chars().map(char::len_utf16).sum();
+        let u16_input = to_utf16(input);
+        let mut matches: Vec<_> = self.re.find_from_utf16(&u16_input, u16_start).collect();
+        // Convert any ranges back to UTF8.
+        for matc in matches.iter_mut() {
+            matc.range = range_from_utf16(&u16_input, matc.range());
+            for r in matc.captures.iter_mut().flatten() {
+                *r = range_from_utf16(&u16_input, r.clone());
+            }
+        }
+        matches
+    }
+
+    /// Encode a string as UTF16, and match against it as UCS2.
+    #[cfg(feature = "utf16")]
+    #[track_caller]
+    pub fn match_ucs2(&self, input: &str, start: usize) -> Vec<regress::Match> {
+        let u16_start = input[..start].chars().map(char::len_utf16).sum();
+        let u16_input = to_utf16(input);
+        let mut matches: Vec<_> = self.re.find_from_ucs2(&u16_input, u16_start).collect();
+        // Convert any ranges back to UTF8.
+        for matc in matches.iter_mut() {
+            matc.range = range_from_utf16(&u16_input, matc.range());
+            for r in matc.captures.iter_mut().flatten() {
+                *r = range_from_utf16(&u16_input, r.clone());
+            }
+        }
+        matches
+    }
+
     /// Search for self in \p input, returning the first Match, or None if
     /// none.
     pub fn find(&self, input: &str) -> Option<regress::Match> {
         self.matches(input, 0).into_iter().next()
     }
 
-    /// Encode a string as UTF16, and match against it as UTF16.
+    /// Like find(), but for UTF-16.
     #[cfg(feature = "utf16")]
-    #[track_caller]
     pub fn find_utf16(&self, input: &str) -> Option<regress::Match> {
-        let input = input.encode_utf16().collect::<Vec<_>>();
-        self.re.find_from_utf16(&input, 0).next()
+        self.match_utf16(input, 0).into_iter().next()
     }
 
-    /// Encode a string as UTF16, and match against it as UCS2.
+    /// Like find(), but for UCS2.
     #[cfg(feature = "utf16")]
-    #[track_caller]
     pub fn find_ucs2(&self, input: &str) -> Option<regress::Match> {
-        let input = input.encode_utf16().collect::<Vec<_>>();
-        self.re.find_from_ucs2(&input, 0).next()
+        self.match_ucs2(input, 0).into_iter().next()
     }
 
     /// Match against a string, returning the first formatted match.
@@ -172,10 +239,18 @@ impl TestCompiledRegex {
 }
 
 /// Our backend types.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Backend {
     PikeVM,
     Backtracking,
+}
+
+/// Our encoding types.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum Encoding {
+    Utf8,
+    Utf16,
+    Ucs2,
 }
 
 /// Description of how to test a regex.
@@ -187,8 +262,12 @@ pub struct TestConfig {
     // Whether to optimize.
     optimize: bool,
 
-    // Which backed to use.
+    // Which backend to use.
     backend: Backend,
+
+    // Which encoding to use. Only used if utf16 is enabled.
+    #[allow(dead_code)]
+    encoding: Encoding,
 }
 
 impl TestConfig {
@@ -243,6 +322,7 @@ pub fn test_with_configs<F>(func: F)
 where
     F: Fn(TestConfig),
 {
+    let encoding = Encoding::Utf8;
     // Note we wish to be able to determine the TestConfig from the line number.
     // Also note that optimizations are not supported for PikeVM backend, as it
     // doesn't implement Loop1CharBody.
@@ -250,32 +330,69 @@ where
         ascii: true,
         optimize: false,
         backend: Backend::PikeVM,
+        encoding,
     });
     func(TestConfig {
         ascii: false,
         optimize: false,
         backend: Backend::PikeVM,
+        encoding,
     });
     func(TestConfig {
         ascii: true,
         optimize: false,
         backend: Backend::Backtracking,
+        encoding,
     });
     func(TestConfig {
         ascii: false,
         optimize: false,
         backend: Backend::Backtracking,
+        encoding,
     });
     func(TestConfig {
         ascii: true,
         optimize: true,
         backend: Backend::Backtracking,
+        encoding,
     });
     func(TestConfig {
         ascii: false,
         optimize: true,
         backend: Backend::Backtracking,
+        encoding,
     });
+
+    // UTF16 and UCS2.
+    if cfg!(feature = "utf16") {
+        func(TestConfig {
+            ascii: false,
+            optimize: false,
+            backend: Backend::Backtracking,
+            encoding: Encoding::Utf16,
+        });
+
+        func(TestConfig {
+            ascii: false,
+            optimize: true,
+            backend: Backend::Backtracking,
+            encoding: Encoding::Utf16,
+        });
+
+        func(TestConfig {
+            ascii: false,
+            optimize: false,
+            backend: Backend::Backtracking,
+            encoding: Encoding::Ucs2,
+        });
+
+        func(TestConfig {
+            ascii: false,
+            optimize: true,
+            backend: Backend::Backtracking,
+            encoding: Encoding::Ucs2,
+        });
+    }
 }
 
 /// Invoke `F` with each test config.
@@ -291,15 +408,49 @@ where
         ascii: false,
         optimize: false,
         backend: Backend::PikeVM,
+        encoding: Encoding::Utf8,
     });
     func(TestConfig {
         ascii: false,
         optimize: false,
         backend: Backend::Backtracking,
+        encoding: Encoding::Utf8,
     });
     func(TestConfig {
         ascii: false,
         optimize: true,
         backend: Backend::Backtracking,
+        encoding: Encoding::Utf8,
     });
+
+    // UTF16 and UCS2.
+    if cfg!(feature = "utf16") {
+        func(TestConfig {
+            ascii: false,
+            optimize: false,
+            backend: Backend::Backtracking,
+            encoding: Encoding::Utf16,
+        });
+
+        func(TestConfig {
+            ascii: false,
+            optimize: true,
+            backend: Backend::Backtracking,
+            encoding: Encoding::Utf16,
+        });
+
+        func(TestConfig {
+            ascii: false,
+            optimize: false,
+            backend: Backend::Backtracking,
+            encoding: Encoding::Ucs2,
+        });
+
+        func(TestConfig {
+            ascii: false,
+            optimize: true,
+            backend: Backend::Backtracking,
+            encoding: Encoding::Ucs2,
+        });
+    }
 }

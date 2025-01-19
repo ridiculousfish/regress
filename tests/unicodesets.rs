@@ -3146,3 +3146,13 @@ fn test_unicode_sets_nested_class_tc(tc: TestConfig) {
     tc.test_match_succeeds(r"^[[0-9]&&\q{0|2|4}]$", "v", "2");
     tc.test_match_succeeds(r"^[[0-9]&&\q{0|2|4}]$", "v", "4");
 }
+
+#[test]
+fn test_stuff() {
+    test_with_configs(test_stuff_tc)
+}
+
+fn test_stuff_tc(tc: TestConfig) {
+    let r = tc.compilef("c|abc", "i").match1f("\u{83}x0abcdef");
+    assert_eq!(r, "abc");
+}

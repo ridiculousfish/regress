@@ -1886,4 +1886,64 @@ mod utf16_tests {
             assert_eq!(matched.unwrap().range, 0..3);
         }
     }
+
+    #[test]
+    fn test_ucs2_surrogates() {
+        // Test that we can match against surrogates in UCS-2 mode.
+        // TODO: we improperly match this in UTF-16 mode, because our API is
+        // kind of bad. We ought to infer UTF-16 vs UCS2 from the "u" flag,
+        // matching the JS spec.
+        let re = regress::Regex::new(r"[\uD800-\uDBFF]").unwrap();
+
+        // High surrogate.
+        let matched = re.find_from_ucs2(&[0xD800], 0).next();
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap().range, 0..1);
+
+        let input = to_utf16("😀");
+        let matched = re.find_from_ucs2(&input, 0).next();
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap().range, 0..1);
+
+        // Low surrogate.
+        let re = regress::Regex::new(r"[\uDC00-\uDFFF]").unwrap();
+        let matched = re.find_from_ucs2(&[1, 2, 3, 0xDC00], 0).next();
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap().range, 3..4);
+
+        let input = to_utf16("😀");
+        let matched = re.find_from_ucs2(&input, 0).next();
+        assert!(matched.is_some());
+        assert_eq!(matched.unwrap().range, 1..2);
+    }
+}
+
+#[test]
+fn test_range_from_utf16() {
+    use std::char::decode_utf16;
+    let weird_utf8 = "a🌍b\u{1F600}q"; // 'a', '🌍', 'b', '😀', 'q'
+    let utf16: Vec<u16> = to_utf16(weird_utf8);
+    assert_eq!(utf16, weird_utf8.encode_utf16().collect::<Vec<_>>());
+
+    // Define all possible ranges in UTF-16
+    for start in 0..utf16.len() {
+        for end in start..=utf16.len() {
+            let utf16_range = start..end;
+
+            // The prefix and body must not split surrogate pairs, else we cannot convert the range.
+            if decode_utf16(utf16[0..utf16_range.end].iter().copied()).any(|r| r.is_err()) {
+                continue;
+            }
+            if decode_utf16(utf16[utf16_range.clone()].iter().copied()).any(|r| r.is_err()) {
+                continue;
+            }
+
+            let utf16_to_utf8: String = decode_utf16(utf16[utf16_range.clone()].iter().copied())
+                .map(|r| r.unwrap())
+                .collect();
+
+            let utf8_range = range_from_utf16(&utf16, utf16_range);
+            assert_eq!(&weird_utf8[utf8_range], utf16_to_utf8);
+        }
+    }
 }
