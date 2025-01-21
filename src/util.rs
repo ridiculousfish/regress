@@ -99,13 +99,13 @@ pub fn utf8_first_byte(cp: u32) -> u8 {
         cp as u8
     } else if cp < 0x800 {
         // Two byte encoding.
-        (cp >> 6 & 0x1F) as u8 | 0b1100_0000
+        ((cp >> 6) & 0x1F) as u8 | 0b1100_0000
     } else if cp < 0x10000 {
         // Three byte encoding.
-        (cp >> 12 & 0x0F) as u8 | 0b1110_0000
+        ((cp >> 12) & 0x0F) as u8 | 0b1110_0000
     } else {
         // Four byte encoding.
-        (cp >> 18 & 0x07) as u8 | 0b1111_0000
+        ((cp >> 18) & 0x07) as u8 | 0b1111_0000
     }
 }
 
