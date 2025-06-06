@@ -168,4 +168,4 @@ fn test_complex_replacement() {
     let re = Regex::new(r"(\d{1,2})/(\d{1,2})/(\d{4})").unwrap();
     let result = re.replace_all("Born on 12/25/1990 and graduated on 5/15/2012", "$3-$1-$2");
     assert_eq!(result, "Born on 1990-12-25 and graduated on 2012-5-15");
-} 
+}

@@ -202,12 +202,12 @@ impl Match {
     }
 
     /// Returns the matched text as a string slice.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use regress::Regex;
-    /// 
+    ///
     /// let re = Regex::new(r"\d+").unwrap();
     /// let text = "Price: $123";
     /// let m = re.find(text).unwrap();
@@ -456,22 +456,22 @@ impl Regex {
     }
 
     /// Replaces the first match of the regex in `text` with the replacement string.
-    /// 
+    ///
     /// The replacement string may contain capture group references in the form `$1`, `$2`, etc.,
     /// where `$1` refers to the first capture group, `$2` to the second, and so on.
     /// `$0` refers to the entire match. Use `$$` to insert a literal `$`.
-    /// 
+    ///
     /// If no match is found, the original text is returned unchanged.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use regress::Regex;
-    /// 
+    ///
     /// let re = Regex::new(r"(\w+)\s+(\w+)").unwrap();
     /// let result = re.replace("hello world", "$2 $1");
     /// assert_eq!(result, "world hello");
-    /// 
+    ///
     /// let re = Regex::new(r"(\d{4})-(\d{2})-(\d{2})").unwrap();
     /// let result = re.replace("2023-12-25", "$2/$3/$1");
     /// assert_eq!(result, "12/25/2023");
@@ -490,20 +490,20 @@ impl Regex {
     }
 
     /// Replaces all matches of the regex in `text` with the replacement string.
-    /// 
+    ///
     /// The replacement string may contain capture group references in the form `$1`, `$2`, etc.,
     /// where `$1` refers to the first capture group, `$2` to the second, and so on.
     /// `$0` refers to the entire match. Use `$$` to insert a literal `$`.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use regress::Regex;
-    /// 
+    ///
     /// let re = Regex::new(r"(\w+)\s+(\w+)").unwrap();
     /// let result = re.replace_all("hello world foo bar", "$2-$1");
     /// assert_eq!(result, "world-hello bar-foo");
-    /// 
+    ///
     /// let re = Regex::new(r"\b(\w)(\w+)").unwrap();
     /// let result = re.replace_all("hello world", "$1.$2");
     /// assert_eq!(result, "h.ello w.orld");
@@ -511,29 +511,29 @@ impl Regex {
     pub fn replace_all(&self, text: &str, replacement: &str) -> String {
         let mut result = String::with_capacity(text.len());
         let mut last_end = 0;
-        
+
         for m in self.find_iter(text) {
             result.push_str(&text[last_end..m.start()]);
             self.expand_replacement(&m, text, replacement, &mut result);
             last_end = m.end();
         }
-        
+
         result.push_str(&text[last_end..]);
         result
     }
 
     /// Replaces the first match of the regex in `text` using a closure.
-    /// 
+    ///
     /// The closure receives a `&Match` and should return the replacement string.
     /// This is useful for dynamic replacements that depend on the match details.
-    /// 
+    ///
     /// If no match is found, the original text is returned unchanged.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use regress::Regex;
-    /// 
+    ///
     /// let re = Regex::new(r"\d+").unwrap();
     /// let text = "Price: $123";
     /// let result = re.replace_with(text, |m| {
@@ -559,15 +559,15 @@ impl Regex {
     }
 
     /// Replaces all matches of the regex in `text` using a closure.
-    /// 
+    ///
     /// The closure receives a `&Match` and should return the replacement string.
     /// This is useful for dynamic replacements that depend on the match details.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use regress::Regex;
-    /// 
+    ///
     /// let re = Regex::new(r"\d+").unwrap();
     /// let text = "Items: 5, 10, 15";
     /// let result = re.replace_all_with(text, |m| {
@@ -582,13 +582,13 @@ impl Regex {
     {
         let mut result = String::with_capacity(text.len());
         let mut last_end = 0;
-        
+
         for m in self.find_iter(text) {
             result.push_str(&text[last_end..m.start()]);
             result.push_str(&replacement(&m));
             last_end = m.end();
         }
-        
+
         result.push_str(&text[last_end..]);
         result
     }
@@ -596,7 +596,7 @@ impl Regex {
     /// Helper method to expand replacement strings with capture group substitutions.
     fn expand_replacement(&self, m: &Match, text: &str, replacement: &str, output: &mut String) {
         let mut chars = replacement.chars().peekable();
-        
+
         while let Some(ch) = chars.next() {
             if ch == '$' {
                 match chars.peek() {
@@ -620,7 +620,7 @@ impl Regex {
                                 break;
                             }
                         }
-                        
+
                         // Get the matched text for this group
                         if let Some(range) = m.group(group_num) {
                             output.push_str(&text[range]);
@@ -632,7 +632,7 @@ impl Regex {
                         chars.next(); // consume '{'
                         let mut name = String::new();
                         let mut found_closing_brace = false;
-                        
+
                         while let Some(ch) = chars.next() {
                             if ch == '}' {
                                 found_closing_brace = true;
@@ -640,7 +640,7 @@ impl Regex {
                             }
                             name.push(ch);
                         }
-                        
+
                         if found_closing_brace {
                             if let Some(range) = m.named_group(&name) {
                                 output.push_str(&text[range]);
