@@ -28,7 +28,6 @@ There's lots of stuff still missing, maybe you want to contribute?
 
 ### Currently Missing Features
 
-- An API for replacing a string while substituting in capture groups (e.g. with `$1`)
 - An API for escaping a string to make it a literal
 - Implementing `std::str::pattern::Pattern`
 
