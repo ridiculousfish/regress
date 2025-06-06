@@ -4,6 +4,65 @@ extern crate memchr;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
+/// Boyer-Moore substring search implementation for efficient literal matching.
+mod boyer_moore {
+    /// Compute the bad character table for Boyer-Moore algorithm.
+    /// Returns an array where index i contains the rightmost position of byte i in the pattern,
+    /// or -1 if the byte doesn't appear in the pattern.
+    fn compute_bad_char_table(pattern: &[u8]) -> [isize; 256] {
+        let mut table = [-1isize; 256];
+        for (i, &byte) in pattern.iter().enumerate() {
+            table[byte as usize] = i as isize;
+        }
+        table
+    }
+
+    /// Boyer-Moore search algorithm implementation.
+    /// Returns the index of the first occurrence of pattern in text, or None if not found.
+    pub fn boyer_moore_search(pattern: &[u8], text: &[u8]) -> Option<usize> {
+        if pattern.is_empty() {
+            return Some(0);
+        }
+        if text.len() < pattern.len() {
+            return None;
+        }
+
+        let bad_char = compute_bad_char_table(pattern);
+        let m = pattern.len();
+        let n = text.len();
+        let mut shift = 0;
+
+        while shift <= n - m {
+            let mut j = m - 1;
+
+            // Check pattern from right to left
+            while j < m && pattern[j] == text[shift + j] {
+                if j == 0 {
+                    return Some(shift);
+                }
+                j -= 1;
+            }
+
+            // Calculate shift using bad character rule
+            let bad_char_shift = if j < m {
+                let text_char = text[shift + j] as usize;
+                let last_occurrence = bad_char[text_char];
+                if last_occurrence < j as isize {
+                    j as isize - last_occurrence
+                } else {
+                    1
+                }
+            } else {
+                1
+            };
+
+            shift += bad_char_shift as usize;
+        }
+
+        None
+    }
+}
+
 /// Facilities for searching bytes.
 pub trait ByteSearcher {
     /// Search for ourselves in a slice of bytes.
@@ -51,6 +110,16 @@ impl<const N: usize> ByteSearcher for [u8; N] {
         if N == 1 {
             return memchr::memchr(self[0], rhs);
         }
+        // Use Boyer-Moore for longer patterns to get better performance
+        // than the naive sliding window approach. For very short patterns
+        // (2-3 bytes), the overhead might not be worth it, but for longer
+        // patterns Boyer-Moore provides significant speedup.
+        if N >= 5 {
+            return boyer_moore::boyer_moore_search(self, rhs);
+        }
+
+        // For short patterns (2-3 bytes), still use the simple approach
+        // as the Boyer-Moore overhead might not be worth it
         for win in rhs.windows(Self::LENGTH) {
             if self.equals_known_len(win) {
                 // Black magic?
@@ -126,10 +195,11 @@ impl SmallArraySet for [u8; 4] {
 
     #[inline(always)]
     fn find_in(self, rhs: &[u8]) -> Option<usize> {
-        // TODO.
-        for (idx, byte) in rhs.iter().enumerate() {
-            if self.contains(*byte) {
-                return Some(idx);
+        // For [u8; 4], we should do literal sequence search, not character set search
+        // Since 4 < 5, we use simple sliding window (Boyer-Moore threshold is 5)
+        for win in rhs.windows(4) {
+            if self == *win {
+                return Some((win.as_ptr() as usize) - (rhs.as_ptr() as usize));
             }
         }
         None
@@ -397,5 +467,96 @@ mod tests {
     fn literal_search() {
         assert_eq!([0, 1, 2, 3].find_in(&[4, 5, 6, 7]), None);
         assert_eq!([0, 1, 2, 3].find_in(&[]), None);
+    }
+
+    #[test]
+    fn boyer_moore_search() {
+        // Test Boyer-Moore implementation directly
+        assert_eq!(
+            super::boyer_moore::boyer_moore_search(b"abc", b"abcdef"),
+            Some(0)
+        );
+        assert_eq!(
+            super::boyer_moore::boyer_moore_search(b"def", b"abcdef"),
+            Some(3)
+        );
+        assert_eq!(
+            super::boyer_moore::boyer_moore_search(b"xyz", b"abcdef"),
+            None
+        );
+        assert_eq!(
+            super::boyer_moore::boyer_moore_search(b"", b"abcdef"),
+            Some(0)
+        );
+        assert_eq!(
+            super::boyer_moore::boyer_moore_search(b"abcdefg", b"abcdef"),
+            None
+        );
+
+        // Test with longer patterns that will use Boyer-Moore through ByteSearcher
+        let pattern = [b'h', b'e', b'l', b'l', b'o'];
+        let text = b"hello world, hello again";
+        assert_eq!(pattern.find_in(text), Some(0));
+
+        let pattern2 = [b'w', b'o', b'r', b'l', b'd'];
+        assert_eq!(pattern2.find_in(text), Some(6));
+
+        let pattern3 = [b'a', b'g', b'a', b'i', b'n'];
+        assert_eq!(pattern3.find_in(text), Some(19));
+
+        // Test case where pattern doesn't exist
+        let pattern4 = [b'x', b'y', b'z', b'a', b'b'];
+        assert_eq!(pattern4.find_in(text), None);
+
+        // Test repeated characters
+        let pattern5 = [b'l', b'l', b'o', b' '];
+        assert_eq!(pattern5.find_in(text), Some(2));
+    }
+
+    #[test]
+    fn boyer_moore_performance_characteristics() {
+        // Create a pathological case for naive search but good for Boyer-Moore:
+        // A long text with many false starts
+        let mut text = Vec::new();
+        for _ in 0..1000 {
+            text.extend_from_slice(b"abcdef");
+        }
+        text.extend_from_slice(b"abcdefghijk"); // The actual pattern appears at the end
+
+        let pattern = [
+            b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k',
+        ];
+
+        // This should find the pattern at the very end
+        let expected_pos = text.len() - 11;
+        assert_eq!(pattern.find_in(&text), Some(expected_pos));
+
+        // Test that both shorter and longer patterns work correctly
+        let short_pattern = [b'a', b'b', b'c']; // Uses naive search
+        assert_eq!(short_pattern.find_in(&text), Some(0));
+
+        let long_pattern = [b'f', b'g', b'h', b'i', b'j', b'k']; // Uses Boyer-Moore
+        assert_eq!(long_pattern.find_in(&text), Some(expected_pos + 5));
+    }
+
+    #[test]
+    fn boyer_moore_edge_cases() {
+        // Test edge cases for Boyer-Moore
+        let pattern = [b'a', b'a', b'a', b'a']; // Repeated character pattern
+        let text = b"baaaaaaaaab";
+        assert_eq!(pattern.find_in(text), Some(1));
+
+        // Pattern at the very beginning
+        let pattern2 = [b'b', b'a', b'a', b'a'];
+        assert_eq!(pattern2.find_in(text), Some(0));
+
+        // Use a longer pattern to ensure Boyer-Moore is used
+        let pattern3 = [b'a', b'a', b'a', b'a', b'b']; // 5 bytes, will use Boyer-Moore
+        let text3 = b"baaaaaaaaaab"; // Extended text to have the pattern
+        assert_eq!(pattern3.find_in(text3), Some(7));
+
+        // Single character repeated throughout - use Boyer-Moore
+        let pattern4 = [b'a'; 5];
+        assert_eq!(pattern4.find_in(text3), Some(1));
     }
 }
