@@ -36,5 +36,4 @@ There's lots of stuff still missing, maybe you want to contribute?
 
 - Anchored matches like `^abc` still perform a string search. We should compute whether the whole regex is anchored, and optimize matching if so.
 - Non-greedy loops like `.*?` will eagerly compute their maximum match. This doesn't affect correctness but it does mean they may match more than they should.
-- Pure literal searches should use Boyer-Moore or etc.
 - There are lots of vectorization opportunities.
