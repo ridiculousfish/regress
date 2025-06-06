@@ -492,3 +492,38 @@ pub mod backends {
         find::<Executor::AsAscii>(re, text, start)
     }
 }
+
+/// Escapes all special regex characters in a string to make it a literal match.
+///
+/// This function takes a string and returns a new string with all special
+/// regex characters escaped with backslashes, so the resulting string can be
+/// used as a literal pattern in a regular expression.
+///
+/// # Example
+///
+/// ```
+/// use regress::escape;
+///
+/// let escaped = escape("Hello. How are you?");
+/// assert_eq!(escaped, "Hello\\. How are you\\?");
+///
+/// let escaped = escape("$100 + tax (15%)");
+/// assert_eq!(escaped, "\\$100 \\+ tax \\(15%\\)");
+/// ```
+pub fn escape(text: &str) -> String {
+    let mut result = String::with_capacity(text.len() * 2);
+
+    for c in text.chars() {
+        match c {
+            // Characters that have special meaning in regex and need escaping
+            '\\' | '^' | '$' | '.' | '|' | '?' | '*' | '+' | '(' | ')' | '[' | ']' | '{' | '}' => {
+                result.push('\\');
+                result.push(c);
+            }
+            // All other characters are literal
+            _ => result.push(c),
+        }
+    }
+
+    result
+}
