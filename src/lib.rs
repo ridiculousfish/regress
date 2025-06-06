@@ -45,6 +45,23 @@ println!("Year: {}", &text[group]);
 // Output: Year: 2020
 ```
 
+# Example: using with Pattern trait (nightly only)
+
+When the `pattern` feature is enabled and using nightly Rust, `Regex` can be used with standard string methods:
+
+```rust,ignore
+#![feature(pattern)]
+use regress::Regex;
+let re = Regex::new(r"\d+").unwrap();
+let text = "abc123def456";
+
+// Use with str methods
+assert_eq!(text.find(&re), Some(3));
+assert!(text.contains(&re));
+let parts: Vec<&str> = text.split(&re).collect();
+assert_eq!(parts, vec!["abc", "def", ""]);
+```
+
 # Supported Syntax
 
 regress targets ES 2018 syntax. You can refer to the many resources about JavaScript regex syntax.
@@ -112,9 +129,12 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 
 - **utf16**. When enabled, additional APIs are made available that allow matching text formatted in UTF-16 and UCS-2 (`&[u16]`) without going through a conversion to and from UTF-8 (`&str`) first. This is particularly useful when interacting with and/or (re)implementing existing systems that use those encodings, such as JavaScript, Windows, and the JVM.
 
+- **pattern**. When enabled (nightly only), implements the `std::str::pattern::Pattern` trait for `Regex`, allowing it to be used with standard string methods like `str::find`, `str::contains`, `str::split`, etc.
+
 */
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(feature = "pattern", feature(pattern))]
 #![warn(clippy::all)]
 #![allow(clippy::upper_case_acronyms, clippy::match_like_matches_macro)]
 // Clippy's manual_range_contains suggestion produces worse codegen.
