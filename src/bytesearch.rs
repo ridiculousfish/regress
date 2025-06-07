@@ -104,8 +104,7 @@ impl SmallArraySet for [u8; 2] {
 
     #[inline(always)]
     fn find_in(self, rhs: &[u8]) -> Option<usize> {
-        // Use memchr's substring search for literal sequences, not character set search
-        memchr::memmem::find(rhs, &self)
+        memchr::memchr2(self[0], self[1], rhs)
     }
 }
 impl SmallArraySet for [u8; 3] {
@@ -116,8 +115,7 @@ impl SmallArraySet for [u8; 3] {
 
     #[inline(always)]
     fn find_in(self, rhs: &[u8]) -> Option<usize> {
-        // Use memchr's substring search for literal sequences, not character set search
-        memchr::memmem::find(rhs, &self)
+        memchr::memchr3(self[0], self[1], self[2], rhs)
     }
 }
 impl SmallArraySet for [u8; 4] {
@@ -128,11 +126,10 @@ impl SmallArraySet for [u8; 4] {
 
     #[inline(always)]
     fn find_in(self, rhs: &[u8]) -> Option<usize> {
-        // For [u8; 4], we should do literal sequence search, not character set search
-        // Since 4 < 5, we use simple sliding window (Boyer-Moore threshold is 5)
-        for win in rhs.windows(4) {
-            if self == *win {
-                return Some((win.as_ptr() as usize) - (rhs.as_ptr() as usize));
+        // TODO.
+        for (idx, byte) in rhs.iter().enumerate() {
+            if self.contains(*byte) {
+                return Some(idx);
             }
         }
         None
@@ -400,116 +397,5 @@ mod tests {
     fn literal_search() {
         assert_eq!([0, 1, 2, 3].find_in(&[4, 5, 6, 7]), None);
         assert_eq!([0, 1, 2, 3].find_in(&[]), None);
-
-        // Test basic substring search
-        let pattern = [b'h', b'e', b'l', b'l', b'o'];
-        let text = b"hello world, hello again";
-        assert_eq!(pattern.find_in(text), Some(0));
-
-        let pattern2 = [b'w', b'o', b'r', b'l', b'd'];
-        assert_eq!(pattern2.find_in(text), Some(6));
-
-        let pattern3 = [b'a', b'g', b'a', b'i', b'n'];
-        assert_eq!(pattern3.find_in(text), Some(19));
-
-        // Test case where pattern doesn't exist
-        let pattern4 = [b'x', b'y', b'z', b'a', b'b'];
-        assert_eq!(pattern4.find_in(text), None);
-
-        // Test repeated characters
-        let pattern5 = [b'l', b'l', b'o', b' '];
-        assert_eq!(pattern5.find_in(text), Some(2));
-
-        // Test edge cases
-        let pattern6 = [b'a', b'a', b'a', b'a'];
-        let text6 = b"baaaaaaaaab";
-        assert_eq!(pattern6.find_in(text6), Some(1));
-
-        // Test longer patterns
-        let pattern7 = [
-            b'a', b'b', b'c', b'd', b'e', b'f', b'g', b'h', b'i', b'j', b'k',
-        ];
-        let mut text7 = Vec::new();
-        for _ in 0..100 {
-            text7.extend_from_slice(b"abcdef");
-        }
-        text7.extend_from_slice(b"abcdefghijk");
-        let expected_pos = text7.len() - 11;
-        assert_eq!(pattern7.find_in(&text7), Some(expected_pos));
-    }
-
-    #[test]
-    fn substring_search_comprehensive() {
-        // Test various pattern and text combinations to ensure memchr integration works correctly
-
-        // Single character (handled by memchr::memchr)
-        assert_eq!([b'h'].find_in(b"hello"), Some(0));
-        assert_eq!([b'e'].find_in(b"hello"), Some(1));
-        assert_eq!([b'z'].find_in(b"hello"), None);
-
-        // Two character patterns
-        assert_eq!([b'h', b'e'].find_in(b"hello"), Some(0));
-        assert_eq!([b'e', b'l'].find_in(b"hello"), Some(1));
-        assert_eq!([b'l', b'o'].find_in(b"hello"), Some(3));
-        assert_eq!([b'a', b'b'].find_in(b"hello"), None);
-
-        // Three character patterns
-        assert_eq!([b'h', b'e', b'l'].find_in(b"hello"), Some(0));
-        assert_eq!([b'e', b'l', b'l'].find_in(b"hello"), Some(1));
-        assert_eq!([b'l', b'l', b'o'].find_in(b"hello"), Some(2));
-
-        // Longer patterns
-        assert_eq!(
-            [b'h', b'e', b'l', b'l', b'o'].find_in(b"hello world"),
-            Some(0)
-        );
-        assert_eq!(
-            [b'w', b'o', b'r', b'l', b'd'].find_in(b"hello world"),
-            Some(6)
-        );
-        assert_eq!(
-            [b'h', b'e', b'l', b'l', b'o', b' ', b'w', b'o', b'r', b'l', b'd']
-                .find_in(b"hello world"),
-            Some(0)
-        );
-
-        // Pattern larger than text
-        assert_eq!(
-            [b'h', b'e', b'l', b'l', b'o', b' ', b'w', b'o', b'r', b'l', b'd', b'!']
-                .find_in(b"hello world"),
-            None
-        );
-
-        // Pathological cases with repeated characters
-        let pattern = [b'a'; 9];
-        let text = b"bbbbbaaaaaaaaabbbbbb";
-        assert_eq!(pattern.find_in(text), Some(5));
-
-        // Pattern not found in text with similar characters
-        let pattern = [b'a', b'b', b'a', b'b', b'x']; // "ababx" doesn't exist in the text
-        let text = b"ababababcabababab";
-        assert_eq!(pattern.find_in(text), None);
-
-        let pattern2 = [b'a', b'b', b'a', b'b'];
-        assert_eq!(pattern2.find_in(text), Some(0));
-    }
-
-    #[test]
-    fn substring_search_edge_cases() {
-        // Test pattern at start, middle, and end
-        let text = b"abcdefghijklmnop";
-        assert_eq!([b'a', b'b', b'c'].find_in(text), Some(0)); // start
-        assert_eq!([b'h', b'i', b'j'].find_in(text), Some(7)); // middle
-        assert_eq!([b'n', b'o', b'p'].find_in(text), Some(13)); // end
-
-        // Test overlapping patterns
-        let text = b"aaaaaaa";
-        assert_eq!([b'a', b'a', b'a'].find_in(text), Some(0)); // should find first occurrence
-
-        // Test with binary data
-        let text = &[0, 1, 2, 3, 4, 255, 254, 253];
-        assert_eq!([255, 254, 253].find_in(text), Some(5));
-        assert_eq!([0, 1, 2].find_in(text), Some(0));
-        assert_eq!([255, 255, 255].find_in(text), None);
     }
 }
