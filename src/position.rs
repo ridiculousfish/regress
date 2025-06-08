@@ -94,7 +94,7 @@ pub struct RefPosition<'a>(core::ptr::NonNull<u8>, PhantomData<&'a ()>);
 
 #[allow(dead_code)]
 impl RefPosition<'_> {
-    /// The big idea of RefPosition is that Option<RefPosition> becomes pointer-sized, by using nullptr as the None value.
+    /// The big idea of RefPosition is that `Option<RefPosition>` becomes pointer-sized, by using nullptr as the None value.
     /// Good candidate for const-panics when stabilized.
     #[inline(always)]
     pub fn check_size() {
