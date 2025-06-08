@@ -45,6 +45,18 @@ println!("Year: {}", &text[group]);
 // Output: Year: 2020
 ```
 
+# Example: escaping strings for literal matching
+
+Use the `escape` function to escape special regex characters in a string:
+
+```rust
+use regress::{escape, Regex};
+let user_input = "How much $ do you have? (in dollars)";
+let escaped = escape(user_input);
+let re = Regex::new(&escaped).unwrap();
+assert!(re.find(user_input).is_some());
+```
+
 # Supported Syntax
 
 regress targets ES 2018 syntax. You can refer to the many resources about JavaScript regex syntax.
