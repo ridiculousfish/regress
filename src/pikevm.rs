@@ -280,7 +280,7 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         &Insn::LoopAgain { begin } => {
             s.ip = begin as usize;
             match re.insns.iat(s.ip) {
-                Insn::EnterLoop(ref lf) => run_loop(s, lf, false),
+                Insn::EnterLoop(lf) => run_loop(s, lf, false),
                 _ => panic!("LoopAgain does not point at EnterLoop"),
             }
         }
