@@ -32,6 +32,9 @@ prohibit-unsafe = []
 # Enables UTF-16 support. This disables some optimizations, so it should only be used when necessary.
 utf16 = []
 
+# Enables Pattern trait implementation for str::find, str::contains, etc.
+pattern = []
+
 [dependencies]
 hashbrown = "0.15.0"
 memchr = { version = "2.4.0", default-features = false }
