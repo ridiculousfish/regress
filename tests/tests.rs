@@ -1998,28 +1998,13 @@ fn test_issue26_identity_escapes_tc(tc: TestConfig) {
     tc.compilef(pattern, "L").match1f(",;").test_eq(",;");
 
     // Test other identity escapes that should work with L flag
-    tc.compilef(r"\!", "L").match1f("!").test_eq("!");
-    tc.compilef(r"\@", "L").match1f("@").test_eq("@");
-    tc.compilef(r"\#", "L").match1f("#").test_eq("#");
-    tc.compilef(r"\%", "L").match1f("%").test_eq("%");
-    tc.compilef(r"\&", "L").match1f("&").test_eq("&");
-    tc.compilef(r"\:", "L").match1f(":").test_eq(":");
-    tc.compilef(r"\;", "L").match1f(";").test_eq(";");
-    tc.compilef(r"\<", "L").match1f("<").test_eq("<");
-    tc.compilef(r"\>", "L").match1f(">").test_eq(">");
-    tc.compilef(r"\=", "L").match1f("=").test_eq("=");
-
-    // These should fail in unicode mode
-    test_parse_fails_flags(r"\!", "u");
-    test_parse_fails_flags(r"\@", "u");
-    test_parse_fails_flags(r"\#", "u");
-    test_parse_fails_flags(r"\%", "u");
-    test_parse_fails_flags(r"\&", "u");
-    test_parse_fails_flags(r"\:", "u");
-    test_parse_fails_flags(r"\;", "u");
-    test_parse_fails_flags(r"\<", "u");
-    test_parse_fails_flags(r"\>", "u");
-    test_parse_fails_flags(r"\=", "u");
+    let identity_escapes = vec!['!', '@', '#', '%', '&', ':', ';', '<', '>', '='];
+    for &ch in &identity_escapes {
+        let pattern = format!(r"\{}", ch);
+        tc.compilef(&pattern, "L").match1f(&ch.to_string()).test_eq(&ch.to_string());
+        // These should fail in unicode mode
+        test_parse_fails_flags(&pattern, "u");
+    }
 }
 
 #[test]
