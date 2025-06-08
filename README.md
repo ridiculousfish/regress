@@ -28,8 +28,6 @@ There's lots of stuff still missing, maybe you want to contribute?
 
 ### Currently Missing Features
 
-- Implementing `std::str::pattern::Pattern`
-
 ### Missing Performance Optimizations
 
 - Anchored matches like `^abc` still perform a string search. We should compute whether the whole regex is anchored, and optimize matching if so.
