@@ -1,4 +1,4 @@
-use regress::{backends, Error, Flags, Regex};
+use regress::{Error, Flags, Regex, backends};
 use std::{
     fs,
     path::{Path, PathBuf},
