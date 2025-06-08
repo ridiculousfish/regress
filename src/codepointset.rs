@@ -10,7 +10,7 @@ pub const CODE_POINT_MAX: CodePoint = 0x10FFFF;
 
 /// An inclusive range of code points.
 /// This is more efficient than InclusiveRange because it does not need to carry
-/// around the Option<bool>.
+/// around the `Option<bool>`.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Interval {
     pub(crate) first: CodePoint,

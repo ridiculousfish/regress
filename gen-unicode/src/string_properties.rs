@@ -127,8 +127,8 @@ impl GenUnicode {
                 .new_fn(&format!("{}_sets", name.to_lowercase()))
                 .vis("pub(crate)")
                 .ret("&'static [&'static [u32]]")
-                .line(&format!("{}.as_slice()", name.to_uppercase()))
-                .doc(&format!(
+                .line(format!("{}.as_slice()", name.to_uppercase()))
+                .doc(format!(
                     "Return the code point ranges of the '{}' Unicode property.",
                     name
                 ));

@@ -34,7 +34,7 @@ impl GenUnicode {
             ));
         }
 
-        self.scope.raw(&format!(
+        self.scope.raw(format!(
             "pub(crate) const FOLDS: [FoldRange; {}] = [\n    {}\n];",
             delta_blocks.len(),
             lines.join("\n    ")

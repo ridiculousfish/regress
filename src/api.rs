@@ -634,7 +634,7 @@ impl Regex {
                         let mut name = String::new();
                         let mut found_closing_brace = false;
 
-                        while let Some(ch) = chars.next() {
+                        for ch in chars.by_ref() {
                             if ch == '}' {
                                 found_closing_brace = true;
                                 break;

@@ -480,7 +480,7 @@ fn try_reduce_bracket(bc: &BracketContents) -> Option<Node> {
 }
 
 /// Optimize brackets like [a-b].
-/// Optimize certain stupid brackets like [a] to a single char.
+/// Optimize certain stupid brackets like `[a]` to a single char.
 /// Invert a bracket if it would *reduce* the number of ranges.
 /// Note we only run this once.
 fn simplify_brackets(n: &mut Node, _walk: &Walk) -> PassAction {

@@ -49,8 +49,8 @@ impl GenUnicode {
                 .new_fn(&format!("{}_ranges", orig_name.to_lowercase()))
                 .vis("pub(crate)")
                 .ret("&'static [Interval]")
-                .line(&format!("&{}", orig_name.to_uppercase()))
-                .doc(&format!(
+                .line(format!("&{}", orig_name.to_uppercase()))
+                .doc(format!(
                     "Return the code point ranges of the '{}' Unicode property.",
                     orig_name
                 ));
@@ -96,8 +96,8 @@ impl GenUnicode {
                 .new_fn(&format!("{}_ranges", orig_name.to_lowercase()))
                 .vis("pub(crate)")
                 .ret("&'static [Interval]")
-                .line(&format!("&{}", orig_name.to_uppercase()))
-                .doc(&format!(
+                .line(format!("&{}", orig_name.to_uppercase()))
+                .doc(format!(
                     "Return the code point ranges of the '{}' Unicode property.",
                     orig_name
                 ));

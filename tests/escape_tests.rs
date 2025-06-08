@@ -54,8 +54,8 @@ fn test_escape_with_regex() {
 
     for test_case in test_cases {
         let escaped = escape(test_case);
-        let regex =
-            Regex::new(&escaped).expect(&format!("Failed to create regex for: {}", escaped));
+        let regex = Regex::new(&escaped)
+            .unwrap_or_else(|_| panic!("Failed to create regex for: {}", escaped));
 
         // The escaped pattern should match the original string literally
         assert!(
@@ -87,8 +87,8 @@ fn test_escape_unicode() {
 
     for test_case in test_cases {
         let escaped = escape(test_case);
-        let regex =
-            Regex::new(&escaped).expect(&format!("Failed to create regex for: {}", escaped));
+        let regex = Regex::new(&escaped)
+            .unwrap_or_else(|_| panic!("Failed to create regex for: {}", escaped));
         assert!(
             regex.find(test_case).is_some(),
             "Escaped pattern should match original unicode string"
