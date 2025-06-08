@@ -48,16 +48,16 @@ impl<const N: usize> ByteSeq for [u8; N] {
 impl<const N: usize> ByteSearcher for [u8; N] {
     #[inline(always)]
     fn find_in(&self, rhs: &[u8]) -> Option<usize> {
+        if N == 0 {
+            return Some(0);
+        }
         if N == 1 {
             return memchr::memchr(self[0], rhs);
         }
-        for win in rhs.windows(Self::LENGTH) {
-            if self.equals_known_len(win) {
-                // Black magic?
-                return Some((win.as_ptr() as usize) - (rhs.as_ptr() as usize));
-            }
-        }
-        None
+        // Use memchr's highly optimized substring search which uses SIMD when available
+        // and falls back to efficient scalar algorithms like Two-Way when SIMD isn't available.
+        // This is much faster than any custom scalar implementation we could write.
+        memchr::memmem::find(rhs, self)
     }
 }
 
