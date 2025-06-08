@@ -135,14 +135,8 @@ impl Emitter {
                     // Fix up the continuation.
                     let next_insn = self.next_offset();
                     match self.get_insn(lookaround_instruction_index) {
-                        Insn::Lookbehind {
-                            continuation,
-                            ..
-                        } => *continuation = next_insn,
-                        Insn::Lookahead {
-                            continuation,
-                            ..
-                        } => *continuation = next_insn,
+                        Insn::Lookbehind { continuation, .. } => *continuation = next_insn,
+                        Insn::Lookahead { continuation, .. } => *continuation = next_insn,
                         _ => panic!("Should be a Lookaround instruction"),
                     }
                 }
