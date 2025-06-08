@@ -5,6 +5,7 @@ use crate::indexing;
 use crate::insn::CompiledRegex;
 use crate::optimizer;
 use crate::parse;
+use crate::types::MAX_CAPTURE_GROUPS;
 
 #[cfg(feature = "utf16")]
 use crate::{
@@ -613,7 +614,7 @@ impl Regex {
                                 chars.next();
                                 group_num = group_num * 10 + (digit as u32 - '0' as u32) as usize;
                                 // Limit to reasonable group numbers to avoid overflow
-                                if group_num > 999 {
+                                if group_num > MAX_CAPTURE_GROUPS {
                                     break;
                                 }
                             } else {
