@@ -53,11 +53,17 @@ pub struct Flags {
     /// If set, the regex is interpreted as a UnicodeSets regex.
     /// Equivalent to the 'v' flag in JavaScript.
     pub unicode_sets: bool,
+
+    /// If set, allows non-Unicode syntax (like legacy escapes) but still
+    /// applies Unicode semantics for character handling.
+    /// This is a custom extension not found in JavaScript.
+    pub unicode_syntax_lenient: bool,
 }
 
 impl Flags {
     /// Construct a Flags from a Unicode codepoints iterator, using JavaScript field names.
     /// 'i' means to ignore case, 'm' means multiline, 'u' means unicode.
+    /// 'L' means unicode_syntax_lenient (custom extension).
     /// Note the 'g' flag implies a stateful regex and is not supported.
     /// Other flags are not implemented and are ignored.
     #[inline]
@@ -79,6 +85,9 @@ impl Flags {
                 }
                 'v' => {
                     result.unicode_sets = true;
+                }
+                'L' => {
+                    result.unicode_syntax_lenient = true;
                 }
                 _ => {
                     // Silently skip unsupported flags.
@@ -112,6 +121,12 @@ impl fmt::Display for Flags {
         }
         if self.unicode {
             f.write_str("u")?;
+        }
+        if self.unicode_sets {
+            f.write_str("v")?;
+        }
+        if self.unicode_syntax_lenient {
+            f.write_str("L")?;
         }
         Ok(())
     }
@@ -428,7 +443,10 @@ impl Regex {
         start: usize,
     ) -> exec::Matches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Utf16Input<'t>>>
     {
-        let input = Utf16Input::new(text, self.cr.flags.unicode);
+        let input = Utf16Input::new(
+            text,
+            self.cr.flags.unicode || self.cr.flags.unicode_syntax_lenient,
+        );
         exec::Matches::new(
             super::classicalbacktrack::BacktrackExecutor::new(
                 input,
@@ -446,7 +464,10 @@ impl Regex {
         start: usize,
     ) -> exec::Matches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Ucs2Input<'t>>>
     {
-        let input = Ucs2Input::new(text, self.cr.flags.unicode);
+        let input = Ucs2Input::new(
+            text,
+            self.cr.flags.unicode || self.cr.flags.unicode_syntax_lenient,
+        );
         exec::Matches::new(
             super::classicalbacktrack::BacktrackExecutor::new(
                 input,

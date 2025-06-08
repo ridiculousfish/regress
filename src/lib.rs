@@ -64,9 +64,19 @@ regress targets ES 2018 syntax. You can refer to the many resources about JavaSc
 There are some features which have yet to be implemented:
 
 - Named character classes liks `[[:alpha:]]`
-- Unicode property escapes like `\p{Sc}`
 
-Note the parser assumes the `u` (Unicode) flag, as the non-Unicode path is tied to JS's UCS-2 string encoding and the semantics cannot be usefully expressed in Rust.
+## Flags
+
+regress supports the following flags:
+
+- `i` - Case insensitive matching
+- `m` - Multiline mode (^ and $ match line boundaries)
+- `s` - Dot-all mode (. matches newlines)
+- `u` - Unicode mode (strict syntax, full Unicode support)
+- `v` - Unicode sets mode (extended character class syntax)
+- `L` - Unicode syntax lenient mode (allows non-Unicode syntax while maintaining Unicode semantics)
+
+The `L` flag is a custom extension that combines the lenient parsing of non-Unicode mode with the Unicode semantics. For example, with `L` you can use legacy octal escapes like `\141` or control escapes like `\cA` while still getting Unicode case folding and property support.
 
 # Unicode remarks
 

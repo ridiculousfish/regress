@@ -185,7 +185,11 @@ impl Emitter {
                             self.emit_insn(Insn::Char(c))
                         } else {
                             core::debug_assert!(
-                                unicode::fold_code_point(c, self.result.flags.unicode) == c,
+                                unicode::fold_code_point(
+                                    c,
+                                    self.result.flags.unicode
+                                        || self.result.flags.unicode_syntax_lenient
+                                ) == c,
                                 "Char {:x} should be folded",
                                 c
                             );
