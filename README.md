@@ -28,7 +28,6 @@ There's lots of stuff still missing, maybe you want to contribute?
 
 ### Currently Missing Features
 
-- An API for escaping a string to make it a literal
 - Implementing `std::str::pattern::Pattern`
 
 ### Missing Performance Optimizations
