@@ -511,7 +511,7 @@ pub mod backends {
 /// assert_eq!(escaped, "\\$100 \\+ tax \\(15%\\)");
 /// ```
 pub fn escape(text: &str) -> String {
-    let mut result = String::with_capacity(text.len() * 2);
+    let mut result = String::with_capacity(text.len());
 
     for c in text.chars() {
         match c {
