@@ -1,6 +1,6 @@
 use crate::bytesearch::ByteBitmap;
-use crate::codepointset::Interval;
 use crate::codepointset::CODE_POINT_MAX;
+use crate::codepointset::Interval;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::cmp::Ordering;
@@ -206,7 +206,7 @@ pub fn utf8_w4(b0: u8, b1: u8, b2: u8, b3: u8) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{add_utf8_first_bytes_to_bitmap, utf8_first_byte, ByteBitmap, Interval, SliceHelp};
+    use super::{ByteBitmap, Interval, SliceHelp, add_utf8_first_bytes_to_bitmap, utf8_first_byte};
 
     #[test]
     fn ranges() {

@@ -15,7 +15,7 @@ use crate::matchers::CharProperties;
 use crate::position::PositionType;
 use crate::scm;
 use crate::scm::SingleCharMatcher;
-use crate::types::{CaptureGroupID, GroupData, LoopData, LoopID, IP, MAX_CAPTURE_GROUPS};
+use crate::types::{CaptureGroupID, GroupData, IP, LoopData, LoopID, MAX_CAPTURE_GROUPS};
 use crate::util::DebugCheckIndex;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -639,10 +639,12 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     ),
 
                     &Insn::Bracket(idx) => {
-                        next_or_bt!(scm::Bracket {
-                            bc: &self.re.brackets[idx]
-                        }
-                        .matches(input, dir, &mut pos))
+                        next_or_bt!(
+                            scm::Bracket {
+                                bc: &self.re.brackets[idx]
+                            }
+                            .matches(input, dir, &mut pos)
+                        )
                     }
 
                     Insn::MatchAny => {

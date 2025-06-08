@@ -186,7 +186,7 @@ fn propagate_early_fails(n: &mut Node, _w: &Walk) -> PassAction {
                 PassAction::Keep
             }
         }
-        Node::Alt(ref mut left, ref mut right) => {
+        Node::Alt(left, right) => {
             // If both sides are early fails, we are an early fail.
             let left_fails = left.match_always_fails();
             let right_fails = right.match_always_fails();

@@ -1,4 +1,4 @@
-use regress::{escape, Regex};
+use regress::{Regex, escape};
 
 #[test]
 fn test_escape_basic() {
