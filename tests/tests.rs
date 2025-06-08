@@ -2001,7 +2001,9 @@ fn test_issue26_identity_escapes_tc(tc: TestConfig) {
     let identity_escapes = vec!['!', '@', '#', '%', '&', ':', ';', '<', '>', '='];
     for &ch in &identity_escapes {
         let pattern = format!(r"\{}", ch);
-        tc.compilef(&pattern, "L").match1f(&ch.to_string()).test_eq(&ch.to_string());
+        tc.compilef(&pattern, "L")
+            .match1f(&ch.to_string())
+            .test_eq(&ch.to_string());
         // These should fail in unicode mode
         test_parse_fails_flags(&pattern, "u");
     }
