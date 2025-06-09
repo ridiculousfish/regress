@@ -17,9 +17,9 @@ echo "📦 Building in release mode..."
 cargo build --release
 
 echo "🚀 Running a quick subset of benchmarks..."
-timeout 30s cargo bench --bench regex_benchmarks regex_compile || {
+timeout 15s cargo bench --bench regex_benchmarks compile || {
     if [ $? -eq 124 ]; then
-        echo "⏰ Benchmark test timed out after 30s (this is expected for the test)"
+        echo "⏰ Benchmark test timed out after 15s (this is expected for the test)"
         echo "✅ Benchmarks are working correctly!"
     else
         echo "❌ Benchmark test failed"

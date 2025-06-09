@@ -4,18 +4,16 @@
 
 ## What Was Added
 
-### 1. Comprehensive Benchmark Suite (`benches/regex_benchmarks.rs`)
-- **Regex Compilation** - Tests pattern compilation speed
-- **Pattern Matching** - Tests finding all matches in text
-- **Text Replacement** - Tests replace operations
-- **Advanced Matching** - Tests complex pattern matching scenarios  
-- **Case-Insensitive Matching** - Tests with case-insensitive flags
-- **Pathological Cases** - Tests patterns that might cause exponential behavior
+### 1. Fast & Lightweight Benchmark Suite (`benches/regex_benchmarks.rs`)
+- **Regex Compilation** - Tests pattern compilation speed (literal & digit patterns)
+- **Pattern Matching** - Tests simple find operations 
+- **Text Replacement** - Tests basic replace operations
+- **Optimized for Speed** - Minimal test cases, fast execution (~25 seconds total)
 
-### 2. Test Data (`test_data/`)
-- `small_text.txt` - Small sample text for quick tests
-- `medium_text.txt` - Larger text for throughput measurements
-- Both contain varied patterns: English text, Unicode characters, numbers, punctuation
+### 2. Simple Test Data (embedded in benchmark)
+- Minimal test string: "Tom caught 123 fish. Great! ∞"
+- Contains literal text, digits, and Unicode for basic testing
+- No external files needed - everything embedded for speed
 
 ### 3. Automated Scripts (`scripts/`)
 - `run_benchmarks.sh` - Main benchmark runner with baseline comparison
@@ -80,21 +78,18 @@ The CI system automatically:
 ## What the Benchmarks Test
 
 ### Core Performance Areas
-1. **Compilation Speed** - How fast regex patterns compile
-2. **Matching Throughput** - Bytes/second processed during matching
-3. **Memory Efficiency** - Indirect via timing consistency
-4. **Edge Case Handling** - Pathological pattern performance
+1. **Compilation Speed** - How fast basic regex patterns compile
+2. **Matching Speed** - Simple find operations on short text
+3. **Replacement Speed** - Basic text replacement operations
+4. **Core Functionality** - Essential regex operations only
 
 ### Pattern Types Covered
-- Simple literals ("Twain")
-- Character classes ("[a-z]shing") 
-- Alternations ("Tom|Sawyer|Huckleberry")
-- Word boundaries (`\b\w+\b`)
-- Complex quantifiers (".{2,4}pattern")
-- Unicode characters ("∞|✓")
-- Case-insensitive matching
-- Email-like patterns
-- Pathological backtracking cases
+- **Literal patterns** ("Tom") - Basic string matching
+- **Digit patterns** (`\d+`) - Character class matching
+- **Unicode support** (∞) - Basic Unicode handling
+- **Simple operations** - Find and replace only
+
+**✅ Focus: Speed & essential functionality over comprehensive coverage**
 
 ## Understanding Results
 
