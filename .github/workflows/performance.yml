@@ -2,9 +2,7 @@ name: Performance Tests
 
 on:
   push:
-    branches: [ main, master ]
   pull_request:
-    branches: [ main, master ]
   schedule:
     # Run performance tests daily at 2 AM UTC
     - cron: '0 2 * * *'
