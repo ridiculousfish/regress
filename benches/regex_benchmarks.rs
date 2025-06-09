@@ -79,7 +79,7 @@ fn bench_regex_replace_all(c: &mut Criterion) {
             group.bench_with_input(
                 BenchmarkId::new("replace_all", bench_name),
                 &(text, replacement),
-                |b, (text, replacement)| b.iter(|| regex.replace_all(text, *replacement)),
+                |b, (text, replacement)| b.iter(|| regex.replace_all(text, replacement)),
             );
         }
     }
