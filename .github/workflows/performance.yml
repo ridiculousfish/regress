@@ -7,6 +7,12 @@ on:
     # Run performance tests daily at 2 AM UTC
     - cron: '0 2 * * *'
 
+# Add necessary permissions for the workflow
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -85,41 +91,78 @@ jobs:
         path: |
           target/criterion/
           benchmark_summary_*.txt
+          pr_comment.md
         retention-days: 30
     
     - name: Create performance summary comment
       if: github.event_name == 'pull_request'
       uses: actions/github-script@v6
+      continue-on-error: true
       with:
         script: |
-          const fs = require('fs');
-          const path = require('path');
-          
-          // Find the latest benchmark summary file
-          const files = fs.readdirSync('.');
-          const summaryFile = files.find(f => f.startsWith('benchmark_summary_'));
-          
-          if (summaryFile) {
-            const summary = fs.readFileSync(summaryFile, 'utf8');
+          try {
+            const fs = require('fs');
+            const path = require('path');
             
-            const body = `## 🚀 Performance Test Results
-          
-          \`\`\`
-          ${summary}
-          \`\`\`
-          
-          📊 **Detailed Results**: Check the "benchmark-results" artifact in this workflow run.
-          
-          > Performance tests help ensure that changes don't introduce regressions.
-          > Results are compared against the baseline from the main branch.`;
-          
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            });
+            // Find the latest benchmark summary file
+            const files = fs.readdirSync('.');
+            const summaryFile = files.find(f => f.startsWith('benchmark_summary_'));
+            
+            if (summaryFile) {
+              const summary = fs.readFileSync(summaryFile, 'utf8');
+              
+              const body = `## 🚀 Performance Test Results
+            
+            \`\`\`
+            ${summary}
+            \`\`\`
+            
+            📊 **Detailed Results**: Check the "benchmark-results" artifact in this workflow run.
+            
+            > Performance tests help ensure that changes don't introduce regressions.
+            > Results are compared against the baseline from the main branch.`;
+            
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+              
+              console.log('✅ Performance summary comment posted successfully');
+            } else {
+              console.log('⚠️ No benchmark summary file found');
+            }
+          } catch (error) {
+            console.log('⚠️ Failed to post comment (this is okay):', error.message);
+            console.log('📊 Performance results are still available in the workflow artifacts');
           }
+
+    - name: Display performance summary
+      run: |
+        echo "📊 Performance Test Summary"
+        echo "=========================="
+        if [ -f benchmark_summary_*.txt ]; then
+          echo "✅ Benchmark completed successfully"
+          echo "📈 Results summary:"
+          cat benchmark_summary_*.txt | head -20
+          echo ""
+          echo "💾 Full results available in workflow artifacts"
+          
+          # Create a simple PR comment file as backup
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "🚀 **Performance Test Results**" > pr_comment.md
+            echo "" >> pr_comment.md
+            echo "\`\`\`" >> pr_comment.md
+            cat benchmark_summary_*.txt | head -10 >> pr_comment.md
+            echo "\`\`\`" >> pr_comment.md
+            echo "" >> pr_comment.md
+            echo "📊 Full results available in workflow artifacts" >> pr_comment.md
+            echo "✅ Comment file created for manual posting if needed" 
+          fi
+        else
+          echo "❌ No benchmark summary found"
+        fi
     
     - name: Check for performance regressions
       run: |
