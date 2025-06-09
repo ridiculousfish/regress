@@ -81,7 +81,7 @@ jobs:
         cp -r target/criterion target/criterion.baseline
     
     - name: Upload benchmark results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: benchmark-results-${{ github.sha }}
         path: |
@@ -184,7 +184,7 @@ jobs:
         ./scripts/run_benchmarks.sh --compare previous
     
     - name: Upload comparison results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: release-comparison-${{ github.sha }}
         path: |
