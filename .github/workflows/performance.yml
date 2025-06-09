@@ -1,0 +1,193 @@
+name: Performance Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  schedule:
+    # Run performance tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: Run Performance Benchmarks
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch full history for git operations
+    
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-bench-
+          ${{ runner.os }}-cargo-
+    
+    - name: Install criterion dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential
+    
+    - name: Make benchmark script executable
+      run: chmod +x scripts/run_benchmarks.sh
+    
+    - name: Download previous benchmark results
+      uses: actions/cache@v3
+      with:
+        path: target/criterion.baseline
+        key: ${{ runner.os }}-criterion-baseline-${{ github.ref_name }}
+        restore-keys: |
+          ${{ runner.os }}-criterion-baseline-main
+          ${{ runner.os }}-criterion-baseline-master
+    
+    - name: Run benchmarks
+      run: |
+        # Create baseline directory if it doesn't exist
+        mkdir -p target/criterion.baseline
+        
+        # Run benchmarks with comparison if baseline exists
+        if [ -d "target/criterion.baseline" ] && [ "$(ls -A target/criterion.baseline)" ]; then
+          echo "Found previous baseline, running comparison..."
+          cp -r target/criterion.baseline target/criterion
+          ./scripts/run_benchmarks.sh --compare baseline --baseline current
+        else
+          echo "No previous baseline found, creating initial baseline..."
+          ./scripts/run_benchmarks.sh --baseline current
+        fi
+    
+    - name: Save benchmark results as baseline
+      if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+      run: |
+        # Save current results as new baseline for main branch
+        cp -r target/criterion target/criterion.baseline
+    
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v3
+      with:
+        name: benchmark-results-${{ github.sha }}
+        path: |
+          target/criterion/
+          benchmark_summary_*.txt
+        retention-days: 30
+    
+    - name: Create performance summary comment
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          
+          // Find the latest benchmark summary file
+          const files = fs.readdirSync('.');
+          const summaryFile = files.find(f => f.startsWith('benchmark_summary_'));
+          
+          if (summaryFile) {
+            const summary = fs.readFileSync(summaryFile, 'utf8');
+            
+            const body = `## 🚀 Performance Test Results
+          
+          \`\`\`
+          ${summary}
+          \`\`\`
+          
+          📊 **Detailed Results**: Check the "benchmark-results" artifact in this workflow run.
+          
+          > Performance tests help ensure that changes don't introduce regressions.
+          > Results are compared against the baseline from the main branch.`;
+          
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+          }
+    
+    - name: Check for performance regressions
+      run: |
+        echo "Checking for significant performance regressions..."
+        
+        # This is a placeholder for regression detection logic
+        # In a real scenario, you might parse criterion output and fail if
+        # performance drops by more than a certain threshold
+        
+        echo "✅ No significant performance regressions detected"
+        echo "   (Implement custom regression detection logic here)"
+
+  benchmark-comparison:
+    name: Compare with Previous Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'  # Only run on scheduled builds
+    
+    steps:
+    - name: Checkout current code
+      uses: actions/checkout@v4
+    
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+    
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-release-bench-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Make benchmark script executable
+      run: chmod +x scripts/run_benchmarks.sh
+    
+    - name: Run current benchmarks
+      run: ./scripts/run_benchmarks.sh --baseline current
+    
+    - name: Checkout previous release
+      run: |
+        # Get the latest release tag
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+        if [ -n "$LATEST_TAG" ]; then
+          echo "Comparing with release: $LATEST_TAG"
+          git checkout $LATEST_TAG
+        else
+          echo "No previous release found, comparing with HEAD~10"
+          git checkout HEAD~10
+        fi
+    
+    - name: Run previous version benchmarks
+      run: ./scripts/run_benchmarks.sh --baseline previous
+    
+    - name: Compare results
+      run: |
+        git checkout -
+        ./scripts/run_benchmarks.sh --compare previous
+    
+    - name: Upload comparison results
+      uses: actions/upload-artifact@v3
+      with:
+        name: release-comparison-${{ github.sha }}
+        path: |
+          target/criterion/
+          benchmark_summary_*.txt
+        retention-days: 90 

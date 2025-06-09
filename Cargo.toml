@@ -38,3 +38,10 @@ pattern = []
 [dependencies]
 hashbrown = "0.15.0"
 memchr = { version = "2.4.0", default-features = false }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "regex_benchmarks"
+harness = false

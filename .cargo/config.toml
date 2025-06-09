@@ -1,0 +1,16 @@
+[build]
+# Use all available CPU cores for parallel compilation
+# jobs = 0 means use all available cores
+# Commenting out as 0 is invalid, cargo will auto-detect
+# jobs = 4
+
+[profile.bench]
+# Optimize for performance in benchmarks
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[env]
+# Set environment variables for benchmarks
+CRITERION_HOME = { value = "target/criterion", relative = true } 
