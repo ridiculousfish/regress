@@ -238,3 +238,22 @@ fn test_pattern_comprehensive_example() {
         "The year XXXX was followed by XXXX, and then 2025."
     );
 }
+
+#[test]
+fn test_pattern_iterator() {
+    let re = Regex::new(r"hello (?<name>[a-z]+)?").unwrap();
+    let text = "hello world";
+    let result = re.find(text).expect("No match");
+
+    assert_eq!(result.groups().len(), result.groups().count());
+
+    assert_eq!(result.named_groups().len(), result.named_groups().count());
+    let mut iter = result.named_groups();
+    let _ = iter.next();
+    assert_eq!(iter.len(), iter.count());
+
+    assert_eq!(
+        result.named_groups().skip(1).len(),
+        result.named_groups().skip(1).count()
+    );
+}
