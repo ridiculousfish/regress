@@ -310,6 +310,16 @@ impl<'m> Iterator for NamedGroups<'m> {
     }
 }
 
+impl<'m> ExactSizeIterator for NamedGroups<'m> {
+    fn len(&self) -> usize {
+        self.mat.captures[self.next_group_name_idx..]
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| !self.mat.group_names[*idx].is_empty())
+            .count()
+    }
+}
+
 /// A Regex is the compiled version of a pattern.
 #[derive(Debug, Clone)]
 pub struct Regex {
