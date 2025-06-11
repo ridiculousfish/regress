@@ -266,6 +266,12 @@ impl Iterator for Groups<'_> {
     }
 }
 
+impl<'m> ExactSizeIterator for Groups<'m> {
+    fn len(&self) -> usize {
+        self.max.saturating_sub(self.i)
+    }
+}
+
 /// An iterator over the named capture groups of a [`Match`]
 ///
 /// This struct is created by the [`named_groups`] method on [`Match`].
