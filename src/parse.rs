@@ -398,6 +398,18 @@ impl<I> Parser<I>
 where
     I: Iterator<Item = u32> + Clone,
 {
+    /// Check if lenient syntax (non-Unicode style parsing) is allowed.
+    /// This is true when either Unicode mode is disabled OR unicode_syntax_lenient is enabled.
+    fn allows_lenient_syntax(&self) -> bool {
+        !self.flags.unicode || self.flags.unicode_syntax_lenient
+    }
+
+    /// Check if Unicode semantics should be used for character handling.
+    /// This is true when either Unicode mode is enabled OR unicode_syntax_lenient is enabled.
+    fn uses_unicode_semantics(&self) -> bool {
+        self.flags.unicode || self.flags.unicode_syntax_lenient
+    }
+
     /// Consume a character, returning it.
     fn consume<C: Into<u32>>(&mut self, c: C) -> u32 {
         let nc = self.input.next();
@@ -427,7 +439,7 @@ where
     /// Fold a character if icase.
     fn fold_if_icase(&self, c: u32) -> u32 {
         if self.flags.icase {
-            unicode::fold_code_point(c, self.flags.unicode)
+            unicode::fold_code_point(c, self.uses_unicode_semantics())
         } else {
             c
         }
@@ -520,7 +532,7 @@ where
                         }
                         // Term :: Atom :: \ AtomEscape :: CharacterEscape :: c AsciiLetter
                         // Term :: ExtendedAtom :: \ [lookahead = c]
-                        'c' if !self.flags.unicode => {
+                        'c' if self.allows_lenient_syntax() => {
                             self.consume('c');
                             if self
                                 .peek()
@@ -564,14 +576,14 @@ where
                 '(' => {
                     if self.try_consume_str("(?=") {
                         // Positive lookahead.
-                        quantifier_allowed = !self.flags.unicode;
+                        quantifier_allowed = self.allows_lenient_syntax();
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: false,
                             backwards: false,
                         })?);
                     } else if self.try_consume_str("(?!") {
                         // Negative lookahead.
-                        quantifier_allowed = !self.flags.unicode;
+                        quantifier_allowed = self.allows_lenient_syntax();
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: true,
                             backwards: false,
@@ -644,7 +656,7 @@ where
                 }
 
                 // Term :: ExtendedAtom :: InvalidBracedQuantifier
-                '{' if !self.flags.unicode => {
+                '{' if self.allows_lenient_syntax() => {
                     if self.try_consume_braced_quantifier().is_some() {
                         return error("Invalid braced quantifier");
                     }
@@ -657,7 +669,7 @@ where
                 }
 
                 // Term :: Atom :: PatternCharacter :: SourceCharacter but not ^ $ \ . * + ? ( ) [ ] { } |
-                '*' | '+' | '?' | ']' | '{' | '}' if self.flags.unicode => {
+                '*' | '+' | '?' | ']' | '{' | '}' if !self.allows_lenient_syntax() => {
                     return error("Invalid atom character");
                 }
 
@@ -762,7 +774,7 @@ where
                 continue;
             }
 
-            if self.flags.unicode {
+            if !self.allows_lenient_syntax() {
                 return error("Invalid character range");
             }
 
@@ -798,11 +810,11 @@ where
                         Ok(Some(ClassAtom::CodePoint(u32::from('\x08'))))
                     }
                     // ClassEscape :: [+UnicodeMode] -
-                    '-' if self.flags.unicode => {
+                    '-' if !self.allows_lenient_syntax() => {
                         self.consume('-');
                         Ok(Some(ClassAtom::CodePoint(u32::from('-'))))
                     }
-                    'c' if !self.flags.unicode => {
+                    'c' if self.allows_lenient_syntax() => {
                         let input = self.input.clone();
                         self.consume('c');
                         match self.peek().map(to_char_sat) {
@@ -873,7 +885,7 @@ where
                     }
                     // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
                     // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] P{ UnicodePropertyValueExpression }
-                    'p' | 'P' if self.flags.unicode => {
+                    'p' | 'P' if self.uses_unicode_semantics() => {
                         self.consume(ec);
                         let negate = ec == 'P' as u32;
                         match self.try_consume_unicode_property_escape()? {
@@ -1273,9 +1285,9 @@ where
             Some('{') => {
                 if let Some(quantifier) = self.try_consume_braced_quantifier() {
                     Ok(Some(quantifier))
-                } else if self.flags.unicode {
+                } else if !self.allows_lenient_syntax() {
                     // if there was a brace '{' that doesn't parse into a valid quantifier,
-                    // it's not valid with the unicode flag
+                    // it's not valid with strict unicode syntax
                     error("Invalid quantifier")
                 } else {
                     Ok(None)
@@ -1394,7 +1406,7 @@ where
                 match (x1, x2) {
                     (Some(x1), Some(x2)) => Ok(x1 * 16 + x2),
                     // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
-                    _ if !self.flags.unicode => Ok(c),
+                    _ if self.allows_lenient_syntax() => Ok(c),
                     _ => error("Invalid character escape"),
                 }
             }
@@ -1402,7 +1414,7 @@ where
             'u' => {
                 if let Some(c) = self.try_escape_unicode_sequence() {
                     Ok(c)
-                } else if !self.flags.unicode {
+                } else if self.allows_lenient_syntax() {
                     // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
                     Ok(c)
                 } else {
@@ -1410,7 +1422,7 @@ where
                 }
             }
             // CharacterEscape :: [~UnicodeMode] LegacyOctalEscapeSequence
-            '0'..='7' if !self.flags.unicode => {
+            '0'..='7' if self.allows_lenient_syntax() => {
                 let Some(c1) = self.peek() else {
                     return Ok(c - '0' as u32);
                 };
@@ -1447,7 +1459,7 @@ where
             '^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
             | '/' => Ok(c),
             // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
-            _ if !self.flags.unicode => Ok(c),
+            _ if self.allows_lenient_syntax() => Ok(c),
             _ => error("Invalid character escape"),
         }
     }
@@ -1484,7 +1496,7 @@ where
 
             // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
             // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] P{ UnicodePropertyValueExpression }
-            'p' | 'P' if self.flags.unicode || self.flags.unicode_sets => {
+            'p' | 'P' if self.uses_unicode_semantics() || self.flags.unicode_sets => {
                 self.consume(c);
                 let negate = c == 'P' as u32;
                 let property_escape = self.try_consume_unicode_property_escape()?;
@@ -1516,7 +1528,7 @@ where
 
             // [+UnicodeMode] DecimalEscape
             // Note: This is a backreference.
-            '1'..='9' if self.flags.unicode => {
+            '1'..='9' if !self.allows_lenient_syntax() => {
                 let group = self.try_consume_decimal_integer_literal().unwrap();
                 if group <= self.group_count_max as usize {
                     Ok(ir::Node::BackRef(group as u32))
@@ -1545,7 +1557,7 @@ where
             }
 
             // [+NamedCaptureGroups] k GroupName
-            'k' if self.flags.unicode || !self.named_group_indices.is_empty() => {
+            'k' if !self.allows_lenient_syntax() || !self.named_group_indices.is_empty() => {
                 self.consume('k');
 
                 // The sequence `\k` must be the start of a backreference to a named capture group.
@@ -1828,7 +1840,7 @@ where
         if self.has_lookbehind {
             ir::walk_mut(
                 false,
-                re.flags.unicode,
+                self.uses_unicode_semantics(),
                 &mut re.node,
                 &mut ir::Node::reverse_cats,
             );
