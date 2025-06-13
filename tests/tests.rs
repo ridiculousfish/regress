@@ -1954,15 +1954,13 @@ fn test_anchored_optimization() {
 }
 
 fn test_anchored_optimization_tc(tc: TestConfig) {
-    // Test basic anchored regex
-    tc.compile(r"^abc").match1f("abc").test_eq("abc");
-    tc.compile(r"^abc").match1f("abcdef").test_eq("abc");
-    tc.compile(r"^abc").test_fails("xabc"); // Should not match when not at start
-
-    // Test anchored regex with more complex pattern
-    tc.compile(r"^hello\s+world")
+    // Test basic anchored matching with ^
+    tc.compile(r"^hello")
         .match1f("hello world")
-        .test_eq("hello world");
+        .test_eq("hello");
+    tc.compile(r"^hello").test_fails("  hello world"); // Should not match when not at start
+
+    // Test anchored regex with whitespace
     tc.compile(r"^hello\s+world")
         .match1f("hello   world")
         .test_eq("hello   world");
@@ -1979,7 +1977,55 @@ fn test_anchored_optimization_tc(tc: TestConfig) {
     tc.compile(r"^(abc|def)").match1f("def").test_eq("def,def");
     tc.compile(r"^(abc|def)").test_fails(" abc");
 
+    // Test anchored regex with multiline flag
+    tc.compilef(r"^hello", "m")
+        .match1f("world\nhello")
+        .test_eq("hello");
+
     // Test that non-anchored regexes still work normally
     tc.compile(r"abc").match1f("xabc").test_eq("abc");
     tc.compile(r"abc").match1f("abcx").test_eq("abc");
+}
+
+#[test]
+fn test_non_greedy_quantifiers() {
+    test_with_configs(test_non_greedy_quantifiers_tc)
+}
+
+fn test_non_greedy_quantifiers_tc(tc: TestConfig) {
+    // Test that non-greedy quantifiers match minimally
+    tc.compile(r"a.*?b")
+        .match1f("aXXXXbYYYYb")
+        .test_eq("aXXXXb");
+    tc.compile(r"a.+?b")
+        .match1f("aXXXXbYYYYb")
+        .test_eq("aXXXXb");
+
+    // Test difference between greedy and non-greedy
+    tc.compile(r"a.*b")
+        .match1f("aXXXXbYYYYb")
+        .test_eq("aXXXXbYYYYb");
+    tc.compile(r"a.*?b")
+        .match1f("aXXXXbYYYYb")
+        .test_eq("aXXXXb");
+
+    // Test non-greedy with capture groups
+    tc.compile(r"a(.*?)b")
+        .match1f("aXXXXbYYYYb")
+        .test_eq("aXXXXb,XXXX");
+    tc.compile(r"a(.*)b")
+        .match1f("aXXXXbYYYYb")
+        .test_eq("aXXXXbYYYYb,XXXXbYYYY");
+
+    // Test non-greedy quantifier at end of string
+    tc.compile(r"a.*?$").match1f("aXXXX").test_eq("aXXXX");
+
+    // Test multiple non-greedy quantifiers
+    tc.compile(r"a.*?b.*?c").match1f("aXbYcZ").test_eq("aXbYc");
+
+    // Test non-greedy with alternation
+    tc.compile(r"(a|b)*?c").match1f("ababc").test_eq("ababc,b");
+
+    // Test zero-width non-greedy match
+    tc.compile(r"a.*?a").match1f("aa").test_eq("aa");
 }
