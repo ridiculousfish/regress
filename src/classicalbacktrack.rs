@@ -937,6 +937,7 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
 
     /// \return the next match for an anchored regex that only matches at the start.
     /// This avoids any string searching and only tries matching at the given position.
+    #[cfg(not(feature = "utf16"))]
     fn next_match_anchored(
         &mut self,
         pos: Input::Position,
