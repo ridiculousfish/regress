@@ -1947,3 +1947,39 @@ fn test_range_from_utf16() {
         }
     }
 }
+
+#[test]
+fn test_anchored_optimization() {
+    test_with_configs(test_anchored_optimization_tc)
+}
+
+fn test_anchored_optimization_tc(tc: TestConfig) {
+    // Test basic anchored regex
+    tc.compile(r"^abc").match1f("abc").test_eq("abc");
+    tc.compile(r"^abc").match1f("abcdef").test_eq("abc");
+    tc.compile(r"^abc").test_fails("xabc"); // Should not match when not at start
+
+    // Test anchored regex with more complex pattern
+    tc.compile(r"^hello\s+world")
+        .match1f("hello world")
+        .test_eq("hello world");
+    tc.compile(r"^hello\s+world")
+        .match1f("hello   world")
+        .test_eq("hello   world");
+    tc.compile(r"^hello\s+world").test_fails("  hello world"); // Should not match when not at start
+
+    // Test anchored regex with capture groups
+    tc.compile(r"^(\w+)=(\d+)")
+        .match1f("key=123 other=456")
+        .test_eq("key=123,key,123");
+    tc.compile(r"^(\w+)=(\d+)").test_fails(" key=123"); // Should not match when not at start
+
+    // Test anchored alternation
+    tc.compile(r"^(abc|def)").match1f("abc").test_eq("abc,abc");
+    tc.compile(r"^(abc|def)").match1f("def").test_eq("def,def");
+    tc.compile(r"^(abc|def)").test_fails(" abc");
+
+    // Test that non-anchored regexes still work normally
+    tc.compile(r"abc").match1f("xabc").test_eq("abc");
+    tc.compile(r"abc").match1f("abcx").test_eq("abc");
+}

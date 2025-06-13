@@ -6,7 +6,7 @@ use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
-use crate::insn::{CompiledRegex, Insn, LoopFields};
+use crate::insn::{CompiledRegex, Insn, LoopFields, StartPredicate};
 use crate::matchers;
 use crate::matchers::CharProperties;
 use crate::position::PositionType;
@@ -421,6 +421,37 @@ impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
         next_start: &mut Option<Self::Position>,
     ) -> Option<Match> {
         let re = self.matcher.re;
+
+        // Check if this is an anchored regex - if so, only try matching at the current position
+        if matches!(re.start_pred, StartPredicate::StartAnchored) {
+            let mut state = State {
+                pos,
+                ip: 0,
+                loops: vec![LoopData::new(pos); re.loops as usize],
+                groups: vec![GroupData::new(); re.groups as usize],
+            };
+            if self
+                .matcher
+                .try_at_pos(self.input, &mut state, Forward::new())
+            {
+                let end = state.pos;
+                if end != pos {
+                    *next_start = Some(end)
+                } else {
+                    *next_start = self.input.next_right_pos(end)
+                }
+                return Some(successful_match(
+                    self.input,
+                    pos,
+                    &state,
+                    re.group_names.clone(),
+                ));
+            }
+            // Anchored regex failed to match at this position
+            return None;
+        }
+
+        // Standard matching - try at each position
         // Note the "initial" loop position is ignored. Use whatever is most convenient.
         let mut state = State {
             pos,

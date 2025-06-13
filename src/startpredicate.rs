@@ -9,6 +9,23 @@ use crate::util::{add_utf8_first_bytes_to_bitmap, utf8_first_byte};
 use alloc::{boxed::Box, vec::Vec};
 use core::convert::TryInto;
 
+/// Check if a node is anchored to the start of the line/string.
+/// Returns true if the node begins with a StartOfLine anchor.
+fn is_start_anchored(n: &Node) -> bool {
+    match n {
+        Node::Anchor(ir::AnchorType::StartOfLine) => true,
+        Node::Cat(nodes) => {
+            // For concatenation, check if the first node is start-anchored
+            nodes.first().is_some_and(is_start_anchored)
+        }
+        Node::CaptureGroup(child, ..) | Node::NamedCaptureGroup(child, ..) => {
+            is_start_anchored(child)
+        }
+        // Other nodes are not anchored
+        _ => false,
+    }
+}
+
 /// Convert the code point set to a first-byte bitmap.
 /// That is, make a list of all of the possible first bytes of every contained
 /// code point, and store that in a bitmap.
@@ -194,6 +211,14 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
 
 /// \return the start predicate for a Regex.
 pub fn predicate_for_re(re: &ir::Regex) -> StartPredicate {
+    // Check if the regex is anchored to the start - if so, we can optimize
+    // by avoiding string searching entirely. However, only do this when
+    // multiline mode is disabled, since in multiline mode ^ can match
+    // at the beginning of any line, not just the string start.
+    if is_start_anchored(&re.node) && !re.flags.multiline {
+        return StartPredicate::StartAnchored;
+    }
+
     compute_start_predicate(&re.node)
         .unwrap_or(AbstractStartPredicate::Arbitrary)
         .resolve_to_insn()
