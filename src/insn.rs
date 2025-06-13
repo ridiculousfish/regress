@@ -174,6 +174,10 @@ pub enum StartPredicate {
 
     /// Look for a byte which matches the bitmap.
     ByteBracket(ByteBitmap),
+
+    /// The regex is anchored to the start of the line/string.
+    /// This avoids string searching entirely and only tries matching at the beginning.
+    StartAnchored,
 }
 
 #[derive(Debug, Clone)]

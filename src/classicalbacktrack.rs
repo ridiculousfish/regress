@@ -935,6 +935,29 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
         }
     }
 
+    /// \return the next match for an anchored regex that only matches at the start.
+    /// This avoids any string searching and only tries matching at the given position.
+    fn next_match_anchored(
+        &mut self,
+        pos: Input::Position,
+        next_start: &mut Option<Input::Position>,
+    ) -> Option<Match> {
+        let inp = self.input;
+        // For anchored regexes, only try matching at the current position
+        if let Some(end) = self.matcher.try_at_pos(inp, 0, pos, Forward::new()) {
+            // If we matched the empty string, we have to increment.
+            if end != pos {
+                *next_start = Some(end)
+            } else {
+                *next_start = inp.next_right_pos(end);
+            }
+            Some(self.successful_match(pos, end))
+        } else {
+            // Anchored regex failed to match at this position, no more matches
+            None
+        }
+    }
+
     /// \return the next match, searching the remaining bytes using the given
     /// prefix searcher to quickly find the first potential match location.
     fn next_match_with_prefix_search<PrefixSearch: bytesearch::ByteSearcher>(
@@ -986,6 +1009,9 @@ impl<Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'_, Input> {
         match &self.matcher.re.start_pred {
             StartPredicate::Arbitrary => {
                 self.next_match_with_prefix_search(pos, next_start, &bytesearch::EmptyString {})
+            }
+            StartPredicate::StartAnchored => {
+                self.next_match_anchored(pos, next_start)
             }
             StartPredicate::ByteSeq1(bytes) => {
                 self.next_match_with_prefix_search(pos, next_start, bytes)
