@@ -1010,9 +1010,7 @@ impl<Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'_, Input> {
             StartPredicate::Arbitrary => {
                 self.next_match_with_prefix_search(pos, next_start, &bytesearch::EmptyString {})
             }
-            StartPredicate::StartAnchored => {
-                self.next_match_anchored(pos, next_start)
-            }
+            StartPredicate::StartAnchored => self.next_match_anchored(pos, next_start),
             StartPredicate::ByteSeq1(bytes) => {
                 self.next_match_with_prefix_search(pos, next_start, bytes)
             }

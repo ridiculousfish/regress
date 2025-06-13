@@ -421,7 +421,7 @@ impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
         next_start: &mut Option<Self::Position>,
     ) -> Option<Match> {
         let re = self.matcher.re;
-        
+
         // Check if this is an anchored regex - if so, only try matching at the current position
         if matches!(re.start_pred, StartPredicate::StartAnchored) {
             let mut state = State {
