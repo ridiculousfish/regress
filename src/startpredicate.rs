@@ -16,7 +16,7 @@ fn is_start_anchored(n: &Node) -> bool {
         Node::Anchor(ir::AnchorType::StartOfLine) => true,
         Node::Cat(nodes) => {
             // For concatenation, check if the first node is start-anchored
-            nodes.first().map_or(false, is_start_anchored)
+            nodes.first().is_some_and(is_start_anchored)
         }
         Node::CaptureGroup(child, ..) | Node::NamedCaptureGroup(child, ..) => {
             is_start_anchored(child)
