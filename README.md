@@ -29,5 +29,5 @@ There's lots of stuff still missing, maybe you want to contribute?
 ### Currently Missing Features
 
 ### Missing Performance Optimizations
-- Non-greedy loops like `.*?` will eagerly compute their maximum match. This doesn't affect correctness but it does mean they may match more than they should.
+
 - There are lots of vectorization opportunities.
