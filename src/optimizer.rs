@@ -32,7 +32,7 @@ static mut UNICODE_UNFOLD_CACHE: Option<HashMap<u32, Arc<Vec<u32>>>> = None;
 static mut UPPERCASE_UNFOLD_CACHE: Option<HashMap<u32, Arc<Vec<u32>>>> = None;
 
 /// Get cached unicode unfolding result, computing if not cached
-/// Returns an Arc<Vec<u32>> to avoid expensive cloning
+/// Returns an `Arc<Vec<u32>>` to avoid expensive cloning
 fn get_unicode_unfold_cached(c: u32) -> Arc<Vec<u32>> {
     #[cfg(feature = "std")]
     {
@@ -63,7 +63,7 @@ fn get_unicode_unfold_cached(c: u32) -> Arc<Vec<u32>> {
 }
 
 /// Get cached uppercase unfolding result, computing if not cached
-/// Returns an Arc<Vec<u32>> to avoid expensive cloning
+/// Returns an `Arc<Vec<u32>>` to avoid expensive cloning
 fn get_uppercase_unfold_cached(c: u32) -> Arc<Vec<u32>> {
     #[cfg(feature = "std")]
     {
