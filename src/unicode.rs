@@ -217,7 +217,9 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
             // Optimization: when modulo is 1, every character in range gets transformed
             for cu in first_trans..(last_trans + 1) {
                 let cs = fr.add_delta(cu);
-                recv.add_one(cs);
+                if cs != cu {
+                    recv.add_one(cs);
+                }
             }
         } else {
             // Optimization: walk by modulo amount instead of checking every character
