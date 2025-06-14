@@ -251,4 +251,9 @@ fn test_pattern_iterator() {
     let mut iter = result.named_groups();
     let _ = iter.next();
     assert_eq!(iter.len(), iter.count());
+
+    assert_eq!(
+        result.named_groups().skip(1).len(),
+        result.named_groups().skip(1).count()
+    );
 }
