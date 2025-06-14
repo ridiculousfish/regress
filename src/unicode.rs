@@ -211,7 +211,7 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
         // Find the (inclusive) range of our interval that this transform covers.
         let first_trans = core::cmp::max(fr.first(), iv.first);
         let last_trans = core::cmp::min(fr.last(), iv.last);
-        
+
         let modulo = fr.predicate_mask() + 1;
         if modulo == 1 {
             // Optimization: when modulo is 1, every character in range gets transformed
@@ -223,7 +223,7 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
             // Optimization: walk by modulo amount instead of checking every character
             let offset_start = first_trans - fr.first();
             let start_aligned = first_trans + ((modulo - (offset_start % modulo)) % modulo);
-            
+
             let mut cu = start_aligned;
             while cu <= last_trans {
                 let cs = fr.add_delta(cu);
