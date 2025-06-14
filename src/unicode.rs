@@ -209,14 +209,26 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
             "Interval does not overlap transform"
         );
         // Find the (inclusive) range of our interval that this transform covers.
-        // TODO: could walk by modulo amount.
-        // TODO: optimize for cases when modulo is 1.
         let first_trans = core::cmp::max(fr.first(), iv.first);
         let last_trans = core::cmp::min(fr.last(), iv.last);
-        for cu in first_trans..(last_trans + 1) {
-            let cs = fr.apply(cu);
-            if cs != cu {
-                recv.add_one(cs)
+        
+        let modulo = fr.predicate_mask() + 1;
+        if modulo == 1 {
+            // Optimization: when modulo is 1, every character in range gets transformed
+            for cu in first_trans..(last_trans + 1) {
+                let cs = fr.add_delta(cu);
+                recv.add_one(cs);
+            }
+        } else {
+            // Optimization: walk by modulo amount instead of checking every character
+            let offset_start = first_trans - fr.first();
+            let start_aligned = first_trans + ((modulo - (offset_start % modulo)) % modulo);
+            
+            let mut cu = start_aligned;
+            while cu <= last_trans {
+                let cs = fr.add_delta(cu);
+                recv.add_one(cs);
+                cu += modulo;
             }
         }
     }
