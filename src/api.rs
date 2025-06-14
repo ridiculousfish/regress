@@ -318,9 +318,11 @@ impl<'m> Iterator for NamedGroups<'m> {
 
 impl<'m> ExactSizeIterator for NamedGroups<'m> {
     fn len(&self) -> usize {
-        self.mat.captures[self.next_group_name_idx..]
+        self.mat
+            .captures
             .iter()
             .enumerate()
+            .skip(self.next_group_name_idx)
             .filter(|(idx, _)| !self.mat.group_names[*idx].is_empty())
             .count()
     }
