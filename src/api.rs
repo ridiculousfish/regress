@@ -264,13 +264,14 @@ impl Iterator for Groups<'_> {
             None
         }
     }
-}
 
-impl<'m> ExactSizeIterator for Groups<'m> {
-    fn len(&self) -> usize {
-        self.max.saturating_sub(self.i)
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self.max.saturating_sub(self.i);
+        (size, Some(size))
     }
 }
+
+impl<'m> ExactSizeIterator for Groups<'m> {}
 
 /// An iterator over the named capture groups of a [`Match`]
 ///
@@ -314,19 +315,22 @@ impl<'m> Iterator for NamedGroups<'m> {
         self.next_group_name_idx = idx + 1;
         Some((name, range))
     }
-}
 
-impl<'m> ExactSizeIterator for NamedGroups<'m> {
-    fn len(&self) -> usize {
-        self.mat
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = self
+            .mat
             .captures
             .iter()
             .enumerate()
             .skip(self.next_group_name_idx)
             .filter(|(idx, _)| !self.mat.group_names[*idx].is_empty())
-            .count()
+            .count();
+
+        (size, Some(size))
     }
 }
+
+impl<'m> ExactSizeIterator for NamedGroups<'m> {}
 
 /// A Regex is the compiled version of a pattern.
 #[derive(Debug, Clone)]
