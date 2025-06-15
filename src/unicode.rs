@@ -239,7 +239,6 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
 /// Find all characters that fold into the given interval and add them to the given code point set.
 /// This skips characters which fold to themselves.
 fn unfold_interval(iv: Interval, recv: &mut CodePointSet) {
-    // Use binary search to find potentially overlapping ranges
     // Note: We still need to check all ranges because the relationship between
     // transformed_from and transformed_to intervals can be complex
     for tr in FOLDS.iter() {
