@@ -236,18 +236,38 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
     }
 }
 
-/// This is a slow linear search across all ranges.
+/// Find all characters that fold into the given interval and add them to the given code point set.
+/// This skips characters which fold to themselves.
 fn unfold_interval(iv: Interval, recv: &mut CodePointSet) {
-    // TODO: optimize ASCII case.
+    // Note: We still need to check all ranges because the relationship between
+    // transformed_from and transformed_to intervals can be complex
     for tr in FOLDS.iter() {
         if !iv.overlaps(tr.transformed_to()) {
             continue;
         }
-        for cp in tr.transformed_from().codepoints() {
-            // TODO: this can be optimized.
+
+        let modulo = tr.predicate_mask() + 1;
+        let first_source = tr.first();
+        let last_source = tr.last();
+
+        let mut process_cp = |cp| {
             let tcp = tr.apply(cp);
             if tcp != cp && iv.contains(tcp) {
                 recv.add_one(cp);
+            }
+        };
+
+        if modulo == 1 {
+            // Optimization: when modulo is 1, every character in range gets transformed
+            for cp in first_source..(last_source + 1) {
+                process_cp(cp);
+            }
+        } else {
+            // Walk by modulo amount instead of checking every character
+            let mut cp = first_source;
+            while cp <= last_source {
+                process_cp(cp);
+                cp += modulo;
             }
         }
     }
