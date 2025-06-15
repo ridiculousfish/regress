@@ -246,27 +246,28 @@ fn unfold_interval(iv: Interval, recv: &mut CodePointSet) {
         if !iv.overlaps(tr.transformed_to()) {
             continue;
         }
-        
+
         let modulo = tr.predicate_mask() + 1;
         let first_source = tr.first();
         let last_source = tr.last();
-        
+
+        let mut process_cp = |cp| {
+            let tcp = tr.apply(cp);
+            if tcp != cp && iv.contains(tcp) {
+                recv.add_one(cp);
+            }
+        };
+
         if modulo == 1 {
             // Optimization: when modulo is 1, every character in range gets transformed
             for cp in first_source..(last_source + 1) {
-                let tcp = tr.apply(cp);
-                if tcp != cp && iv.contains(tcp) {
-                    recv.add_one(cp);
-                }
+                process_cp(cp);
             }
         } else {
             // Walk by modulo amount instead of checking every character
             let mut cp = first_source;
             while cp <= last_source {
-                let tcp = tr.apply(cp);
-                if tcp != cp && iv.contains(tcp) {
-                    recv.add_one(cp);
-                }
+                process_cp(cp);
                 cp += modulo;
             }
         }
