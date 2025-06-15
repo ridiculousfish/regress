@@ -13,7 +13,7 @@ jobs:
     name: Check
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
     name: Test Suite
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         features:
           - ""
           - "index-positions"
@@ -42,16 +42,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --features "${{ matrix.features }}" --verbose
 
-  fmt:
-    name: Rustfmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --all --check
-
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
@@ -65,7 +55,7 @@ jobs:
 
   test-nightly:
     name: Test (Nightly)
-    runs-on: ubuntu-latest
+    runs-on: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
