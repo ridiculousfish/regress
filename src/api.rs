@@ -357,10 +357,11 @@ impl Regex {
     {
         let flags = flags.into();
         let mut ire = parse::try_parse(pattern, flags)?;
+        let bump = bumpalo::Bump::new();
         if !flags.no_opt {
-            optimizer::optimize(&mut ire);
+            optimizer::optimize(&mut ire, &bump);
         }
-        let cr = emit::emit(&ire);
+        let cr = emit::emit(&ire, &bump);
         Ok(Regex { cr })
     }
 

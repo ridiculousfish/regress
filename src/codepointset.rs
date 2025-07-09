@@ -1,3 +1,4 @@
+use bumpalo::{Bump, collections::Vec};
 use crate::util::SliceHelp;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -101,15 +102,15 @@ fn merge_intervals(x: Interval, y: &Interval) -> Interval {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct CodePointSet {
-    ivs: Vec<Interval>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodePointSet<'b> {
+    ivs: Vec<'b, Interval>,
 }
 
 /// A set of code points stored via as disjoint, non-abutting, sorted intervals.
-impl CodePointSet {
-    pub fn new() -> CodePointSet {
-        CodePointSet { ivs: Vec::new() }
+impl<'b> CodePointSet<'b> {
+    pub fn new(bump: &'b Bump) -> CodePointSet<'b> {
+        CodePointSet { ivs: Vec::new_in(bump) }
     }
 
     pub(crate) fn clear(&mut self) {
@@ -210,7 +211,7 @@ impl CodePointSet {
     }
 
     /// Add another code point set.
-    pub fn add_set(&mut self, mut rhs: CodePointSet) {
+    pub fn add_set(&mut self, mut rhs: CodePointSet<'b>) {
         // Prefer to add to the set with more intervals.
         if self.ivs.len() < rhs.ivs.len() {
             core::mem::swap(self, &mut rhs);
@@ -243,9 +244,9 @@ impl CodePointSet {
 
     /// \return an inverted set: a set containing every code point NOT in the
     /// receiver.
-    pub fn inverted(&self) -> CodePointSet {
+    pub fn inverted(&self, b: &'b Bump) -> CodePointSet<'b> {
         // The intervals we collect.
-        let mut inverted_ivs = Vec::new();
+        let mut inverted_ivs = Vec::new_in(b);
 
         // The first code point *not* in the previous interval.
         let mut start: CodePoint = 0;
@@ -270,8 +271,8 @@ impl CodePointSet {
     /// Remove the the given intervals from the set.
     ///
     /// Invariants: The intervals must be sorted and disjoint.
-    pub(crate) fn remove(&mut self, intervals: &[Interval]) {
-        let mut result = Vec::new();
+    pub(crate) fn remove(&mut self, intervals: &[Interval], bump: &'b Bump) {
+        let mut result = Vec::new_in(bump);
         let mut remove_iter = intervals.iter().peekable();
         let mut current_remove = remove_iter.next();
 
@@ -306,8 +307,8 @@ impl CodePointSet {
     }
 
     /// Intersect the set with the given intervals.
-    pub(crate) fn intersect(&mut self, intervals: &[Interval]) {
-        let mut new_ivs = Vec::new();
+    pub(crate) fn intersect(&mut self, intervals: &[Interval], bump: &'b Bump) {
+        let mut new_ivs = Vec::new_in(bump);
         for iv in intervals {
             for self_iv in self.intervals() {
                 if iv.overlaps(*self_iv) {
@@ -416,7 +417,8 @@ mod tests {
 
     #[test]
     fn test_add() {
-        let mut set = CodePointSet::new();
+        let bump = Bump::new();
+        let mut set = CodePointSet::new(&bump);
         set.add(iv(10, 20));
         set.add(iv(30, 40));
         set.add(iv(15, 35));
@@ -425,7 +427,8 @@ mod tests {
 
     #[test]
     fn test_add_one() {
-        let mut set = CodePointSet::new();
+        let bump = Bump::new();
+        let mut set = CodePointSet::new(&bump);
         set.add_one(10);
         set.add_one(20);
         set.add_one(15);
@@ -434,10 +437,11 @@ mod tests {
 
     #[test]
     fn test_add_set() {
-        let mut set1 = CodePointSet::new();
+        let bump = Bump::new();
+        let mut set1 = CodePointSet::new(&bump);
         set1.add(iv(10, 20));
         set1.add(iv(30, 40));
-        let mut set2 = CodePointSet::new();
+        let mut set2 = CodePointSet::new(&bump);
         set2.add(iv(15, 25));
         set2.add(iv(35, 45));
         set1.add_set(set2);
@@ -446,15 +450,16 @@ mod tests {
 
     #[test]
     fn test_inverted() {
-        let mut set = CodePointSet::new();
+        let bump = Bump::new();
+        let mut set = CodePointSet::new(&bump);
         set.add(iv(10, 20));
         set.add(iv(30, 40));
-        let inverted_set = set.inverted();
+        let inverted_set = set.inverted(&bump);
         assert_eq!(
             inverted_set.intervals(),
             &[iv(0, 9), iv(21, 29), iv(41, CODE_POINT_MAX)]
         );
-        let set_again = inverted_set.inverted();
+        let set_again = inverted_set.inverted(&bump);
         assert_eq!(set_again.intervals(), set.intervals());
 
         assert_eq!(
@@ -469,7 +474,8 @@ mod tests {
 
     #[test]
     fn test_adds_torture() {
-        let mut set = CodePointSet::new();
+        let bump = Bump::new();
+        let mut set = CodePointSet::new(&bump);
         set.add(iv(1, 3));
         assert_eq!(&set.intervals(), &[iv(1, 3)]);
         set.add(iv(0, 0));

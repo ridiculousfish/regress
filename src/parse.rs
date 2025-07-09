@@ -15,6 +15,7 @@ use crate::{
     util::to_char_sat,
 };
 use core::{fmt, iter::Peekable};
+use bumpalo::{Bump, boxed::Box, collections::Vec};
 #[cfg(feature = "std")]
 use std::collections::HashMap;
 #[cfg(not(feature = "std"))]
@@ -44,34 +45,34 @@ impl fmt::Display for Error {
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
-enum ClassAtom {
+enum ClassAtom<'b> {
     CodePoint(u32),
     CharacterClass {
         class_type: CharacterClassType,
         positive: bool,
     },
     Range {
-        iv: CodePointSet,
+        iv: CodePointSet<'b>,
         negate: bool,
     },
 }
 
 /// Represents the result of a class set.
 #[derive(Debug, Clone)]
-struct ClassSet {
-    codepoints: CodePointSet,
-    alternatives: ClassSetAlternativeStrings,
+struct ClassSet<'b> {
+    codepoints: CodePointSet<'b>,
+    alternatives: ClassSetAlternativeStrings<'b>,
 }
 
-impl ClassSet {
-    fn new() -> Self {
+impl<'b> ClassSet<'b> {
+    fn new(bump: &'b Bump) -> Self {
         ClassSet {
-            codepoints: CodePointSet::new(),
-            alternatives: ClassSetAlternativeStrings::new(),
+            codepoints: CodePointSet::new(bump),
+            alternatives: ClassSetAlternativeStrings::new(bump),
         }
     }
 
-    fn node(self, icase: bool, negate_set: bool) -> ir::Node {
+    fn node(self, icase: bool, negate_set: bool, bump: &'b Bump) -> ir::Node<'b> {
         let codepoints = if icase {
             unicode::add_icase_code_points(self.codepoints)
         } else {
@@ -83,14 +84,14 @@ impl ClassSet {
                 cps: codepoints,
             })
         } else if codepoints.is_empty() {
-            make_alt(self.alternatives.to_nodes(icase))
+            make_alt(self.alternatives.to_nodes(icase, bump))
         } else if self.alternatives.0.is_empty() {
             ir::Node::Bracket(BracketContents {
                 invert: negate_set,
                 cps: codepoints,
             })
         } else {
-            let mut nodes = self.alternatives.to_nodes(icase);
+            let mut nodes = self.alternatives.to_nodes(icase, bump);
             nodes.push(ir::Node::Bracket(BracketContents {
                 invert: negate_set,
                 cps: codepoints,
@@ -99,7 +100,7 @@ impl ClassSet {
         }
     }
 
-    fn union_operand(&mut self, operand: ClassSetOperand) {
+    fn union_operand(&mut self, operand: ClassSetOperand<'b>) {
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
                 self.codepoints.add_one(c);
@@ -117,15 +118,15 @@ impl ClassSet {
         }
     }
 
-    fn intersect_operand(&mut self, operand: ClassSetOperand) {
+    fn intersect_operand(&mut self, operand: ClassSetOperand<'b>, bump: &'b Bump) {
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
                 if self.codepoints.contains(c) {
                     self.codepoints =
-                        CodePointSet::from_sorted_disjoint_intervals(Vec::from([Interval {
+                        CodePointSet::from_sorted_disjoint_intervals(Vec::from_iter_in([Interval {
                             first: c,
                             last: c,
-                        }]));
+                        }], bump));
                 } else {
                     self.codepoints.clear();
                 }
@@ -138,12 +139,12 @@ impl ClassSet {
                 }
                 self.alternatives.0.clear();
                 if found_alternative {
-                    self.alternatives.0.push(Vec::from([c]));
+                    self.alternatives.0.push(Vec::from_iter_in([c], bump));
                 }
             }
             ClassSetOperand::CharacterClassEscape(cps) => {
-                self.codepoints.intersect(cps.intervals());
-                let mut retained = Vec::new();
+                self.codepoints.intersect(cps.intervals(), bump);
+                let mut retained = Vec::new_in(bump);
                 for alternative in &self.alternatives.0 {
                     if alternative.len() == 1 && cps.contains(alternative[0]) {
                         retained.push(alternative.clone());
@@ -152,46 +153,46 @@ impl ClassSet {
                 self.alternatives.0 = retained;
             }
             ClassSetOperand::Class(class) => {
-                let mut retained_codepoints = CodePointSet::new();
+                let mut retained_codepoints = CodePointSet::new(bump);
                 for alternative in &class.alternatives.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         retained_codepoints.add_one(alternative[0]);
                     }
                 }
-                let mut retained_alternatives = ClassSetAlternativeStrings::new();
+                let mut retained_alternatives = ClassSetAlternativeStrings::new(bump);
                 for alternative in &self.alternatives.0 {
                     if alternative.len() == 1 && class.codepoints.contains(alternative[0]) {
                         retained_alternatives.0.push(alternative.clone());
                     }
                 }
-                self.codepoints.intersect(class.codepoints.intervals());
+                self.codepoints.intersect(class.codepoints.intervals(), bump);
                 self.codepoints.add_set(retained_codepoints);
-                self.alternatives.intersect(class.alternatives);
+                self.alternatives.intersect(class.alternatives, bump);
                 self.alternatives.extend(retained_alternatives);
             }
             ClassSetOperand::ClassStringDisjunction(s) => {
-                let mut retained = CodePointSet::new();
+                let mut retained = CodePointSet::new(bump);
                 for alternative in &s.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         retained.add_one(alternative[0]);
                     }
                 }
                 self.codepoints = retained;
-                self.alternatives.intersect(s);
+                self.alternatives.intersect(s, bump);
             }
         }
     }
 
-    fn subtract_operand(&mut self, operand: ClassSetOperand) {
+    fn subtract_operand(&mut self, operand: ClassSetOperand<'b>, bump: &'b Bump) {
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
-                self.codepoints.remove(&[Interval { first: c, last: c }]);
+                self.codepoints.remove(&[Interval { first: c, last: c }], bump);
                 self.alternatives
-                    .remove(ClassSetAlternativeStrings(Vec::from([Vec::from([c])])));
+                    .remove(ClassSetAlternativeStrings(Vec::from_iter_in([Vec::from_iter_in([c], bump)], bump)));
             }
             ClassSetOperand::CharacterClassEscape(cps) => {
-                self.codepoints.remove(cps.intervals());
-                let mut to_remove = ClassSetAlternativeStrings::new();
+                self.codepoints.remove(cps.intervals(), bump);
+                let mut to_remove = ClassSetAlternativeStrings::new(bump);
                 for alternative in &self.alternatives.0 {
                     if alternative.len() == 1 && cps.contains(alternative[0]) {
                         to_remove.0.push(alternative.clone());
@@ -200,31 +201,31 @@ impl ClassSet {
                 self.alternatives.remove(to_remove);
             }
             ClassSetOperand::Class(class) => {
-                let mut codepoints_removed = CodePointSet::new();
+                let mut codepoints_removed = CodePointSet::new(bump);
                 for alternative in &class.alternatives.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         codepoints_removed.add_one(alternative[0]);
                     }
                 }
-                let mut alternatives_removed = ClassSetAlternativeStrings::new();
+                let mut alternatives_removed = ClassSetAlternativeStrings::new(bump);
                 for alternative in &self.alternatives.0 {
                     if alternative.len() == 1 && class.codepoints.contains(alternative[0]) {
                         alternatives_removed.0.push(alternative.clone());
                     }
                 }
-                self.codepoints.remove(codepoints_removed.intervals());
-                self.codepoints.remove(class.codepoints.intervals());
+                self.codepoints.remove(codepoints_removed.intervals(), bump);
+                self.codepoints.remove(class.codepoints.intervals(), bump);
                 self.alternatives.remove(alternatives_removed);
                 self.alternatives.remove(class.alternatives);
             }
             ClassSetOperand::ClassStringDisjunction(s) => {
-                let mut to_remove = CodePointSet::new();
+                let mut to_remove = CodePointSet::new(bump);
                 for alternative in &s.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         to_remove.add_one(alternative[0]);
                     }
                 }
-                self.codepoints.remove(to_remove.intervals());
+                self.codepoints.remove(to_remove.intervals(), bump);
                 self.alternatives.remove(s);
             }
         }
@@ -233,27 +234,27 @@ impl ClassSet {
 
 /// Represents all different types of class set operands.
 #[derive(Debug, Clone)]
-enum ClassSetOperand {
+enum ClassSetOperand<'b> {
     ClassSetCharacter(u32),
-    CharacterClassEscape(CodePointSet),
-    Class(ClassSet),
-    ClassStringDisjunction(ClassSetAlternativeStrings),
+    CharacterClassEscape(CodePointSet<'b>),
+    Class(ClassSet<'b>),
+    ClassStringDisjunction(ClassSetAlternativeStrings<'b>),
 }
 
 #[derive(Debug, Clone)]
-struct ClassSetAlternativeStrings(Vec<Vec<u32>>);
+struct ClassSetAlternativeStrings<'b>(Vec<'b, Vec<'b, u32>>);
 
-impl ClassSetAlternativeStrings {
-    fn new() -> Self {
-        ClassSetAlternativeStrings(Vec::new())
+impl<'b> ClassSetAlternativeStrings<'b> {
+    fn new(bump: &'b Bump) -> Self {
+        ClassSetAlternativeStrings(Vec::new_in(bump))
     }
 
     fn extend(&mut self, other: Self) {
         self.0.extend(other.0);
     }
 
-    fn intersect(&mut self, other: Self) {
-        let mut retained = Vec::new();
+    fn intersect(&mut self, other: Self, bump: &'b Bump) {
+        let mut retained = Vec::new_in(bump);
         for string in &self.0 {
             for other_string in &other.0 {
                 if string == other_string {
@@ -269,8 +270,8 @@ impl ClassSetAlternativeStrings {
         self.0.retain(|string| !other.0.contains(string));
     }
 
-    fn to_nodes(&self, icase: bool) -> Vec<ir::Node> {
-        let mut nodes = Vec::new();
+    fn to_nodes(&self, icase: bool, bump: &'b Bump) -> Vec<'b, ir::Node> {
+        let mut nodes = Vec::new_in(bump);
         for string in &self.0 {
             nodes.push(ir::Node::Cat(
                 string
@@ -313,7 +314,7 @@ fn make_alt(nodes: ir::NodeList) -> ir::Node {
 
 /// \return a CodePointSet for a given character escape (positive or negative).
 /// See ES9 21.2.2.12.
-fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet {
+fn codepoints_from_class<'b>(ct: CharacterClassType, positive: bool, bump: &'b Bump) -> CodePointSet<'b> {
     let mut cps;
     match ct {
         CharacterClassType::Digits => {
@@ -330,16 +331,16 @@ fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet
         }
     };
     if !positive {
-        cps = cps.inverted()
+        cps = cps.inverted(bump)
     }
     cps
 }
 
 /// \return a Bracket for a given character escape (positive or negative).
-fn make_bracket_class(ct: CharacterClassType, positive: bool) -> ir::Node {
+fn make_bracket_class<'b>(ct: CharacterClassType, positive: bool, bump: &'b Bump) -> ir::Node<'b> {
     ir::Node::Bracket(BracketContents {
         invert: false,
-        cps: codepoints_from_class(ct, positive),
+        cps: codepoints_from_class(ct, positive, bump),
     })
 }
 
@@ -897,8 +898,8 @@ where
     }
 
     // CharacterClass :: ClassContents :: ClassSetExpression
-    fn consume_class_set_expression(&mut self, negate_set: bool) -> Result<ClassSet, Error> {
-        let mut result = ClassSet::new();
+    fn consume_class_set_expression<'b>(&mut self, negate_set: bool, bump: &'b Bump) -> Result<ClassSet<'b>, Error> {
+        let mut result = ClassSet::new(bump);
 
         let first = match self.peek() {
             Some(0x5D /* ] */) => {
@@ -1007,7 +1008,7 @@ where
             ClassSetOperator::Intersection => {
                 loop {
                     let operand = self.consume_class_set_operand(negate_set)?;
-                    result.intersect_operand(operand);
+                    result.intersect_operand(operand, bump);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
                         Some(0x26 /* & */) => {}
@@ -1338,10 +1339,11 @@ where
         if char_count > 0 { Some(result) } else { None }
     }
 
-    fn consume_lookaround_assertion(
-        &mut self,
+    fn consume_lookaround_assertion<'b>(
+        & mut self,
         params: LookaroundParams,
-    ) -> Result<ir::Node, Error> {
+        bump: &'b Bump,
+    ) -> Result<ir::Node<'b>, Error> {
         let start_group = self.group_count;
         let contents = self.consume_disjunction()?;
         let end_group = self.group_count;
@@ -1350,7 +1352,7 @@ where
             backwards: params.backwards,
             start_group,
             end_group,
-            contents: Box::new(contents),
+            contents: Box::new_in(contents, bump),
         })
     }
 
@@ -1453,7 +1455,7 @@ where
     }
 
     // AtomEscape
-    fn consume_atom_escape(&mut self) -> Result<ir::Node, Error> {
+    fn consume_atom_escape<'b>(&mut self, bump: &'b Bump) -> Result<ir::Node<'b>, Error> {
         let Some(c) = self.peek() else {
             return error("Incomplete escape");
         };
@@ -1463,6 +1465,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Digits,
                     c == 'd' as u32,
+                    bump,
                 ))
             }
 
@@ -1471,6 +1474,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Spaces,
                     c == 's' as u32,
+                    bump,
                 ))
             }
 
@@ -1479,6 +1483,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Words,
                     c == 'w' as u32,
+                    bump,
                 ))
             }
 

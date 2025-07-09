@@ -1,5 +1,7 @@
 //! Intermediate representation for a regex
 
+use bumpalo::Bump;
+use bumpalo::{boxed::Box, collections::Vec};
 use crate::api;
 use crate::types::{BracketContents, CaptureGroupID, CaptureGroupName};
 #[cfg(not(feature = "std"))]
@@ -27,7 +29,7 @@ pub struct Quantifier {
 
 /// The node types of our IR.
 #[derive(Debug)]
-pub enum Node {
+pub enum Node<'b> {
     /// Matches the empty string.
     Empty,
 
@@ -39,21 +41,21 @@ pub enum Node {
     Char { c: u32, icase: bool },
 
     /// Match a literal sequence of bytes.
-    ByteSequence(Vec<u8>),
+    ByteSequence(Vec<'b,u8>),
 
     /// Match any of a set of *bytes*.
     /// This may not exceed length MAX_BYTE_SET_LENGTH.
-    ByteSet(Vec<u8>),
+    ByteSet(Vec<'b,u8>),
 
     /// Match any of a set of *chars*, case-insensitive.
     /// This may not exceed length MAX_CHAR_SET_LENGTH.
-    CharSet(Vec<u32>),
+    CharSet(Vec<'b,u32>),
 
     /// Match the catenation of multiple nodes.
-    Cat(Vec<Node>),
+    Cat(Vec<'b,Node<'b>>),
 
     /// Match an alternation like a|b.
-    Alt(Box<Node>, Box<Node>),
+    Alt(Box<'b, Node<'b>>, Box<'b, Node<'b>>),
 
     /// Match anything including newlines.
     MatchAny,
@@ -68,10 +70,10 @@ pub enum Node {
     WordBoundary { invert: bool },
 
     /// A capturing group.
-    CaptureGroup(Box<Node>, CaptureGroupID),
+    CaptureGroup(Box<'b, Node<'b>>, CaptureGroupID),
 
     /// A named capturing group.
-    NamedCaptureGroup(Box<Node>, CaptureGroupID, CaptureGroupName),
+    NamedCaptureGroup(Box<'b, Node<'b>>, CaptureGroupID, CaptureGroupName),
 
     /// A backreference.
     BackRef(u32),
@@ -85,12 +87,12 @@ pub enum Node {
         backwards: bool,
         start_group: CaptureGroupID,
         end_group: CaptureGroupID,
-        contents: Box<Node>,
+        contents: Box<'b, Node<'b>>,
     },
 
     /// A loop like /.*/ or /x{3, 5}?/
     Loop {
-        loopee: Box<Node>,
+        loopee: Box<'b, Node<'b>>,
         quant: Quantifier,
         enclosed_groups: core::ops::Range<u16>,
     },
@@ -98,17 +100,17 @@ pub enum Node {
     /// A loop whose body matches exactly one character.
     /// Enclosed capture groups are forbidden here.
     Loop1CharBody {
-        loopee: Box<Node>,
+        loopee: Box<'b, Node<'b>>,
         quant: Quantifier,
     },
 }
 
-pub type NodeList = Vec<Node>;
+pub type NodeList<'b> = Vec<'b, Node<'b>>;
 
-impl Node {
+impl<'b> Node<'b> {
     /// Helper to return an "always fails" node.
-    pub fn make_always_fails() -> Node {
-        Node::CharSet(Vec::new())
+    pub fn make_always_fails(bump: &'b Bump) -> Node<'b> {
+        Node::CharSet(Vec::new_in(bump))
     }
 
     /// Reverse the children of \p self if in a lookbehind.
@@ -161,7 +163,7 @@ impl Node {
     /// copy a capture group.
     ///
     /// Returns None if the depth is too high.
-    pub fn try_duplicate(&self, mut depth: usize) -> Option<Node> {
+    pub fn try_duplicate(&self, mut depth: usize, bump: &'b Bump) -> Option<Node<'b>> {
         if depth > 100 {
             return None;
         }
@@ -174,15 +176,15 @@ impl Node {
             Node::ByteSet(bytes) => Node::ByteSet(bytes.clone()),
             Node::CharSet(chars) => Node::CharSet(chars.clone()),
             Node::Cat(nodes) => {
-                let mut new_nodes = Vec::with_capacity(nodes.len());
+                let mut new_nodes = Vec::with_capacity_in(nodes.len(), bump);
                 for n in nodes {
-                    new_nodes.push(n.try_duplicate(depth)?);
+                    new_nodes.push(n.try_duplicate(depth, bump)?);
                 }
                 Node::Cat(new_nodes)
             }
             Node::Alt(left, right) => Node::Alt(
-                Box::new(left.try_duplicate(depth)?),
-                Box::new(right.try_duplicate(depth)?),
+                Box::new_in(left.try_duplicate(depth, bump)?, bump),
+                Box::new_in(right.try_duplicate(depth, bump)?, bump),
             ),
             Node::MatchAny => Node::MatchAny,
             Node::MatchAnyExceptLineTerminator => Node::MatchAnyExceptLineTerminator,
@@ -198,14 +200,14 @@ impl Node {
                     "Cannot duplicate a loop with enclosed groups"
                 );
                 Node::Loop {
-                    loopee: Box::new(loopee.as_ref().try_duplicate(depth)?),
+                    loopee: Box::new_in(loopee.as_ref().try_duplicate(depth, bump)?, bump),
                     quant: *quant,
                     enclosed_groups: enclosed_groups.clone(),
                 }
             }
 
             Node::Loop1CharBody { loopee, quant } => Node::Loop1CharBody {
-                loopee: Box::new(loopee.as_ref().try_duplicate(depth)?),
+                loopee: Box::new_in(loopee.as_ref().try_duplicate(depth, bump)?, bump),
                 quant: *quant,
             },
 
@@ -232,7 +234,7 @@ impl Node {
                     backwards: *backwards,
                     start_group: *start_group,
                     end_group: *end_group,
-                    contents: Box::new((*contents).try_duplicate(depth)?),
+                    contents: Box::new_in((*contents).try_duplicate(depth, bump)?, bump),
                 }
             }
         })
@@ -339,20 +341,21 @@ where
 }
 
 #[derive(Debug)]
-struct MutWalker<'a, F>
+struct MutWalker<'a, 'b, F>
 where
-    F: FnMut(&mut Node, &mut Walk),
+    F: FnMut(&mut Node<'b>, &mut Walk),
 {
     func: &'a mut F,
     postorder: bool,
     walk: Walk,
+    __phantom: core::marker::PhantomData<&'b ()>,
 }
 
-impl<F> MutWalker<'_, F>
+impl<'a, 'b, F> MutWalker<'a, 'b, F>
 where
-    F: FnMut(&mut Node, &mut Walk),
+    F: FnMut(&mut Node<'b>, &mut Walk),
 {
-    fn process_children(&mut self, n: &mut Node) {
+    fn process_children(&mut self, n: &mut Node<'b>) {
         match n {
             Node::Empty
             | Node::Goal
@@ -394,7 +397,7 @@ where
         }
     }
 
-    fn process(&mut self, n: &mut Node) {
+    fn process(&mut self, n: &mut Node<'b>) {
         self.walk.skip_children = false;
         if !self.postorder {
             (self.func)(n, &mut self.walk);
@@ -431,25 +434,26 @@ where
 /// If postorder is false, the function should return true to process children,
 /// false to avoid descending into children. If postorder is true, the return
 /// value is ignored.
-pub fn walk_mut<F>(postorder: bool, unicode: bool, n: &mut Node, func: &mut F)
+pub fn walk_mut<'b, F>(postorder: bool, unicode: bool, n: &mut Node<'b>, func: &mut F)
 where
-    F: FnMut(&mut Node, &mut Walk),
+    F: FnMut(&mut Node<'b>, &mut Walk),
 {
     let mut walker = MutWalker {
         func,
         postorder,
         walk: Walk::new(unicode),
+        __phantom: core::marker::PhantomData,
     };
     walker.process(n);
 }
 
 /// A regex in IR form.
-pub struct Regex {
-    pub node: Node,
+pub struct Regex<'b> {
+    pub node: Node<'b>,
     pub flags: api::Flags,
 }
 
-impl Regex {}
+impl<'b> Regex<'b> {}
 
 fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Result {
     for _ in 0..depth {
@@ -553,7 +557,7 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
     Ok(())
 }
 
-impl fmt::Display for Regex {
+impl<'b> fmt::Display for Regex<'b> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         //display_node(&self.node, 0, f)
         let mut result = Ok(());

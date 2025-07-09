@@ -38,3 +38,11 @@ pattern = []
 [dependencies]
 hashbrown = "0.15.0"
 memchr = { version = "2.4.0", default-features = false }
+bumpalo = { version = "3.19.0", features = ["boxed", "collections"] }
+
+[dev-dependencies]
+criterion = {  version = "0.6", features = ["html_reports"] }
+
+[[bench]]
+name = "replacement"
+harness = false

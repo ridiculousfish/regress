@@ -1,5 +1,6 @@
 //! Regex compiler back-end: transforms IR into a CompiledRegex
 
+use bumpalo::{Bump, collections::Vec};
 use crate::bytesearch::{AsciiBitmap, ByteArraySet};
 use crate::insn::{CompiledRegex, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR_SET_LENGTH};
 use crate::ir;
@@ -41,17 +42,17 @@ fn bracket_as_ascii(bc: &BracketContents) -> Option<AsciiBitmap> {
 }
 
 /// Type which wraps up the context needed to emit a CompiledRegex.
-struct Emitter {
+struct Emitter<'b> {
     result: CompiledRegex,
 
     // Number of loops seen so far.
     next_loop_id: LoopID,
 
     // List of group names, in order, with empties for unnamed groups.
-    group_names: Vec<Box<str>>,
+    group_names: Vec<'b, std::boxed::Box<str>>,
 }
 
-impl Emitter {
+impl<'b> Emitter<'b> {
     /// Emit a ByteSet instruction.
     /// We awkwardly optimize it like so.
     fn make_byte_set_insn(&self, bytes: &[u8]) -> Insn {
@@ -88,9 +89,9 @@ impl Emitter {
     }
 
     /// Emit instructions corresponding to a given node.
-    fn emit_node(&mut self, node: &Node) {
-        enum Emitter<'a> {
-            Node(&'a Node),
+    fn emit_node(&mut self, node: &Node<'b>) {
+        enum Emitter<'a, 'b> {
+            Node(&'a Node<'b>),
             NodeLoopFinish {
                 loop_instruction_index: u32,
             },
@@ -99,7 +100,7 @@ impl Emitter {
             },
             NodeAltMiddle {
                 alt_instruction_index: u32,
-                right_node: &'a Node,
+                right_node: &'a Node<'b>,
             },
             NodeAltFinish {
                 alt_instruction_index: u32,
@@ -348,16 +349,16 @@ impl Emitter {
 }
 
 /// Compile the given IR to a CompiledRegex.
-pub fn emit(n: &ir::Regex) -> CompiledRegex {
+pub fn emit<'b>(n: &ir::Regex<'b>, bump: &'b Bump) -> CompiledRegex {
     let mut emitter = Emitter {
         next_loop_id: 0,
-        group_names: Vec::new(),
+        group_names: Vec::new_in(bump),
         result: CompiledRegex {
-            insns: Vec::new(),
-            brackets: Vec::new(),
+            insns: std::vec::Vec::new(),
+            brackets: std::vec::Vec::new(),
             loops: 0,
             groups: 0,
-            group_names: Box::new([]),
+            group_names: std::boxed::Box::new([]),
             flags: n.flags,
             start_pred: startpredicate::predicate_for_re(n),
         },
@@ -370,7 +371,7 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
         "Group names should not be set"
     );
     if emitter.group_names.iter().any(|s| !s.is_empty()) {
-        result.group_names = emitter.group_names.into_boxed_slice();
+        result.group_names = emitter.group_names.to_vec().into_boxed_slice();
     }
     debug_assert!(
         result.group_names.is_empty() || result.group_names.len() == result.groups as usize
