@@ -43,7 +43,7 @@ fn bracket_as_ascii(bc: &BracketContents) -> Option<AsciiBitmap> {
 
 /// Type which wraps up the context needed to emit a CompiledRegex.
 struct Emitter<'b> {
-    result: CompiledRegex,
+    result: CompiledRegex<'b>,
 
     // Number of loops seen so far.
     next_loop_id: LoopID,
@@ -349,18 +349,18 @@ impl<'b> Emitter<'b> {
 }
 
 /// Compile the given IR to a CompiledRegex.
-pub fn emit<'b>(n: &ir::Regex<'b>, bump: &'b Bump) -> CompiledRegex {
+pub fn emit<'b>(n: &ir::Regex<'b>, bump: &'b Bump) -> CompiledRegex<'b> {
     let mut emitter = Emitter {
         next_loop_id: 0,
         group_names: Vec::new_in(bump),
         result: CompiledRegex {
-            insns: std::vec::Vec::new(),
-            brackets: std::vec::Vec::new(),
+            insns: bumpalo::collections::Vec::new_in(bump),
+            brackets: bumpalo::collections::Vec::new_in(bump),
             loops: 0,
             groups: 0,
             group_names: std::boxed::Box::new([]),
             flags: n.flags,
-            start_pred: startpredicate::predicate_for_re(n),
+            start_pred: startpredicate::predicate_for_re(n, bump),
         },
     };
     emitter.emit_node(&n.node);

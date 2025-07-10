@@ -356,8 +356,8 @@ impl Regex {
         F: Into<Flags>,
     {
         let flags = flags.into();
-        let mut ire = parse::try_parse(pattern, flags)?;
         let bump = bumpalo::Bump::new();
+        let mut ire = parse::try_parse(pattern, flags, &bump)?;
         if !flags.no_opt {
             optimizer::optimize(&mut ire, &bump);
         }

@@ -508,6 +508,7 @@ mod tests {
 
     #[test]
     fn test_add_icase_code_points() {
+        let bump = bumpalo::Bump::new();
         let unfold_map = get_unfold_map();
         let locs = [
             0x0, 0x42, 0x100, 0xdeba, 0x11419, 0x278f8, 0x2e000, 0x35df7, 0x462d6, 0x4bc29,
@@ -518,7 +519,7 @@ mod tests {
         for (idx, &first) in locs.iter().enumerate() {
             // Keep a running set of the unfolded code points we expect to be in the
             // range [first, last].
-            let mut expected = CodePointSet::default();
+            let mut expected = CodePointSet::new(&bump);
             let mut from = first;
             for &last in &locs[idx..] {
                 // Add both folded and unfolded characters to expected.
@@ -534,7 +535,7 @@ mod tests {
                         expected.add_one(fc);
                     }
                 }
-                let mut input = CodePointSet::new();
+                let mut input = CodePointSet::new(&bump);
                 input.add(Interval { first, last });
                 let folded = add_icase_code_points(input);
                 assert_eq!(folded, expected);
@@ -545,6 +546,7 @@ mod tests {
 
     #[test]
     fn test_fold_interval() {
+        let bump = bumpalo::Bump::new();
         let locs = [
             0, 0x894, 0x59ac, 0xfa64, 0x10980, 0x12159, 0x16b8d, 0x1aaa2, 0x1f973, 0x1fcd4,
             0x20c35, 0x23d8a, 0x276af, 0x2c6b8, 0x2fb25, 0x30b9b, 0x338ad, 0x35ab3, 0x38d37,
@@ -562,7 +564,7 @@ mod tests {
         for (idx, &first) in locs.iter().enumerate() {
             // Keep a running set of the folded code points we expect to be in the
             // range [first, last].
-            let mut expected = CodePointSet::default();
+            let mut expected = CodePointSet::new(&bump);
             let mut from = first;
             for &last in &locs[idx..] {
                 // Add characters to expected which do not fold to themselves.
@@ -572,7 +574,7 @@ mod tests {
                         expected.add_one(fc);
                     }
                 }
-                let mut cps = CodePointSet::default();
+                let mut cps = CodePointSet::new(&bump);
                 fold_interval(Interval { first, last }, &mut cps);
                 assert_eq!(cps.intervals(), expected.intervals());
 

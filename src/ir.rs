@@ -79,7 +79,7 @@ pub enum Node<'b> {
     BackRef(u32),
 
     /// A bracket.
-    Bracket(BracketContents),
+    Bracket(BracketContents<'b>),
 
     /// A lookaround assertions like (?:) or (?!).
     LookaroundAssertion {

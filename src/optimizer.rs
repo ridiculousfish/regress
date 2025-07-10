@@ -112,7 +112,7 @@ pub enum PassAction<'b> {
 #[derive(Debug)]
 struct Pass<'a, 'b, F>
 where
-    F: FnMut(&mut Node<'b>, &Walk) -> PassAction<'b>,
+    F: FnMut(&mut Node<'b>, &Walk, &'b Bump) -> PassAction<'b>,
     'a: 'b,
 {
     // The function.
@@ -124,31 +124,32 @@ where
     // If the regex is in unicode mode.
     unicode: bool,
 
-    __phantom: core::marker::PhantomData<&'b ()>,
+    bump: &'b Bump,
 }
 
 impl<'a, 'b, F> Pass<'a, 'b, F>
 where
-    F: FnMut(&mut Node<'b>, &Walk) -> PassAction<'b>,
+    F: FnMut(&mut Node<'b>, &Walk, &'b Bump) -> PassAction<'b>,
 {
-    fn new(func: &'a mut F, unicode: bool) -> Self {
+    fn new(func: &'a mut F, unicode: bool, bump: &'b Bump) -> Self {
         Pass {
             func,
             changed: false,
             unicode,
-            __phantom: core::marker::PhantomData,
+            bump,
         }
     }
 
     fn run_postorder(&mut self, start: &mut Node<'b>) {
         let func = &mut self.func;
         let changed = &mut self.changed;
+        let bump = self.bump;
 
         walk_mut(
             true,
             self.unicode,
             start,
-            &mut |n: &mut Node<'b>, walk: &mut Walk| match (func)(n, walk) {
+            &mut |n: &mut Node<'b>, walk: &mut Walk| match (func)(n, walk, bump) {
                 PassAction::Keep => {}
                 PassAction::Modified => {
                     *changed = true;
@@ -179,11 +180,12 @@ where
 
 /// Run a "pass" on a regex, which is a function that takes a Node and maybe
 /// returns a new node. \return true if something changed, false if nothing did.
-fn run_pass<'b, F>(r: &mut Regex<'b>, func: &'b mut F) -> bool
+fn run_pass<'a, 'b, F>(r: &mut Regex<'b>, func: &'a mut F, bump: &'b Bump) -> bool
 where
-    F: FnMut(&mut Node<'b>, &Walk) -> PassAction<'b>,
+    F: FnMut(&mut Node<'b>, &Walk, &'b Bump) -> PassAction<'b>,
+    'a: 'b,
 {
-    let mut p = Pass::new(func, r.flags.unicode);
+    let mut p = Pass::new(func, r.flags.unicode, bump);
     p.run_to_fixpoint(&mut r.node);
     p.changed
 }
@@ -191,7 +193,7 @@ where
 // Here are some optimizations we support.
 
 // Remove empty Nodes.
-fn remove_empties<'b>(n: &mut Node<'b>, _w: &Walk) -> PassAction<'b> {
+fn remove_empties<'b>(n: &mut Node<'b>, _w: &Walk, _bump: &'b Bump) -> PassAction<'b> {
     match n {
         Node::Empty | Node::Goal | Node::Char { .. } => PassAction::Keep,
         Node::ByteSequence(v) => {
@@ -354,7 +356,7 @@ fn decat<'b>(n: &mut Node<'b>, _w: &Walk, bump: &'b Bump) -> PassAction<'b> {
 /// That means for case-insensitive characters, figure out everything that they
 /// could match.
 /// Uses caching to avoid expensive recomputation of unfolding results.
-fn unfold_icase_chars<'b>(n: &mut Node<'b>, w: &Walk) -> PassAction<'b> {
+fn unfold_icase_chars<'b>(n: &mut Node<'b>, w: &Walk, bump: &'b Bump) -> PassAction<'b> {
     match *n {
         Node::Char { c, icase } if icase && !w.unicode => {
             let unfolded = get_uppercase_unfold_cached(c);
@@ -595,21 +597,21 @@ fn simplify_brackets<'b>(n: &mut Node<'b>, _walk: &Walk, bump: &'b Bump) -> Pass
 }
 
 pub fn optimize<'b>(r: &mut Regex<'b>, bump: &'b Bump) {
-    run_pass(r, &mut simplify_brackets);
+    run_pass(r, &mut simplify_brackets, bump);
     loop {
         let mut changed = false;
-        changed |= run_pass(r, &mut decat);
+        changed |= run_pass(r, &mut decat, bump);
         if r.flags.icase {
-            changed |= run_pass(r, &mut unfold_icase_chars);
+            changed |= run_pass(r, &mut unfold_icase_chars, bump);
         }
-        changed |= run_pass(r, &mut unroll_loops);
-        changed |= run_pass(r, &mut promote_1char_loops);
+        changed |= run_pass(r, &mut unroll_loops, bump);
+        changed |= run_pass(r, &mut promote_1char_loops, bump);
         #[cfg(not(feature = "utf16"))]
         {
-            changed |= run_pass(r, &mut form_literal_bytes);
+            changed |= run_pass(r, &mut form_literal_bytes, bump);
         }
-        changed |= run_pass(r, &mut remove_empties);
-        changed |= run_pass(r, &mut propagate_early_fails);
+        changed |= run_pass(r, &mut remove_empties, bump);
+        changed |= run_pass(r, &mut propagate_early_fails, bump);
         if !changed {
             break;
         }

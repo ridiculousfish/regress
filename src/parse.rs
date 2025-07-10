@@ -332,16 +332,17 @@ fn codepoints_from_class<'b>(
     positive: bool,
     bump: &'b Bump,
 ) -> CodePointSet<'b> {
+    use bumpalo::collections::Vec;
     let mut cps;
     match ct {
         CharacterClassType::Digits => {
-            cps = CodePointSet::from_sorted_disjoint_intervals(charclasses::DIGITS.to_vec())
+            cps = CodePointSet::from_sorted_disjoint_intervals(Vec::from_iter_in(charclasses::DIGITS, bump))
         }
         CharacterClassType::Words => {
-            cps = CodePointSet::from_sorted_disjoint_intervals(charclasses::WORD_CHARS.to_vec())
+            cps = CodePointSet::from_sorted_disjoint_intervals(Vec::from_iter_in(charclasses::WORD_CHARS, bump))
         }
         CharacterClassType::Spaces => {
-            cps = CodePointSet::from_sorted_disjoint_intervals(charclasses::WHITESPACE.to_vec());
+            cps = CodePointSet::from_sorted_disjoint_intervals(Vec::from_iter_in(charclasses::WHITESPACE, bump));
             for &iv in charclasses::LINE_TERMINATOR.iter() {
                 cps.add(iv)
             }
@@ -361,7 +362,7 @@ fn make_bracket_class<'b>(ct: CharacterClassType, positive: bool, bump: &'b Bump
     })
 }
 
-fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom, bump: &Bump) {
+fn add_class_atom<'b>(bc: &mut BracketContents<'b>, atom: ClassAtom<'b>, bump: &'b Bump) {
     match atom {
         ClassAtom::CodePoint(c) => bc.cps.add_one(c),
         ClassAtom::CharacterClass {
@@ -462,12 +463,12 @@ where
         self.input.next()
     }
 
-    fn try_parse(&mut self, bump: &Bump) -> Result<ir::Regex, Error> {
+    fn try_parse<'b>(&mut self, bump: &'b Bump) -> Result<ir::Regex<'b>, Error> {
         self.parse_capture_groups()?;
 
         // Parse a catenation. If we consume everything, it's success. If there's
         // something left, it's an error (for example, an excess closing paren).
-        let body = self.consume_disjunction()?;
+        let body = self.consume_disjunction(bump)?;
         match self.input.peek().copied() {
             Some(c) if c == ')' as u32 => error("Unbalanced parenthesis"),
             Some(c) => error(format!(
@@ -737,12 +738,12 @@ where
     }
 
     /// ES6 21.2.2.13 CharacterClass.
-    fn consume_bracket(&mut self) -> Result<ir::Node, Error> {
+    fn consume_bracket<'b>(&mut self, bump: &'b Bump) -> Result<ir::Node<'b>, Error> {
         self.consume('[');
         let invert = self.try_consume('^');
         let mut result = BracketContents {
             invert,
-            cps: CodePointSet::default(),
+            cps: CodePointSet::new(bump),
         };
 
         loop {
@@ -767,14 +768,14 @@ where
 
             // Check for a dash; we may have a range.
             if !self.try_consume('-') {
-                add_class_atom(&mut result, first);
+                add_class_atom(&mut result, first, bump);
                 continue;
             }
 
             let Some(second) = self.try_consume_bracket_class_atom()? else {
                 // No second atom. For example: [a-].
-                add_class_atom(&mut result, first);
-                add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
+                add_class_atom(&mut result, first, bump);
+                add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')), bump);
                 continue;
             };
 
@@ -799,9 +800,9 @@ where
             }
 
             // If it does not match a range treat as any match single characters.
-            add_class_atom(&mut result, first);
-            add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
-            add_class_atom(&mut result, second);
+            add_class_atom(&mut result, first, bump);
+            add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')), bump);
+            add_class_atom(&mut result, second, bump);
         }
     }
 
@@ -910,7 +911,7 @@ where
                         let negate = ec == 'P' as u32;
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(s) => Ok(Some(ClassAtom::Range {
-                                iv: CodePointSet::from_sorted_disjoint_intervals(s.to_vec()),
+                                iv: CodePointSet::from_sorted_disjoint_intervals(bumpalo::collections::Vec::from_iter_in(s, bump)),
                                 negate,
                             })),
                             PropertyEscapeKind::StringSet(_) => error("Invalid property escape"),
@@ -941,7 +942,7 @@ where
                 self.consume(']');
                 return Ok(result);
             }
-            Some(_) => self.consume_class_set_operand(negate_set)?,
+            Some(_) => self.consume_class_set_operand(negate_set, bump)?,
             None => {
                 return error("Unbalanced class set bracket");
             }
@@ -980,7 +981,7 @@ where
                     match first {
                         ClassSetOperand::ClassSetCharacter(first) => {
                             let ClassSetOperand::ClassSetCharacter(last) =
-                                self.consume_class_set_operand(negate_set)?
+                                self.consume_class_set_operand(negate_set, bump)?
                             else {
                                 return error("Invalid class set range");
                             };
@@ -1013,7 +1014,7 @@ where
                             self.consume(']');
                             return Ok(result);
                         }
-                        Some(_) => self.consume_class_set_operand(negate_set)?,
+                        Some(_) => self.consume_class_set_operand(negate_set, bump)?,
                         None => return error("Unbalanced class set bracket"),
                     };
                     if self.peek() == Some(0x2D /* - */) {
@@ -1021,7 +1022,7 @@ where
                         match operand {
                             ClassSetOperand::ClassSetCharacter(first) => {
                                 let ClassSetOperand::ClassSetCharacter(last) =
-                                    self.consume_class_set_operand(negate_set)?
+                                    self.consume_class_set_operand(negate_set, bump)?
                                 else {
                                     return error("Invalid class set range");
                                 };
@@ -1042,7 +1043,7 @@ where
             // ClassIntersection :: ClassSetOperand && [lookahead ≠ &]
             ClassSetOperator::Intersection => {
                 loop {
-                    let operand = self.consume_class_set_operand(negate_set)?;
+                    let operand = self.consume_class_set_operand(negate_set, bump)?;
                     result.intersect_operand(operand, bump);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
@@ -1058,7 +1059,7 @@ where
             // ClassSubtraction :: ClassSubtraction -- ClassSetOperand
             ClassSetOperator::Subtraction => {
                 loop {
-                    let operand = self.consume_class_set_operand(negate_set)?;
+                    let operand = self.consume_class_set_operand(negate_set, bump)?;
                     result.subtract_operand(operand, bump);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
@@ -1883,7 +1884,7 @@ where
 
 /// Try parsing a given pattern.
 /// Return the resulting IR regex, or an error.
-pub fn try_parse<I>(pattern: I, flags: api::Flags) -> Result<ir::Regex, Error>
+pub fn try_parse<'b, I>(pattern: I, flags: api::Flags, bump: &'b bumpalo::Bump) -> Result<ir::Regex<'b>, Error>
 where
     I: Iterator<Item = u32> + Clone,
 {
@@ -1896,5 +1897,5 @@ where
         group_count_max: 0,
         has_lookbehind: false,
     };
-    p.try_parse()
+    p.try_parse(bump)
 }

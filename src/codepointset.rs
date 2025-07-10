@@ -146,7 +146,7 @@ impl<'b> CodePointSet<'b> {
 
     /// Construct from sorted, disjoint intervals. Note these are not allowed to
     /// even abut.
-    pub fn from_sorted_disjoint_intervals(ivs: Vec<Interval>) -> CodePointSet {
+    pub fn from_sorted_disjoint_intervals(ivs: Vec<'b, Interval>) -> CodePointSet<'b> {
         let res = CodePointSet { ivs };
         res.assert_is_well_formed();
         res

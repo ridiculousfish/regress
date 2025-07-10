@@ -181,12 +181,12 @@ pub enum StartPredicate {
 }
 
 #[derive(Debug, Clone)]
-pub struct CompiledRegex {
+pub struct CompiledRegex<'b> {
     // Sequence of instructions.
-    pub insns: Vec<Insn>,
+    pub insns: bumpalo::collections::Vec<'b, Insn>,
 
     // The bracket contents, indexed by the value of the `Bracket` instruction.
-    pub brackets: Vec<BracketContents>,
+    pub brackets: bumpalo::collections::Vec<'b, BracketContents<'b>>,
 
     // Predicate to rapidly find the first potential match.
     pub start_pred: StartPredicate,

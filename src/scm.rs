@@ -58,10 +58,10 @@ impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Char
 
 /// Insn::Bracket
 pub struct Bracket<'a> {
-    pub bc: &'a BracketContents,
+    pub bc: &'a BracketContents<'a>,
 }
 
-impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Bracket<'_> {
+impl<'a, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Bracket<'a> {
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {

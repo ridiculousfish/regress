@@ -26,13 +26,13 @@ pub enum CharacterClassType {
 }
 
 /// The stuff in a bracket.
-#[derive(Debug, Clone, Default)]
-pub struct BracketContents {
+#[derive(Debug, Clone)]
+pub struct BracketContents<'b> {
     pub invert: bool,
-    pub cps: CodePointSet,
+    pub cps: CodePointSet<'b>,
 }
 
-impl BracketContents {
+impl<'b> BracketContents<'b> {
     // Return true if the bracket is empty.
     pub fn is_empty(&self) -> bool {
         match self.invert {
