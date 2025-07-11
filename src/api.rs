@@ -3,6 +3,7 @@ use crate::emit;
 use crate::exec;
 use crate::indexing;
 use crate::insn::CompiledRegex;
+use crate::insn::CompiledRegexInner;
 use crate::optimizer;
 use crate::parse;
 use crate::types::MAX_CAPTURE_GROUPS;
@@ -362,7 +363,7 @@ impl Regex {
             optimizer::optimize(&mut ire, &bump);
         }
         let cr = emit::emit(&ire, &bump);
-        Ok(Regex { cr })
+        Ok(Regex { cr: cr.into() })
     }
 
     /// Searches `text` to find the first match.

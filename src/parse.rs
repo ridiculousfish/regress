@@ -2,10 +2,10 @@
 
 use crate::{
     api, charclasses,
-    codepointset::{CodePointSet, Interval, interval_contains},
+    codepointset::{CodePointSetInner, Interval, interval_contains},
     ir,
     types::{
-        BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
+        BracketContentsInner, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
         MAX_LOOPS,
     },
     unicode::{
@@ -57,7 +57,7 @@ enum ClassAtom<'b> {
         positive: bool,
     },
     Range {
-        iv: CodePointSet<'b>,
+        iv: CodePointSetInner<'b>,
         negate: bool,
     },
 }
@@ -65,14 +65,14 @@ enum ClassAtom<'b> {
 /// Represents the result of a class set.
 #[derive(Debug, Clone)]
 struct ClassSet<'b> {
-    codepoints: CodePointSet<'b>,
+    codepoints: CodePointSetInner<'b>,
     alternatives: ClassSetAlternativeStrings<'b>,
 }
 
 impl<'b> ClassSet<'b> {
     fn new(bump: &'b Bump) -> Self {
         ClassSet {
-            codepoints: CodePointSet::new(bump),
+            codepoints: CodePointSetInner::new(bump),
             alternatives: ClassSetAlternativeStrings::new(bump),
         }
     }
@@ -84,20 +84,20 @@ impl<'b> ClassSet<'b> {
             self.codepoints
         };
         if codepoints.is_empty() && self.alternatives.0.is_empty() {
-            ir::Node::Bracket(BracketContents {
+            ir::Node::Bracket(BracketContentsInner {
                 invert: negate_set,
                 cps: codepoints,
             })
         } else if codepoints.is_empty() {
             make_alt(self.alternatives.to_nodes(icase, bump), bump)
         } else if self.alternatives.0.is_empty() {
-            ir::Node::Bracket(BracketContents {
+            ir::Node::Bracket(BracketContentsInner {
                 invert: negate_set,
                 cps: codepoints,
             })
         } else {
             let mut nodes = self.alternatives.to_nodes(icase, bump);
-            nodes.push(ir::Node::Bracket(BracketContents {
+            nodes.push(ir::Node::Bracket(BracketContentsInner {
                 invert: negate_set,
                 cps: codepoints,
             }));
@@ -127,7 +127,7 @@ impl<'b> ClassSet<'b> {
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
                 if self.codepoints.contains(c) {
-                    self.codepoints = CodePointSet::from_sorted_disjoint_intervals(
+                    self.codepoints = CodePointSetInner::from_sorted_disjoint_intervals(
                         Vec::from_iter_in([Interval { first: c, last: c }], bump),
                     );
                 } else {
@@ -156,7 +156,7 @@ impl<'b> ClassSet<'b> {
                 self.alternatives.0 = retained;
             }
             ClassSetOperand::Class(class) => {
-                let mut retained_codepoints = CodePointSet::new(bump);
+                let mut retained_codepoints = CodePointSetInner::new(bump);
                 for alternative in &class.alternatives.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         retained_codepoints.add_one(alternative[0]);
@@ -175,7 +175,7 @@ impl<'b> ClassSet<'b> {
                 self.alternatives.extend(retained_alternatives);
             }
             ClassSetOperand::ClassStringDisjunction(s) => {
-                let mut retained = CodePointSet::new(bump);
+                let mut retained = CodePointSetInner::new(bump);
                 for alternative in &s.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         retained.add_one(alternative[0]);
@@ -209,7 +209,7 @@ impl<'b> ClassSet<'b> {
                 self.alternatives.remove(to_remove);
             }
             ClassSetOperand::Class(class) => {
-                let mut codepoints_removed = CodePointSet::new(bump);
+                let mut codepoints_removed = CodePointSetInner::new(bump);
                 for alternative in &class.alternatives.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         codepoints_removed.add_one(alternative[0]);
@@ -227,7 +227,7 @@ impl<'b> ClassSet<'b> {
                 self.alternatives.remove(class.alternatives);
             }
             ClassSetOperand::ClassStringDisjunction(s) => {
-                let mut to_remove = CodePointSet::new(bump);
+                let mut to_remove = CodePointSetInner::new(bump);
                 for alternative in &s.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         to_remove.add_one(alternative[0]);
@@ -244,7 +244,7 @@ impl<'b> ClassSet<'b> {
 #[derive(Debug, Clone)]
 enum ClassSetOperand<'b> {
     ClassSetCharacter(u32),
-    CharacterClassEscape(CodePointSet<'b>),
+    CharacterClassEscape(CodePointSetInner<'b>),
     Class(ClassSet<'b>),
     ClassStringDisjunction(ClassSetAlternativeStrings<'b>),
 }
@@ -331,18 +331,27 @@ fn codepoints_from_class<'b>(
     ct: CharacterClassType,
     positive: bool,
     bump: &'b Bump,
-) -> CodePointSet<'b> {
+) -> CodePointSetInner<'b> {
     use bumpalo::collections::Vec;
     let mut cps;
     match ct {
         CharacterClassType::Digits => {
-            cps = CodePointSet::from_sorted_disjoint_intervals(Vec::from_iter_in(charclasses::DIGITS, bump))
+            cps = CodePointSetInner::from_sorted_disjoint_intervals(Vec::from_iter_in(
+                charclasses::DIGITS,
+                bump,
+            ))
         }
         CharacterClassType::Words => {
-            cps = CodePointSet::from_sorted_disjoint_intervals(Vec::from_iter_in(charclasses::WORD_CHARS, bump))
+            cps = CodePointSetInner::from_sorted_disjoint_intervals(Vec::from_iter_in(
+                charclasses::WORD_CHARS,
+                bump,
+            ))
         }
         CharacterClassType::Spaces => {
-            cps = CodePointSet::from_sorted_disjoint_intervals(Vec::from_iter_in(charclasses::WHITESPACE, bump));
+            cps = CodePointSetInner::from_sorted_disjoint_intervals(Vec::from_iter_in(
+                charclasses::WHITESPACE,
+                bump,
+            ));
             for &iv in charclasses::LINE_TERMINATOR.iter() {
                 cps.add(iv)
             }
@@ -356,13 +365,13 @@ fn codepoints_from_class<'b>(
 
 /// \return a Bracket for a given character escape (positive or negative).
 fn make_bracket_class<'b>(ct: CharacterClassType, positive: bool, bump: &'b Bump) -> ir::Node<'b> {
-    ir::Node::Bracket(BracketContents {
+    ir::Node::Bracket(BracketContentsInner {
         invert: false,
         cps: codepoints_from_class(ct, positive, bump),
     })
 }
 
-fn add_class_atom<'b>(bc: &mut BracketContents<'b>, atom: ClassAtom<'b>, bump: &'b Bump) {
+fn add_class_atom<'b>(bc: &mut BracketContentsInner<'b>, atom: ClassAtom<'b>, bump: &'b Bump) {
     match atom {
         ClassAtom::CodePoint(c) => bc.cps.add_one(c),
         ClassAtom::CharacterClass {
@@ -741,9 +750,9 @@ where
     fn consume_bracket<'b>(&mut self, bump: &'b Bump) -> Result<ir::Node<'b>, Error> {
         self.consume('[');
         let invert = self.try_consume('^');
-        let mut result = BracketContents {
+        let mut result = BracketContentsInner {
             invert,
-            cps: CodePointSet::new(bump),
+            cps: CodePointSetInner::new(bump),
         };
 
         loop {
@@ -806,7 +815,10 @@ where
         }
     }
 
-    fn try_consume_bracket_class_atom<'b>(&mut self, bump: &'b Bump) -> Result<Option<ClassAtom<'b>>, Error> {
+    fn try_consume_bracket_class_atom<'b>(
+        &mut self,
+        bump: &'b Bump,
+    ) -> Result<Option<ClassAtom<'b>>, Error> {
         let c = self.peek();
         if c.is_none() {
             return Ok(None);
@@ -911,7 +923,12 @@ where
                         let negate = ec == 'P' as u32;
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(s) => Ok(Some(ClassAtom::Range {
-                                iv: CodePointSet::from_sorted_disjoint_intervals(bumpalo::collections::Vec::from_iter_in(s.iter().copied(), bump)),
+                                iv: CodePointSetInner::from_sorted_disjoint_intervals(
+                                    bumpalo::collections::Vec::from_iter_in(
+                                        s.iter().copied(),
+                                        bump,
+                                    ),
+                                ),
                                 negate,
                             })),
                             PropertyEscapeKind::StringSet(_) => error("Invalid property escape"),
@@ -1079,7 +1096,7 @@ where
         &mut self,
         negate_set: bool,
         bump: &'b Bump,
-    ) -> Result<ClassSetOperand, Error> {
+    ) -> Result<ClassSetOperand<'b>, Error> {
         use ClassSetOperand::*;
         let Some(cp) = self.peek() else {
             return error("Empty class set operand");
@@ -1176,13 +1193,13 @@ where
                         self.consume('p');
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(intervals) => {
-                                Ok(CharacterClassEscape(CodePointSet::from_sorted_disjoint_intervals(
+                                Ok(CharacterClassEscape(CodePointSetInner::from_sorted_disjoint_intervals(
                                     bumpalo::collections::Vec::from_iter_in( intervals.iter().copied(), bump),
                                 )))
                             }
                             PropertyEscapeKind::StringSet(_) if negate_set => error("Invalid character escape"),
                             PropertyEscapeKind::StringSet(strings) => {
-                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| s.to_vec()).collect_in(bump))))
+                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| bumpalo::collections::Vec::from_iter_in(s.iter().copied(), bump)).collect_in(bump))))
                             }
                         }
                     }
@@ -1191,7 +1208,7 @@ where
                         self.consume('P');
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(s) => {
-                                Ok(CharacterClassEscape(CodePointSet::from_sorted_disjoint_intervals(
+                                Ok(CharacterClassEscape(CodePointSetInner::from_sorted_disjoint_intervals(
                                     bumpalo::collections::Vec::from_iter_in( s.iter().copied(), bump),
                                 ).inverted(bump)))
                             }
@@ -1535,9 +1552,11 @@ where
                 let property_escape = self.try_consume_unicode_property_escape()?;
                 match property_escape {
                     PropertyEscapeKind::CharacterClass(s) => {
-                        Ok(ir::Node::Bracket(BracketContents {
+                        Ok(ir::Node::Bracket(BracketContentsInner {
                             invert: negate,
-                            cps: CodePointSet::from_sorted_disjoint_intervals(bumpalo::collections::Vec::from_iter_in(s.iter().copied(), bump)),
+                            cps: CodePointSetInner::from_sorted_disjoint_intervals(
+                                bumpalo::collections::Vec::from_iter_in(s.iter().copied(), bump),
+                            ),
                         }))
                     }
                     PropertyEscapeKind::StringSet(_) if negate => error("Invalid character escape"),
@@ -1885,9 +1904,11 @@ where
 
 /// Try parsing a given pattern.
 /// Return the resulting IR regex, or an error.
-pub fn try_parse<'b, I>(pattern: I, flags: api::Flags, bump: &'b bumpalo::Bump) -> Result<ir::Regex<'b>, Error>
-where
-    I: Iterator<Item = u32> + Clone,
+pub fn try_parse<'b, I>(
+    pattern: I,
+    flags: api::Flags,
+    bump: &'b bumpalo::Bump,
+) -> Result<ir::Regex<'b>, Error> where I: Iterator<Item = u32> + Clone,
 {
     let mut p = Parser {
         input: pattern.peekable(),

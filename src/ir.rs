@@ -1,11 +1,11 @@
 //! Intermediate representation for a regex
 
-use bumpalo::Bump;
-use bumpalo::{boxed::Box, collections::Vec};
 use crate::api;
-use crate::types::{BracketContents, CaptureGroupID, CaptureGroupName};
+use crate::types::{BracketContentsInner, CaptureGroupID, CaptureGroupName};
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::ToString, vec::Vec};
+use bumpalo::Bump;
+use bumpalo::{boxed::Box, collections::Vec};
 use core::fmt;
 
 #[derive(Debug, Copy, Clone)]
@@ -41,18 +41,18 @@ pub enum Node<'b> {
     Char { c: u32, icase: bool },
 
     /// Match a literal sequence of bytes.
-    ByteSequence(Vec<'b,u8>),
+    ByteSequence(Vec<'b, u8>),
 
     /// Match any of a set of *bytes*.
     /// This may not exceed length MAX_BYTE_SET_LENGTH.
-    ByteSet(Vec<'b,u8>),
+    ByteSet(Vec<'b, u8>),
 
     /// Match any of a set of *chars*, case-insensitive.
     /// This may not exceed length MAX_CHAR_SET_LENGTH.
-    CharSet(Vec<'b,u32>),
+    CharSet(Vec<'b, u32>),
 
     /// Match the catenation of multiple nodes.
-    Cat(Vec<'b,Node<'b>>),
+    Cat(Vec<'b, Node<'b>>),
 
     /// Match an alternation like a|b.
     Alt(Box<'b, Node<'b>>, Box<'b, Node<'b>>),
@@ -79,7 +79,7 @@ pub enum Node<'b> {
     BackRef(u32),
 
     /// A bracket.
-    Bracket(BracketContents<'b>),
+    Bracket(BracketContentsInner<'b>),
 
     /// A lookaround assertions like (?:) or (?!).
     LookaroundAssertion {

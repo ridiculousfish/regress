@@ -6,7 +6,7 @@ use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
-use crate::insn::{CompiledRegex, Insn, LoopFields, StartPredicate};
+use crate::insn::{CompiledRegexInner, Insn, LoopFields, StartPredicate};
 use crate::matchers;
 use crate::matchers::CharProperties;
 use crate::position::PositionType;
@@ -95,7 +95,7 @@ fn run_loop<Position: PositionType>(
 }
 
 fn try_match_state<Input: InputIndexer, Dir: Direction>(
-    re: &CompiledRegex,
+    re: &CompiledRegexInner,
     input: &Input,
     s: &mut State<Input::Position>,
     dir: Dir,
@@ -339,11 +339,11 @@ fn successful_match<Input: InputIndexer>(
 #[derive(Debug)]
 struct MatchAttempter<'a, 'b, Input: InputIndexer> {
     states: Vec<State<Input::Position>>,
-    re: &'a CompiledRegex<'b>,
+    re: &'a CompiledRegexInner<'b>,
 }
 
 impl<'a, 'b, Input: InputIndexer> MatchAttempter<'a, 'b, Input> {
-    fn new(re: &'a CompiledRegex<'b>) -> Self {
+    fn new(re: &'a CompiledRegexInner<'b>) -> Self {
         Self {
             states: Vec::new(),
             re,
@@ -384,10 +384,10 @@ pub struct PikeVMExecutor<'r, 'b, Input: InputIndexer> {
     matcher: MatchAttempter<'r, 'b, Input>,
 }
 
-impl<'r, 't, 'b> exec::Executor<'r,'b, 't> for PikeVMExecutor<'r, 'b, Utf8Input<'t>> {
+impl<'r, 't, 'b> exec::Executor<'r, 'b, 't> for PikeVMExecutor<'r, 'b, Utf8Input<'t>> {
     type AsAscii = PikeVMExecutor<'r, 'b, AsciiInput<'t>>;
 
-    fn new(re: &'r CompiledRegex<'b>, text: &'t str) -> Self {
+    fn new(re: &'r CompiledRegexInner<'b>, text: &'t str) -> Self {
         let input = Utf8Input::new(text, re.flags.unicode);
         Self {
             input,
@@ -396,10 +396,10 @@ impl<'r, 't, 'b> exec::Executor<'r,'b, 't> for PikeVMExecutor<'r, 'b, Utf8Input<
     }
 }
 
-impl<'r, 't, 'b> exec::Executor<'r, 'b,'t> for PikeVMExecutor<'r, 'b, AsciiInput<'t>> {
+impl<'r, 't, 'b> exec::Executor<'r, 'b, 't> for PikeVMExecutor<'r, 'b, AsciiInput<'t>> {
     type AsAscii = PikeVMExecutor<'r, 'b, AsciiInput<'t>>;
 
-    fn new(re: &'r CompiledRegex<'b>, text: &'t str) -> Self {
+    fn new(re: &'r CompiledRegexInner<'b>, text: &'t str) -> Self {
         let input = AsciiInput::new(text);
         Self {
             input,

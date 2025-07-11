@@ -1,13 +1,13 @@
 //! Regex compiler back-end: transforms IR into a CompiledRegex
 
-use bumpalo::{Bump, collections::Vec};
 use crate::bytesearch::{AsciiBitmap, ByteArraySet};
-use crate::insn::{CompiledRegex, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR_SET_LENGTH};
+use crate::insn::{CompiledRegexInner, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR_SET_LENGTH};
 use crate::ir;
 use crate::ir::Node;
 use crate::startpredicate;
-use crate::types::{BracketContents, CaptureGroupID, LoopID};
+use crate::types::{BracketContentsInner, CaptureGroupID, LoopID};
 use crate::unicode;
+use bumpalo::{Bump, collections::Vec};
 use core::convert::TryInto;
 #[cfg(not(feature = "std"))]
 use {alloc::vec::Vec, hashbrown::HashMap};
@@ -23,7 +23,7 @@ fn make_anchor(anchor_type: ir::AnchorType) -> Insn {
 /// Weirdly placed optimization.
 /// If the given bracket can be represented as ASCII contents, return the
 /// bitmap. Otherwise nothing.
-fn bracket_as_ascii(bc: &BracketContents) -> Option<AsciiBitmap> {
+fn bracket_as_ascii(bc: &BracketContentsInner) -> Option<AsciiBitmap> {
     let mut result = AsciiBitmap::default();
     // We just assume that inverted brackets contain non-ASCII characters.
     if bc.invert {
@@ -43,7 +43,7 @@ fn bracket_as_ascii(bc: &BracketContents) -> Option<AsciiBitmap> {
 
 /// Type which wraps up the context needed to emit a CompiledRegex.
 struct Emitter<'b> {
-    result: CompiledRegex<'b>,
+    result: CompiledRegexInner<'b>,
 
     // Number of loops seen so far.
     next_loop_id: LoopID,
@@ -349,11 +349,11 @@ impl<'b> Emitter<'b> {
 }
 
 /// Compile the given IR to a CompiledRegex.
-pub fn emit<'b>(n: &ir::Regex<'b>, bump: &'b Bump) -> CompiledRegex<'b> {
+pub fn emit<'b>(n: &ir::Regex<'b>, bump: &'b Bump) -> CompiledRegexInner<'b> {
     let mut emitter = Emitter {
         next_loop_id: 0,
         group_names: Vec::new_in(bump),
-        result: CompiledRegex {
+        result: CompiledRegexInner {
             insns: bumpalo::collections::Vec::new_in(bump),
             brackets: bumpalo::collections::Vec::new_in(bump),
             loops: 0,

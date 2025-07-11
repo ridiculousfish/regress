@@ -1,4 +1,4 @@
-use crate::codepointset::CodePointSet;
+use crate::codepointset::{CodePointSet, CodePointSetInner};
 use crate::position::PositionType;
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
@@ -27,12 +27,32 @@ pub enum CharacterClassType {
 
 /// The stuff in a bracket.
 #[derive(Debug, Clone)]
-pub struct BracketContents<'b> {
+pub struct BracketContents {
     pub invert: bool,
-    pub cps: CodePointSet<'b>,
+    pub cps: CodePointSet,
 }
 
-impl<'b> BracketContents<'b> {
+impl From<BracketContentsInner<'_>> for BracketContents {
+    fn from(inner: BracketContentsInner<'_>) -> Self {
+        let BracketContentsInner {
+            invert,
+            cps,
+        } = inner;
+        BracketContents {
+            invert,
+            cps: cps.into(),
+        }
+    }
+}
+
+/// The stuff in a bracket.
+#[derive(Debug, Clone)]
+pub struct BracketContentsInner<'b> {
+    pub invert: bool,
+    pub cps: CodePointSetInner<'b>,
+}
+
+impl<'b> BracketContentsInner<'b> {
     // Return true if the bracket is empty.
     pub fn is_empty(&self) -> bool {
         match self.invert {

@@ -9,7 +9,7 @@ use crate::indexing;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
 #[cfg(not(feature = "utf16"))]
 use crate::insn::StartPredicate;
-use crate::insn::{CompiledRegex, Insn, LoopFields};
+use crate::insn::{CompiledRegexInner, Insn, LoopFields};
 use crate::matchers;
 use crate::matchers::CharProperties;
 use crate::position::PositionType;
@@ -68,13 +68,13 @@ struct State<Position: PositionType> {
 
 #[derive(Debug)]
 pub(crate) struct MatchAttempter<'a, 'b, Input: InputIndexer> {
-    re: &'a CompiledRegex<'b>,
+    re: &'a CompiledRegexInner<'b>,
     bts: Vec<BacktrackInsn<Input>>,
     s: State<Input::Position>,
 }
 
 impl<'a, 'b, Input: InputIndexer> MatchAttempter<'a, 'b, Input> {
-    pub(crate) fn new(re: &'a CompiledRegex<'b>, entry: Input::Position) -> Self {
+    pub(crate) fn new(re: &'a CompiledRegexInner<'b>, entry: Input::Position) -> Self {
         Self {
             re,
             bts: vec![BacktrackInsn::Exhausted],
@@ -229,7 +229,7 @@ impl<'a, 'b, Input: InputIndexer> MatchAttempter<'a, 'b, Input> {
     // Helper function to extract the duplicated match blocks that handle different instruction types
     // with different matcher functions. This significantly reduces code duplication and compile times.
     fn with_scm_loop_impl<Dir: Direction>(
-        re: &CompiledRegex,
+        re: &CompiledRegexInner,
         input: &Input,
         pos: Input::Position,
         min: usize,
@@ -307,7 +307,7 @@ impl<'a, 'b, Input: InputIndexer> MatchAttempter<'a, 'b, Input> {
 
     // Helper function for compute_max_pos to avoid duplication
     fn with_scm_compute_max<Dir: Direction>(
-        re: &CompiledRegex,
+        re: &CompiledRegexInner,
         input: &Input,
         pos: Input::Position,
         limit: usize,
@@ -1137,7 +1137,7 @@ impl<'r, 'b, Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'r, 
 impl<'r, 'b, 't> exec::Executor<'r, 'b, 't> for BacktrackExecutor<'r, 'b, Utf8Input<'t>> {
     type AsAscii = BacktrackExecutor<'r, 'b, AsciiInput<'t>>;
 
-    fn new(re: &'r CompiledRegex<'b>, text: &'t str) -> Self {
+    fn new(re: &'r CompiledRegexInner<'b>, text: &'t str) -> Self {
         let input = Utf8Input::new(text, re.flags.unicode);
         Self {
             input,
@@ -1149,7 +1149,7 @@ impl<'r, 'b, 't> exec::Executor<'r, 'b, 't> for BacktrackExecutor<'r, 'b, Utf8In
 impl<'r, 'b, 't> exec::Executor<'r, 'b, 't> for BacktrackExecutor<'r, 'b, AsciiInput<'t>> {
     type AsAscii = BacktrackExecutor<'r, 'b, AsciiInput<'t>>;
 
-    fn new(re: &'r CompiledRegex<'b>, text: &'t str) -> Self {
+    fn new(re: &'r CompiledRegexInner<'b>, text: &'t str) -> Self {
         let input = AsciiInput::new(text);
         Self {
             input,

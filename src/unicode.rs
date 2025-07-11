@@ -1,4 +1,4 @@
-use crate::codepointset::{CodePointSet, Interval};
+use crate::codepointset::{CodePointSetInner, Interval};
 use crate::unicodetables::{
     FOLDS, TO_UPPERCASE, binary_property_ranges, general_category_property_value_ranges,
     script_extensions_value_ranges, script_value_ranges, string_property_sets,
@@ -193,7 +193,7 @@ fn uppercase(cu: u32) -> u32 {
 
 // Add all folded characters in the given interval to the given code point set.
 // This skips characters which fold to themselves.
-fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
+fn fold_interval(iv: Interval, recv: &mut CodePointSetInner) {
     let overlaps = FOLDS.equal_range_by(|tr| {
         if tr.first() > iv.last {
             Ordering::Greater
@@ -238,7 +238,7 @@ fn fold_interval(iv: Interval, recv: &mut CodePointSet) {
 
 /// Find all characters that fold into the given interval and add them to the given code point set.
 /// This skips characters which fold to themselves.
-fn unfold_interval(iv: Interval, recv: &mut CodePointSet) {
+fn unfold_interval(iv: Interval, recv: &mut CodePointSetInner) {
     // Note: We still need to check all ranges because the relationship between
     // transformed_from and transformed_to intervals can be complex
     for tr in FOLDS.iter() {
@@ -323,7 +323,7 @@ pub(crate) fn unfold_uppercase_char(c: u32) -> Vec<u32> {
 }
 
 // Fold every character in \p input, then find all the prefolds.
-pub fn add_icase_code_points(mut input: CodePointSet) -> CodePointSet {
+pub fn add_icase_code_points(mut input: CodePointSetInner) -> CodePointSetInner {
     let mut folded = input.clone();
     for iv in input.intervals() {
         fold_interval(*iv, &mut folded)
@@ -519,7 +519,7 @@ mod tests {
         for (idx, &first) in locs.iter().enumerate() {
             // Keep a running set of the unfolded code points we expect to be in the
             // range [first, last].
-            let mut expected = CodePointSet::new(&bump);
+            let mut expected = CodePointSetInner::new(&bump);
             let mut from = first;
             for &last in &locs[idx..] {
                 // Add both folded and unfolded characters to expected.
@@ -535,7 +535,7 @@ mod tests {
                         expected.add_one(fc);
                     }
                 }
-                let mut input = CodePointSet::new(&bump);
+                let mut input = CodePointSetInner::new(&bump);
                 input.add(Interval { first, last });
                 let folded = add_icase_code_points(input);
                 assert_eq!(folded, expected);
@@ -564,7 +564,7 @@ mod tests {
         for (idx, &first) in locs.iter().enumerate() {
             // Keep a running set of the folded code points we expect to be in the
             // range [first, last].
-            let mut expected = CodePointSet::new(&bump);
+            let mut expected = CodePointSetInner::new(&bump);
             let mut from = first;
             for &last in &locs[idx..] {
                 // Add characters to expected which do not fold to themselves.
@@ -574,7 +574,7 @@ mod tests {
                         expected.add_one(fc);
                     }
                 }
-                let mut cps = CodePointSet::new(&bump);
+                let mut cps = CodePointSetInner::new(&bump);
                 fold_interval(Interval { first, last }, &mut cps);
                 assert_eq!(cps.intervals(), expected.intervals());
 

@@ -29,7 +29,10 @@ fn is_start_anchored(n: &Node) -> bool {
 /// Convert the code point set to a first-byte bitmap.
 /// That is, make a list of all of the possible first bytes of every contained
 /// code point, and store that in a bitmap.
-fn cps_to_first_byte_bitmap<'b>(input: &codepointset::CodePointSet<'b>, bump: &'b bumpalo::Bump) -> bumpalo::boxed::Box<'b, ByteBitmap> {
+fn cps_to_first_byte_bitmap<'b>(
+    input: &codepointset::CodePointSetInner<'b>,
+    bump: &'b bumpalo::Bump,
+) -> bumpalo::boxed::Box<'b, ByteBitmap> {
     let mut bitmap = bumpalo::boxed::Box::new_in(ByteBitmap::default(), bump);
     for iv in input.intervals() {
         add_utf8_first_bytes_to_bitmap(*iv, &mut bitmap);
@@ -63,10 +66,16 @@ impl<'b> AbstractStartPredicate<'b> {
                 debug_assert!(s1[..shared_len] == s2[..shared_len]);
                 if shared_len > 0 {
                     // Use the shared prefix.
-                    Self::Sequence(bumpalo::collections::Vec::from_iter_in(s1[..shared_len].iter().copied(), bump))
+                    Self::Sequence(bumpalo::collections::Vec::from_iter_in(
+                        s1[..shared_len].iter().copied(),
+                        bump,
+                    ))
                 } else {
                     // Use a set of their first byte.
-                    Self::Set(bumpalo::boxed::Box::new_in(ByteBitmap::new(&[s1[0], s2[0]]), bump))
+                    Self::Set(bumpalo::boxed::Box::new_in(
+                        ByteBitmap::new(&[s1[0], s2[0]]),
+                        bump,
+                    ))
                 }
             }
 
@@ -113,13 +122,17 @@ impl<'b> AbstractStartPredicate<'b> {
 /// If this returns None, then the instruction is conceptually zero-width (e.g.
 /// lookahead assertion) and does not contribute to the predicate.
 /// If this returns StartPredicate::Arbitrary, then there is no predicate.
-fn compute_start_predicate<'b>(n: &Node<'b>, bump: &'b bumpalo::Bump) -> Option<AbstractStartPredicate<'b>> {
+fn compute_start_predicate<'b>(
+    n: &Node<'b>,
+    bump: &'b bumpalo::Bump,
+) -> Option<AbstractStartPredicate<'b>> {
     let arbitrary = Some(AbstractStartPredicate::Arbitrary);
     match n {
         Node::ByteSequence(bytevec) => Some(AbstractStartPredicate::Sequence(bytevec.clone())),
-        Node::ByteSet(bytes) => Some(AbstractStartPredicate::Set(bumpalo::boxed::Box::new_in(ByteBitmap::new(
-            bytes,
-        ), bump))),
+        Node::ByteSet(bytes) => Some(AbstractStartPredicate::Set(bumpalo::boxed::Box::new_in(
+            ByteBitmap::new(bytes),
+            bump,
+        ))),
 
         Node::Empty => arbitrary,
         Node::Goal => arbitrary,
@@ -131,9 +144,10 @@ fn compute_start_predicate<'b>(n: &Node<'b>, bump: &'b bumpalo::Bump) -> Option<
                 .iter()
                 .map(|&c| utf8_first_byte(c))
                 .collect::<Vec<_>>();
-            Some(AbstractStartPredicate::Set(bumpalo::boxed::Box::new_in(ByteBitmap::new(
-                &bytes,
-            ), bump)))
+            Some(AbstractStartPredicate::Set(bumpalo::boxed::Box::new_in(
+                ByteBitmap::new(&bytes),
+                bump,
+            )))
         }
 
         // We assume that most char nodes have been optimized to ByteSeq or AnyBytes2, so skip
@@ -142,7 +156,10 @@ fn compute_start_predicate<'b>(n: &Node<'b>, bump: &'b bumpalo::Bump) -> Option<
         Node::Char { .. } => arbitrary,
 
         // Cats return the first non-None value, if any.
-        Node::Cat(nodes) => nodes.iter().filter_map(|n| compute_start_predicate(n, bump)).next(),
+        Node::Cat(nodes) => nodes
+            .iter()
+            .filter_map(|n| compute_start_predicate(n, bump))
+            .next(),
 
         // MatchAny (aka .) is too common to do a fast prefix search for.
         Node::MatchAny => arbitrary,
