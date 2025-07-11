@@ -278,7 +278,7 @@ impl<'b> ClassSetAlternativeStrings<'b> {
         self.0.retain(|string| !other.0.contains(string));
     }
 
-    fn to_nodes(&self, icase: bool, bump: &'b Bump) -> Vec<'b, ir::Node> {
+    fn to_nodes(&self, icase: bool, bump: &'b Bump) -> Vec<'b, ir::Node<'b>> {
         let mut nodes = Vec::new_in(bump);
         for string in &self.0 {
             nodes.push(ir::Node::Cat(
@@ -673,7 +673,7 @@ where
                 }
 
                 '[' => {
-                    result.push(self.consume_bracket()?);
+                    result.push(self.consume_bracket(bump)?);
                 }
 
                 // Term :: ExtendedAtom :: InvalidBracedQuantifier
@@ -762,7 +762,7 @@ where
             }
 
             // Parse a code point or character class.
-            let Some(first) = self.try_consume_bracket_class_atom()? else {
+            let Some(first) = self.try_consume_bracket_class_atom(bump)? else {
                 continue;
             };
 
@@ -772,7 +772,7 @@ where
                 continue;
             }
 
-            let Some(second) = self.try_consume_bracket_class_atom()? else {
+            let Some(second) = self.try_consume_bracket_class_atom(bump)? else {
                 // No second atom. For example: [a-].
                 add_class_atom(&mut result, first, bump);
                 add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')), bump);
@@ -806,7 +806,7 @@ where
         }
     }
 
-    fn try_consume_bracket_class_atom(&mut self) -> Result<Option<ClassAtom>, Error> {
+    fn try_consume_bracket_class_atom<'b>(&mut self, bump: &'b Bump) -> Result<Option<ClassAtom<'b>>, Error> {
         let c = self.peek();
         if c.is_none() {
             return Ok(None);
@@ -911,7 +911,7 @@ where
                         let negate = ec == 'P' as u32;
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(s) => Ok(Some(ClassAtom::Range {
-                                iv: CodePointSet::from_sorted_disjoint_intervals(bumpalo::collections::Vec::from_iter_in(s, bump)),
+                                iv: CodePointSet::from_sorted_disjoint_intervals(bumpalo::collections::Vec::from_iter_in(s.iter().copied(), bump)),
                                 negate,
                             })),
                             PropertyEscapeKind::StringSet(_) => error("Invalid property escape"),
@@ -1177,12 +1177,12 @@ where
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(intervals) => {
                                 Ok(CharacterClassEscape(CodePointSet::from_sorted_disjoint_intervals(
-                                    intervals.to_vec(),
+                                    bumpalo::collections::Vec::from_iter_in( intervals.iter().copied(), bump),
                                 )))
                             }
                             PropertyEscapeKind::StringSet(_) if negate_set => error("Invalid character escape"),
                             PropertyEscapeKind::StringSet(strings) => {
-                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| s.to_vec()).collect())))
+                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| s.to_vec()).collect_in(bump))))
                             }
                         }
                     }
@@ -1192,8 +1192,8 @@ where
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(s) => {
                                 Ok(CharacterClassEscape(CodePointSet::from_sorted_disjoint_intervals(
-                                    s.to_vec(),
-                                ).inverted()))
+                                    bumpalo::collections::Vec::from_iter_in( s.iter().copied(), bump),
+                                ).inverted(bump)))
                             }
                             PropertyEscapeKind::StringSet(_) => error("Invalid character escape"),
                         }
@@ -1537,7 +1537,7 @@ where
                     PropertyEscapeKind::CharacterClass(s) => {
                         Ok(ir::Node::Bracket(BracketContents {
                             invert: negate,
-                            cps: CodePointSet::from_sorted_disjoint_intervals(s.to_vec()),
+                            cps: CodePointSet::from_sorted_disjoint_intervals(bumpalo::collections::Vec::from_iter_in(s.iter().copied(), bump)),
                         }))
                     }
                     PropertyEscapeKind::StringSet(_) if negate => error("Invalid character escape"),
@@ -1551,10 +1551,11 @@ where
                                             c: *c,
                                             icase: self.flags.icase,
                                         })
-                                        .collect(),
+                                        .collect_in(bump),
                                 )
                             })
-                            .collect(),
+                            .collect_in(bump),
+                        bump,
                     )),
                 }
             }

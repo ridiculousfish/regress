@@ -337,13 +337,13 @@ fn successful_match<Input: InputIndexer>(
 }
 
 #[derive(Debug)]
-struct MatchAttempter<'a, Input: InputIndexer> {
+struct MatchAttempter<'a, 'b, Input: InputIndexer> {
     states: Vec<State<Input::Position>>,
-    re: &'a CompiledRegex,
+    re: &'a CompiledRegex<'b>,
 }
 
-impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
-    fn new(re: &'a CompiledRegex) -> Self {
+impl<'a, 'b, Input: InputIndexer> MatchAttempter<'a, 'b, Input> {
+    fn new(re: &'a CompiledRegex<'b>) -> Self {
         Self {
             states: Vec::new(),
             re,
@@ -379,15 +379,15 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
 }
 
 #[derive(Debug)]
-pub struct PikeVMExecutor<'r, Input: InputIndexer> {
+pub struct PikeVMExecutor<'r, 'b, Input: InputIndexer> {
     input: Input,
-    matcher: MatchAttempter<'r, Input>,
+    matcher: MatchAttempter<'r, 'b, Input>,
 }
 
-impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, Utf8Input<'t>> {
-    type AsAscii = PikeVMExecutor<'r, AsciiInput<'t>>;
+impl<'r, 't, 'b> exec::Executor<'r,'b, 't> for PikeVMExecutor<'r, 'b, Utf8Input<'t>> {
+    type AsAscii = PikeVMExecutor<'r, 'b, AsciiInput<'t>>;
 
-    fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
+    fn new(re: &'r CompiledRegex<'b>, text: &'t str) -> Self {
         let input = Utf8Input::new(text, re.flags.unicode);
         Self {
             input,
@@ -396,10 +396,10 @@ impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, Utf8Input<'t>> {
     }
 }
 
-impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, AsciiInput<'t>> {
-    type AsAscii = PikeVMExecutor<'r, AsciiInput<'t>>;
+impl<'r, 't, 'b> exec::Executor<'r, 'b,'t> for PikeVMExecutor<'r, 'b, AsciiInput<'t>> {
+    type AsAscii = PikeVMExecutor<'r, 'b, AsciiInput<'t>>;
 
-    fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
+    fn new(re: &'r CompiledRegex<'b>, text: &'t str) -> Self {
         let input = AsciiInput::new(text);
         Self {
             input,
@@ -408,7 +408,7 @@ impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, AsciiInput<'t>> {
     }
 }
 
-impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
+impl<'r, 'b, Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'r, 'b, Input> {
     type Position = Input::Position;
 
     fn initial_position(&self, offset: usize) -> Option<Self::Position> {

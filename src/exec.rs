@@ -25,12 +25,12 @@ pub trait MatchProducer: core::fmt::Debug {
 }
 
 /// A trait for executing a regex.
-pub trait Executor<'r, 't>: MatchProducer {
+pub trait Executor<'r, 'b, 't>: MatchProducer {
     /// The ASCII variant.
-    type AsAscii: Executor<'r, 't>;
+    type AsAscii: Executor<'r, 'b, 't>;
 
     /// Construct a new Executor.
-    fn new(re: &'r CompiledRegex, text: &'t str) -> Self;
+    fn new(re: &'r CompiledRegex<'b>, text: &'t str) -> Self;
 }
 
 /// A struct which enables iteration over matches.

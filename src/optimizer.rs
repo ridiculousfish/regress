@@ -112,8 +112,7 @@ pub enum PassAction<'b> {
 #[derive(Debug)]
 struct Pass<'a, 'b, F>
 where
-    F: FnMut(&mut Node<'b>, &Walk, &'b Bump) -> PassAction<'b>,
-    'a: 'b,
+    F: FnMut(&mut Node<'b>, &Walk, &'b Bump) -> PassAction<'b>
 {
     // The function.
     func: &'a mut F,
@@ -182,8 +181,7 @@ where
 /// returns a new node. \return true if something changed, false if nothing did.
 fn run_pass<'a, 'b, F>(r: &mut Regex<'b>, func: &'a mut F, bump: &'b Bump) -> bool
 where
-    F: FnMut(&mut Node<'b>, &Walk, &'b Bump) -> PassAction<'b>,
-    'a: 'b,
+    F: FnMut(&mut Node<'b>, &Walk, &'b Bump) -> PassAction<'b>
 {
     let mut p = Pass::new(func, r.flags.unicode, bump);
     p.run_to_fixpoint(&mut r.node);
@@ -372,7 +370,7 @@ fn unfold_icase_chars<'b>(n: &mut Node<'b>, w: &Walk, bump: &'b Bump) -> PassAct
                 }
                 2..=MAX_BYTE_SET_LENGTH => {
                     // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet((*unfolded).clone()))
+                    PassAction::Replace(Node::CharSet(unfolded.to_vec()))
                 }
                 _ => panic!("Unfolded to more characters than we believed possible"),
             }
