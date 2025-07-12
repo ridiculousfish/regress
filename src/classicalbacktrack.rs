@@ -7,9 +7,10 @@ use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
 use crate::indexing;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
+use crate::insn::CompiledRegex;
 #[cfg(not(feature = "utf16"))]
 use crate::insn::StartPredicate;
-use crate::insn::{CompiledRegex, Insn, LoopFields};
+use crate::insn::{Insn, LoopFields};
 use crate::matchers;
 use crate::matchers::CharProperties;
 use crate::position::PositionType;
@@ -1008,7 +1009,7 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
     }
 }
 
-impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
+impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
     fn successful_match(&mut self, start: Input::Position, end: Input::Position) -> Match {
         // We want to simultaneously map our groups to offsets, and clear the groups.
         // A for loop is the easiest way to do this while satisfying the borrow checker.
@@ -1088,7 +1089,7 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
     }
 }
 
-impl<Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'_, Input> {
+impl<'r, Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'r, Input> {
     type Position = Input::Position;
 
     fn initial_position(&self, offset: usize) -> Option<Self::Position> {

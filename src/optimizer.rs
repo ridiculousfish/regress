@@ -2,10 +2,11 @@
 
 use crate::insn::{MAX_BYTE_SET_LENGTH, MAX_CHAR_SET_LENGTH};
 use crate::ir::*;
-use crate::types::BracketContents;
+use crate::types::BracketContentsInner;
 use crate::unicode;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use bumpalo::{Bump, boxed::Box, collections::Vec};
 #[cfg(not(feature = "std"))]
 use hashbrown::HashMap;
 #[cfg(feature = "std")]
@@ -20,8 +21,8 @@ const LOOP_UNROLL_THRESHOLD: usize = 5;
 // Uses Arc<Vec<u32>> to avoid expensive cloning on every lookup.
 #[cfg(feature = "std")]
 thread_local! {
-    static UNICODE_UNFOLD_CACHE: std::cell::RefCell<HashMap<u32, Arc<Vec<u32>>>> = std::cell::RefCell::new(HashMap::new());
-    static UPPERCASE_UNFOLD_CACHE: std::cell::RefCell<HashMap<u32, Arc<Vec<u32>>>> = std::cell::RefCell::new(HashMap::new());
+    static UNICODE_UNFOLD_CACHE: std::cell::RefCell<HashMap<u32, Arc<std::vec::Vec<u32>>>> = std::cell::RefCell::new(HashMap::new());
+    static UPPERCASE_UNFOLD_CACHE: std::cell::RefCell<HashMap<u32, Arc<std::vec::Vec<u32>>>> = std::cell::RefCell::new(HashMap::new());
 }
 
 // For no-std environments, use static mutable variables.
@@ -33,7 +34,7 @@ static mut UPPERCASE_UNFOLD_CACHE: Option<HashMap<u32, Arc<Vec<u32>>>> = None;
 
 /// Get cached unicode unfolding result, computing if not cached
 /// Returns an `Arc<Vec<u32>>` to avoid expensive cloning
-fn get_unicode_unfold_cached(c: u32) -> Arc<Vec<u32>> {
+fn get_unicode_unfold_cached(c: u32) -> Arc<std::vec::Vec<u32>> {
     #[cfg(feature = "std")]
     {
         UNICODE_UNFOLD_CACHE.with(|cache| {
@@ -64,7 +65,7 @@ fn get_unicode_unfold_cached(c: u32) -> Arc<Vec<u32>> {
 
 /// Get cached uppercase unfolding result, computing if not cached
 /// Returns an `Arc<Vec<u32>>` to avoid expensive cloning
-fn get_uppercase_unfold_cached(c: u32) -> Arc<Vec<u32>> {
+fn get_uppercase_unfold_cached(c: u32) -> Arc<std::vec::Vec<u32>> {
     #[cfg(feature = "std")]
     {
         UPPERCASE_UNFOLD_CACHE.with(|cache| {
@@ -94,7 +95,7 @@ fn get_uppercase_unfold_cached(c: u32) -> Arc<Vec<u32>> {
 }
 
 /// Things that a Pass may do.
-pub enum PassAction {
+pub enum PassAction<'b> {
     // Do nothing to the given node.
     Keep,
 
@@ -105,13 +106,13 @@ pub enum PassAction {
     Remove,
 
     /// Replace the given node with a new Node.
-    Replace(Node),
+    Replace(Node<'b>),
 }
 
 #[derive(Debug)]
-struct Pass<'a, F>
+struct Pass<'a, 'b, F>
 where
-    F: FnMut(&mut Node, &Walk) -> PassAction,
+    F: FnMut(&mut Node<'b>, &Walk, &'b Bump) -> PassAction<'b>,
 {
     // The function.
     func: &'a mut F,
@@ -121,43 +122,50 @@ where
 
     // If the regex is in unicode mode.
     unicode: bool,
+
+    bump: &'b Bump,
 }
 
-impl<'a, F> Pass<'a, F>
+impl<'a, 'b, F> Pass<'a, 'b, F>
 where
-    F: FnMut(&mut Node, &Walk) -> PassAction,
+    F: FnMut(&mut Node<'b>, &Walk, &'b Bump) -> PassAction<'b>,
 {
-    fn new(func: &'a mut F, unicode: bool) -> Self {
+    fn new(func: &'a mut F, unicode: bool, bump: &'b Bump) -> Self {
         Pass {
             func,
             changed: false,
             unicode,
+            bump,
         }
     }
 
-    fn run_postorder(&mut self, start: &mut Node) {
+    fn run_postorder(&mut self, start: &mut Node<'b>) {
+        let func = &mut self.func;
+        let changed = &mut self.changed;
+        let bump = self.bump;
+
         walk_mut(
             true,
             self.unicode,
             start,
-            &mut |n: &mut Node, walk: &mut Walk| match (self.func)(n, walk) {
+            &mut |n: &mut Node<'b>, walk: &mut Walk| match (func)(n, walk, bump) {
                 PassAction::Keep => {}
                 PassAction::Modified => {
-                    self.changed = true;
+                    *changed = true;
                 }
                 PassAction::Remove => {
                     *n = Node::Empty;
-                    self.changed = true;
+                    *changed = true;
                 }
                 PassAction::Replace(newnode) => {
                     *n = newnode;
-                    self.changed = true;
+                    *changed = true;
                 }
             },
         )
     }
 
-    fn run_to_fixpoint(&mut self, n: &mut Node) {
+    fn run_to_fixpoint(&mut self, n: &mut Node<'b>) {
         debug_assert!(!self.changed, "Pass has already been run");
         loop {
             self.changed = false;
@@ -171,11 +179,11 @@ where
 
 /// Run a "pass" on a regex, which is a function that takes a Node and maybe
 /// returns a new node. \return true if something changed, false if nothing did.
-fn run_pass<F>(r: &mut Regex, func: &mut F) -> bool
+fn run_pass<'a, 'b, F>(r: &mut Regex<'b>, func: &'a mut F, bump: &'b Bump) -> bool
 where
-    F: FnMut(&mut Node, &Walk) -> PassAction,
+    F: FnMut(&mut Node<'b>, &Walk, &'b Bump) -> PassAction<'b>,
 {
-    let mut p = Pass::new(func, r.flags.unicode);
+    let mut p = Pass::new(func, r.flags.unicode, bump);
     p.run_to_fixpoint(&mut r.node);
     p.changed
 }
@@ -183,7 +191,7 @@ where
 // Here are some optimizations we support.
 
 // Remove empty Nodes.
-fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
+fn remove_empties<'b>(n: &mut Node<'b>, _w: &Walk, _bump: &'b Bump) -> PassAction<'b> {
     match n {
         Node::Empty | Node::Goal | Node::Char { .. } => PassAction::Keep,
         Node::ByteSequence(v) => {
@@ -258,13 +266,13 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
 }
 
 // If a node can never match, replace it with an always fails node.
-fn propagate_early_fails(n: &mut Node, _w: &Walk) -> PassAction {
+fn propagate_early_fails<'b>(n: &mut Node<'b>, _w: &Walk, bump: &'b Bump) -> PassAction<'b> {
     match n {
         Node::Cat(nodes) => {
             // If any child is an early fail, we are an early fail.
             // Note this assumes that there is no node after a Goal node.
             if nodes.iter().any(|nn| nn.match_always_fails()) {
-                PassAction::Replace(Node::make_always_fails())
+                PassAction::Replace(Node::make_always_fails(bump))
             } else {
                 PassAction::Keep
             }
@@ -274,7 +282,7 @@ fn propagate_early_fails(n: &mut Node, _w: &Walk) -> PassAction {
             let left_fails = left.match_always_fails();
             let right_fails = right.match_always_fails();
             match (left_fails, right_fails) {
-                (true, true) => PassAction::Replace(Node::make_always_fails()),
+                (true, true) => PassAction::Replace(Node::make_always_fails(bump)),
                 (false, false) => PassAction::Keep,
                 (true, false) | (false, true) => {
                     // Here either our left or right node always fails.
@@ -298,7 +306,7 @@ fn propagate_early_fails(n: &mut Node, _w: &Walk) -> PassAction {
             }
             // If the loop body always fails, we always fail.
             if quant.min > 0 && loopee.match_always_fails() {
-                PassAction::Replace(Node::make_always_fails())
+                PassAction::Replace(Node::make_always_fails(bump))
             } else {
                 PassAction::Keep
             }
@@ -308,7 +316,7 @@ fn propagate_early_fails(n: &mut Node, _w: &Walk) -> PassAction {
 }
 
 // Remove excess cats.
-fn decat(n: &mut Node, _w: &Walk) -> PassAction {
+fn decat<'b>(n: &mut Node<'b>, _w: &Walk, bump: &'b Bump) -> PassAction<'b> {
     match n {
         Node::Cat(nodes) => {
             if nodes.is_empty() {
@@ -320,11 +328,11 @@ fn decat(n: &mut Node, _w: &Walk) -> PassAction {
                 // Unfortunately we can't use flatmap() because there's no single iterator type
                 // we can return.
                 // Avoid copying nodes by switching them into owned vec.
-                let mut catted = Vec::new();
+                let mut catted = Vec::new_in(bump);
                 core::mem::swap(nodes, &mut catted);
 
                 // Decat them.
-                let mut decatted = Vec::new();
+                let mut decatted = Vec::new_in(bump);
                 for nn in catted {
                     match nn {
                         Node::Cat(mut nnodes) => {
@@ -346,7 +354,7 @@ fn decat(n: &mut Node, _w: &Walk) -> PassAction {
 /// That means for case-insensitive characters, figure out everything that they
 /// could match.
 /// Uses caching to avoid expensive recomputation of unfolding results.
-fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
+fn unfold_icase_chars<'b>(n: &mut Node<'b>, w: &Walk, bump: &'b Bump) -> PassAction<'b> {
     match *n {
         Node::Char { c, icase } if icase && !w.unicode => {
             let unfolded = get_uppercase_unfold_cached(c);
@@ -362,7 +370,10 @@ fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
                 }
                 2..=MAX_BYTE_SET_LENGTH => {
                     // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet((*unfolded).clone()))
+                    PassAction::Replace(Node::CharSet(bumpalo::collections::Vec::from_iter_in(
+                        unfolded.iter().copied(),
+                        bump,
+                    )))
                 }
                 _ => panic!("Unfolded to more characters than we believed possible"),
             }
@@ -381,7 +392,10 @@ fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
                 }
                 2..=MAX_BYTE_SET_LENGTH => {
                     // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet((*unfolded).clone()))
+                    PassAction::Replace(Node::CharSet(bumpalo::collections::Vec::from_iter_in(
+                        unfolded.iter().copied(),
+                        bump,
+                    )))
                 }
                 _ => panic!("Unfolded to more characters than we believed possible"),
             }
@@ -391,7 +405,7 @@ fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
 }
 
 // Perform simple unrolling of loops that have a minimum.
-fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
+fn unroll_loops<'b>(n: &mut Node<'b>, _w: &Walk, bump: &'b Bump) -> PassAction<'b> {
     match n {
         Node::Loop {
             loopee,
@@ -410,9 +424,9 @@ fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
             }
 
             // We made it through. Replace us with a cat.
-            let mut unrolled = Vec::new();
+            let mut unrolled = Vec::new_in(bump);
             for _ in 0..quant.min {
-                let Some(node) = loopee.try_duplicate(0) else {
+                let Some(node) = loopee.try_duplicate(0, bump) else {
                     return PassAction::Keep;
                 };
                 unrolled.push(node);
@@ -436,7 +450,7 @@ fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
 }
 
 /// Replace Loops with 1Char loops whenever possible.
-fn promote_1char_loops(n: &mut Node, _w: &Walk) -> PassAction {
+fn promote_1char_loops<'b>(n: &mut Node<'b>, _w: &Walk, bump: &'b Bump) -> PassAction<'b> {
     match n {
         Node::Loop {
             loopee,
@@ -455,7 +469,7 @@ fn promote_1char_loops(n: &mut Node, _w: &Walk) -> PassAction {
             );
 
             // This feels hackish?
-            let mut new_loopee = Box::new(Node::Empty);
+            let mut new_loopee = Box::new_in(Node::Empty, bump);
             core::mem::swap(&mut new_loopee, loopee);
 
             *n = Node::Loop1CharBody {
@@ -473,9 +487,9 @@ fn promote_1char_loops(n: &mut Node, _w: &Walk) -> PassAction {
 /// Don't do this in utf16 mode because UTF-16 should never match against bytes.
 /// TODO: this seems to do too much; consider breaking this up.
 #[cfg(not(feature = "utf16"))]
-fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
+fn form_literal_bytes<'b>(n: &mut Node<'b>, walk: &Walk, bump: &'b Bump) -> PassAction<'b> {
     // Helper to return a mutable reference to the nodes of a literal bytes.
-    fn get_literal_bytes(n: &mut Node) -> Option<&mut Vec<u8>> {
+    fn get_literal_bytes<'b>(n: &mut Node<'b>) -> Option<&'b mut Vec<'b, u8>> {
         match n {
             Node::ByteSequence(v) => Some(v),
             _ => None,
@@ -534,7 +548,7 @@ fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
 }
 
 /// Try to reduce a bracket to something simpler.
-fn try_reduce_bracket(bc: &BracketContents) -> Option<Node> {
+fn try_reduce_bracket<'b>(bc: &BracketContentsInner, bump: &'b Bump) -> Option<Node<'b>> {
     if bc.invert {
         // Give up.
         return None;
@@ -552,7 +566,7 @@ fn try_reduce_bracket(bc: &BracketContents) -> Option<Node> {
     // Ok, we want to make a char set.
     // Note we cannot make a char out of surrogates; should char conversion fail we
     // just give up.
-    let mut res = Vec::new();
+    let mut res = Vec::new_in(bump);
     for iv in bc.cps.intervals() {
         for cp in iv.codepoints() {
             res.push(cp);
@@ -566,16 +580,16 @@ fn try_reduce_bracket(bc: &BracketContents) -> Option<Node> {
 /// Optimize certain stupid brackets like `[a]` to a single char.
 /// Invert a bracket if it would *reduce* the number of ranges.
 /// Note we only run this once.
-fn simplify_brackets(n: &mut Node, _walk: &Walk) -> PassAction {
+fn simplify_brackets<'b>(n: &mut Node<'b>, _walk: &Walk, bump: &'b Bump) -> PassAction<'b> {
     match n {
         Node::Bracket(bc) => {
-            if let Some(new_node) = try_reduce_bracket(bc) {
+            if let Some(new_node) = try_reduce_bracket(bc, bump) {
                 return PassAction::Replace(new_node);
             }
 
             // TODO: does this ever help anything?
             if bc.cps.intervals().len() > bc.cps.inverted_interval_count() {
-                bc.cps = bc.cps.inverted();
+                bc.cps = bc.cps.inverted(bump);
                 bc.invert = !bc.invert;
                 PassAction::Modified
             } else {
@@ -586,22 +600,22 @@ fn simplify_brackets(n: &mut Node, _walk: &Walk) -> PassAction {
     }
 }
 
-pub fn optimize(r: &mut Regex) {
-    run_pass(r, &mut simplify_brackets);
+pub fn optimize<'b>(r: &mut Regex<'b>, bump: &'b Bump) {
+    run_pass(r, &mut simplify_brackets, bump);
     loop {
         let mut changed = false;
-        changed |= run_pass(r, &mut decat);
+        changed |= run_pass(r, &mut decat, bump);
         if r.flags.icase {
-            changed |= run_pass(r, &mut unfold_icase_chars);
+            changed |= run_pass(r, &mut unfold_icase_chars, bump);
         }
-        changed |= run_pass(r, &mut unroll_loops);
-        changed |= run_pass(r, &mut promote_1char_loops);
+        changed |= run_pass(r, &mut unroll_loops, bump);
+        changed |= run_pass(r, &mut promote_1char_loops, bump);
         #[cfg(not(feature = "utf16"))]
         {
-            changed |= run_pass(r, &mut form_literal_bytes);
+            changed |= run_pass(r, &mut form_literal_bytes, bump);
         }
-        changed |= run_pass(r, &mut remove_empties);
-        changed |= run_pass(r, &mut propagate_early_fails);
+        changed |= run_pass(r, &mut remove_empties, bump);
+        changed |= run_pass(r, &mut propagate_early_fails, bump);
         if !changed {
             break;
         }

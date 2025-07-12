@@ -3,6 +3,7 @@ use crate::emit;
 use crate::exec;
 use crate::indexing;
 use crate::insn::CompiledRegex;
+use crate::insn::CompiledRegexInner;
 use crate::optimizer;
 use crate::parse;
 use crate::types::MAX_CAPTURE_GROUPS;
@@ -322,6 +323,12 @@ impl From<CompiledRegex> for Regex {
     }
 }
 
+impl From<CompiledRegexInner<'_>> for Regex {
+    fn from(cr: CompiledRegexInner<'_>) -> Self {
+        Self { cr: cr.into() }
+    }
+}
+
 impl Regex {
     /// Construct a regex by parsing `pattern` using the default flags.
     /// An Error may be returned if the syntax is invalid.
@@ -356,12 +363,13 @@ impl Regex {
         F: Into<Flags>,
     {
         let flags = flags.into();
-        let mut ire = parse::try_parse(pattern, flags)?;
+        let bump = bumpalo::Bump::new();
+        let mut ire = parse::try_parse(pattern, flags, &bump)?;
         if !flags.no_opt {
-            optimizer::optimize(&mut ire);
+            optimizer::optimize(&mut ire, &bump);
         }
-        let cr = emit::emit(&ire);
-        Ok(Regex { cr })
+        let cr = emit::emit(&ire, &bump);
+        Ok(Regex { cr: cr.into() })
     }
 
     /// Searches `text` to find the first match.

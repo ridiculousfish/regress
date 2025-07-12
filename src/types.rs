@@ -1,4 +1,4 @@
-use crate::codepointset::CodePointSet;
+use crate::codepointset::{CodePointSet, CodePointSetInner};
 use crate::position::PositionType;
 #[cfg(not(feature = "std"))]
 use alloc::string::String;
@@ -26,13 +26,42 @@ pub enum CharacterClassType {
 }
 
 /// The stuff in a bracket.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BracketContents {
     pub invert: bool,
     pub cps: CodePointSet,
 }
 
 impl BracketContents {
+    /// \return whether the bracket \p bc matches the given character \p c,
+    /// respecting case. Respects 'invert'.
+    #[inline(always)]
+    pub(crate) fn bracket(&self, cp: u32) -> bool {
+        if self.cps.contains(cp) {
+            return !self.invert;
+        }
+        self.invert
+    }
+}
+
+impl From<BracketContentsInner<'_>> for BracketContents {
+    fn from(inner: BracketContentsInner<'_>) -> Self {
+        let BracketContentsInner { invert, cps } = inner;
+        BracketContents {
+            invert,
+            cps: cps.into(),
+        }
+    }
+}
+
+/// The stuff in a bracket.
+#[derive(Debug, Clone)]
+pub struct BracketContentsInner<'b> {
+    pub invert: bool,
+    pub cps: CodePointSetInner<'b>,
+}
+
+impl<'b> BracketContentsInner<'b> {
     // Return true if the bracket is empty.
     pub fn is_empty(&self) -> bool {
         match self.invert {

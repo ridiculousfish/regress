@@ -1,12 +1,13 @@
 //! Regex compiler back-end: transforms IR into a CompiledRegex
 
 use crate::bytesearch::{AsciiBitmap, ByteArraySet};
-use crate::insn::{CompiledRegex, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR_SET_LENGTH};
+use crate::insn::{CompiledRegexInner, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR_SET_LENGTH};
 use crate::ir;
 use crate::ir::Node;
 use crate::startpredicate;
-use crate::types::{BracketContents, CaptureGroupID, LoopID};
+use crate::types::{BracketContentsInner, CaptureGroupID, LoopID};
 use crate::unicode;
+use bumpalo::{Bump, collections::Vec};
 use core::convert::TryInto;
 #[cfg(not(feature = "std"))]
 use {alloc::vec::Vec, hashbrown::HashMap};
@@ -22,7 +23,7 @@ fn make_anchor(anchor_type: ir::AnchorType) -> Insn {
 /// Weirdly placed optimization.
 /// If the given bracket can be represented as ASCII contents, return the
 /// bitmap. Otherwise nothing.
-fn bracket_as_ascii(bc: &BracketContents) -> Option<AsciiBitmap> {
+fn bracket_as_ascii(bc: &BracketContentsInner) -> Option<AsciiBitmap> {
     let mut result = AsciiBitmap::default();
     // We just assume that inverted brackets contain non-ASCII characters.
     if bc.invert {
@@ -41,17 +42,17 @@ fn bracket_as_ascii(bc: &BracketContents) -> Option<AsciiBitmap> {
 }
 
 /// Type which wraps up the context needed to emit a CompiledRegex.
-struct Emitter {
-    result: CompiledRegex,
+struct Emitter<'b> {
+    result: CompiledRegexInner<'b>,
 
     // Number of loops seen so far.
     next_loop_id: LoopID,
 
     // List of group names, in order, with empties for unnamed groups.
-    group_names: Vec<Box<str>>,
+    group_names: Vec<'b, std::boxed::Box<str>>,
 }
 
-impl Emitter {
+impl<'b> Emitter<'b> {
     /// Emit a ByteSet instruction.
     /// We awkwardly optimize it like so.
     fn make_byte_set_insn(&self, bytes: &[u8]) -> Insn {
@@ -88,9 +89,9 @@ impl Emitter {
     }
 
     /// Emit instructions corresponding to a given node.
-    fn emit_node(&mut self, node: &Node) {
-        enum Emitter<'a> {
-            Node(&'a Node),
+    fn emit_node(&mut self, node: &Node<'b>) {
+        enum Emitter<'a, 'b> {
+            Node(&'a Node<'b>),
             NodeLoopFinish {
                 loop_instruction_index: u32,
             },
@@ -99,7 +100,7 @@ impl Emitter {
             },
             NodeAltMiddle {
                 alt_instruction_index: u32,
-                right_node: &'a Node,
+                right_node: &'a Node<'b>,
             },
             NodeAltFinish {
                 alt_instruction_index: u32,
@@ -348,18 +349,18 @@ impl Emitter {
 }
 
 /// Compile the given IR to a CompiledRegex.
-pub fn emit(n: &ir::Regex) -> CompiledRegex {
+pub fn emit<'b>(n: &ir::Regex<'b>, bump: &'b Bump) -> CompiledRegexInner<'b> {
     let mut emitter = Emitter {
         next_loop_id: 0,
-        group_names: Vec::new(),
-        result: CompiledRegex {
-            insns: Vec::new(),
-            brackets: Vec::new(),
+        group_names: Vec::new_in(bump),
+        result: CompiledRegexInner {
+            insns: bumpalo::collections::Vec::new_in(bump),
+            brackets: bumpalo::collections::Vec::new_in(bump),
             loops: 0,
             groups: 0,
-            group_names: Box::new([]),
+            group_names: std::boxed::Box::new([]),
             flags: n.flags,
-            start_pred: startpredicate::predicate_for_re(n),
+            start_pred: startpredicate::predicate_for_re(n, bump),
         },
     };
     emitter.emit_node(&n.node);
@@ -370,7 +371,7 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
         "Group names should not be set"
     );
     if emitter.group_names.iter().any(|s| !s.is_empty()) {
-        result.group_names = emitter.group_names.into_boxed_slice();
+        result.group_names = emitter.group_names.to_vec().into_boxed_slice();
     }
     debug_assert!(
         result.group_names.is_empty() || result.group_names.len() == result.groups as usize

@@ -2,17 +2,23 @@
 
 use crate::{
     api, charclasses,
-    codepointset::{CodePointSet, Interval, interval_contains},
+    codepointset::{CodePointSetInner, Interval, interval_contains},
     ir,
     types::{
-        BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
-        MAX_LOOPS,
+        BracketContentsInner, CaptureGroupID, CaptureGroupName, CharacterClassType,
+        MAX_CAPTURE_GROUPS, MAX_LOOPS,
     },
     unicode::{
         self, PropertyEscapeKind, unicode_property_from_str, unicode_property_name_from_str,
     },
     unicodetables::{id_continue_ranges, id_start_ranges},
     util::to_char_sat,
+};
+use bumpalo::{
+    Bump,
+    boxed::Box,
+    collections::{CollectIn, Vec},
+    vec,
 };
 use core::{fmt, iter::Peekable};
 #[cfg(feature = "std")]
@@ -44,62 +50,62 @@ impl fmt::Display for Error {
 #[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
-enum ClassAtom {
+enum ClassAtom<'b> {
     CodePoint(u32),
     CharacterClass {
         class_type: CharacterClassType,
         positive: bool,
     },
     Range {
-        iv: CodePointSet,
+        iv: CodePointSetInner<'b>,
         negate: bool,
     },
 }
 
 /// Represents the result of a class set.
 #[derive(Debug, Clone)]
-struct ClassSet {
-    codepoints: CodePointSet,
-    alternatives: ClassSetAlternativeStrings,
+struct ClassSet<'b> {
+    codepoints: CodePointSetInner<'b>,
+    alternatives: ClassSetAlternativeStrings<'b>,
 }
 
-impl ClassSet {
-    fn new() -> Self {
+impl<'b> ClassSet<'b> {
+    fn new(bump: &'b Bump) -> Self {
         ClassSet {
-            codepoints: CodePointSet::new(),
-            alternatives: ClassSetAlternativeStrings::new(),
+            codepoints: CodePointSetInner::new(bump),
+            alternatives: ClassSetAlternativeStrings::new(bump),
         }
     }
 
-    fn node(self, icase: bool, negate_set: bool) -> ir::Node {
+    fn node(self, icase: bool, negate_set: bool, bump: &'b Bump) -> ir::Node<'b> {
         let codepoints = if icase {
             unicode::add_icase_code_points(self.codepoints)
         } else {
             self.codepoints
         };
         if codepoints.is_empty() && self.alternatives.0.is_empty() {
-            ir::Node::Bracket(BracketContents {
+            ir::Node::Bracket(BracketContentsInner {
                 invert: negate_set,
                 cps: codepoints,
             })
         } else if codepoints.is_empty() {
-            make_alt(self.alternatives.to_nodes(icase))
+            make_alt(self.alternatives.to_nodes(icase, bump), bump)
         } else if self.alternatives.0.is_empty() {
-            ir::Node::Bracket(BracketContents {
+            ir::Node::Bracket(BracketContentsInner {
                 invert: negate_set,
                 cps: codepoints,
             })
         } else {
-            let mut nodes = self.alternatives.to_nodes(icase);
-            nodes.push(ir::Node::Bracket(BracketContents {
+            let mut nodes = self.alternatives.to_nodes(icase, bump);
+            nodes.push(ir::Node::Bracket(BracketContentsInner {
                 invert: negate_set,
                 cps: codepoints,
             }));
-            make_alt(nodes)
+            make_alt(nodes, bump)
         }
     }
 
-    fn union_operand(&mut self, operand: ClassSetOperand) {
+    fn union_operand(&mut self, operand: ClassSetOperand<'b>) {
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
                 self.codepoints.add_one(c);
@@ -117,15 +123,13 @@ impl ClassSet {
         }
     }
 
-    fn intersect_operand(&mut self, operand: ClassSetOperand) {
+    fn intersect_operand(&mut self, operand: ClassSetOperand<'b>, bump: &'b Bump) {
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
                 if self.codepoints.contains(c) {
-                    self.codepoints =
-                        CodePointSet::from_sorted_disjoint_intervals(Vec::from([Interval {
-                            first: c,
-                            last: c,
-                        }]));
+                    self.codepoints = CodePointSetInner::from_sorted_disjoint_intervals(
+                        Vec::from_iter_in([Interval { first: c, last: c }], bump),
+                    );
                 } else {
                     self.codepoints.clear();
                 }
@@ -138,12 +142,12 @@ impl ClassSet {
                 }
                 self.alternatives.0.clear();
                 if found_alternative {
-                    self.alternatives.0.push(Vec::from([c]));
+                    self.alternatives.0.push(Vec::from_iter_in([c], bump));
                 }
             }
             ClassSetOperand::CharacterClassEscape(cps) => {
-                self.codepoints.intersect(cps.intervals());
-                let mut retained = Vec::new();
+                self.codepoints.intersect(cps.intervals(), bump);
+                let mut retained = Vec::new_in(bump);
                 for alternative in &self.alternatives.0 {
                     if alternative.len() == 1 && cps.contains(alternative[0]) {
                         retained.push(alternative.clone());
@@ -152,46 +156,51 @@ impl ClassSet {
                 self.alternatives.0 = retained;
             }
             ClassSetOperand::Class(class) => {
-                let mut retained_codepoints = CodePointSet::new();
+                let mut retained_codepoints = CodePointSetInner::new(bump);
                 for alternative in &class.alternatives.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         retained_codepoints.add_one(alternative[0]);
                     }
                 }
-                let mut retained_alternatives = ClassSetAlternativeStrings::new();
+                let mut retained_alternatives = ClassSetAlternativeStrings::new(bump);
                 for alternative in &self.alternatives.0 {
                     if alternative.len() == 1 && class.codepoints.contains(alternative[0]) {
                         retained_alternatives.0.push(alternative.clone());
                     }
                 }
-                self.codepoints.intersect(class.codepoints.intervals());
+                self.codepoints
+                    .intersect(class.codepoints.intervals(), bump);
                 self.codepoints.add_set(retained_codepoints);
-                self.alternatives.intersect(class.alternatives);
+                self.alternatives.intersect(class.alternatives, bump);
                 self.alternatives.extend(retained_alternatives);
             }
             ClassSetOperand::ClassStringDisjunction(s) => {
-                let mut retained = CodePointSet::new();
+                let mut retained = CodePointSetInner::new(bump);
                 for alternative in &s.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         retained.add_one(alternative[0]);
                     }
                 }
                 self.codepoints = retained;
-                self.alternatives.intersect(s);
+                self.alternatives.intersect(s, bump);
             }
         }
     }
 
-    fn subtract_operand(&mut self, operand: ClassSetOperand) {
+    fn subtract_operand(&mut self, operand: ClassSetOperand<'b>, bump: &'b Bump) {
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
-                self.codepoints.remove(&[Interval { first: c, last: c }]);
+                self.codepoints
+                    .remove(&[Interval { first: c, last: c }], bump);
                 self.alternatives
-                    .remove(ClassSetAlternativeStrings(Vec::from([Vec::from([c])])));
+                    .remove(ClassSetAlternativeStrings(Vec::from_iter_in(
+                        [Vec::from_iter_in([c], bump)],
+                        bump,
+                    )));
             }
             ClassSetOperand::CharacterClassEscape(cps) => {
-                self.codepoints.remove(cps.intervals());
-                let mut to_remove = ClassSetAlternativeStrings::new();
+                self.codepoints.remove(cps.intervals(), bump);
+                let mut to_remove = ClassSetAlternativeStrings::new(bump);
                 for alternative in &self.alternatives.0 {
                     if alternative.len() == 1 && cps.contains(alternative[0]) {
                         to_remove.0.push(alternative.clone());
@@ -200,31 +209,31 @@ impl ClassSet {
                 self.alternatives.remove(to_remove);
             }
             ClassSetOperand::Class(class) => {
-                let mut codepoints_removed = CodePointSet::new();
+                let mut codepoints_removed = CodePointSetInner::new(bump);
                 for alternative in &class.alternatives.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         codepoints_removed.add_one(alternative[0]);
                     }
                 }
-                let mut alternatives_removed = ClassSetAlternativeStrings::new();
+                let mut alternatives_removed = ClassSetAlternativeStrings::new(bump);
                 for alternative in &self.alternatives.0 {
                     if alternative.len() == 1 && class.codepoints.contains(alternative[0]) {
                         alternatives_removed.0.push(alternative.clone());
                     }
                 }
-                self.codepoints.remove(codepoints_removed.intervals());
-                self.codepoints.remove(class.codepoints.intervals());
+                self.codepoints.remove(codepoints_removed.intervals(), bump);
+                self.codepoints.remove(class.codepoints.intervals(), bump);
                 self.alternatives.remove(alternatives_removed);
                 self.alternatives.remove(class.alternatives);
             }
             ClassSetOperand::ClassStringDisjunction(s) => {
-                let mut to_remove = CodePointSet::new();
+                let mut to_remove = CodePointSetInner::new(bump);
                 for alternative in &s.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
                         to_remove.add_one(alternative[0]);
                     }
                 }
-                self.codepoints.remove(to_remove.intervals());
+                self.codepoints.remove(to_remove.intervals(), bump);
                 self.alternatives.remove(s);
             }
         }
@@ -233,27 +242,27 @@ impl ClassSet {
 
 /// Represents all different types of class set operands.
 #[derive(Debug, Clone)]
-enum ClassSetOperand {
+enum ClassSetOperand<'b> {
     ClassSetCharacter(u32),
-    CharacterClassEscape(CodePointSet),
-    Class(ClassSet),
-    ClassStringDisjunction(ClassSetAlternativeStrings),
+    CharacterClassEscape(CodePointSetInner<'b>),
+    Class(ClassSet<'b>),
+    ClassStringDisjunction(ClassSetAlternativeStrings<'b>),
 }
 
 #[derive(Debug, Clone)]
-struct ClassSetAlternativeStrings(Vec<Vec<u32>>);
+struct ClassSetAlternativeStrings<'b>(Vec<'b, Vec<'b, u32>>);
 
-impl ClassSetAlternativeStrings {
-    fn new() -> Self {
-        ClassSetAlternativeStrings(Vec::new())
+impl<'b> ClassSetAlternativeStrings<'b> {
+    fn new(bump: &'b Bump) -> Self {
+        ClassSetAlternativeStrings(Vec::new_in(bump))
     }
 
     fn extend(&mut self, other: Self) {
         self.0.extend(other.0);
     }
 
-    fn intersect(&mut self, other: Self) {
-        let mut retained = Vec::new();
+    fn intersect(&mut self, other: Self, bump: &'b Bump) {
+        let mut retained = Vec::new_in(bump);
         for string in &self.0 {
             for other_string in &other.0 {
                 if string == other_string {
@@ -269,14 +278,14 @@ impl ClassSetAlternativeStrings {
         self.0.retain(|string| !other.0.contains(string));
     }
 
-    fn to_nodes(&self, icase: bool) -> Vec<ir::Node> {
-        let mut nodes = Vec::new();
+    fn to_nodes(&self, icase: bool, bump: &'b Bump) -> Vec<'b, ir::Node<'b>> {
+        let mut nodes = Vec::new_in(bump);
         for string in &self.0 {
             nodes.push(ir::Node::Cat(
                 string
                     .iter()
                     .map(|cp| ir::Node::Char { c: *cp, icase })
-                    .collect::<Vec<_>>(),
+                    .collect_in::<Vec<_>>(bump),
             ));
         }
         nodes
@@ -300,12 +309,17 @@ fn make_cat(nodes: ir::NodeList) -> ir::Node {
     }
 }
 
-fn make_alt(nodes: ir::NodeList) -> ir::Node {
+fn make_alt<'b>(nodes: ir::NodeList<'b>, bump: &'b Bump) -> ir::Node<'b> {
     let mut mright = None;
     for node in nodes.into_iter().rev() {
         match mright {
             None => mright = Some(node),
-            Some(right) => mright = Some(ir::Node::Alt(Box::new(node), Box::new(right))),
+            Some(right) => {
+                mright = Some(ir::Node::Alt(
+                    Box::new_in(node, bump),
+                    Box::new_in(right, bump),
+                ))
+            }
         }
     }
     mright.unwrap_or(ir::Node::Empty)
@@ -313,48 +327,63 @@ fn make_alt(nodes: ir::NodeList) -> ir::Node {
 
 /// \return a CodePointSet for a given character escape (positive or negative).
 /// See ES9 21.2.2.12.
-fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet {
+fn codepoints_from_class<'b>(
+    ct: CharacterClassType,
+    positive: bool,
+    bump: &'b Bump,
+) -> CodePointSetInner<'b> {
+    use bumpalo::collections::Vec;
     let mut cps;
     match ct {
         CharacterClassType::Digits => {
-            cps = CodePointSet::from_sorted_disjoint_intervals(charclasses::DIGITS.to_vec())
+            cps = CodePointSetInner::from_sorted_disjoint_intervals(Vec::from_iter_in(
+                charclasses::DIGITS,
+                bump,
+            ))
         }
         CharacterClassType::Words => {
-            cps = CodePointSet::from_sorted_disjoint_intervals(charclasses::WORD_CHARS.to_vec())
+            cps = CodePointSetInner::from_sorted_disjoint_intervals(Vec::from_iter_in(
+                charclasses::WORD_CHARS,
+                bump,
+            ))
         }
         CharacterClassType::Spaces => {
-            cps = CodePointSet::from_sorted_disjoint_intervals(charclasses::WHITESPACE.to_vec());
+            cps = CodePointSetInner::from_sorted_disjoint_intervals(Vec::from_iter_in(
+                charclasses::WHITESPACE,
+                bump,
+            ));
             for &iv in charclasses::LINE_TERMINATOR.iter() {
                 cps.add(iv)
             }
         }
     };
     if !positive {
-        cps = cps.inverted()
+        cps = cps.inverted(bump)
     }
     cps
 }
 
 /// \return a Bracket for a given character escape (positive or negative).
-fn make_bracket_class(ct: CharacterClassType, positive: bool) -> ir::Node {
-    ir::Node::Bracket(BracketContents {
+fn make_bracket_class<'b>(ct: CharacterClassType, positive: bool, bump: &'b Bump) -> ir::Node<'b> {
+    ir::Node::Bracket(BracketContentsInner {
         invert: false,
-        cps: codepoints_from_class(ct, positive),
+        cps: codepoints_from_class(ct, positive, bump),
     })
 }
 
-fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom) {
+fn add_class_atom<'b>(bc: &mut BracketContentsInner<'b>, atom: ClassAtom<'b>, bump: &'b Bump) {
     match atom {
         ClassAtom::CodePoint(c) => bc.cps.add_one(c),
         ClassAtom::CharacterClass {
             class_type,
             positive,
         } => {
-            bc.cps.add_set(codepoints_from_class(class_type, positive));
+            bc.cps
+                .add_set(codepoints_from_class(class_type, positive, bump));
         }
         ClassAtom::Range { iv, negate } => {
             if negate {
-                bc.cps.add_set(iv.inverted());
+                bc.cps.add_set(iv.inverted(bump));
             } else {
                 bc.cps.add_set(iv);
             }
@@ -443,12 +472,12 @@ where
         self.input.next()
     }
 
-    fn try_parse(&mut self) -> Result<ir::Regex, Error> {
+    fn try_parse<'b>(&mut self, bump: &'b Bump) -> Result<ir::Regex<'b>, Error> {
         self.parse_capture_groups()?;
 
         // Parse a catenation. If we consume everything, it's success. If there's
         // something left, it's an error (for example, an excess closing paren).
-        let body = self.consume_disjunction()?;
+        let body = self.consume_disjunction(bump)?;
         match self.input.peek().copied() {
             Some(c) if c == ')' as u32 => error("Unbalanced parenthesis"),
             Some(c) => error(format!(
@@ -458,24 +487,24 @@ where
                     .unwrap_or_else(|| format!("\\u{c:04X}"))
             )),
             None => self.finalize(ir::Regex {
-                node: make_cat(vec![body, ir::Node::Goal]),
+                node: make_cat(vec![in bump; body, ir::Node::Goal]),
                 flags: self.flags,
             }),
         }
     }
 
     /// ES6 21.2.2.3 Disjunction.
-    fn consume_disjunction(&mut self) -> Result<ir::Node, Error> {
-        let mut terms = vec![self.consume_term()?];
+    fn consume_disjunction<'b>(&mut self, bump: &'b Bump) -> Result<ir::Node<'b>, Error> {
+        let mut terms = vec![in bump; self.consume_term(bump)?];
         while self.try_consume('|') {
-            terms.push(self.consume_term()?)
+            terms.push(self.consume_term(bump)?)
         }
-        Ok(make_alt(terms))
+        Ok(make_alt(terms, bump))
     }
 
     /// ES6 21.2.2.5 Term.
-    fn consume_term(&mut self) -> Result<ir::Node, Error> {
-        let mut result: Vec<ir::Node> = Vec::new();
+    fn consume_term<'b>(&mut self, bump: &'b Bump) -> Result<ir::Node<'b>, Error> {
+        let mut result: Vec<ir::Node> = Vec::new_in(bump);
         loop {
             let start_group = self.group_count;
             let mut start_offset = result.len();
@@ -546,7 +575,7 @@ where
                         }
                         // Term :: Atom :: \ AtomEscape
                         _ => {
-                            result.push(self.consume_atom_escape()?);
+                            result.push(self.consume_atom_escape(bump)?);
                         }
                     }
                 }
@@ -565,36 +594,48 @@ where
                     if self.try_consume_str("(?=") {
                         // Positive lookahead.
                         quantifier_allowed = !self.flags.unicode;
-                        result.push(self.consume_lookaround_assertion(LookaroundParams {
-                            negate: false,
-                            backwards: false,
-                        })?);
+                        result.push(self.consume_lookaround_assertion(
+                            LookaroundParams {
+                                negate: false,
+                                backwards: false,
+                            },
+                            bump,
+                        )?);
                     } else if self.try_consume_str("(?!") {
                         // Negative lookahead.
                         quantifier_allowed = !self.flags.unicode;
-                        result.push(self.consume_lookaround_assertion(LookaroundParams {
-                            negate: true,
-                            backwards: false,
-                        })?);
+                        result.push(self.consume_lookaround_assertion(
+                            LookaroundParams {
+                                negate: true,
+                                backwards: false,
+                            },
+                            bump,
+                        )?);
                     } else if self.try_consume_str("(?<=") {
                         // Positive lookbehind.
                         quantifier_allowed = false;
                         self.has_lookbehind = true;
-                        result.push(self.consume_lookaround_assertion(LookaroundParams {
-                            negate: false,
-                            backwards: true,
-                        })?);
+                        result.push(self.consume_lookaround_assertion(
+                            LookaroundParams {
+                                negate: false,
+                                backwards: true,
+                            },
+                            bump,
+                        )?);
                     } else if self.try_consume_str("(?<!") {
                         // Negative lookbehind.
                         quantifier_allowed = false;
                         self.has_lookbehind = true;
-                        result.push(self.consume_lookaround_assertion(LookaroundParams {
-                            negate: true,
-                            backwards: true,
-                        })?);
+                        result.push(self.consume_lookaround_assertion(
+                            LookaroundParams {
+                                negate: true,
+                                backwards: true,
+                            },
+                            bump,
+                        )?);
                     } else if self.try_consume_str("(?:") {
                         // Non-capturing group.
-                        result.push(self.consume_disjunction()?);
+                        result.push(self.consume_disjunction(bump)?);
                     } else {
                         // Capturing group.
                         self.consume('(');
@@ -613,15 +654,15 @@ where
                             } else {
                                 return error("Invalid token at named capture group identifier");
                             };
-                            let contents = self.consume_disjunction()?;
+                            let contents = self.consume_disjunction(bump)?;
                             result.push(ir::Node::NamedCaptureGroup(
-                                Box::new(contents),
+                                Box::new_in(contents, bump),
                                 group,
                                 group_name,
                             ))
                         } else {
-                            let contents = self.consume_disjunction()?;
-                            result.push(ir::Node::CaptureGroup(Box::new(contents), group))
+                            let contents = self.consume_disjunction(bump)?;
+                            result.push(ir::Node::CaptureGroup(Box::new_in(contents, bump), group))
                         }
                     }
                     if !self.try_consume(')') {
@@ -633,14 +674,15 @@ where
                 '[' if self.flags.unicode_sets => {
                     self.consume('[');
                     let negate_set = self.try_consume('^');
-                    result.push(
-                        self.consume_class_set_expression(negate_set)?
-                            .node(self.flags.icase, negate_set),
-                    );
+                    result.push(self.consume_class_set_expression(negate_set, bump)?.node(
+                        self.flags.icase,
+                        negate_set,
+                        bump,
+                    ));
                 }
 
                 '[' => {
-                    result.push(self.consume_bracket()?);
+                    result.push(self.consume_bracket(bump)?);
                 }
 
                 // Term :: ExtendedAtom :: InvalidBracedQuantifier
@@ -695,7 +737,7 @@ where
                 }
                 self.loop_count += 1;
                 result.push(ir::Node::Loop {
-                    loopee: Box::new(make_cat(quantifee)),
+                    loopee: Box::new_in(make_cat(quantifee), bump),
                     quant,
                     enclosed_groups: start_group..self.group_count,
                 });
@@ -705,12 +747,12 @@ where
     }
 
     /// ES6 21.2.2.13 CharacterClass.
-    fn consume_bracket(&mut self) -> Result<ir::Node, Error> {
+    fn consume_bracket<'b>(&mut self, bump: &'b Bump) -> Result<ir::Node<'b>, Error> {
         self.consume('[');
         let invert = self.try_consume('^');
-        let mut result = BracketContents {
+        let mut result = BracketContentsInner {
             invert,
-            cps: CodePointSet::default(),
+            cps: CodePointSetInner::new(bump),
         };
 
         loop {
@@ -729,20 +771,20 @@ where
             }
 
             // Parse a code point or character class.
-            let Some(first) = self.try_consume_bracket_class_atom()? else {
+            let Some(first) = self.try_consume_bracket_class_atom(bump)? else {
                 continue;
             };
 
             // Check for a dash; we may have a range.
             if !self.try_consume('-') {
-                add_class_atom(&mut result, first);
+                add_class_atom(&mut result, first, bump);
                 continue;
             }
 
-            let Some(second) = self.try_consume_bracket_class_atom()? else {
+            let Some(second) = self.try_consume_bracket_class_atom(bump)? else {
                 // No second atom. For example: [a-].
-                add_class_atom(&mut result, first);
-                add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
+                add_class_atom(&mut result, first, bump);
+                add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')), bump);
                 continue;
             };
 
@@ -767,13 +809,16 @@ where
             }
 
             // If it does not match a range treat as any match single characters.
-            add_class_atom(&mut result, first);
-            add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
-            add_class_atom(&mut result, second);
+            add_class_atom(&mut result, first, bump);
+            add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')), bump);
+            add_class_atom(&mut result, second, bump);
         }
     }
 
-    fn try_consume_bracket_class_atom(&mut self) -> Result<Option<ClassAtom>, Error> {
+    fn try_consume_bracket_class_atom<'b>(
+        &mut self,
+        bump: &'b Bump,
+    ) -> Result<Option<ClassAtom<'b>>, Error> {
         let c = self.peek();
         if c.is_none() {
             return Ok(None);
@@ -878,7 +923,12 @@ where
                         let negate = ec == 'P' as u32;
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(s) => Ok(Some(ClassAtom::Range {
-                                iv: CodePointSet::from_sorted_disjoint_intervals(s.to_vec()),
+                                iv: CodePointSetInner::from_sorted_disjoint_intervals(
+                                    bumpalo::collections::Vec::from_iter_in(
+                                        s.iter().copied(),
+                                        bump,
+                                    ),
+                                ),
                                 negate,
                             })),
                             PropertyEscapeKind::StringSet(_) => error("Invalid property escape"),
@@ -897,15 +947,19 @@ where
     }
 
     // CharacterClass :: ClassContents :: ClassSetExpression
-    fn consume_class_set_expression(&mut self, negate_set: bool) -> Result<ClassSet, Error> {
-        let mut result = ClassSet::new();
+    fn consume_class_set_expression<'b>(
+        &mut self,
+        negate_set: bool,
+        bump: &'b Bump,
+    ) -> Result<ClassSet<'b>, Error> {
+        let mut result = ClassSet::new(bump);
 
         let first = match self.peek() {
             Some(0x5D /* ] */) => {
                 self.consume(']');
                 return Ok(result);
             }
-            Some(_) => self.consume_class_set_operand(negate_set)?,
+            Some(_) => self.consume_class_set_operand(negate_set, bump)?,
             None => {
                 return error("Unbalanced class set bracket");
             }
@@ -944,7 +998,7 @@ where
                     match first {
                         ClassSetOperand::ClassSetCharacter(first) => {
                             let ClassSetOperand::ClassSetCharacter(last) =
-                                self.consume_class_set_operand(negate_set)?
+                                self.consume_class_set_operand(negate_set, bump)?
                             else {
                                 return error("Invalid class set range");
                             };
@@ -977,7 +1031,7 @@ where
                             self.consume(']');
                             return Ok(result);
                         }
-                        Some(_) => self.consume_class_set_operand(negate_set)?,
+                        Some(_) => self.consume_class_set_operand(negate_set, bump)?,
                         None => return error("Unbalanced class set bracket"),
                     };
                     if self.peek() == Some(0x2D /* - */) {
@@ -985,7 +1039,7 @@ where
                         match operand {
                             ClassSetOperand::ClassSetCharacter(first) => {
                                 let ClassSetOperand::ClassSetCharacter(last) =
-                                    self.consume_class_set_operand(negate_set)?
+                                    self.consume_class_set_operand(negate_set, bump)?
                                 else {
                                     return error("Invalid class set range");
                                 };
@@ -1006,8 +1060,8 @@ where
             // ClassIntersection :: ClassSetOperand && [lookahead ≠ &]
             ClassSetOperator::Intersection => {
                 loop {
-                    let operand = self.consume_class_set_operand(negate_set)?;
-                    result.intersect_operand(operand);
+                    let operand = self.consume_class_set_operand(negate_set, bump)?;
+                    result.intersect_operand(operand, bump);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
                         Some(0x26 /* & */) => {}
@@ -1022,8 +1076,8 @@ where
             // ClassSubtraction :: ClassSubtraction -- ClassSetOperand
             ClassSetOperator::Subtraction => {
                 loop {
-                    let operand = self.consume_class_set_operand(negate_set)?;
-                    result.subtract_operand(operand);
+                    let operand = self.consume_class_set_operand(negate_set, bump)?;
+                    result.subtract_operand(operand, bump);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
                         Some(0x2D /* - */) => {}
@@ -1038,7 +1092,11 @@ where
         }
     }
 
-    fn consume_class_set_operand(&mut self, negate_set: bool) -> Result<ClassSetOperand, Error> {
+    fn consume_class_set_operand<'b>(
+        &mut self,
+        negate_set: bool,
+        bump: &'b Bump,
+    ) -> Result<ClassSetOperand<'b>, Error> {
         use ClassSetOperand::*;
         let Some(cp) = self.peek() else {
             return error("Empty class set operand");
@@ -1049,9 +1107,9 @@ where
             0x5B /* [ */ => {
                 self.consume('[');
                 let negate_set = self.try_consume('^');
-                let result = self.consume_class_set_expression(negate_set)?;
+                let result = self.consume_class_set_expression(negate_set, bump)?;
                 if negate_set {
-                    result.codepoints.inverted();
+                    result.codepoints.inverted(bump);
                 }
                 Ok(Class(result))
             }
@@ -1071,8 +1129,8 @@ where
                         if !self.try_consume('{') {
                             return error("Invalid class set escape: expected {");
                         }
-                        let mut alternatives = Vec::new();
-                        let mut alternative = Vec::new();
+                        let mut alternatives = Vec::new_in(bump);
+                        let mut alternative = Vec::new_in(bump);
                         loop {
                             match self.peek() {
                                 Some(0x7D /* } */) => {
@@ -1103,45 +1161,45 @@ where
                     // CharacterClassEscape :: d
                     0x64 /* d */ => {
                         self.consume('d');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Digits, true)))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Digits, true, bump)))
                     }
                     // CharacterClassEscape :: D
                     0x44 /* D */ => {
                         self.consume('D');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Digits, false)))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Digits, false, bump)))
                     }
                     // CharacterClassEscape :: s
                     0x73 /* s */ => {
                         self.consume('s');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Spaces, true)))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Spaces, true, bump)))
                     }
                     // CharacterClassEscape :: S
                     0x53 /* S */ => {
                         self.consume('S');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Spaces, false)))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Spaces, false, bump)))
                     }
                     // CharacterClassEscape :: w
                     0x77 /* w */ => {
                         self.consume('w');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Words, true)))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Words, true, bump)))
                     }
                     // CharacterClassEscape :: W
                     0x57 /* W */ => {
                         self.consume('W');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Words, false)))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Words, false, bump)))
                     }
                     // CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
                     0x70 /* p */ => {
                         self.consume('p');
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(intervals) => {
-                                Ok(CharacterClassEscape(CodePointSet::from_sorted_disjoint_intervals(
-                                    intervals.to_vec(),
+                                Ok(CharacterClassEscape(CodePointSetInner::from_sorted_disjoint_intervals(
+                                    bumpalo::collections::Vec::from_iter_in( intervals.iter().copied(), bump),
                                 )))
                             }
                             PropertyEscapeKind::StringSet(_) if negate_set => error("Invalid character escape"),
                             PropertyEscapeKind::StringSet(strings) => {
-                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| s.to_vec()).collect())))
+                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| bumpalo::collections::Vec::from_iter_in(s.iter().copied(), bump)).collect_in(bump))))
                             }
                         }
                     }
@@ -1150,9 +1208,9 @@ where
                         self.consume('P');
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(s) => {
-                                Ok(CharacterClassEscape(CodePointSet::from_sorted_disjoint_intervals(
-                                    s.to_vec(),
-                                ).inverted()))
+                                Ok(CharacterClassEscape(CodePointSetInner::from_sorted_disjoint_intervals(
+                                    bumpalo::collections::Vec::from_iter_in( s.iter().copied(), bump),
+                                ).inverted(bump)))
                             }
                             PropertyEscapeKind::StringSet(_) => error("Invalid character escape"),
                         }
@@ -1338,19 +1396,20 @@ where
         if char_count > 0 { Some(result) } else { None }
     }
 
-    fn consume_lookaround_assertion(
+    fn consume_lookaround_assertion<'b>(
         &mut self,
         params: LookaroundParams,
-    ) -> Result<ir::Node, Error> {
+        bump: &'b Bump,
+    ) -> Result<ir::Node<'b>, Error> {
         let start_group = self.group_count;
-        let contents = self.consume_disjunction()?;
+        let contents = self.consume_disjunction(bump)?;
         let end_group = self.group_count;
         Ok(ir::Node::LookaroundAssertion {
             negate: params.negate,
             backwards: params.backwards,
             start_group,
             end_group,
-            contents: Box::new(contents),
+            contents: Box::new_in(contents, bump),
         })
     }
 
@@ -1453,7 +1512,7 @@ where
     }
 
     // AtomEscape
-    fn consume_atom_escape(&mut self) -> Result<ir::Node, Error> {
+    fn consume_atom_escape<'b>(&mut self, bump: &'b Bump) -> Result<ir::Node<'b>, Error> {
         let Some(c) = self.peek() else {
             return error("Incomplete escape");
         };
@@ -1463,6 +1522,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Digits,
                     c == 'd' as u32,
+                    bump,
                 ))
             }
 
@@ -1471,6 +1531,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Spaces,
                     c == 's' as u32,
+                    bump,
                 ))
             }
 
@@ -1479,6 +1540,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Words,
                     c == 'w' as u32,
+                    bump,
                 ))
             }
 
@@ -1490,9 +1552,11 @@ where
                 let property_escape = self.try_consume_unicode_property_escape()?;
                 match property_escape {
                     PropertyEscapeKind::CharacterClass(s) => {
-                        Ok(ir::Node::Bracket(BracketContents {
+                        Ok(ir::Node::Bracket(BracketContentsInner {
                             invert: negate,
-                            cps: CodePointSet::from_sorted_disjoint_intervals(s.to_vec()),
+                            cps: CodePointSetInner::from_sorted_disjoint_intervals(
+                                bumpalo::collections::Vec::from_iter_in(s.iter().copied(), bump),
+                            ),
                         }))
                     }
                     PropertyEscapeKind::StringSet(_) if negate => error("Invalid character escape"),
@@ -1506,10 +1570,11 @@ where
                                             c: *c,
                                             icase: self.flags.icase,
                                         })
-                                        .collect(),
+                                        .collect_in(bump),
                                 )
                             })
-                            .collect(),
+                            .collect_in(bump),
+                        bump,
                     )),
                 }
             }
@@ -1822,7 +1887,7 @@ where
         error("Invalid property name")
     }
 
-    fn finalize(&self, mut re: ir::Regex) -> Result<ir::Regex, Error> {
+    fn finalize<'b>(&self, mut re: ir::Regex<'b>) -> Result<ir::Regex<'b>, Error> {
         debug_assert!(self.loop_count <= MAX_LOOPS as u32);
         debug_assert!(self.group_count as usize <= MAX_CAPTURE_GROUPS);
         if self.has_lookbehind {
@@ -1839,7 +1904,11 @@ where
 
 /// Try parsing a given pattern.
 /// Return the resulting IR regex, or an error.
-pub fn try_parse<I>(pattern: I, flags: api::Flags) -> Result<ir::Regex, Error>
+pub fn try_parse<'b, I>(
+    pattern: I,
+    flags: api::Flags,
+    bump: &'b bumpalo::Bump,
+) -> Result<ir::Regex<'b>, Error>
 where
     I: Iterator<Item = u32> + Clone,
 {
@@ -1852,5 +1921,5 @@ where
         group_count_max: 0,
         has_lookbehind: false,
     };
-    p.try_parse()
+    p.try_parse(bump)
 }

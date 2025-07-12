@@ -29,8 +29,11 @@ fn is_start_anchored(n: &Node) -> bool {
 /// Convert the code point set to a first-byte bitmap.
 /// That is, make a list of all of the possible first bytes of every contained
 /// code point, and store that in a bitmap.
-fn cps_to_first_byte_bitmap(input: &codepointset::CodePointSet) -> Box<ByteBitmap> {
-    let mut bitmap = Box::<ByteBitmap>::default();
+fn cps_to_first_byte_bitmap<'b>(
+    input: &codepointset::CodePointSetInner<'b>,
+    bump: &'b bumpalo::Bump,
+) -> bumpalo::boxed::Box<'b, ByteBitmap> {
+    let mut bitmap = bumpalo::boxed::Box::new_in(ByteBitmap::default(), bump);
     for iv in input.intervals() {
         add_utf8_first_bytes_to_bitmap(*iv, &mut bitmap);
     }
@@ -38,21 +41,21 @@ fn cps_to_first_byte_bitmap(input: &codepointset::CodePointSet) -> Box<ByteBitma
 }
 
 /// The "IR" for a start predicate.
-enum AbstractStartPredicate {
+enum AbstractStartPredicate<'b> {
     /// No predicate.
     Arbitrary,
 
     /// Sequence of non-empty bytes.
-    Sequence(Vec<u8>),
+    Sequence(bumpalo::collections::Vec<'b, u8>),
 
     /// Set of bytes.
-    Set(Box<ByteBitmap>),
+    Set(bumpalo::boxed::Box<'b, ByteBitmap>),
 }
 
-impl AbstractStartPredicate {
+impl<'b> AbstractStartPredicate<'b> {
     /// \return the disjunction of two predicates.
     /// That is, a predicate that matches x OR y.
-    fn disjunction(x: Self, y: Self) -> Self {
+    fn disjunction(x: Self, y: Self, bump: &'b bumpalo::Bump) -> Self {
         match (x, y) {
             (Self::Arbitrary, _) => Self::Arbitrary,
             (_, Self::Arbitrary) => Self::Arbitrary,
@@ -63,10 +66,16 @@ impl AbstractStartPredicate {
                 debug_assert!(s1[..shared_len] == s2[..shared_len]);
                 if shared_len > 0 {
                     // Use the shared prefix.
-                    Self::Sequence(s1[..shared_len].to_vec())
+                    Self::Sequence(bumpalo::collections::Vec::from_iter_in(
+                        s1[..shared_len].iter().copied(),
+                        bump,
+                    ))
                 } else {
                     // Use a set of their first byte.
-                    Self::Set(Box::new(ByteBitmap::new(&[s1[0], s2[0]])))
+                    Self::Set(bumpalo::boxed::Box::new_in(
+                        ByteBitmap::new(&[s1[0], s2[0]]),
+                        bump,
+                    ))
                 }
             }
 
@@ -113,13 +122,17 @@ impl AbstractStartPredicate {
 /// If this returns None, then the instruction is conceptually zero-width (e.g.
 /// lookahead assertion) and does not contribute to the predicate.
 /// If this returns StartPredicate::Arbitrary, then there is no predicate.
-fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
+fn compute_start_predicate<'b>(
+    n: &Node<'b>,
+    bump: &'b bumpalo::Bump,
+) -> Option<AbstractStartPredicate<'b>> {
     let arbitrary = Some(AbstractStartPredicate::Arbitrary);
     match n {
         Node::ByteSequence(bytevec) => Some(AbstractStartPredicate::Sequence(bytevec.clone())),
-        Node::ByteSet(bytes) => Some(AbstractStartPredicate::Set(Box::new(ByteBitmap::new(
-            bytes,
-        )))),
+        Node::ByteSet(bytes) => Some(AbstractStartPredicate::Set(bumpalo::boxed::Box::new_in(
+            ByteBitmap::new(bytes),
+            bump,
+        ))),
 
         Node::Empty => arbitrary,
         Node::Goal => arbitrary,
@@ -131,9 +144,10 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
                 .iter()
                 .map(|&c| utf8_first_byte(c))
                 .collect::<Vec<_>>();
-            Some(AbstractStartPredicate::Set(Box::new(ByteBitmap::new(
-                &bytes,
-            ))))
+            Some(AbstractStartPredicate::Set(bumpalo::boxed::Box::new_in(
+                ByteBitmap::new(&bytes),
+                bump,
+            )))
         }
 
         // We assume that most char nodes have been optimized to ByteSeq or AnyBytes2, so skip
@@ -142,7 +156,10 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         Node::Char { .. } => arbitrary,
 
         // Cats return the first non-None value, if any.
-        Node::Cat(nodes) => nodes.iter().filter_map(compute_start_predicate).next(),
+        Node::Cat(nodes) => nodes
+            .iter()
+            .filter_map(|n| compute_start_predicate(n, bump))
+            .next(),
 
         // MatchAny (aka .) is too common to do a fast prefix search for.
         Node::MatchAny => arbitrary,
@@ -156,7 +173,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
 
         // Capture groups delegate to their contents.
         Node::CaptureGroup(child, ..) | Node::NamedCaptureGroup(child, ..) => {
-            compute_start_predicate(child)
+            compute_start_predicate(child, bump)
         }
 
         // Zero-width assertions are one of the few instructions that impose no start predicate.
@@ -165,7 +182,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         Node::Loop { loopee, quant, .. } => {
             // TODO: we could try to join two predicates if the loop were optional.
             if quant.min > 0 {
-                compute_start_predicate(loopee)
+                compute_start_predicate(loopee, bump)
             } else {
                 arbitrary
             }
@@ -174,7 +191,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         Node::Loop1CharBody { loopee, quant } => {
             // TODO: we could try to join two predicates if the loop were optional.
             if quant.min > 0 {
-                compute_start_predicate(loopee)
+                compute_start_predicate(loopee, bump)
             } else {
                 arbitrary
             }
@@ -183,10 +200,10 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         // This one is interesting - we compute the disjunction of the predicates of our two arms.
         Node::Alt(left, right) => {
             if let (Some(x), Some(y)) = (
-                compute_start_predicate(left),
-                compute_start_predicate(right),
+                compute_start_predicate(left, bump),
+                compute_start_predicate(right, bump),
             ) {
-                Some(AbstractStartPredicate::disjunction(x, y))
+                Some(AbstractStartPredicate::disjunction(x, y, bump))
             } else {
                 // This indicates that one of our branches could match the empty string.
                 arbitrary
@@ -198,19 +215,19 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
             // If our bracket is inverted, construct the set of code points not contained.
             let storage;
             let cps = if bc.invert {
-                storage = bc.cps.inverted();
+                storage = bc.cps.inverted(bump);
                 &storage
             } else {
                 &bc.cps
             };
-            let bitmap = cps_to_first_byte_bitmap(cps);
+            let bitmap = cps_to_first_byte_bitmap(cps, bump);
             Some(AbstractStartPredicate::Set(bitmap))
         }
     }
 }
 
 /// \return the start predicate for a Regex.
-pub fn predicate_for_re(re: &ir::Regex) -> StartPredicate {
+pub fn predicate_for_re<'b>(re: &ir::Regex<'b>, bump: &'b bumpalo::Bump) -> StartPredicate {
     // Check if the regex is anchored to the start - if so, we can optimize
     // by avoiding string searching entirely. However, only do this when
     // multiline mode is disabled, since in multiline mode ^ can match
@@ -219,7 +236,7 @@ pub fn predicate_for_re(re: &ir::Regex) -> StartPredicate {
         return StartPredicate::StartAnchored;
     }
 
-    compute_start_predicate(&re.node)
+    compute_start_predicate(&re.node, bump)
         .unwrap_or(AbstractStartPredicate::Arbitrary)
         .resolve_to_insn()
 }

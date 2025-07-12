@@ -286,7 +286,7 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         }
         Insn::Loop1CharBody { .. } => panic!("Loop1CharBody unimplemented for pikevm"),
         &Insn::Bracket(idx) => match cursor::next(input, dir, &mut s.pos) {
-            Some(c) => nextinsn_or_fail!(Input::CharProps::bracket(&re.brackets[idx], c)),
+            Some(c) => nextinsn_or_fail!(re.brackets[idx].bracket(c.as_u32())),
             _ => StateMatch::Fail,
         },
 
@@ -408,7 +408,7 @@ impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, AsciiInput<'t>> {
     }
 }
 
-impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
+impl<'r, Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'r, Input> {
     type Position = Input::Position;
 
     fn initial_position(&self, offset: usize) -> Option<Self::Position> {

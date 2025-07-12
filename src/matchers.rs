@@ -1,6 +1,6 @@
 use crate::cursor::Direction;
 use crate::indexing::{ElementType, InputIndexer};
-use crate::types::BracketContents;
+use crate::types::BracketContentsInner;
 use crate::{cursor, unicode};
 
 pub trait CharProperties {
@@ -27,7 +27,7 @@ pub trait CharProperties {
     /// \return whether the bracket \p bc matches the given character \p c,
     /// respecting case. Respects 'invert'.
     #[inline(always)]
-    fn bracket(bc: &BracketContents, cp: Self::Element) -> bool {
+    fn bracket(bc: &BracketContentsInner, cp: Self::Element) -> bool {
         let cp = cp.into();
         if bc.cps.contains(cp) {
             return !bc.invert;

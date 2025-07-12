@@ -8,7 +8,7 @@ use {
 
 use crate::api;
 use crate::bytesearch::{AsciiBitmap, ByteArraySet, ByteBitmap};
-use crate::types::{BracketContents, CaptureGroupID, LoopID};
+use crate::types::{BracketContents, BracketContentsInner, CaptureGroupID, LoopID};
 
 type JumpTarget = u32;
 
@@ -181,6 +181,33 @@ pub enum StartPredicate {
 }
 
 #[derive(Debug, Clone)]
+pub struct CompiledRegexInner<'b> {
+    // Sequence of instructions.
+    pub insns: bumpalo::collections::Vec<'b, Insn>,
+
+    // The bracket contents, indexed by the value of the `Bracket` instruction.
+    pub brackets: bumpalo::collections::Vec<'b, BracketContentsInner<'b>>,
+
+    // Predicate to rapidly find the first potential match.
+    pub start_pred: StartPredicate,
+
+    // Number of loops, used to populate loop data.
+    pub loops: u32,
+
+    // Number of capture groups, used to populate capture group data.
+    pub groups: u32,
+
+    // A list of capture group names. This is either:
+    //   - Empty, if there were no named capture groups.
+    //   - A list of names with length `groups`, corresponding to the capture
+    //     group names in order. Groups without names have an empty string.
+    pub group_names: Box<[Box<str>]>,
+
+    // Flags controlling matching.
+    pub flags: api::Flags,
+}
+
+#[derive(Debug, Clone)]
 pub struct CompiledRegex {
     // Sequence of instructions.
     pub insns: Vec<Insn>,
@@ -205,4 +232,27 @@ pub struct CompiledRegex {
 
     // Flags controlling matching.
     pub flags: api::Flags,
+}
+
+impl From<CompiledRegexInner<'_>> for CompiledRegex {
+    fn from(inner: CompiledRegexInner<'_>) -> Self {
+        let CompiledRegexInner {
+            insns,
+            brackets,
+            start_pred,
+            loops,
+            groups,
+            group_names,
+            flags,
+        } = inner;
+        CompiledRegex {
+            insns: insns.to_vec(),
+            brackets: brackets.into_iter().map(|b| b.into()).collect(),
+            start_pred,
+            loops,
+            groups,
+            group_names,
+            flags,
+        }
+    }
 }
