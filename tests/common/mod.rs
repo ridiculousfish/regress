@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 /// Test that \p pattern fails to parse with default flags.
 pub fn test_parse_fails(pattern: &str) {
     let res = regress::Regex::new(pattern);

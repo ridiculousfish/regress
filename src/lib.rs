@@ -148,7 +148,11 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(feature = "pattern", feature(pattern))]
 #![warn(clippy::all)]
-#![allow(clippy::upper_case_acronyms, clippy::match_like_matches_macro)]
+#![allow(
+    clippy::upper_case_acronyms,
+    clippy::match_like_matches_macro,
+    clippy::uninlined_format_args
+)]
 // Clippy's manual_range_contains suggestion produces worse codegen.
 #![allow(clippy::manual_range_contains)]
 

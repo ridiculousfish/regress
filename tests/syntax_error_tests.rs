@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 #[track_caller]
 fn test_1_error(pattern: &str, expected_err: &str) {
     let res = regress::Regex::with_flags(pattern, "u");
