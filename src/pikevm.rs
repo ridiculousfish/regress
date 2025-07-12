@@ -6,7 +6,7 @@ use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
-use crate::insn::{CompiledRegexInner, Insn, LoopFields, StartPredicate};
+use crate::insn::{CompiledRegex, Insn, LoopFields, StartPredicate};
 use crate::matchers;
 use crate::matchers::CharProperties;
 use crate::position::PositionType;
@@ -95,7 +95,7 @@ fn run_loop<Position: PositionType>(
 }
 
 fn try_match_state<Input: InputIndexer, Dir: Direction>(
-    re: &CompiledRegexInner,
+    re: &CompiledRegex,
     input: &Input,
     s: &mut State<Input::Position>,
     dir: Dir,
@@ -286,7 +286,7 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         }
         Insn::Loop1CharBody { .. } => panic!("Loop1CharBody unimplemented for pikevm"),
         &Insn::Bracket(idx) => match cursor::next(input, dir, &mut s.pos) {
-            Some(c) => nextinsn_or_fail!(Input::CharProps::bracket(&re.brackets[idx], c)),
+            Some(c) => nextinsn_or_fail!(re.brackets[idx].bracket(c.as_u32())),
             _ => StateMatch::Fail,
         },
 
@@ -337,13 +337,13 @@ fn successful_match<Input: InputIndexer>(
 }
 
 #[derive(Debug)]
-struct MatchAttempter<'a, 'b, Input: InputIndexer> {
+struct MatchAttempter<'a, Input: InputIndexer> {
     states: Vec<State<Input::Position>>,
-    re: &'a CompiledRegexInner<'b>,
+    re: &'a CompiledRegex,
 }
 
-impl<'a, 'b, Input: InputIndexer> MatchAttempter<'a, 'b, Input> {
-    fn new(re: &'a CompiledRegexInner<'b>) -> Self {
+impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
+    fn new(re: &'a CompiledRegex) -> Self {
         Self {
             states: Vec::new(),
             re,
@@ -379,15 +379,15 @@ impl<'a, 'b, Input: InputIndexer> MatchAttempter<'a, 'b, Input> {
 }
 
 #[derive(Debug)]
-pub struct PikeVMExecutor<'r, 'b, Input: InputIndexer> {
+pub struct PikeVMExecutor<'r, Input: InputIndexer> {
     input: Input,
-    matcher: MatchAttempter<'r, 'b, Input>,
+    matcher: MatchAttempter<'r, Input>,
 }
 
-impl<'r, 't, 'b> exec::Executor<'r, 'b, 't> for PikeVMExecutor<'r, 'b, Utf8Input<'t>> {
-    type AsAscii = PikeVMExecutor<'r, 'b, AsciiInput<'t>>;
+impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, Utf8Input<'t>> {
+    type AsAscii = PikeVMExecutor<'r, AsciiInput<'t>>;
 
-    fn new(re: &'r CompiledRegexInner<'b>, text: &'t str) -> Self {
+    fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
         let input = Utf8Input::new(text, re.flags.unicode);
         Self {
             input,
@@ -396,10 +396,10 @@ impl<'r, 't, 'b> exec::Executor<'r, 'b, 't> for PikeVMExecutor<'r, 'b, Utf8Input
     }
 }
 
-impl<'r, 't, 'b> exec::Executor<'r, 'b, 't> for PikeVMExecutor<'r, 'b, AsciiInput<'t>> {
-    type AsAscii = PikeVMExecutor<'r, 'b, AsciiInput<'t>>;
+impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, AsciiInput<'t>> {
+    type AsAscii = PikeVMExecutor<'r, AsciiInput<'t>>;
 
-    fn new(re: &'r CompiledRegexInner<'b>, text: &'t str) -> Self {
+    fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
         let input = AsciiInput::new(text);
         Self {
             input,
@@ -408,7 +408,7 @@ impl<'r, 't, 'b> exec::Executor<'r, 'b, 't> for PikeVMExecutor<'r, 'b, AsciiInpu
     }
 }
 
-impl<'r, 'b, Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'r, 'b, Input> {
+impl<'r, Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'r, Input> {
     type Position = Input::Position;
 
     fn initial_position(&self, offset: usize) -> Option<Self::Position> {

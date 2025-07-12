@@ -370,7 +370,10 @@ fn unfold_icase_chars<'b>(n: &mut Node<'b>, w: &Walk, bump: &'b Bump) -> PassAct
                 }
                 2..=MAX_BYTE_SET_LENGTH => {
                     // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet(bumpalo::collections::Vec::from_iter_in(unfolded.iter().copied(), bump)))
+                    PassAction::Replace(Node::CharSet(bumpalo::collections::Vec::from_iter_in(
+                        unfolded.iter().copied(),
+                        bump,
+                    )))
                 }
                 _ => panic!("Unfolded to more characters than we believed possible"),
             }
@@ -389,7 +392,10 @@ fn unfold_icase_chars<'b>(n: &mut Node<'b>, w: &Walk, bump: &'b Bump) -> PassAct
                 }
                 2..=MAX_BYTE_SET_LENGTH => {
                     // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet(bumpalo::collections::Vec::from_iter_in(unfolded.iter().copied(), bump)))
+                    PassAction::Replace(Node::CharSet(bumpalo::collections::Vec::from_iter_in(
+                        unfolded.iter().copied(),
+                        bump,
+                    )))
                 }
                 _ => panic!("Unfolded to more characters than we believed possible"),
             }
@@ -481,9 +487,9 @@ fn promote_1char_loops<'b>(n: &mut Node<'b>, _w: &Walk, bump: &'b Bump) -> PassA
 /// Don't do this in utf16 mode because UTF-16 should never match against bytes.
 /// TODO: this seems to do too much; consider breaking this up.
 #[cfg(not(feature = "utf16"))]
-fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
+fn form_literal_bytes<'b>(n: &mut Node, walk: &Walk, bump: &'b Bump) -> PassAction<'b> {
     // Helper to return a mutable reference to the nodes of a literal bytes.
-    fn get_literal_bytes(n: &mut Node) -> Option<&mut Vec<u8>> {
+    fn get_literal_bytes<'b>(n: &mut Node) -> Option<&'b mut Vec<'b, u8>> {
         match n {
             Node::ByteSequence(v) => Some(v),
             _ => None,

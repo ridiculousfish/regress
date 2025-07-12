@@ -107,6 +107,12 @@ pub struct CodePointSet {
     ivs: std::vec::Vec<Interval>,
 }
 
+impl CodePointSet {
+    pub(crate) fn contains(&self, cp: u32) -> bool {
+        interval_contains(&self.ivs, cp)
+    }
+}
+
 impl From<CodePointSetInner<'_>> for CodePointSet {
     fn from(set: CodePointSetInner) -> Self {
         CodePointSet {

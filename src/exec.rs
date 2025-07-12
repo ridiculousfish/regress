@@ -1,7 +1,7 @@
 //! Execution engine bits.
 
 use crate::api::Match;
-use crate::insn::CompiledRegexInner;
+use crate::insn::CompiledRegex;
 use crate::position::PositionType;
 
 /// A trait for finding the next match in a regex.
@@ -25,12 +25,12 @@ pub trait MatchProducer: core::fmt::Debug {
 }
 
 /// A trait for executing a regex.
-pub trait Executor<'r, 'b, 't>: MatchProducer {
+pub trait Executor<'r, 't>: MatchProducer {
     /// The ASCII variant.
-    type AsAscii: Executor<'r, 'b, 't>;
+    type AsAscii: Executor<'r, 't>;
 
     /// Construct a new Executor.
-    fn new(re: &'r CompiledRegexInner<'b>, text: &'t str) -> Self;
+    fn new(re: &'r CompiledRegex, text: &'t str) -> Self;
 }
 
 /// A struct which enables iteration over matches.

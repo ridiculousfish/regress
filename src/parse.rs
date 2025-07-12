@@ -5,8 +5,8 @@ use crate::{
     codepointset::{CodePointSetInner, Interval, interval_contains},
     ir,
     types::{
-        BracketContentsInner, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
-        MAX_LOOPS,
+        BracketContentsInner, CaptureGroupID, CaptureGroupName, CharacterClassType,
+        MAX_CAPTURE_GROUPS, MAX_LOOPS,
     },
     unicode::{
         self, PropertyEscapeKind, unicode_property_from_str, unicode_property_name_from_str,
@@ -1908,7 +1908,9 @@ pub fn try_parse<'b, I>(
     pattern: I,
     flags: api::Flags,
     bump: &'b bumpalo::Bump,
-) -> Result<ir::Regex<'b>, Error> where I: Iterator<Item = u32> + Clone,
+) -> Result<ir::Regex<'b>, Error>
+where
+    I: Iterator<Item = u32> + Clone,
 {
     let mut p = Parser {
         input: pattern.peekable(),

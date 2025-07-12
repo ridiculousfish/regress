@@ -207,7 +207,6 @@ pub struct CompiledRegexInner<'b> {
     pub flags: api::Flags,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct CompiledRegex {
     // Sequence of instructions.

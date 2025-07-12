@@ -32,12 +32,21 @@ pub struct BracketContents {
     pub cps: CodePointSet,
 }
 
+impl BracketContents {
+    /// \return whether the bracket \p bc matches the given character \p c,
+    /// respecting case. Respects 'invert'.
+    #[inline(always)]
+    pub(crate) fn bracket(&self, cp: u32) -> bool {
+        if self.cps.contains(cp) {
+            return !self.invert;
+        }
+        self.invert
+    }
+}
+
 impl From<BracketContentsInner<'_>> for BracketContents {
     fn from(inner: BracketContentsInner<'_>) -> Self {
-        let BracketContentsInner {
-            invert,
-            cps,
-        } = inner;
+        let BracketContentsInner { invert, cps } = inner;
         BracketContents {
             invert,
             cps: cps.into(),

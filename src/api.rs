@@ -3,7 +3,6 @@ use crate::emit;
 use crate::exec;
 use crate::indexing;
 use crate::insn::CompiledRegex;
-use crate::insn::CompiledRegexInner;
 use crate::optimizer;
 use crate::parse;
 use crate::types::MAX_CAPTURE_GROUPS;

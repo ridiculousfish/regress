@@ -4,7 +4,7 @@ use crate::cursor::Direction;
 use crate::indexing::{ElementType, InputIndexer};
 use crate::insn::MAX_CHAR_SET_LENGTH;
 use crate::matchers::CharProperties;
-use crate::types::BracketContentsInner;
+use crate::types::{BracketContents, BracketContentsInner};
 
 /// A trait for things that match a single Element.
 pub trait SingleCharMatcher<Input: InputIndexer, Dir: Direction> {
@@ -58,10 +58,25 @@ impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Char
 
 /// Insn::Bracket
 pub struct Bracket<'a> {
-    pub bc: &'a BracketContentsInner<'a>,
+    pub bc: &'a BracketContents,
 }
 
 impl<'a, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Bracket<'a> {
+    #[inline(always)]
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
+        match cursor::next(input, dir, pos) {
+            Some(c) => self.bc.bracket(c.as_u32()),
+            _ => false,
+        }
+    }
+}
+
+/// Insn::Bracket
+pub struct BracketInner<'a> {
+    pub bc: &'a BracketContentsInner<'a>,
+}
+
+impl<'a, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for BracketInner<'a> {
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
