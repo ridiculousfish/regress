@@ -10,6 +10,7 @@ default-run = "regress-tool"
 [dependencies]
 structopt = "0.3"
 regress = {path = "../"}
+bumpalo = { version = "3.19.0", features = ["boxed", "collections"] }
 
 [[bin]]
 name = "regress-tool"

@@ -3,6 +3,7 @@ use crate::emit;
 use crate::exec;
 use crate::indexing;
 use crate::insn::CompiledRegex;
+use crate::insn::CompiledRegexInner;
 use crate::optimizer;
 use crate::parse;
 use crate::types::MAX_CAPTURE_GROUPS;
@@ -319,6 +320,12 @@ pub struct Regex {
 impl From<CompiledRegex> for Regex {
     fn from(cr: CompiledRegex) -> Self {
         Self { cr }
+    }
+}
+
+impl From<CompiledRegexInner<'_>> for Regex {
+    fn from(cr: CompiledRegexInner<'_>) -> Self {
+        Self { cr: cr.into() }
     }
 }
 

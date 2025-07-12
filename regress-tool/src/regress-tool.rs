@@ -1,3 +1,4 @@
+use bumpalo::Bump;
 use regress::{Error, Flags, Regex, backends};
 use std::{
     fs,
@@ -91,20 +92,21 @@ fn bench_re_on_path(re: &Regex, path: &Path) {
 
 fn main() -> Result<(), Error> {
     let args = Opt::from_args();
+    let bump = Bump::new();
 
     let flags = args.flags.unwrap_or_default();
-    let mut ire = backends::try_parse(args.pattern.chars().map(u32::from), flags)?;
+    let mut ire = backends::try_parse(args.pattern.chars().map(u32::from), flags, &bump)?;
     if args.dump_phases || args.dump_unoptimized_ir {
         println!("Unoptimized IR:\n{}", ire);
     }
 
     if args.optimize {
-        backends::optimize(&mut ire);
+        backends::optimize(&mut ire, &bump);
         if args.dump_phases || args.dump_optimized_ir {
             println!("Optimized IR:\n{}", ire);
         }
     }
-    let cr = backends::emit(&ire);
+    let cr = backends::emit(&ire, &bump);
     if args.dump_phases || args.dump_bytecode {
         println!("Bytecode:\n{:#?}", cr);
     }

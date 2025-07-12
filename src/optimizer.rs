@@ -487,9 +487,9 @@ fn promote_1char_loops<'b>(n: &mut Node<'b>, _w: &Walk, bump: &'b Bump) -> PassA
 /// Don't do this in utf16 mode because UTF-16 should never match against bytes.
 /// TODO: this seems to do too much; consider breaking this up.
 #[cfg(not(feature = "utf16"))]
-fn form_literal_bytes<'b>(n: &mut Node, walk: &Walk, bump: &'b Bump) -> PassAction<'b> {
+fn form_literal_bytes<'b>(n: &mut Node<'b>, walk: &Walk, bump: &'b Bump) -> PassAction<'b> {
     // Helper to return a mutable reference to the nodes of a literal bytes.
-    fn get_literal_bytes<'b>(n: &mut Node) -> Option<&'b mut Vec<'b, u8>> {
+    fn get_literal_bytes<'b>(n: &mut Node<'b>) -> Option<&'b mut Vec<'b, u8>> {
         match n {
             Node::ByteSequence(v) => Some(v),
             _ => None,
