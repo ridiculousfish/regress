@@ -274,7 +274,7 @@ fn unfold_interval(iv: Interval, recv: &mut CodePointSet) {
 }
 
 /// \return all the characters which fold to c's fold.
-/// This is a slow linear search across all ranges.
+/// This is a linear search across all ranges.
 /// The result always contains c.
 pub fn unfold_char(c: u32) -> Vec<u32> {
     let mut res = vec![c];

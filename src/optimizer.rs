@@ -262,7 +262,7 @@ fn decat(n: &mut Node, _w: &Walk) -> PassAction {
 /// Unfold icase chars.
 /// That means for case-insensitive characters, figure out everything that they
 /// could match.
-/// TODO: should cache unfolding.
+/// TODO: evaluate unfolding performance and consider a cache within the optimizer.
 fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
     match *n {
         Node::Char { c, icase } if icase && !w.unicode => {
