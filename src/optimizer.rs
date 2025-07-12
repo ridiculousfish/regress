@@ -5,93 +5,10 @@ use crate::ir::*;
 use crate::types::BracketContents;
 use crate::unicode;
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
-#[cfg(not(feature = "std"))]
-use hashbrown::HashMap;
-#[cfg(feature = "std")]
-use std::{collections::HashMap, sync::Arc};
+use alloc::{boxed::Box, vec::Vec};
 
 /// When unrolling a loop, the largest minimum count we will unroll.
 const LOOP_UNROLL_THRESHOLD: usize = 5;
-
-// Thread-local caches for character unfolding to avoid expensive recomputation.
-// These caches store the results of unicode::unfold_char() and unicode::unfold_uppercase_char()
-// calls, which involve expensive linear searches through Unicode tables.
-// Uses Arc<Vec<u32>> to avoid expensive cloning on every lookup.
-#[cfg(feature = "std")]
-thread_local! {
-    static UNICODE_UNFOLD_CACHE: std::cell::RefCell<HashMap<u32, Arc<Vec<u32>>>> = std::cell::RefCell::new(HashMap::new());
-    static UPPERCASE_UNFOLD_CACHE: std::cell::RefCell<HashMap<u32, Arc<Vec<u32>>>> = std::cell::RefCell::new(HashMap::new());
-}
-
-// For no-std environments, use static mutable variables.
-// This is safe in single-threaded contexts, which is typical for no-std usage.
-#[cfg(not(feature = "std"))]
-static mut UNICODE_UNFOLD_CACHE: Option<HashMap<u32, Arc<Vec<u32>>>> = None;
-#[cfg(not(feature = "std"))]
-static mut UPPERCASE_UNFOLD_CACHE: Option<HashMap<u32, Arc<Vec<u32>>>> = None;
-
-/// Get cached unicode unfolding result, computing if not cached
-/// Returns an `Arc<Vec<u32>>` to avoid expensive cloning
-fn get_unicode_unfold_cached(c: u32) -> Arc<Vec<u32>> {
-    #[cfg(feature = "std")]
-    {
-        UNICODE_UNFOLD_CACHE.with(|cache| {
-            let mut cache_ref = cache.borrow_mut();
-            cache_ref
-                .entry(c)
-                .or_insert_with(|| Arc::new(unicode::unfold_char(c)))
-                .clone()
-        })
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        unsafe {
-            if UNICODE_UNFOLD_CACHE.is_none() {
-                UNICODE_UNFOLD_CACHE = Some(HashMap::new());
-            }
-            if let Some(ref mut cache) = UNICODE_UNFOLD_CACHE {
-                cache
-                    .entry(c)
-                    .or_insert_with(|| Arc::new(unicode::unfold_char(c)))
-                    .clone()
-            } else {
-                unreachable!()
-            }
-        }
-    }
-}
-
-/// Get cached uppercase unfolding result, computing if not cached
-/// Returns an `Arc<Vec<u32>>` to avoid expensive cloning
-fn get_uppercase_unfold_cached(c: u32) -> Arc<Vec<u32>> {
-    #[cfg(feature = "std")]
-    {
-        UPPERCASE_UNFOLD_CACHE.with(|cache| {
-            let mut cache_ref = cache.borrow_mut();
-            cache_ref
-                .entry(c)
-                .or_insert_with(|| Arc::new(unicode::unfold_uppercase_char(c)))
-                .clone()
-        })
-    }
-    #[cfg(not(feature = "std"))]
-    {
-        unsafe {
-            if UPPERCASE_UNFOLD_CACHE.is_none() {
-                UPPERCASE_UNFOLD_CACHE = Some(HashMap::new());
-            }
-            if let Some(ref mut cache) = UPPERCASE_UNFOLD_CACHE {
-                cache
-                    .entry(c)
-                    .or_insert_with(|| Arc::new(unicode::unfold_uppercase_char(c)))
-                    .clone()
-            } else {
-                unreachable!()
-            }
-        }
-    }
-}
 
 /// Things that a Pass may do.
 pub enum PassAction {
@@ -345,11 +262,11 @@ fn decat(n: &mut Node, _w: &Walk) -> PassAction {
 /// Unfold icase chars.
 /// That means for case-insensitive characters, figure out everything that they
 /// could match.
-/// Uses caching to avoid expensive recomputation of unfolding results.
+/// TODO: should cache unfolding.
 fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
     match *n {
         Node::Char { c, icase } if icase && !w.unicode => {
-            let unfolded = get_uppercase_unfold_cached(c);
+            let unfolded = unicode::unfold_uppercase_char(c);
             debug_assert!(
                 unfolded.contains(&c),
                 "Char should always unfold to at least itself"
@@ -362,13 +279,13 @@ fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
                 }
                 2..=MAX_BYTE_SET_LENGTH => {
                     // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet((*unfolded).clone()))
+                    PassAction::Replace(Node::CharSet(unfolded))
                 }
                 _ => panic!("Unfolded to more characters than we believed possible"),
             }
         }
         Node::Char { c, icase } if icase => {
-            let unfolded = get_unicode_unfold_cached(c);
+            let unfolded = unicode::unfold_char(c);
             debug_assert!(
                 unfolded.contains(&c),
                 "Char should always unfold to at least itself"
@@ -381,7 +298,7 @@ fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
                 }
                 2..=MAX_BYTE_SET_LENGTH => {
                     // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet((*unfolded).clone()))
+                    PassAction::Replace(Node::CharSet(unfolded))
                 }
                 _ => panic!("Unfolded to more characters than we believed possible"),
             }
