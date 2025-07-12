@@ -1110,23 +1110,18 @@ impl<Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'_, Input> {
                 self.next_match_with_prefix_search(pos, next_start, &bytesearch::EmptyString {})
             }
             StartPredicate::StartAnchored => self.next_match_anchored(pos, next_start),
-            StartPredicate::ByteSeq1(bytes) => {
+            StartPredicate::ByteSet1(bytes) => {
                 self.next_match_with_prefix_search(pos, next_start, bytes)
             }
-            StartPredicate::ByteSeq2(bytes) => {
+            StartPredicate::ByteSet2(bytes) => {
                 self.next_match_with_prefix_search(pos, next_start, bytes)
             }
-            StartPredicate::ByteSeq3(bytes) => {
+            StartPredicate::ByteSet3(bytes) => {
                 self.next_match_with_prefix_search(pos, next_start, bytes)
             }
-            StartPredicate::ByteSeq4(bytes) => {
-                self.next_match_with_prefix_search(pos, next_start, bytes)
+            StartPredicate::ByteSeq(bytes) => {
+                self.next_match_with_prefix_search(pos, next_start, bytes.as_ref())
             }
-            &StartPredicate::ByteSet2(bytes) => self.next_match_with_prefix_search(
-                pos,
-                next_start,
-                &bytesearch::ByteArraySet(bytes),
-            ),
             StartPredicate::ByteBracket(bitmap) => {
                 self.next_match_with_prefix_search(pos, next_start, bitmap)
             }

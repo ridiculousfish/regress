@@ -7,7 +7,7 @@ use crate::ir::Node;
 use crate::util::{add_utf8_first_bytes_to_bitmap, utf8_first_byte};
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
-use core::convert::TryInto;
+use memchr::memmem;
 
 /// Check if a node is anchored to the start of the line/string.
 /// Returns true if the node begins with a StartOfLine anchor.
@@ -94,15 +94,14 @@ impl AbstractStartPredicate {
             Self::Arbitrary => StartPredicate::Arbitrary,
             Self::Sequence(vals) => match vals.len() {
                 0 => StartPredicate::Arbitrary,
-                1 => StartPredicate::ByteSeq1(vals[..].try_into().unwrap()),
-                2 => StartPredicate::ByteSeq2(vals[..].try_into().unwrap()),
-                3 => StartPredicate::ByteSeq3(vals[..].try_into().unwrap()),
-                _ => StartPredicate::ByteSeq4(vals[..4].try_into().unwrap()),
+                1 => StartPredicate::ByteSet1([vals[0]]),
+                _ => StartPredicate::ByteSeq(Box::new(memmem::Finder::new(&vals).into_owned())),
             },
             Self::Set(bm) => match bm.count_bits() {
                 0 => StartPredicate::Arbitrary,
-                1 => StartPredicate::ByteSeq1(bm.to_vec()[..].try_into().unwrap()),
-                2 => StartPredicate::ByteSet2(bm.to_vec()[..].try_into().unwrap()),
+                1 => StartPredicate::ByteSet1(bm.as_array()),
+                2 => StartPredicate::ByteSet2(bm.as_array()),
+                3 => StartPredicate::ByteSet3(bm.as_array()),
                 _ => StartPredicate::ByteBracket(*bm),
             },
         }

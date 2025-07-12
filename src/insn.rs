@@ -9,6 +9,8 @@ use {
 use crate::api;
 use crate::bytesearch::{AsciiBitmap, ByteArraySet, ByteBitmap};
 use crate::types::{BracketContents, CaptureGroupID, LoopID};
+extern crate memchr;
+use memchr::memmem;
 
 type JumpTarget = u32;
 
@@ -158,19 +160,18 @@ pub enum Insn {
 
 /// The peeled prefix start predicate.
 /// This is a fast way of locating the first potential match.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum StartPredicate {
     /// May match an arbitrary sequence.
     Arbitrary,
 
-    /// Look for literal bytes.
-    ByteSeq1([u8; 1]),
-    ByteSeq2([u8; 2]),
-    ByteSeq3([u8; 3]),
-    ByteSeq4([u8; 4]),
-
-    /// Look for any of the contained bytes.
+    /// Look for the first instance of any of the given bytes.
+    ByteSet1([u8; 1]),
     ByteSet2([u8; 2]),
+    ByteSet3([u8; 3]),
+
+    /// Look for a byte sequence.
+    ByteSeq(Box<memmem::Finder<'static>>),
 
     /// Look for a byte which matches the bitmap.
     ByteBracket(ByteBitmap),

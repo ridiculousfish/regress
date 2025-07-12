@@ -13,7 +13,7 @@ pub trait ByteSearcher {
 }
 
 /// Helper trait that describes matching against literal bytes.
-pub trait ByteSeq: ByteSearcher + core::fmt::Debug + Copy + Clone {
+pub trait ByteSeq: core::fmt::Debug + Copy + Clone {
     /// Number of bytes.
     const LENGTH: usize;
 
@@ -45,19 +45,30 @@ impl<const N: usize> ByteSeq for [u8; N] {
     }
 }
 
-impl<const N: usize> ByteSearcher for [u8; N] {
+impl ByteSearcher for [u8; 1] {
     #[inline(always)]
     fn find_in(&self, rhs: &[u8]) -> Option<usize> {
-        if N == 0 {
-            return Some(0);
-        }
-        if N == 1 {
-            return memchr::memchr(self[0], rhs);
-        }
-        // Use memchr's highly optimized substring search which uses SIMD when available
-        // and falls back to efficient scalar algorithms like Two-Way when SIMD isn't available.
-        // This is much faster than any custom scalar implementation we could write.
-        memchr::memmem::find(rhs, self)
+        memchr::memchr(self[0], rhs)
+    }
+}
+
+impl ByteSearcher for [u8; 2] {
+    #[inline(always)]
+    fn find_in(&self, rhs: &[u8]) -> Option<usize> {
+        memchr::memchr2(self[0], self[1], rhs)
+    }
+}
+
+impl ByteSearcher for [u8; 3] {
+    #[inline(always)]
+    fn find_in(&self, rhs: &[u8]) -> Option<usize> {
+        memchr::memchr3(self[0], self[1], self[2], rhs)
+    }
+}
+
+impl ByteSearcher for memchr::memmem::Finder<'_> {
+    fn find_in(&self, rhs: &[u8]) -> Option<usize> {
+        self.find(rhs)
     }
 }
 
@@ -270,10 +281,20 @@ impl ByteBitmap {
         self.0.iter().map(|v| v.count_ones()).sum()
     }
 
-    /// \return all set bytes, as a vec.
+    /// Return ourselves as an array of a fixed length.
+    /// Panics if the array is not large enough.
     #[allow(clippy::wrong_self_convention)]
-    pub fn to_vec(&self) -> Vec<u8> {
-        (0..=255).filter(|b| self.contains(*b)).collect()
+    #[inline(always)]
+    pub fn as_array<const N: usize>(&self) -> [u8; N] {
+        let mut array = [0u8; N];
+        let mut idx = 0;
+        for byte in 0..=255 {
+            if self.contains(byte) {
+                array[idx] = byte;
+                idx += 1;
+            }
+        }
+        array
     }
 
     /// \return the index of the first byte in the slice that is present in this
