@@ -6,6 +6,7 @@ use crate::insn::CompiledRegex;
 use crate::optimizer;
 use crate::parse;
 use crate::types::MAX_CAPTURE_GROUPS;
+use std::iter::FusedIterator;
 
 #[cfg(feature = "utf16")]
 use crate::{
@@ -177,7 +178,7 @@ impl Match {
 
     /// Return an iterator over the named groups of a Match.
     #[inline]
-    pub fn named_groups(&self) -> NamedGroups {
+    pub fn named_groups(&self) -> NamedGroups<'_> {
         NamedGroups::new(self)
     }
 
@@ -222,7 +223,7 @@ impl Match {
     /// Return an iterator over a Match. The first returned value is the total
     /// match, and subsequent values represent the capture groups.
     #[inline]
-    pub fn groups(&self) -> Groups {
+    pub fn groups(&self) -> Groups<'_> {
         Groups::new(self)
     }
 }
@@ -236,7 +237,12 @@ impl Match {
 #[derive(Clone)]
 pub struct Groups<'m> {
     mat: &'m Match,
-    i: usize,
+
+    // The next group index to return, where 0 references the total match.
+    next_group_idx: usize,
+
+    // The maximum group index to return, with a +1 for the implicit total match.
+    // For example, in a regex with 1 capture group, this will be 2.
     max: usize,
 }
 
@@ -245,8 +251,8 @@ impl<'m> Groups<'m> {
     fn new(mat: &'m Match) -> Self {
         Self {
             mat,
-            i: 0,
-            max: mat.captures.len() + 1,
+            next_group_idx: 0,
+            max: mat.captures.len() + 1, // +1 for the total match
         }
     }
 }
@@ -256,9 +262,9 @@ impl Iterator for Groups<'_> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let i = self.i;
+        let i = self.next_group_idx;
         if i < self.max {
-            self.i += 1;
+            self.next_group_idx += 1;
             Some(self.mat.group(i))
         } else {
             None
@@ -266,12 +272,13 @@ impl Iterator for Groups<'_> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let size = self.max.saturating_sub(self.i);
+        let size = self.max.saturating_sub(self.next_group_idx);
         (size, Some(size))
     }
 }
 
 impl<'m> ExactSizeIterator for Groups<'m> {}
+impl<'m> FusedIterator for Groups<'m> {}
 
 /// An iterator over the named capture groups of a [`Match`]
 ///
@@ -282,7 +289,11 @@ impl<'m> ExactSizeIterator for Groups<'m> {}
 #[derive(Clone)]
 pub struct NamedGroups<'m> {
     mat: &'m Match,
-    next_group_name_idx: usize,
+
+    // The next group name index to return.
+    // Note unlike `Groups` this does NOT include the implicit total match.
+    // That is, group 0 is the first capture group, NOT the total match.
+    next_group_idx: usize,
 }
 
 impl<'m> NamedGroups<'m> {
@@ -290,7 +301,7 @@ impl<'m> NamedGroups<'m> {
     fn new(mat: &'m Match) -> Self {
         Self {
             mat,
-            next_group_name_idx: 0,
+            next_group_idx: 0,
         }
     }
 }
@@ -300,10 +311,10 @@ impl<'m> Iterator for NamedGroups<'m> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        // Increment next_group_name_idx until we find a non-empty name.
-        debug_assert!(self.next_group_name_idx <= self.mat.group_names.len());
+        // Increment next_group_idx until we find a non-empty name.
+        debug_assert!(self.next_group_idx <= self.mat.group_names.len());
         let end = self.mat.group_names.len();
-        let mut idx = self.next_group_name_idx;
+        let mut idx = self.next_group_idx;
         while idx < end && self.mat.group_names[idx].is_empty() {
             idx += 1;
         }
@@ -312,18 +323,14 @@ impl<'m> Iterator for NamedGroups<'m> {
         }
         let name = self.mat.group_names[idx].as_ref();
         let range = self.mat.captures[idx].clone();
-        self.next_group_name_idx = idx + 1;
+        self.next_group_idx = idx + 1;
         Some((name, range))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let size = self
-            .mat
-            .captures
+        let size = self.mat.group_names[self.next_group_idx..]
             .iter()
-            .enumerate()
-            .skip(self.next_group_name_idx)
-            .filter(|(idx, _)| !self.mat.group_names[*idx].is_empty())
+            .filter(|s| !s.is_empty())
             .count();
 
         (size, Some(size))
@@ -331,6 +338,7 @@ impl<'m> Iterator for NamedGroups<'m> {
 }
 
 impl<'m> ExactSizeIterator for NamedGroups<'m> {}
+impl<'m> FusedIterator for NamedGroups<'m> {}
 
 /// A Regex is the compiled version of a pattern.
 #[derive(Debug, Clone)]

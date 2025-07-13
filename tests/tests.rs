@@ -33,6 +33,76 @@ fn non_matching_captures() {
     test_with_configs(non_matching_captures_tc)
 }
 
+fn test_captures_tc(tc: TestConfig) {
+    // Zero explicit groups - but group zero is the entire match.
+    let m = tc.compile("derp").find("derp").unwrap();
+    assert_eq!(m.group(0), Some(0..4));
+    let g = m.groups();
+    assert_eq!(g.size_hint(), (1, Some(1)));
+    assert!(g.eq([Some(0..4)]));
+    let ng = m.named_groups();
+    assert_eq!(ng.size_hint(), (0, Some(0)));
+    assert!(ng.eq([]));
+
+    // One group.
+    let m = tc.compile("d(er)p").find("derp").unwrap();
+    assert_eq!(m.group(0), Some(0..4));
+    assert_eq!(m.group(1), Some(1..3));
+    let mut g = m.groups();
+    assert_eq!(g.size_hint(), (2, Some(2)));
+    assert_eq!(g.next(), Some(Some(0..4)));
+    assert_eq!(g.next(), Some(Some(1..3)));
+    assert_eq!(g.next(), None);
+    let ng = m.named_groups();
+    assert_eq!(ng.size_hint(), (0, Some(0)));
+    assert!(ng.eq([]));
+
+    // Multiple groups.
+    let m = tc.compile("(d)(er)(p)").find("derp").unwrap();
+    assert_eq!(m.group(0), Some(0..4));
+    assert_eq!(m.group(1), Some(0..1));
+    assert_eq!(m.group(2), Some(1..3));
+    assert_eq!(m.group(3), Some(3..4));
+    let g = m.groups();
+    assert_eq!(g.size_hint(), (4, Some(4)));
+    assert!(g.eq([Some(0..4), Some(0..1), Some(1..3), Some(3..4)]));
+    let ng = m.named_groups();
+    assert_eq!(ng.size_hint(), (0, Some(0)));
+    assert!(ng.eq([]));
+
+    // Optional group not matched.
+    let m = tc.compile("d(er)?p").find("dp").unwrap();
+    assert_eq!(m.group(0), Some(0..2));
+    assert_eq!(m.group(1), None);
+    let g = m.groups();
+    assert_eq!(g.size_hint(), (2, Some(2)));
+    assert!(g.eq([Some(0..2), None]));
+    let ng = m.named_groups();
+    assert_eq!(ng.size_hint(), (0, Some(0)));
+
+    // Named groups skip groups without names.
+    let m = tc
+        .compile(r"(?<first>d)(?:(er)|(?<skip>unmatched))(?<third>p)")
+        .find("derp")
+        .unwrap();
+    assert_eq!(m.group(0), Some(0..4));
+    assert_eq!(m.group(1), Some(0..1));
+    assert_eq!(m.group(2), Some(1..3));
+    assert_eq!(m.group(3), None);
+    assert_eq!(m.group(4), Some(3..4));
+
+    let g = m.groups();
+    assert!(g.eq([Some(0..4), Some(0..1), Some(1..3), None, Some(3..4)]));
+
+    let ng = m.named_groups();
+    assert!(ng.eq([("first", Some(0..1)), ("skip", None), ("third", Some(3..4))]));
+}
+
+#[test]
+fn test_captures() {
+    test_with_configs(test_captures_tc)
+}
+
 fn test_multiline_tc(tc: TestConfig) {
     tc.compilef(r"^abc", "").match1f("abc").test_eq("abc");
     tc.compile(r"^def").test_fails("abc\ndef");
