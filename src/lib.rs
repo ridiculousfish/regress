@@ -129,7 +129,7 @@ to the architecture: regex uses finite automata while regress uses "classical ba
 
 # Comparison to fancy-regex crate
 
-fancy-regex wraps the regex crate and extends it with PCRE-style syntactic features. regress has more complete support for these features: backreferences may be case-insensitive, and lookbehinds may be arbitrary-width.
+fancy-regex wraps the regex crate and extends it with PCRE-style syntactic features. regress has more complete support for these features: lookbehinds may be arbitrary-width.
 
 # Architecture
 
