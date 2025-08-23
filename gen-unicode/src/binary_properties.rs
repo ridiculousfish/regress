@@ -1,4 +1,4 @@
-use crate::{GenUnicode, codepoints_to_range, format_interval_table, pack_adjacent_codepoints};
+use crate::{codepoints_to_range, format_interval_table, pack_adjacent_codepoints, GenUnicode};
 use codegen::{Block, Enum, Function};
 
 impl GenUnicode {

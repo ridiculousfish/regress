@@ -2,14 +2,14 @@
 
 use crate::{
     api, charclasses,
-    codepointset::{CodePointSet, Interval, interval_contains},
+    codepointset::{interval_contains, CodePointSet, Interval},
     ir,
     types::{
         BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
         MAX_LOOPS,
     },
     unicode::{
-        self, PropertyEscapeKind, unicode_property_from_str, unicode_property_name_from_str,
+        self, unicode_property_from_str, unicode_property_name_from_str, PropertyEscapeKind,
     },
     unicodetables::{id_continue_ranges, id_start_ranges},
     util::to_char_sat,
@@ -1332,7 +1332,11 @@ where
                 break;
             }
         }
-        if char_count > 0 { Some(result) } else { None }
+        if char_count > 0 {
+            Some(result)
+        } else {
+            None
+        }
     }
 
     fn consume_lookaround_assertion(

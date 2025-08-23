@@ -1,7 +1,7 @@
 use crate::{GenUnicode, UCD_PATH};
 use codegen::{Block, Enum, Function};
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::str::FromStr;
