@@ -75,13 +75,33 @@ fn format_nfa_error(err: &regress::backends::NfaError) -> String {
 }
 
 fn format_match(r: &regress::Match, input: &str) -> String {
-    let mut result = input[r.range()].to_string();
-    for cg in r.captures.iter() {
-        result.push(',');
-        if let Some(cg) = cg {
-            result.push_str(&input[cg.clone()])
+    let mut result = String::new();
+    
+    // Show the full matched range
+    result.push_str(&format!("\"{}\" ({}..{})", 
+                            &input[r.range()], 
+                            r.range().start, 
+                            r.range().end));
+    
+    // Show capture groups if any exist
+    if !r.captures.is_empty() {
+        result.push_str(", captures: [");
+        for (i, cg) in r.captures.iter().enumerate() {
+            if i > 0 {
+                result.push_str(", ");
+            }
+            if let Some(cg_range) = cg {
+                result.push_str(&format!("\"{}\" ({}..{})", 
+                                       &input[cg_range.clone()],
+                                       cg_range.start,
+                                       cg_range.end));
+            } else {
+                result.push_str("None");
+            }
         }
+        result.push(']');
     }
+    
     result
 }
 
@@ -99,8 +119,11 @@ fn exec_re_on_string(re: &Regex, input: &str) {
 fn exec_nfa_on_string(nfa: &Nfa, input: &str) {
     match nfa_backend::execute_nfa(nfa, input.as_bytes()) {
         Some(nfa_match) => {
-            let matched_text = &input[nfa_match.range];
-            println!("Match: {}, total: 1", matched_text);
+            let matched_text = &input[nfa_match.range.clone()];
+            println!("Match: \"{}\" ({}..{}), total: 1", 
+                    matched_text, 
+                    nfa_match.range.start, 
+                    nfa_match.range.end);
         }
         None => {
             println!("No match");

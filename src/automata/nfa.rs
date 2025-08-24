@@ -16,6 +16,17 @@ pub struct Nfa {
 // This is implemented as an index but is remapped to a dense vector later.
 pub type StateHandle = u32;
 
+// An index of a capture register. Each capture group has two registers, for open and close.
+// We reserve the first register pair for the entire match.
+// Thus, the first explicit capture group has index 2 for open and 3 for close.
+pub type RegisterIdx = u32;
+
+pub const FULL_MATCH_START: RegisterIdx = 0;
+pub const FULL_MATCH_END: RegisterIdx = 1;
+
+// A captured position in the text.
+pub type TextPos = usize;
+
 // A closed range of bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ByteRange {
@@ -49,19 +60,50 @@ impl Fragment {
     }
 }
 
+// An epsilon edge. Transitions on empty input, optionally writing to one or more registers.
+#[derive(Debug, Default)]
+pub struct EpsEdge {
+    // Target of the transition.
+    pub target: StateHandle,
+    // Registers to write to on transition.
+    pub ops: SmallVec<[RegisterIdx; 2]>,
+}
+
+impl EpsEdge {
+    // Create a new epsilon edge going to a target state, with no register writes.
+    fn to_target(target: StateHandle) -> Self {
+        Self {
+            target,
+            ops: smallvec![],
+        }
+    }
+}
+
+// A state (node) in the TNFA.
 #[derive(Debug, Default)]
 pub struct State {
-    // Epsilon transitions to other states, in priority order.
-    pub eps: Vec<StateHandle>,
+    // Tagged epsilon transitions to other states, in priority order.
+    pub eps: Vec<EpsEdge>,
 
     // Transitions to other states, indexed by sorted byte ranges.
     pub transitions: Vec<(ByteRange, StateHandle)>,
 }
 
 impl State {
-    // Add an epsilon transition to another state.
+    // Add an epsilon transition to another state, with no register writes.
     pub fn add_eps(&mut self, target: StateHandle) {
-        self.eps.push(target);
+        self.eps.push(EpsEdge {
+            target,
+            ops: smallvec![],
+        });
+    }
+
+    // Add an epsilon transition to another state, with one register write.
+    pub fn add_eps_with_write(&mut self, target: StateHandle, reg: RegisterIdx) {
+        self.eps.push(EpsEdge {
+            target,
+            ops: smallvec![reg],
+        });
     }
 
     // Add a byte transition to another state.
@@ -246,12 +288,28 @@ impl Builder {
         }
     }
 
+    // Build a start state, that captures the beginning.
+    fn build_start(&mut self) -> Result<Fragment> {
+        let start = self.make()?;
+        let end = self.join_with_write(&[start], FULL_MATCH_START)?;
+        Ok(Fragment::new(start, [end]))
+    }
+
+    // Build a transition to a goal state.
+    // Crucially this has NO dangling ends.
+    fn build_goal(&mut self) -> Result<Fragment> {
+        let start = self.make()?;
+        self.get(start)
+            .add_eps_with_write(GOAL_STATE, FULL_MATCH_END);
+        Ok(Fragment::new(start, []))
+    }
+
     fn build(&mut self, node: &Node) -> Result<Fragment> {
         match node {
             Node::ByteSequence(seq) => self.build_sequence(seq),
             Node::Cat(seq) => self.build_cat(seq),
             Node::Alt(left, right) => self.build_alt(left, right),
-            Node::Goal => Ok(Fragment::new(GOAL_STATE, [])),
+            Node::Goal => self.build_goal(),
             Node::Loop1CharBody { loopee, quant } => self.build_loop(loopee, quant),
             Node::Loop {
                 loopee,
@@ -287,9 +345,10 @@ impl Builder {
         &mut self.states[idx as usize]
     }
 
-    /// Add epsilons from a handle to more handles.
+    /// Add epsilons from a handle to more handles, without register writes.
     fn connect_eps(&mut self, from: StateHandle, to: impl IntoIterator<Item = StateHandle>) {
-        self.get(from).eps.extend(to);
+        let edges = to.into_iter().map(EpsEdge::to_target);
+        self.get(from).eps.extend(edges);
     }
 
     /// Add epsilons from a list of handles to a single handle.
@@ -304,6 +363,22 @@ impl Builder {
         for dst in to {
             self.join_eps(from, dst);
         }
+    }
+
+    /// Add a single register write on an epsilon transition from a list of handles, producing a new handle.
+    fn join_with_write(&mut self, from: &[StateHandle], reg: RegisterIdx) -> Result<StateHandle> {
+        assert!(!from.is_empty());
+        let target = self.make()?;
+        // Join the existing states into one first, if we have more than one.
+        let joined: StateHandle = if from.len() == 1 {
+            from[0]
+        } else {
+            let joined = self.make()?;
+            self.join_eps(from, joined);
+            joined
+        };
+        self.get(joined).add_eps_with_write(target, reg);
+        Ok(target)
     }
 
     /// Build an alternation of nodes.
@@ -443,8 +518,17 @@ impl Builder {
 impl Nfa {
     pub fn try_from(re: &ir::Regex) -> Result<Self> {
         let mut b: Builder = Builder::new(2048);
-        let Fragment { start, ends } = b.build(&re.node)?;
-        assert!(ends.is_empty(), "Should not have dangling ends");
+
+        // Create the start, capturing it.
+        let Fragment { start, ends } = b.build_start()?;
+
+        // Should have no ends on the pattern since it's top level - everything ends in goal or fail.
+        let pattern_fragment = b.build(&re.node)?;
+        assert!(pattern_fragment.ends.is_empty());
+
+        // Connect start to pattern.
+        b.join_eps(&ends, pattern_fragment.start);
+
         Ok(Nfa {
             start,
             states: b.states.into_boxed_slice(),
@@ -481,13 +565,22 @@ impl Nfa {
             // Show epsilon transitions
             if !state.eps.is_empty() {
                 result.push_str("  ε-transitions:\n");
-                for &target in &state.eps {
-                    let dest = match target {
+                for edge in &state.eps {
+                    let dest = match edge.target {
                         idx if idx == self.start() => "START".to_string(),
                         GOAL_STATE => "GOAL".to_string(),
-                        _ => target.to_string(),
+                        target => target.to_string(),
                     };
-                    result.push_str(&format!("    ε ──> {}\n", dest));
+                    
+                    if edge.ops.is_empty() {
+                        result.push_str(&format!("    ε ──> {}\n", dest));
+                    } else {
+                        let ops_str = edge.ops.iter()
+                            .map(|&reg| format!("r{}", reg))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        result.push_str(&format!("    ε [{}] ──> {}\n", ops_str, dest));
+                    }
                 }
             }
 
@@ -536,8 +629,8 @@ impl fmt::Display for Nfa {
             write!(f, "[{}{}]", marker, handle)?;
 
             // Epsilon transitions
-            for &target in &state.eps {
-                write!(f, " ε→{}", target)?;
+            for edge in &state.eps {
+                write!(f, " ε→{}", edge.target)?;
             }
 
             // Byte transitions (concise)

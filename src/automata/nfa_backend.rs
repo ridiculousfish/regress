@@ -1,9 +1,37 @@
 //! NFA execution backend for pattern matching.
 
-use crate::automata::nfa::{GOAL_STATE, Nfa, StateHandle};
+use crate::automata::nfa::{
+    FULL_MATCH_END, FULL_MATCH_START, GOAL_STATE, Nfa, RegisterIdx, StateHandle, TextPos,
+};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::ops::Range;
+use smallvec::{SmallVec, smallvec};
+
+// A thread is a current state and register set.
+#[derive(Clone, Debug, Default)]
+pub struct Thread {
+    pub state: StateHandle,
+    pub registers: SmallVec<[TextPos; 2]>,
+}
+
+impl Thread {
+    fn new(state: StateHandle) -> Self {
+        Self {
+            state,
+            registers: smallvec![],
+        }
+    }
+
+    fn with_registers(state: StateHandle, registers: SmallVec<[TextPos; 2]>) -> Self {
+        Self { state, registers }
+    }
+
+    // Get a register, which must exist.
+    fn get_reg(&self, idx: RegisterIdx) -> TextPos {
+        self.registers[idx as usize]
+    }
+}
 
 /// Result of NFA execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,64 +43,97 @@ pub struct NfaMatch {
 /// Execute the NFA against a slice of bytes.
 /// Returns the first match found, or None if no match is found.
 pub fn execute_nfa(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
-    // Current set of active states
-    let mut current_states = Vec::new();
-    let mut next_states = Vec::new();
+    let mut current_threads = Vec::new();
+    let mut next_threads = Vec::new();
 
-    // Start with the start state and all epsilon-reachable states
-    current_states.push(nfa.start());
-    epsilon_closure(nfa, &mut current_states);
+    // Start at the start state
+    let start_thread = Thread::new(nfa.start());
+    current_threads.push(start_thread);
+
+    // Apply epsilon closure to get initial thread set
+    epsilon_closure_with_registers(nfa, &mut current_threads, 0);
 
     // Check if we start in an accepting state (empty match)
-    if current_states.contains(&GOAL_STATE) {
-        return Some(NfaMatch { range: 0..0 });
+    for thread in &current_threads {
+        if thread.state == GOAL_STATE {
+            // Extract match range from registers
+            let start_pos = thread.get_reg(FULL_MATCH_START);
+            let end_pos = thread.get_reg(FULL_MATCH_END);
+            return Some(NfaMatch {
+                range: start_pos..end_pos,
+            });
+        }
     }
 
     // Process each byte of input
     for (pos, &byte) in input.iter().enumerate() {
-        next_states.clear();
+        next_threads.clear();
 
-        // For each current state, find transitions on this byte
-        for &state_handle in &current_states {
-            let state = nfa.at(state_handle);
+        // For each current thread, find transitions on this byte
+        for thread in &current_threads {
+            let state = nfa.at(thread.state);
 
             // Check byte transitions
             if let Some(next_state) = state.transition_for_byte(byte) {
-                next_states.push(next_state);
+                let next_thread = Thread::with_registers(next_state, thread.registers.clone());
+                next_threads.push(next_thread);
             }
         }
 
-        // If no states can process this byte, no match
-        if next_states.is_empty() {
+        // If no threads can process this byte, no match
+        if next_threads.is_empty() {
             return None;
         }
 
-        // Add epsilon-reachable states
-        epsilon_closure(nfa, &mut next_states);
+        // Add epsilon-reachable states with register updates
+        epsilon_closure_with_registers(nfa, &mut next_threads, pos + 1);
 
         // Check if we've reached an accepting state
-        if next_states.contains(&GOAL_STATE) {
-            return Some(NfaMatch { range: 0..pos + 1 });
+        for thread in &next_threads {
+            if thread.state == GOAL_STATE {
+                // Extract match range from registers
+                let start_pos = thread.get_reg(FULL_MATCH_START);
+                let end_pos = thread.get_reg(FULL_MATCH_END);
+                return Some(NfaMatch {
+                    range: start_pos..end_pos,
+                });
+            }
         }
 
-        // Swap state sets for next iteration
-        core::mem::swap(&mut current_states, &mut next_states);
+        // Swap thread sets for next iteration
+        core::mem::swap(&mut current_threads, &mut next_threads);
     }
 
     None
 }
 
-/// Add all epsilon-reachable states to the given state set.
-fn epsilon_closure(nfa: &Nfa, states: &mut Vec<StateHandle>) {
+/// Add all epsilon-reachable states to the given thread set, updating registers.
+fn epsilon_closure_with_registers(nfa: &Nfa, threads: &mut Vec<Thread>, current_pos: TextPos) {
     let mut i = 0;
-    while i < states.len() {
-        let state_handle = states[i];
-        let state = nfa.at(state_handle);
+    while i < threads.len() {
+        let thread = threads[i].clone();
+        let state = nfa.at(thread.state);
 
-        // Add all epsilon transitions
-        for &eps_target in &state.eps {
-            if !states.contains(&eps_target) {
-                states.push(eps_target);
+        // Process all epsilon transitions
+        for eps_edge in &state.eps {
+            // Check if we already have a thread in this target state
+            let target_exists = threads.iter().any(|t| t.state == eps_edge.target);
+
+            if !target_exists {
+                // Create new thread with updated registers
+                let mut new_registers = thread.registers.clone();
+
+                // Apply register operations from the epsilon edge
+                for &reg_idx in &eps_edge.ops {
+                    // Ensure registers vector is large enough
+                    while new_registers.len() <= reg_idx as usize {
+                        new_registers.push(0);
+                    }
+                    new_registers[reg_idx as usize] = current_pos;
+                }
+
+                let new_thread = Thread::with_registers(eps_edge.target, new_registers);
+                threads.push(new_thread);
             }
         }
 
