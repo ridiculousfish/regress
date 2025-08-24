@@ -173,18 +173,12 @@ impl State {
         (byte <= r.end).then_some(*dst)
     }
 
-    // Dead states and goal states are effectively the same.
-    fn dead() -> Self {
-        Self::default()
-    }
-
     fn goal() -> Self {
         Self::default()
     }
 }
 
-pub const DEAD_STATE: StateHandle = 0;
-pub const GOAL_STATE: StateHandle = 1;
+pub const GOAL_STATE: StateHandle = 0;
 
 /// Format a byte range in a human-readable way
 fn format_byte_range(range: ByteRange) -> String {
@@ -289,7 +283,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 impl Builder {
     fn new(state_budget: usize) -> Self {
         Builder {
-            states: vec![State::dead(), State::goal()],
+            states: vec![State::goal()],
             state_budget,
             num_registers: 2, // Initially two registers for full match start and end
         }
@@ -594,7 +588,6 @@ impl Nfa {
 
             // Add special state markers
             let marker = match state_idx {
-                DEAD_STATE => " (DEAD)",
                 GOAL_STATE => " (GOAL)",
                 idx if idx == self.start() => " (START)",
                 _ => "",
@@ -636,10 +629,7 @@ impl Nfa {
             }
 
             // Empty state indicator
-            if state.eps.is_empty()
-                && state.transitions.is_empty()
-                && !matches!(state_idx, GOAL_STATE | DEAD_STATE)
-            {
+            if state.eps.is_empty() && state.transitions.is_empty() && !state_idx != GOAL_STATE {
                 result.push_str("  (no transitions)\n");
             }
 
@@ -662,7 +652,6 @@ impl fmt::Display for Nfa {
         for (idx, state) in self.states.iter().enumerate() {
             let handle = idx as StateHandle;
             let marker = match handle {
-                DEAD_STATE => "D",
                 GOAL_STATE => "G",
                 idx if idx == self.start() => "S",
                 _ => " ",
