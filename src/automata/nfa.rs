@@ -4,7 +4,7 @@ use crate::ir::{self, Node};
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::{fmt, iter::once};
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 
 #[derive(Debug)]
 pub struct Nfa {
@@ -66,7 +66,13 @@ impl State {
 
     // Add a byte transition to another state.
     pub fn add_transition(&mut self, range: ByteRange, dest: StateHandle) {
-        assert!(range.start <= range.end);
+        debug_assert!(range.start <= range.end);
+
+        // Common fast path.
+        if self.transitions.is_empty() {
+            self.transitions.push((range, dest));
+            return;
+        }
 
         // Find insertion point by start and then insert.
         let i = self
@@ -281,14 +287,32 @@ impl Builder {
         &mut self.states[idx as usize]
     }
 
+    /// Add epsilons from a handle to more handles.
+    fn connect_eps(&mut self, from: StateHandle, to: impl IntoIterator<Item = StateHandle>) {
+        self.get(from).eps.extend(to);
+    }
+
+    /// Add epsilons from a list of handles to a single handle.
+    fn join_eps(&mut self, from: &[StateHandle], to: StateHandle) {
+        for &src in from {
+            self.get(src).add_eps(to);
+        }
+    }
+
+    /// Add epsilons from a list of handles to a list of handles.
+    fn join_many_eps(&mut self, from: &[StateHandle], to: impl IntoIterator<Item = StateHandle>) {
+        for dst in to {
+            self.join_eps(from, dst);
+        }
+    }
+
     /// Build an alternation of nodes.
     fn build_alt(&mut self, left: &Node, right: &Node) -> Result<Fragment> {
         let start = self.make()?;
         let left = self.build(left)?;
         let right = self.build(right)?;
         // Note: left has priority.
-        self.get(start).add_eps(left.start);
-        self.get(start).add_eps(right.start);
+        self.connect_eps(start, [left.start, right.start]);
 
         // Construct all loose ends.
         let mut ends = left.ends;
@@ -305,9 +329,7 @@ impl Builder {
             if start.is_none() {
                 start = Some(next.start);
             }
-            for end in ends {
-                self.get(end).add_eps(next.start);
-            }
+            self.join_eps(&ends, next.start);
             ends = next.ends;
         }
         // Handle empties (unlikely).
@@ -349,72 +371,60 @@ impl Builder {
         match quant.max {
             None => {
                 // Unbounded. Ends can continue looping or exit.
-                let body = self.build(loopee)?;
-                let end = self.make()?;
-                for current_end in current_ends {
-                    if quant.greedy {
-                        // Greedy: prefer to continue looping
-                        self.get(current_end).add_eps(body.start);
-                        self.get(current_end).add_eps(end);
+                let body = self.build(loopee)?; // loopee
+                let exit: u32 = self.make()?; // way out of the loop
+                let recur = body.start; // return to the loop
+                let greedy = quant.greedy;
 
-                        // Body ends loop back to themselves or exit
-                        for &body_end in &body.ends {
-                            self.get(body_end).add_eps(body.start);
-                            self.get(body_end).add_eps(end);
-                        }
-                    } else {
-                        // Non-greedy: prefer to exit
-                        self.get(current_end).add_eps(end);
-                        self.get(current_end).add_eps(body.start);
+                // Add eps to the loop body and end. Prefer the body if we are greedy,
+                // the end if non-greedy.
+                self.join_many_eps(
+                    &current_ends,
+                    if greedy { [recur, exit] } else { [exit, recur] },
+                );
 
-                        // Body ends exit or loop back to themselves
-                        for &body_end in &body.ends {
-                            self.get(body_end).add_eps(end);
-                            self.get(body_end).add_eps(body.start);
-                        }
-                    }
-                }
+                // Add eps from the end of the loop body back to the start,
+                // or to exit.
+                self.join_many_eps(
+                    &body.ends,
+                    if greedy { [recur, exit] } else { [exit, recur] },
+                );
 
-                Ok(Fragment::new(start, [end]))
+                Ok(Fragment::new(start, [exit]))
             }
-            Some(max) if max > quant.min => {
-                // Bounded loop with optional iterations from min to max
-                let end = self.make()?;
-
-                // All current ends can exit to end
-                for current_end in current_ends.clone() {
-                    self.get(current_end).add_eps(end);
-                }
+            Some(max) if max != quant.min => {
+                debug_assert!(max > quant.min);
+                // Bounded loop. Every iteration from min to max can bail out.
+                let exit = self.make()?;
 
                 // Add optional iterations from min to max
                 for _i in quant.min..max {
-                    let mut next_ends: SmallVec<[StateHandle; 2]> = smallvec![];
+                    let mut next_ends = smallvec![];
 
                     for current_end in current_ends {
-                        let body_fragment = self.build(loopee)?;
-
+                        let body = self.build(loopee)?;
                         if quant.greedy {
                             // Greedy: prefer to continue
-                            self.get(current_end).add_eps(body_fragment.start);
-                            self.get(current_end).add_eps(end);
+                            self.get(current_end).add_eps(body.start);
+                            self.get(current_end).add_eps(exit);
                         } else {
                             // Non-greedy: prefer to exit
-                            self.get(current_end).add_eps(end);
-                            self.get(current_end).add_eps(body_fragment.start);
+                            self.get(current_end).add_eps(exit);
+                            self.get(current_end).add_eps(body.start);
                         }
 
-                        next_ends.extend(body_fragment.ends);
+                        next_ends.extend(body.ends);
                     }
 
                     // These new ends can also exit
                     for new_end in next_ends.clone() {
-                        self.get(new_end).add_eps(end);
+                        self.get(new_end).add_eps(exit);
                     }
 
                     current_ends = next_ends;
                 }
 
-                Ok(Fragment::new(start, [end]))
+                Ok(Fragment::new(start, [exit]))
             }
             Some(_) => {
                 // max == min - exact number of iterations
