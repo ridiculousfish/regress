@@ -18,8 +18,9 @@ pub struct Quantifier {
     /// Minimum number of iterations of the loop, inclusive.
     pub min: usize,
 
-    /// Maximum number of iterations of the loop, inclusive.
-    pub max: usize,
+    /// Maximum number of iterations of the loop, inclusive;
+    /// or None if unbounded.
+    pub max: Option<usize>,
 
     /// Whether the loop is greedy.
     pub greedy: bool,

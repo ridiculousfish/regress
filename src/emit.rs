@@ -225,7 +225,9 @@ impl Emitter {
                         let loop_insn = self.emit_insn_offset(Insn::EnterLoop(LoopFields {
                             loop_id,
                             min_iters: quant.min,
-                            max_iters: quant.max,
+                            // If the loop is unbounded, just emit usize::MAX,
+                            // as we cannot match more characters than that.
+                            max_iters: quant.max.unwrap_or(usize::MAX),
                             greedy: quant.greedy,
                             exit: 0,
                         }));
@@ -242,7 +244,7 @@ impl Emitter {
                     Node::Loop1CharBody { loopee, quant } => {
                         self.emit_insn(Insn::Loop1CharBody {
                             min_iters: quant.min,
-                            max_iters: quant.max,
+                            max_iters: quant.max.unwrap_or(usize::MAX),
                             greedy: quant.greedy,
                         });
                         stack.push(Emitter::Node(loopee));

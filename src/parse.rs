@@ -686,7 +686,7 @@ where
                 // Note we don't want to do this as part of parsing the quantiifer in some cases
                 // an incomplete quantifier is not recognized as a quantifier, e.g. `/{3/` is
                 // valid.
-                if quant.min > quant.max {
+                if matches!(quant.max, Some(max) if quant.min > max) {
                     return error("Invalid quantifier");
                 }
                 let quantifee = result.split_off(start_offset);
@@ -1250,7 +1250,7 @@ where
                 self.consume('+');
                 Ok(Some(ir::Quantifier {
                     min: 1,
-                    max: usize::MAX,
+                    max: None,
                     greedy: true,
                 }))
             }
@@ -1258,7 +1258,7 @@ where
                 self.consume('*');
                 Ok(Some(ir::Quantifier {
                     min: 0,
-                    max: usize::MAX,
+                    max: None,
                     greedy: true,
                 }))
             }
@@ -1266,7 +1266,7 @@ where
                 self.consume('?');
                 Ok(Some(ir::Quantifier {
                     min: 0,
-                    max: 1,
+                    max: Some(1),
                     greedy: true,
                 }))
             }
@@ -1290,24 +1290,21 @@ where
         let pre_input = self.input.clone();
         self.consume('{');
         let optmin = self.try_consume_decimal_integer_literal();
-        if optmin.is_none() {
+        let Some(optmin) = optmin else {
             // not a valid quantifier, rollback consumption
             self.input = pre_input;
             return None;
-        }
+        };
         let mut quant = ir::Quantifier {
-            min: optmin.unwrap(),
-            max: optmin.unwrap(),
+            min: optmin,
+            max: Some(optmin),
             greedy: true,
         };
         if self.try_consume(',') {
-            if let Some(max) = self.try_consume_decimal_integer_literal() {
-                // Like {3,4}
-                quant.max = max;
-            } else {
-                // Like {3,}
-                quant.max = usize::MAX;
-            }
+            let max = self.try_consume_decimal_integer_literal();
+            // Either like {3,4} in which case we want to set the max;
+            // or like {3,} in which case the max should be None to indicate unbounded.
+            quant.max = max;
         } else {
             // Like {3}.
         }

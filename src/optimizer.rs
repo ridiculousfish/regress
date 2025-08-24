@@ -147,7 +147,8 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
         } => {
             // A loop is empty if it has an empty body, or 0 max iters.
             // But do not remove contained capture groups.
-            if loopee.is_empty() || (quant.max == 0 && enclosed_groups.start == enclosed_groups.end)
+            if loopee.is_empty()
+                || (quant.max == Some(0) && enclosed_groups.start == enclosed_groups.end)
             {
                 PassAction::Remove
             } else {
@@ -337,9 +338,9 @@ fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
 
             // We unrolled 'min' elements.
             // Maybe our loop is now empty.
-            quant.max -= quant.min;
+            quant.max = quant.max.map(|v| v - quant.min);
             quant.min = 0;
-            if quant.max > 0 {
+            if quant.max != Some(0) {
                 // Move the loop to the end of unrolled.
                 let mut loop_node = Node::Empty;
                 core::mem::swap(&mut loop_node, n);
