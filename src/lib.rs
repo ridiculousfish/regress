@@ -147,7 +147,8 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 #![allow(
     clippy::upper_case_acronyms,
     clippy::match_like_matches_macro,
-    clippy::uninlined_format_args
+    clippy::uninlined_format_args,
+    clippy::collapsible_if
 )]
 // Clippy's manual_range_contains suggestion produces worse codegen.
 #![allow(clippy::manual_range_contains)]
