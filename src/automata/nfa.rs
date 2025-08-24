@@ -1,6 +1,7 @@
 //! Conversion of IR to non-deterministic finite automata.
 
 use crate::ir::{self, Node};
+use crate::types::CaptureGroupID;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::{fmt, iter::once};
@@ -10,6 +11,7 @@ use smallvec::{SmallVec, smallvec};
 pub struct Nfa {
     start: StateHandle,
     states: Box<[State]>,
+    num_registers: usize,
 }
 
 // A handle to a State in the NFA.
@@ -26,6 +28,9 @@ pub const FULL_MATCH_END: RegisterIdx = 1;
 
 // A captured position in the text.
 pub type TextPos = usize;
+
+// Sentinel position meaning no match.
+pub const TEXT_POS_NO_MATCH: TextPos = usize::MAX;
 
 // A closed range of bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -271,6 +276,7 @@ struct Builder {
     // States indexed by handle.
     states: Vec<State>,
     state_budget: usize,
+    num_registers: usize,
 }
 
 #[derive(Debug)]
@@ -285,6 +291,7 @@ impl Builder {
         Builder {
             states: vec![State::dead(), State::goal()],
             state_budget,
+            num_registers: 2, // Initially two registers for full match start and end
         }
     }
 
@@ -311,19 +318,8 @@ impl Builder {
             Node::Alt(left, right) => self.build_alt(left, right),
             Node::Goal => self.build_goal(),
             Node::Loop1CharBody { loopee, quant } => self.build_loop(loopee, quant),
-            Node::Loop {
-                loopee,
-                quant,
-                enclosed_groups,
-            } => {
-                if !enclosed_groups.is_empty() {
-                    return Err(Error::UnsupportedInstruction(format!(
-                        "Loop with enclosed groups: {:?}",
-                        enclosed_groups
-                    )));
-                }
-                self.build_loop(loopee, quant)
-            }
+            Node::Loop { loopee, quant, .. } => self.build_loop(loopee, quant),
+            Node::CaptureGroup(contents, group_id) => self.build_capture_group(contents, *group_id),
 
             // All other node types are unsupported
             unsupported => Err(Error::UnsupportedInstruction(node_description(unsupported))),
@@ -510,6 +506,28 @@ impl Builder {
             }
         }
     }
+
+    fn build_capture_group(
+        &mut self,
+        contents: &Node,
+        group_id: CaptureGroupID,
+    ) -> Result<Fragment> {
+        // The group ID is the capture group index - i.e. a value of 0 means the first capture group (NOT the entire match).
+        // Convert it to our register indexes. Here 0 and 1 correspond to the full match.
+        let open_reg = (group_id as RegisterIdx + 1) * 2;
+        let close_reg = open_reg + 1;
+
+        // Record if we have a new largest number of registers.
+        self.num_registers = self.num_registers.max(close_reg as usize + 1);
+
+        let open_group = self.make()?;
+        let body = self.build(contents)?;
+
+        self.get(open_group)
+            .add_eps_with_write(body.start, open_reg);
+        let close_group = self.join_with_write(&body.ends, close_reg)?;
+        Ok(Fragment::new(open_group, [close_group]))
+    }
 }
 
 /// Try converting a regular expression to a NFA.
@@ -532,6 +550,7 @@ impl Nfa {
         Ok(Nfa {
             start,
             states: b.states.into_boxed_slice(),
+            num_registers: b.num_registers,
         })
     }
 
@@ -541,6 +560,10 @@ impl Nfa {
 
     pub fn start(&self) -> StateHandle {
         self.start
+    }
+
+    pub fn num_registers(&self) -> usize {
+        self.num_registers
     }
 
     /// Generate a human-readable representation of the NFA
@@ -571,11 +594,13 @@ impl Nfa {
                         GOAL_STATE => "GOAL".to_string(),
                         target => target.to_string(),
                     };
-                    
+
                     if edge.ops.is_empty() {
                         result.push_str(&format!("    ε ──> {}\n", dest));
                     } else {
-                        let ops_str = edge.ops.iter()
+                        let ops_str = edge
+                            .ops
+                            .iter()
                             .map(|&reg| format!("r{}", reg))
                             .collect::<Vec<_>>()
                             .join(",");
