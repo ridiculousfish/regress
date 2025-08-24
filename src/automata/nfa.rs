@@ -313,10 +313,12 @@ impl Builder {
 
     fn build(&mut self, node: &Node) -> Result<Fragment> {
         match node {
+            Node::Empty => self.build_empty(),
+            Node::Goal => self.build_goal(),
             Node::ByteSequence(seq) => self.build_sequence(seq),
+            Node::ByteSet(bytes) => self.build_byte_set(bytes),
             Node::Cat(seq) => self.build_cat(seq),
             Node::Alt(left, right) => self.build_alt(left, right),
-            Node::Goal => self.build_goal(),
             Node::Loop1CharBody { loopee, quant } => self.build_loop(loopee, quant),
             Node::Loop { loopee, quant, .. } => self.build_loop(loopee, quant),
             Node::CaptureGroup(contents, group_id) => self.build_capture_group(contents, *group_id),
@@ -391,6 +393,12 @@ impl Builder {
         Ok(Fragment { start, ends })
     }
 
+    // Build an empty node which matches the empty string.
+    fn build_empty(&mut self) -> Result<Fragment> {
+        let start = self.make()?;
+        Ok(Fragment::new(start, [start]))
+    }
+
     /// Build a sequence of nodes.
     fn build_cat(&mut self, cat: &[Node]) -> Result<Fragment> {
         let mut ends = smallvec![];
@@ -411,7 +419,6 @@ impl Builder {
         Ok(Fragment { start, ends })
     }
 
-    /// Given a start node, emit a sequence of transitions for a byte sequence.
     fn build_sequence(&mut self, seq: &[u8]) -> Result<Fragment> {
         let start = self.make()?;
         let mut cursor = start;
@@ -421,6 +428,16 @@ impl Builder {
             cursor = next;
         }
         Ok(Fragment::new(start, [cursor]))
+    }
+
+    fn build_byte_set(&mut self, bytes: &[u8]) -> Result<Fragment> {
+        let start = self.make()?;
+        let end = self.make()?;
+        let start_state = self.get(start);
+        for &b in bytes {
+            start_state.add_transition(ByteRange::new(b, b), end);
+        }
+        Ok(Fragment::new(start, [end]))
     }
 
     /// Build a Loop node (handles both Loop and Loop1CharBody).
