@@ -238,6 +238,13 @@ impl Builder {
             Node::Loop1CharBody { loopee, quant } => self.build_loop(loopee, quant),
             Node::Loop { loopee, quant, .. } => self.build_loop(loopee, quant),
             Node::CaptureGroup(contents, group_id) => self.build_capture_group(contents, *group_id),
+            Node::NamedCaptureGroup(contents, group_id, _name) => {
+                self.build_capture_group(contents, *group_id)
+            }
+            Node::BackRef(_) => Err(Error::UnsupportedInstruction(
+                "Backreferences not supported by NFAs".to_string(),
+            )),
+            Node::Bracket(contents) => self.build_bracket(contents),
 
             // All other node types are unsupported
             unsupported => Err(Error::UnsupportedInstruction(node_description(unsupported))),
