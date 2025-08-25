@@ -438,6 +438,7 @@ impl Builder {
     /// Build a Loop node (handles both Loop and Loop1CharBody).
     fn build_loop(&mut self, loopee: &Node, quant: &crate::ir::Quantifier) -> Result<Fragment> {
         let start = self.make()?;
+        let greedy = quant.greedy;
         let mut current_ends = smallvec![start];
 
         // Unroll minimum iterations. Finite automata can't count.
@@ -457,7 +458,6 @@ impl Builder {
                 let body = self.build(loopee)?; // loopee
                 let exit: u32 = self.make()?; // way out of the loop
                 let recur = body.start; // return to the loop
-                let greedy = quant.greedy;
 
                 // Add eps to the loop body and end. Prefer the body if we are greedy,
                 // the end if non-greedy.
@@ -482,30 +482,20 @@ impl Builder {
 
                 // Add optional iterations from min to max
                 for _i in quant.min..max {
-                    let mut next_ends = smallvec![];
+                    let body = self.build(loopee)?;
+                    let recur = body.start;
 
-                    for current_end in current_ends {
-                        let body = self.build(loopee)?;
-                        if quant.greedy {
-                            // Greedy: prefer to continue
-                            self.get(current_end).add_eps(body.start);
-                            self.get(current_end).add_eps(exit);
-                        } else {
-                            // Non-greedy: prefer to exit
-                            self.get(current_end).add_eps(exit);
-                            self.get(current_end).add_eps(body.start);
-                        }
-
-                        next_ends.extend(body.ends);
-                    }
-
-                    // These new ends can also exit
-                    for new_end in next_ends.clone() {
-                        self.get(new_end).add_eps(exit);
-                    }
-
-                    current_ends = next_ends;
+                    // Add eps to the loop body and end. Prefer the body if we are greedy,
+                    // the end if non-greedy.
+                    self.join_many_eps(
+                        &current_ends,
+                        if greedy { [recur, exit] } else { [exit, recur] },
+                    );
+                    current_ends = body.ends;
                 }
+
+                // Last iteration goes to exit.
+                self.join_eps(&current_ends, exit);
 
                 Ok(Fragment::new(start, [exit]))
             }
