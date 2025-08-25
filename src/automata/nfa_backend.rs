@@ -748,4 +748,195 @@ mod tests {
             Some(match_with_captures(0, 6, vec![Some(0..3), Some(3..6)]))
         );
     }
+
+    #[test]
+    fn test_simple_bracket_expressions() {
+        // Test simple bracket expressions [abc]
+        let nfa = create_nfa("[abc]");
+
+        // Should match 'a'
+        let result = execute_nfa(&nfa, b"a");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        // Should match 'b'
+        let result = execute_nfa(&nfa, b"b");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        // Should match 'c'
+        let result = execute_nfa(&nfa, b"c");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        // Should not match 'd'
+        let result = execute_nfa(&nfa, b"d");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_bracket_ranges() {
+        // Test bracket with ranges [a-z]
+        let nfa = create_nfa("[a-z]");
+
+        // Should match lowercase letters
+        let result = execute_nfa(&nfa, b"m");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        let result = execute_nfa(&nfa, b"z");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        // Should not match uppercase or numbers
+        let result = execute_nfa(&nfa, b"M");
+        assert_eq!(result, None);
+
+        let result = execute_nfa(&nfa, b"5");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_bracket_with_quantifiers() {
+        // Test brackets with quantifiers [0-9]+
+        let nfa = create_nfa("[0-9]+");
+
+        // Should match single digit
+        let result = execute_nfa(&nfa, b"5");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        // Should match multiple digits
+        let result = execute_nfa(&nfa, b"123");
+        assert_eq!(result, Some(simple_match(0, 3)));
+
+        // Should not match letters
+        let result = execute_nfa(&nfa, b"abc");
+        assert_eq!(result, None);
+
+        // Should match only the numeric prefix
+        let result = execute_nfa(&nfa, b"123abc");
+        assert_eq!(result, Some(simple_match(0, 3)));
+    }
+
+    #[test]
+    fn test_empty_brackets() {
+        // Test empty brackets [] - should never match
+        let nfa = create_nfa("a[]b");
+
+        // Should not match anything because [] fails
+        let result = execute_nfa(&nfa, b"ab");
+        assert_eq!(result, None);
+
+        let result = execute_nfa(&nfa, b"axb");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_inverted_brackets_simple() {
+        // Test simple inverted brackets [^abc]
+        let nfa = create_nfa("[^\\s\\S]"); // This matches nothing (empty inverted set)
+
+        // Should not match anything
+        let result = execute_nfa(&nfa, b"a");
+        assert_eq!(result, None);
+
+        let result = execute_nfa(&nfa, b" ");
+        assert_eq!(result, None);
+
+        let result = execute_nfa(&nfa, b"5");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_bracket_edge_cases() {
+        // Test bracket with single character [x]
+        let nfa = create_nfa("[x]");
+
+        let result = execute_nfa(&nfa, b"x");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        let result = execute_nfa(&nfa, b"y");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_bracket_in_complex_patterns() {
+        // Test brackets as part of larger patterns
+        let nfa = create_nfa("prefix[0-9]+suffix");
+
+        let result = execute_nfa(&nfa, b"prefix123suffix");
+        assert_eq!(result, Some(simple_match(0, 15)));
+
+        let result = execute_nfa(&nfa, b"prefixabcsuffix");
+        assert_eq!(result, None);
+
+        // Test with alternation
+        let nfa = create_nfa("[abc]|[xyz]");
+
+        let result = execute_nfa(&nfa, b"a");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        let result = execute_nfa(&nfa, b"x");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        let result = execute_nfa(&nfa, b"m");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_bracket_all_codepoints() {
+        // Test bracket that matches all code points [\s\S]
+        // \s matches all whitespace characters
+        // \S matches all non-whitespace characters
+        // Together [\s\S] should match everything
+        let nfa = create_nfa("[\\s\\S]");
+
+        // Should match any character
+        let result = execute_nfa(&nfa, b"a");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        let result = execute_nfa(&nfa, b"A");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        let result = execute_nfa(&nfa, b"0");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        let result = execute_nfa(&nfa, b" ");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        let result = execute_nfa(&nfa, b"\n");
+        assert_eq!(result, Some(simple_match(0, 1)));
+
+        let result = execute_nfa(&nfa, b"\t");
+        assert_eq!(result, Some(simple_match(0, 1)));
+    }
+
+    #[test]
+    fn test_inverted_bracket_all_codepoints() {
+        // Test inverted bracket that contains all code points [^\s\S]
+        // [\s\S] matches all characters (whitespace + non-whitespace = everything)
+        // [^\s\S] is the inversion, so it should match nothing
+        let nfa = create_nfa("[^\\s\\S]");
+
+        // Should not match any character
+        let result = execute_nfa(&nfa, b"a");
+        assert_eq!(result, None);
+
+        let result = execute_nfa(&nfa, b"A");
+        assert_eq!(result, None);
+
+        let result = execute_nfa(&nfa, b"0");
+        assert_eq!(result, None);
+
+        let result = execute_nfa(&nfa, b" ");
+        assert_eq!(result, None);
+
+        let result = execute_nfa(&nfa, b"\n");
+        assert_eq!(result, None);
+
+        let result = execute_nfa(&nfa, b"\t");
+        assert_eq!(result, None);
+
+        // Should also not match Unicode characters
+        let result = execute_nfa(&nfa, "é".as_bytes());
+        assert_eq!(result, None);
+
+        let result = execute_nfa(&nfa, "🚀".as_bytes());
+        assert_eq!(result, None);
+    }
 }

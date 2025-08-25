@@ -233,6 +233,7 @@ impl Builder {
             Node::Char { c, icase } if !*icase => self.build_char(*c),
             Node::ByteSequence(seq) => self.build_sequence(seq),
             Node::ByteSet(bytes) => self.build_byte_set(bytes),
+            Node::CharSet(chars) => self.build_char_set(chars),
             Node::Cat(seq) => self.build_cat(seq),
             Node::Alt(left, right) => self.build_alt(left, right),
             Node::Loop1CharBody { loopee, quant } => self.build_loop(loopee, quant),
@@ -376,7 +377,12 @@ impl Builder {
     }
 
     fn build_char_set(&mut self, cs: &[u32]) -> Result<Fragment> {
-        assert!(!cs.is_empty(), "Character set is empty");
+        // Handle empty character set - create a node with no outgoing edges (fails to match)
+        if cs.is_empty() {
+            let start = self.make()?;
+            return Ok(Fragment::new(start, []));
+        }
+
         if cs.len() == 1 {
             return self.build_char(cs[0]);
         }
@@ -407,6 +413,31 @@ impl Builder {
         }
 
         Ok(Fragment::new(start, [end]))
+    }
+
+    fn build_bracket(&mut self, contents: &crate::types::BracketContents) -> Result<Fragment> {
+        // Invert the code point set if necessary.
+        let inverted_cps;
+        let cps = if contents.invert {
+            inverted_cps = contents.cps.inverted();
+            &inverted_cps
+        } else {
+            &contents.cps
+        };
+
+        // Collect all codepoints and build a character set
+        let mut codepoints = Vec::new();
+
+        // Iterate through all intervals in the CodePointSet
+        for interval in cps.intervals() {
+            // Add all codepoints in this interval
+            for cp in interval.codepoints() {
+                codepoints.push(cp);
+            }
+        }
+
+        // Use our existing build_char_set implementation (handles empty case)
+        self.build_char_set(&codepoints)
     }
 
     fn build_sequence(&mut self, seq: &[u8]) -> Result<Fragment> {
