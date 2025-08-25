@@ -1,5 +1,6 @@
 //! Conversion of IR to non-deterministic finite automata.
 
+use crate::automata::nfa_optimize::optimize_states;
 use crate::ir::{self, Node};
 use crate::types::CaptureGroupID;
 #[cfg(not(feature = "std"))]
@@ -66,7 +67,7 @@ impl Fragment {
 }
 
 // An epsilon edge. Transitions on empty input, optionally writing to one or more registers.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct EpsEdge {
     // Target of the transition.
     pub target: StateHandle,
@@ -266,11 +267,11 @@ fn node_description(node: &Node) -> String {
     }
 }
 
-struct Builder {
+pub(super) struct Builder {
     // States indexed by handle.
-    states: Vec<State>,
-    state_budget: usize,
-    num_registers: usize,
+    pub(super) states: Vec<State>,
+    pub(super) state_budget: usize,
+    pub(super) num_registers: usize,
 }
 
 #[derive(Debug)]
@@ -551,12 +552,14 @@ impl Nfa {
         // Create the start, capturing it.
         let Fragment { start, ends } = b.build_start()?;
 
-        // Should have no ends on the pattern since it's top level - everything ends in goal or fail.
+        // Should have no ends on the pattern since it's top level - everything ends in goal.
         let pattern_fragment = b.build(&re.node)?;
         assert!(pattern_fragment.ends.is_empty());
 
         // Connect start to pattern.
         b.join_eps(&ends, pattern_fragment.start);
+
+        optimize_states(&mut b.states);
 
         Ok(Nfa {
             start,
