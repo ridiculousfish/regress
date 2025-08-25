@@ -4,6 +4,7 @@ use crate::automata::nfa_optimize::optimize_states;
 use crate::automata::util::node_description;
 use crate::ir::{self, Node};
 use crate::types::CaptureGroupID;
+use crate::unicode;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::iter::once;
@@ -187,21 +188,24 @@ pub(super) struct Builder {
     pub(super) states: Vec<State>,
     pub(super) state_budget: usize,
     pub(super) num_registers: usize,
+    pub(super) unicode: bool,
 }
 
 #[derive(Debug)]
 pub enum Error {
     UnsupportedInstruction(String),
+    NotUTF8,
     BudgetExceeded,
 }
 pub type Result<T> = core::result::Result<T, Error>;
 
 impl Builder {
-    fn new(state_budget: usize) -> Self {
+    fn new(state_budget: usize, unicode: bool) -> Self {
         Builder {
             states: vec![State::goal()],
             state_budget,
             num_registers: 2, // Initially two registers for full match start and end
+            unicode,
         }
     }
 
@@ -225,6 +229,8 @@ impl Builder {
         match node {
             Node::Empty => self.build_empty(),
             Node::Goal => self.build_goal(),
+            Node::Char { c, icase } if *icase => self.build_icase_char(*c),
+            Node::Char { c, icase } if !*icase => self.build_char(*c),
             Node::ByteSequence(seq) => self.build_sequence(seq),
             Node::ByteSet(bytes) => self.build_byte_set(bytes),
             Node::Cat(seq) => self.build_cat(seq),
@@ -251,6 +257,18 @@ impl Builder {
     /// Access a state by handle.
     fn get(&mut self, idx: StateHandle) -> &mut State {
         &mut self.states[idx as usize]
+    }
+
+    /// Ensure there is a single-byte transition for `byte` from `from`.
+    /// If it exists, return the existing destination; otherwise create it.
+    fn ensure_edge(&mut self, from: StateHandle, byte: u8) -> Result<StateHandle> {
+        if let Some(dst) = self.states[from as usize].transition_for_byte(byte) {
+            Ok(dst)
+        } else {
+            let next = self.make()?;
+            self.states[from as usize].add_transition(ByteRange::new(byte, byte), next);
+            Ok(next)
+        }
     }
 
     /// Add epsilons from a handle to more handles, without register writes.
@@ -327,6 +345,61 @@ impl Builder {
             None => self.make()?,
         };
         Ok(Fragment { start, ends })
+    }
+
+    fn build_icase_char(&mut self, c: u32) -> Result<Fragment> {
+        let unfolded = if self.unicode {
+            unicode::unfold_char(c)
+        } else {
+            unicode::unfold_uppercase_char(c)
+        };
+        self.build_char_set(&unfolded)
+    }
+
+    fn build_char(&mut self, c: u32) -> Result<Fragment> {
+        // Convert u32 to char
+        let ch = match char::from_u32(c) {
+            Some(ch) => ch,
+            None => return Err(Error::NotUTF8),
+        };
+
+        let mut buff = [0; 4];
+        let s = ch.encode_utf8(&mut buff);
+        self.build_sequence(s.as_bytes())
+    }
+
+    fn build_char_set(&mut self, cs: &[u32]) -> Result<Fragment> {
+        assert!(!cs.is_empty(), "Character set is empty");
+        if cs.len() == 1 {
+            return self.build_char(cs[0]);
+        }
+
+        let start = self.make()?;
+        let end = self.make()?;
+        let mut buff = [0; 4];
+
+        // Insert each codepoint's UTF-8 bytes into a trie rooted at `start`.
+        for &codepoint in cs {
+            let ch = match char::from_u32(codepoint) {
+                Some(c) => c,
+                None => return Err(Error::NotUTF8),
+            };
+
+            let utf8_bytes = ch.encode_utf8(&mut buff);
+
+            // Walk/create along the path for these bytes.
+            let mut current = start;
+            for &byte in utf8_bytes.as_bytes() {
+                current = self.ensure_edge(current, byte)?;
+            }
+
+            // After consuming all bytes, accept by epsilon to the common `end` node.
+            // This avoids needing the last byte to point *directly* to `end`, which
+            // would prevent sharing if another char needs to continue via the same node.
+            self.get(current).add_eps(end);
+        }
+
+        Ok(Fragment::new(start, [end]))
     }
 
     fn build_sequence(&mut self, seq: &[u8]) -> Result<Fragment> {
@@ -452,7 +525,7 @@ impl Builder {
 /// or we would exceed a budget.
 impl Nfa {
     pub fn try_from(re: &ir::Regex) -> Result<Self> {
-        let mut b: Builder = Builder::new(2048);
+        let mut b: Builder = Builder::new(2048, re.flags.unicode);
 
         // Create the start, capturing it.
         let Fragment { start, ends } = b.build_start()?;

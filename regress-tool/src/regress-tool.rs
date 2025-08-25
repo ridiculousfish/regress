@@ -71,6 +71,9 @@ fn format_nfa_error(err: &regress::backends::NfaError) -> String {
         regress::backends::NfaError::BudgetExceeded => {
             "Budget exceeded (too many states)".to_string()
         }
+        regress::backends::NfaError::NotUTF8 => {
+            "Invalid UTF-8 character".to_string()
+        }
     }
 }
 
