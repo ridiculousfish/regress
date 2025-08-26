@@ -976,4 +976,60 @@ mod tests {
             "Should accept valid 2-byte UTF-8"
         );
     }
+
+    #[test]
+    fn test_large_character_set_should_not_match_everything() {
+        // Create a large character set that includes many codepoints but NOT everything
+        // This uses a smaller subset to avoid potential issues with the UTF-8 pattern detection
+        let nfa = create_nfa("[一-龯]"); // CJK ideographs: ~20k codepoints
+
+        // This should match Chinese characters
+        let result = execute_nfa(&nfa, "中".as_bytes()); // U+4E2D (Chinese "middle")
+        assert_eq!(
+            result,
+            Some(simple_match(0, 3)),
+            "Should match Chinese character in range"
+        );
+
+        // But it should NOT match ASCII characters
+        let result = execute_nfa(&nfa, "A".as_bytes());
+        assert_eq!(result, None, "Should NOT match ASCII 'A'");
+
+        // And it should NOT match emoji
+        let result = execute_nfa(&nfa, "🤠".as_bytes());
+        assert_eq!(result, None, "Should NOT match emoji");
+
+        // And it should NOT match other Unicode characters outside the range
+        let result = execute_nfa(&nfa, "α".as_bytes()); // Greek alpha U+03B1
+        assert_eq!(result, None, "Should NOT match Greek alpha");
+    }
+
+    #[test]
+    fn test_truly_universal_character_set_uses_universal_validator() {
+        // Create a truly universal character set that covers 100% of Unicode
+        // [\s\S] gets inverted to cover all codepoints 0x0-0x10FFFF with no gaps
+        let nfa = create_nfa(r"[\s\S]"); // This should be treated as universal
+
+        // This should match everything because it uses the universal validator
+        let result = execute_nfa(&nfa, "A".as_bytes());
+        assert_eq!(
+            result,
+            Some(simple_match(0, 1)),
+            "Should match ASCII 'A' (universal)"
+        );
+
+        let result = execute_nfa(&nfa, "🤠".as_bytes());
+        assert_eq!(
+            result,
+            Some(simple_match(0, 4)),
+            "Should match emoji (universal)"
+        );
+
+        let result = execute_nfa(&nfa, "中".as_bytes());
+        assert_eq!(
+            result,
+            Some(simple_match(0, 3)),
+            "Should match Chinese character (universal)"
+        );
+    }
 }

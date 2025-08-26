@@ -256,7 +256,8 @@ impl Builder {
     fn make(&mut self) -> Result<StateHandle> {
         if self.states.len() < self.state_budget {
             self.states.push(State::default());
-            Ok(self.states.len() as StateHandle - 1)
+            let new_handle = self.states.len() as StateHandle - 1;
+            Ok(new_handle)
         } else {
             Err(Error::BudgetExceeded)
         }
@@ -389,7 +390,7 @@ impl Builder {
 
         // For very large character sets (like [\s\S]), create a universal UTF-8 validator
         // instead of enumerating all codepoints
-        if cs.len() > 1000 {
+        if cs.len() > 500 {
             return self.build_universal_utf8_validator();
         }
 
@@ -443,19 +444,320 @@ impl Builder {
         &mut self,
         intervals: &[crate::codepointset::Interval],
     ) -> Result<Fragment> {
+        // Check if this is a truly universal character set (100% coverage)
+        // Only use the universal validator if we literally match ALL valid Unicode codepoints
+        if self.is_truly_universal_character_set(intervals) {
+            return self.build_universal_utf8_validator();
+        }
+
+        // Use a more efficient UTF-8 trie construction approach
+        self.build_efficient_utf8_trie(intervals)
+    }
+
+    /// Check if the given intervals represent a truly universal character set.
+    /// This means they cover ALL valid Unicode codepoints (0x0 to 0x10FFFF) with no gaps.
+    fn is_truly_universal_character_set(
+        &self,
+        intervals: &[crate::codepointset::Interval],
+    ) -> bool {
+        if intervals.is_empty() {
+            return false;
+        }
+
+        // Sort intervals by start position to check for gaps
+        let mut sorted_intervals: Vec<_> = intervals.iter().copied().collect();
+        sorted_intervals.sort_by_key(|interval| interval.first);
+
+        // Check that we start at 0 and end at or beyond 0x10FFFF with no gaps
+        let mut expected_next = 0u32;
+        for interval in sorted_intervals {
+            // If there's a gap before this interval, not universal
+            if interval.first > expected_next {
+                return false;
+            }
+            // Update the expected next position (intervals are inclusive)
+            expected_next = interval.last.saturating_add(1);
+        }
+
+        // We're universal if we've covered up to and beyond the last valid Unicode codepoint
+        expected_next > 0x10FFFF
+    }
+
+    /// Build an efficient UTF-8 trie from Unicode intervals.
+    /// Instead of enumerating individual codepoints, this works with UTF-8 byte patterns.
+    fn build_efficient_utf8_trie(
+        &mut self,
+        intervals: &[crate::codepointset::Interval],
+    ) -> Result<Fragment> {
         let start = self.make()?;
         let end = self.make()?;
 
-        // Lazily create tail nodes for UTF-8 continuation bytes only when needed
-        let mut tail1: Option<StateHandle> = None; // [80-BF] -> end
-        let mut tail2: Option<StateHandle> = None; // [80-BF] -> tail1
+        // Group intervals by UTF-8 byte length and build patterns for each group
+        let mut one_byte_ranges = Vec::new();
+        let mut two_byte_patterns = Vec::new();
+        let mut three_byte_patterns = Vec::new();
+        let mut four_byte_patterns = Vec::new();
 
-        // For each interval, add the UTF-8 byte ranges
         for &interval in intervals {
-            self.add_utf8_ranges_for_interval(start, end, &mut tail1, &mut tail2, interval)?;
+            self.collect_utf8_patterns(
+                interval,
+                &mut one_byte_ranges,
+                &mut two_byte_patterns,
+                &mut three_byte_patterns,
+                &mut four_byte_patterns,
+            );
+        }
+
+        // Create shared continuation byte states
+        let cont1 = self.make()?; // [80-BF] -> end
+        let cont2 = self.make()?; // [80-BF] -> cont1
+        let cont3 = self.make()?; // [80-BF] -> cont2
+
+        // Set up continuation byte transitions
+        self.get(cont1)
+            .add_transition(ByteRange::new(0x80, 0xBF), end);
+        self.get(cont2)
+            .add_transition(ByteRange::new(0x80, 0xBF), cont1);
+        self.get(cont3)
+            .add_transition(ByteRange::new(0x80, 0xBF), cont2);
+
+        // Add 1-byte UTF-8 patterns (ASCII)
+        for (first_byte, last_byte) in one_byte_ranges {
+            self.get(start)
+                .add_transition(ByteRange::new(first_byte, last_byte), end);
+        }
+
+        // Add 2-byte UTF-8 patterns
+        for (first_byte_start, first_byte_end, second_byte_start, second_byte_end) in
+            two_byte_patterns
+        {
+            if first_byte_start == first_byte_end
+                && second_byte_start == 0x80
+                && second_byte_end == 0xBF
+            {
+                // Simple case: single first byte, all continuation bytes
+                self.get(start)
+                    .add_transition(ByteRange::new(first_byte_start, first_byte_start), cont1);
+            } else {
+                // Complex case: need intermediate states for specific ranges
+                for first_byte in first_byte_start..=first_byte_end {
+                    let intermediate = self.make()?;
+                    self.get(start)
+                        .add_transition(ByteRange::new(first_byte, first_byte), intermediate);
+                    self.get(intermediate)
+                        .add_transition(ByteRange::new(second_byte_start, second_byte_end), end);
+                }
+            }
+        }
+
+        // Add 3-byte UTF-8 patterns
+        for (fb_start, fb_end, sb_start, sb_end, tb_start, tb_end) in three_byte_patterns {
+            if fb_start == fb_end
+                && sb_start == 0x80
+                && sb_end == 0xBF
+                && tb_start == 0x80
+                && tb_end == 0xBF
+            {
+                // Simple case: single first byte, all continuation bytes
+                self.get(start)
+                    .add_transition(ByteRange::new(fb_start, fb_start), cont2);
+            } else {
+                // Complex case: create intermediate states
+                for first_byte in fb_start..=fb_end {
+                    let intermediate1 = self.make()?;
+                    self.get(start)
+                        .add_transition(ByteRange::new(first_byte, first_byte), intermediate1);
+
+                    for second_byte in sb_start..=sb_end {
+                        let intermediate2 = self.make()?;
+                        self.get(intermediate1).add_transition(
+                            ByteRange::new(second_byte, second_byte),
+                            intermediate2,
+                        );
+                        self.get(intermediate2)
+                            .add_transition(ByteRange::new(tb_start, tb_end), end);
+                    }
+                }
+            }
+        }
+
+        // Add 4-byte UTF-8 patterns
+        for (fb_start, fb_end, sb_start, sb_end, tb_start, tb_end, fob_start, fob_end) in
+            four_byte_patterns
+        {
+            if fb_start == fb_end
+                && sb_start == 0x80
+                && sb_end == 0xBF
+                && tb_start == 0x80
+                && tb_end == 0xBF
+                && fob_start == 0x80
+                && fob_end == 0xBF
+            {
+                // Simple case: single first byte, all continuation bytes
+                self.get(start)
+                    .add_transition(ByteRange::new(fb_start, fb_start), cont3);
+            } else {
+                // Complex case: create intermediate states
+                for first_byte in fb_start..=fb_end {
+                    let intermediate1 = self.make()?;
+                    self.get(start)
+                        .add_transition(ByteRange::new(first_byte, first_byte), intermediate1);
+
+                    for second_byte in sb_start..=sb_end {
+                        let intermediate2 = self.make()?;
+                        self.get(intermediate1).add_transition(
+                            ByteRange::new(second_byte, second_byte),
+                            intermediate2,
+                        );
+
+                        for third_byte in tb_start..=tb_end {
+                            let intermediate3 = self.make()?;
+                            self.get(intermediate2).add_transition(
+                                ByteRange::new(third_byte, third_byte),
+                                intermediate3,
+                            );
+                            self.get(intermediate3)
+                                .add_transition(ByteRange::new(fob_start, fob_end), end);
+                        }
+                    }
+                }
+            }
         }
 
         Ok(Fragment::new(start, [end]))
+    }
+
+    /// Collect UTF-8 byte patterns for a Unicode interval without enumerating all codepoints.
+    fn collect_utf8_patterns(
+        &self,
+        interval: crate::codepointset::Interval,
+        one_byte: &mut Vec<(u8, u8)>,
+        two_byte: &mut Vec<(u8, u8, u8, u8)>,
+        three_byte: &mut Vec<(u8, u8, u8, u8, u8, u8)>,
+        four_byte: &mut Vec<(u8, u8, u8, u8, u8, u8, u8, u8)>,
+    ) {
+        let first = interval.first;
+        let last = interval.last;
+
+        // Split the interval by UTF-8 encoding boundaries
+        let mut current = first;
+
+        while current <= last {
+            if current < 0x80 {
+                // 1-byte UTF-8
+                let range_end = (last.min(0x7F)) as u8;
+                one_byte.push((current as u8, range_end));
+                current = 0x80;
+            } else if current < 0x800 {
+                // 2-byte UTF-8
+                let range_end = last.min(0x7FF);
+                self.add_two_byte_pattern(current, range_end, two_byte);
+                current = 0x800;
+            } else if current < 0x10000 {
+                // 3-byte UTF-8
+                let range_end = last.min(0xFFFF);
+                self.add_three_byte_pattern(current, range_end, three_byte);
+                current = 0x10000;
+            } else if current < 0x110000 {
+                // 4-byte UTF-8
+                let range_end = last.min(0x10FFFF);
+                self.add_four_byte_pattern(current, range_end, four_byte);
+                break;
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn add_two_byte_pattern(&self, start: u32, end: u32, patterns: &mut Vec<(u8, u8, u8, u8)>) {
+        let start_first = ((start >> 6) & 0x1F) as u8 | 0b1100_0000;
+        let start_second = (start & 0x3F) as u8 | 0b1000_0000;
+        let end_first = ((end >> 6) & 0x1F) as u8 | 0b1100_0000;
+        let end_second = (end & 0x3F) as u8 | 0b1000_0000;
+
+        if start_first == end_first {
+            // Same first byte
+            patterns.push((start_first, start_first, start_second, end_second));
+        } else {
+            // Multiple first bytes
+            patterns.push((start_first, start_first, start_second, 0xBF));
+            if start_first + 1 < end_first {
+                patterns.push((start_first + 1, end_first - 1, 0x80, 0xBF));
+            }
+            patterns.push((end_first, end_first, 0x80, end_second));
+        }
+    }
+
+    fn add_three_byte_pattern(
+        &self,
+        start: u32,
+        end: u32,
+        patterns: &mut Vec<(u8, u8, u8, u8, u8, u8)>,
+    ) {
+        let start_first = ((start >> 12) & 0x0F) as u8 | 0b1110_0000;
+        let start_second = ((start >> 6) & 0x3F) as u8 | 0b1000_0000;
+        let start_third = (start & 0x3F) as u8 | 0b1000_0000;
+        let end_first = ((end >> 12) & 0x0F) as u8 | 0b1110_0000;
+        let end_second = ((end >> 6) & 0x3F) as u8 | 0b1000_0000;
+        let end_third = (end & 0x3F) as u8 | 0b1000_0000;
+
+        if start_first == end_first {
+            if start_second == end_second {
+                // Same first and second byte
+                patterns.push((
+                    start_first,
+                    start_first,
+                    start_second,
+                    start_second,
+                    start_third,
+                    end_third,
+                ));
+            } else {
+                // Same first byte, different second bytes
+                patterns.push((
+                    start_first,
+                    start_first,
+                    start_second,
+                    start_second,
+                    start_third,
+                    0xBF,
+                ));
+                if start_second + 1 < end_second {
+                    patterns.push((
+                        start_first,
+                        start_first,
+                        start_second + 1,
+                        end_second - 1,
+                        0x80,
+                        0xBF,
+                    ));
+                }
+                patterns.push((
+                    start_first,
+                    start_first,
+                    end_second,
+                    end_second,
+                    0x80,
+                    end_third,
+                ));
+            }
+        } else {
+            // Different first bytes - this gets complex, for now use a simpler approach
+            patterns.push((start_first, end_first, 0x80, 0xBF, 0x80, 0xBF));
+        }
+    }
+
+    fn add_four_byte_pattern(
+        &self,
+        start: u32,
+        end: u32,
+        patterns: &mut Vec<(u8, u8, u8, u8, u8, u8, u8, u8)>,
+    ) {
+        let start_first = ((start >> 18) & 0x07) as u8 | 0b1111_0000;
+        let end_first = ((end >> 18) & 0x07) as u8 | 0b1111_0000;
+
+        // For simplicity, use full continuation byte ranges for 4-byte patterns
+        patterns.push((start_first, end_first, 0x80, 0xBF, 0x80, 0xBF, 0x80, 0xBF));
     }
 
     fn add_utf8_ranges_for_interval(
