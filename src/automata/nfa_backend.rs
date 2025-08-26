@@ -939,4 +939,41 @@ mod tests {
         let result = execute_nfa(&nfa, "🚀".as_bytes());
         assert_eq!(result, None);
     }
+
+    #[test]
+    fn test_bracket_rejects_invalid_utf8() {
+        // Test that bracket expressions properly reject invalid UTF-8 sequences
+        let nfa = create_nfa("[\\s\\S]"); // Should match any valid UTF-8 character
+
+        // Test overlong 2-byte sequence: should be encoded as 1-byte but encoded as 2-byte
+        // 'A' (U+0041) as overlong 2-byte: [C1 81] instead of [41]
+        let overlong_2byte = [0xC1, 0x81];
+        let result = execute_nfa(&nfa, &overlong_2byte);
+        assert_eq!(result, None, "Should reject overlong 2-byte sequence");
+
+        // Test overlong 3-byte sequence: 'A' (U+0041) as overlong 3-byte: [E0 81 81]
+        let overlong_3byte = [0xE0, 0x81, 0x81];
+        let result = execute_nfa(&nfa, &overlong_3byte);
+        assert_eq!(result, None, "Should reject overlong 3-byte sequence");
+
+        // Test invalid start byte in 2-byte range: [C0 80] (overlong encoding of null)
+        let invalid_2byte = [0xC0, 0x80];
+        let result = execute_nfa(&nfa, &invalid_2byte);
+        assert_eq!(result, None, "Should reject invalid 2-byte sequence");
+
+        // Test valid UTF-8 still works
+        let result = execute_nfa(&nfa, "A".as_bytes()); // Valid 1-byte
+        assert_eq!(
+            result,
+            Some(simple_match(0, 1)),
+            "Should accept valid 1-byte UTF-8"
+        );
+
+        let result = execute_nfa(&nfa, "é".as_bytes()); // Valid 2-byte
+        assert_eq!(
+            result,
+            Some(simple_match(0, 2)),
+            "Should accept valid 2-byte UTF-8"
+        );
+    }
 }
