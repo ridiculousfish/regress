@@ -436,20 +436,13 @@ impl Builder {
         let start = self.make()?;
         let end = self.make()?;
 
-        // Create reusable tail nodes for UTF-8 continuation bytes
-        // tail1: [80-BF] -> end
-        let tail1 = self.make()?;
-        self.get(tail1)
-            .add_transition(ByteRange::new(0x80, 0xBF), end);
-
-        // tail2: [80-BF] -> tail1
-        let tail2 = self.make()?;
-        self.get(tail2)
-            .add_transition(ByteRange::new(0x80, 0xBF), tail1);
+        // Lazily create tail nodes for UTF-8 continuation bytes only when needed
+        let mut tail1: Option<StateHandle> = None; // [80-BF] -> end
+        let mut tail2: Option<StateHandle> = None; // [80-BF] -> tail1
 
         // For each interval, add the UTF-8 byte ranges
         for &interval in intervals {
-            self.add_utf8_ranges_for_interval(start, end, tail1, tail2, interval)?;
+            self.add_utf8_ranges_for_interval(start, end, &mut tail1, &mut tail2, interval)?;
         }
 
         Ok(Fragment::new(start, [end]))
@@ -459,8 +452,8 @@ impl Builder {
         &mut self,
         start: StateHandle,
         end: StateHandle,
-        tail1: StateHandle, // [80-BF] -> end
-        tail2: StateHandle, // [80-BF] -> tail1
+        tail1: &mut Option<StateHandle>, // [80-BF] -> end
+        tail2: &mut Option<StateHandle>, // [80-BF] -> tail1
         interval: crate::codepointset::Interval,
     ) -> Result<()> {
         let first = interval.first;
@@ -491,8 +484,16 @@ impl Builder {
                 let first_byte_start = self.utf8_first_byte_2(cp_start);
                 let first_byte_end = self.utf8_first_byte_2(cp_end);
                 if first_byte_start <= first_byte_end {
-                    self.get(start)
-                        .add_transition(ByteRange::new(first_byte_start, first_byte_end), tail1);
+                    // Lazily create tail1 if needed
+                    if tail1.is_none() {
+                        let t1 = self.make()?;
+                        self.get(t1).add_transition(ByteRange::new(0x80, 0xBF), end);
+                        *tail1 = Some(t1);
+                    }
+                    self.get(start).add_transition(
+                        ByteRange::new(first_byte_start, first_byte_end),
+                        tail1.unwrap(),
+                    );
                 }
             }
         }
@@ -506,13 +507,27 @@ impl Builder {
                 let first_byte_start = self.utf8_first_byte_3(cp_start);
                 let first_byte_end = self.utf8_first_byte_3(cp_end);
                 if first_byte_start <= first_byte_end {
-                    self.get(start)
-                        .add_transition(ByteRange::new(first_byte_start, first_byte_end), tail2);
+                    // Lazily create tail2 if needed (which depends on tail1)
+                    if tail1.is_none() {
+                        let t1 = self.make()?;
+                        self.get(t1).add_transition(ByteRange::new(0x80, 0xBF), end);
+                        *tail1 = Some(t1);
+                    }
+                    if tail2.is_none() {
+                        let t2 = self.make()?;
+                        self.get(t2)
+                            .add_transition(ByteRange::new(0x80, 0xBF), tail1.unwrap());
+                        *tail2 = Some(t2);
+                    }
+                    self.get(start).add_transition(
+                        ByteRange::new(first_byte_start, first_byte_end),
+                        tail2.unwrap(),
+                    );
                 }
             }
         }
 
-        // 4-byte UTF-8 range: first byte [F0-F4] -> tail2 (reusing tail2 since it needs 2 more continuation bytes)
+        // 4-byte UTF-8 range: first byte [F0-F4] -> intermediate -> tail2
         if last >= 0x10000 && first <= 0x10FFFF {
             let cp_start = first.max(0x10000);
             let cp_end = last.min(0x10FFFF);
@@ -521,6 +536,19 @@ impl Builder {
                 let first_byte_start = self.utf8_first_byte_4(cp_start);
                 let first_byte_end = self.utf8_first_byte_4(cp_end);
                 if first_byte_start <= first_byte_end {
+                    // Lazily create tail2 if needed (which depends on tail1)
+                    if tail1.is_none() {
+                        let t1 = self.make()?;
+                        self.get(t1).add_transition(ByteRange::new(0x80, 0xBF), end);
+                        *tail1 = Some(t1);
+                    }
+                    if tail2.is_none() {
+                        let t2 = self.make()?;
+                        self.get(t2)
+                            .add_transition(ByteRange::new(0x80, 0xBF), tail1.unwrap());
+                        *tail2 = Some(t2);
+                    }
+
                     // For 4-byte, we need one more continuation byte than tail2 provides
                     // So create an intermediate state: [F0-F4] -> intermediate -> tail2
                     let intermediate = self.make()?;
@@ -529,7 +557,7 @@ impl Builder {
                         intermediate,
                     );
                     self.get(intermediate)
-                        .add_transition(ByteRange::new(0x80, 0xBF), tail2);
+                        .add_transition(ByteRange::new(0x80, 0xBF), tail2.unwrap());
                 }
             }
         }
