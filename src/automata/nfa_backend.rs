@@ -1,8 +1,8 @@
 //! NFA execution backend for pattern matching.
 
 use crate::automata::nfa::{
-    FULL_MATCH_END, FULL_MATCH_START, GOAL_STATE, Nfa, RegisterIdx, StateHandle, TEXT_POS_NO_MATCH,
-    TextPos,
+    Nfa, RegisterIdx, StateHandle, TextPos, FULL_MATCH_END, FULL_MATCH_START, GOAL_STATE,
+    TEXT_POS_NO_MATCH,
 };
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;

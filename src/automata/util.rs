@@ -1,6 +1,6 @@
 //! Conversion of IR to non-deterministic finite automata.
 
-use crate::automata::nfa::{ByteRange, GOAL_STATE, Nfa, StateHandle};
+use crate::automata::nfa::{ByteRange, Nfa, StateHandle, GOAL_STATE};
 use crate::ir::Node;
 use core::fmt;
 

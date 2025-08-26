@@ -8,7 +8,7 @@ use crate::unicode;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::iter::once;
-use smallvec::{SmallVec, smallvec};
+use smallvec::{smallvec, SmallVec};
 
 #[derive(Debug)]
 pub struct Nfa {
@@ -387,32 +387,42 @@ impl Builder {
             return self.build_char(cs[0]);
         }
 
-        let start = self.make()?;
-        let end = self.make()?;
-        let mut buff = [0; 4];
-
-        // Insert each codepoint's UTF-8 bytes into a trie rooted at `start`.
-        for &codepoint in cs {
-            let ch = match char::from_u32(codepoint) {
-                Some(c) => c,
-                None => return Err(Error::NotUTF8),
-            };
-
-            let utf8_bytes = ch.encode_utf8(&mut buff);
-
-            // Walk/create along the path for these bytes.
-            let mut current = start;
-            for &byte in utf8_bytes.as_bytes() {
-                current = self.ensure_edge(current, byte)?;
-            }
-
-            // After consuming all bytes, accept by epsilon to the common `end` node.
-            // This avoids needing the last byte to point *directly* to `end`, which
-            // would prevent sharing if another char needs to continue via the same node.
-            self.get(current).add_eps(end);
+        // For very large character sets (like [\s\S]), create a universal UTF-8 validator
+        // instead of enumerating all codepoints
+        if cs.len() > 1000 {
+            return self.build_universal_utf8_validator();
         }
 
-        Ok(Fragment::new(start, [end]))
+        // Convert the character set to intervals for range-based optimization
+        let mut intervals = Vec::new();
+        let mut sorted_cs = cs.to_vec();
+        sorted_cs.sort_unstable();
+
+        let mut start_cp = sorted_cs[0];
+        let mut end_cp = sorted_cs[0];
+
+        for &cp in &sorted_cs[1..] {
+            if cp == end_cp + 1 {
+                // Consecutive codepoint - extend the current interval
+                end_cp = cp;
+            } else {
+                // Gap found - close current interval and start new one
+                intervals.push(crate::codepointset::Interval {
+                    first: start_cp,
+                    last: end_cp,
+                });
+                start_cp = cp;
+                end_cp = cp;
+            }
+        }
+        // Don't forget the last interval
+        intervals.push(crate::codepointset::Interval {
+            first: start_cp,
+            last: end_cp,
+        });
+
+        // Use the same range-based approach as brackets
+        self.build_byte_range_trie_from_intervals(&intervals)
     }
 
     fn build_bracket(&mut self, contents: &crate::types::BracketContents) -> Result<Fragment> {
@@ -533,47 +543,65 @@ impl Builder {
         cp_start: u32,
         cp_end: u32,
     ) -> Result<()> {
-        // 3-byte UTF-8 has different validation rules to prevent overlong sequences:
-        // [E0] [A0-BF] [80-BF] for U+0800-U+0FFF (first continuation byte >= A0)
-        // [E1-EF] [80-BF] [80-BF] for U+1000-U+FFFF (normal continuation bytes)
+        // Build a proper UTF-8 trie for 3-byte sequences in the range [cp_start, cp_end]
 
-        // Handle the E0 case specially (U+0800-U+0FFF)
-        if cp_start <= 0x0FFF {
-            let range_end = cp_end.min(0x0FFF);
-            if cp_start <= range_end {
-                // Create states for [E0] [A0-BF] [80-BF] path
-                if tail1.is_none() {
-                    let t1 = self.make()?;
-                    self.get(t1).add_transition(ByteRange::new(0x80, 0xBF), end);
-                    *tail1 = Some(t1);
-                }
-                // Special intermediate for E0 with restricted second byte
-                let e0_intermediate = self.make()?;
-                self.get(start)
-                    .add_transition(ByteRange::new(0xE0, 0xE0), e0_intermediate);
-                self.get(e0_intermediate)
-                    .add_transition(ByteRange::new(0xA0, 0xBF), tail1.unwrap());
-            }
+        // Helper to ensure tail nodes exist
+        if tail1.is_none() {
+            let t1 = self.make()?;
+            self.get(t1).add_transition(ByteRange::new(0x80, 0xBF), end);
+            *tail1 = Some(t1);
+        }
+        if tail2.is_none() {
+            let t2 = self.make()?;
+            self.get(t2)
+                .add_transition(ByteRange::new(0x80, 0xBF), tail1.unwrap());
+            *tail2 = Some(t2);
         }
 
-        // Handle the E1-EF case (U+1000-U+FFFF)
-        if cp_end >= 0x1000 {
-            let range_start = cp_start.max(0x1000);
-            if range_start <= cp_end {
-                // Create standard tail2 for [E1-EF] [80-BF] [80-BF] path
-                if tail1.is_none() {
-                    let t1 = self.make()?;
-                    self.get(t1).add_transition(ByteRange::new(0x80, 0xBF), end);
-                    *tail1 = Some(t1);
+        // Convert the codepoint range to UTF-8 byte sequences and build trie
+        let mut start_bytes = [0u8; 4];
+        let mut end_bytes = [0u8; 4];
+
+        let start_char = char::from_u32(cp_start).ok_or(Error::NotUTF8)?;
+        let end_char = char::from_u32(cp_end).ok_or(Error::NotUTF8)?;
+
+        let start_utf8 = start_char.encode_utf8(&mut start_bytes);
+        let end_utf8 = end_char.encode_utf8(&mut end_bytes);
+
+        // Ensure we're dealing with 3-byte sequences
+        if start_utf8.len() != 3 || end_utf8.len() != 3 {
+            return Err(Error::NotUTF8);
+        }
+
+        // If start and end have same first 2 bytes, we can optimize
+        if start_bytes[0] == end_bytes[0] && start_bytes[1] == end_bytes[1] {
+            // Same prefix - create path for specific bytes with UTF-8 validation
+            let b0 = start_bytes[0];
+            let b1 = start_bytes[1];
+
+            // Validate UTF-8 overlong sequences
+            if b0 == 0xE0 && b1 < 0xA0 {
+                return Err(Error::NotUTF8); // Overlong sequence
+            }
+
+            let b0_state = self.ensure_edge(start, b0)?;
+            let b1_state = self.ensure_edge(b0_state, b1)?;
+
+            // Add range for final byte directly to end
+            self.get(b1_state)
+                .add_transition(ByteRange::new(start_bytes[2], end_bytes[2]), end);
+        } else {
+            // Different prefixes - fall back to individual codepoints
+            for cp in cp_start..=cp_end {
+                let ch = char::from_u32(cp).ok_or(Error::NotUTF8)?;
+                let mut bytes = [0u8; 4];
+                let utf8_str = ch.encode_utf8(&mut bytes);
+
+                let mut current = start;
+                for &byte in utf8_str.as_bytes() {
+                    current = self.ensure_edge(current, byte)?;
                 }
-                if tail2.is_none() {
-                    let t2 = self.make()?;
-                    self.get(t2)
-                        .add_transition(ByteRange::new(0x80, 0xBF), tail1.unwrap());
-                    *tail2 = Some(t2);
-                }
-                self.get(start)
-                    .add_transition(ByteRange::new(0xE1, 0xEF), tail2.unwrap());
+                self.get(current).add_eps(end);
             }
         }
 
@@ -589,10 +617,8 @@ impl Builder {
         cp_start: u32,
         cp_end: u32,
     ) -> Result<()> {
-        // 4-byte UTF-8 has different validation rules to prevent overlong sequences:
-        // [F0] [90-BF] [80-BF] [80-BF] for U+10000-U+3FFFF (first continuation >= 90)
-        // [F1-F3] [80-BF] [80-BF] [80-BF] for U+40000-U+FFFFF (normal continuation)
-        // [F4] [80-8F] [80-BF] [80-BF] for U+100000-U+10FFFF (first continuation <= 8F)
+        // Build a proper UTF-8 trie for 4-byte sequences in the range [cp_start, cp_end]
+        // This needs to handle the specific byte patterns rather than broad ranges
 
         // Helper to ensure tail nodes exist
         if tail1.is_none() {
@@ -607,44 +633,127 @@ impl Builder {
             *tail2 = Some(t2);
         }
 
-        // Handle F0 case specially (U+10000-U+3FFFF)
-        if cp_start <= 0x3FFFF {
-            let range_end = cp_end.min(0x3FFFF);
-            if cp_start <= range_end {
-                let f0_intermediate = self.make()?;
-                self.get(start)
-                    .add_transition(ByteRange::new(0xF0, 0xF0), f0_intermediate);
-                self.get(f0_intermediate)
-                    .add_transition(ByteRange::new(0x90, 0xBF), tail2.unwrap());
-            }
-        }
+        // Convert the codepoint range to UTF-8 byte sequences and build trie
+        // We'll encode the start and end codepoints and build paths for the range
+        let mut start_bytes = [0u8; 4];
+        let mut end_bytes = [0u8; 4];
 
-        // Handle F1-F3 case (U+40000-U+FFFFF)
-        if cp_end >= 0x40000 && cp_start <= 0xFFFFF {
-            let range_start = cp_start.max(0x40000);
-            let range_end = cp_end.min(0xFFFFF);
-            if range_start <= range_end {
-                let f1_f3_intermediate = self.make()?;
-                self.get(start)
-                    .add_transition(ByteRange::new(0xF1, 0xF3), f1_f3_intermediate);
-                self.get(f1_f3_intermediate)
-                    .add_transition(ByteRange::new(0x80, 0xBF), tail2.unwrap());
-            }
-        }
+        let start_char = char::from_u32(cp_start).ok_or(Error::NotUTF8)?;
+        let end_char = char::from_u32(cp_end).ok_or(Error::NotUTF8)?;
 
-        // Handle F4 case specially (U+100000-U+10FFFF)
-        if cp_end >= 0x100000 {
-            let range_start = cp_start.max(0x100000);
-            if range_start <= cp_end {
-                let f4_intermediate = self.make()?;
-                self.get(start)
-                    .add_transition(ByteRange::new(0xF4, 0xF4), f4_intermediate);
-                self.get(f4_intermediate)
-                    .add_transition(ByteRange::new(0x80, 0x8F), tail2.unwrap());
+        start_char.encode_utf8(&mut start_bytes);
+        end_char.encode_utf8(&mut end_bytes);
+
+        // If start and end have same first 3 bytes, we can optimize
+        if start_bytes[0] == end_bytes[0]
+            && start_bytes[1] == end_bytes[1]
+            && start_bytes[2] == end_bytes[2]
+        {
+            // Same prefix - create path for specific bytes
+            let b0_state = self.ensure_edge(start, start_bytes[0])?;
+            let b1_state = self.ensure_edge(b0_state, start_bytes[1])?;
+            let b2_state = self.ensure_edge(b1_state, start_bytes[2])?;
+
+            // Add range for final byte directly to end (bypassing epsilon)
+            self.get(b2_state)
+                .add_transition(ByteRange::new(start_bytes[3], end_bytes[3]), end);
+        } else {
+            // Different prefixes - fall back to individual codepoints
+            for cp in cp_start..=cp_end {
+                let ch = char::from_u32(cp).ok_or(Error::NotUTF8)?;
+                let mut bytes = [0u8; 4];
+                let utf8_str = ch.encode_utf8(&mut bytes);
+
+                let mut current = start;
+                for &byte in utf8_str.as_bytes() {
+                    current = self.ensure_edge(current, byte)?;
+                }
+                self.get(current).add_eps(end);
             }
         }
 
         Ok(())
+    }
+
+    fn build_universal_utf8_validator(&mut self) -> Result<Fragment> {
+        // Create a universal UTF-8 validator that accepts any valid UTF-8 sequence
+        // This is more efficient than enumerating all possible codepoints
+        let start = self.make()?;
+        let end = self.make()?;
+
+        // 1-byte sequences: 0x00-0x7F directly to end
+        self.get(start)
+            .add_transition(ByteRange::new(0x00, 0x7F), end);
+
+        // 2-byte sequences: [C2-DF] [80-BF] (excludes overlong C0-C1)
+        let two_byte_intermediate = self.make()?;
+        self.get(start)
+            .add_transition(ByteRange::new(0xC2, 0xDF), two_byte_intermediate);
+        self.get(two_byte_intermediate)
+            .add_transition(ByteRange::new(0x80, 0xBF), end);
+
+        // 3-byte sequences:
+        // [E0] [A0-BF] [80-BF] (excludes overlong sequences)
+        let e0_intermediate = self.make()?;
+        let e0_continuation = self.make()?;
+        self.get(start)
+            .add_transition(ByteRange::new(0xE0, 0xE0), e0_intermediate);
+        self.get(e0_intermediate)
+            .add_transition(ByteRange::new(0xA0, 0xBF), e0_continuation);
+        self.get(e0_continuation)
+            .add_transition(ByteRange::new(0x80, 0xBF), end);
+
+        // [E1-EF] [80-BF] [80-BF] (normal 3-byte sequences)
+        let three_byte_intermediate = self.make()?;
+        let three_byte_continuation = self.make()?;
+        self.get(start)
+            .add_transition(ByteRange::new(0xE1, 0xEF), three_byte_intermediate);
+        self.get(three_byte_intermediate)
+            .add_transition(ByteRange::new(0x80, 0xBF), three_byte_continuation);
+        self.get(three_byte_continuation)
+            .add_transition(ByteRange::new(0x80, 0xBF), end);
+
+        // 4-byte sequences:
+        // [F0] [90-BF] [80-BF] [80-BF] (excludes overlong sequences)
+        let f0_intermediate = self.make()?;
+        let f0_continuation1 = self.make()?;
+        let f0_continuation2 = self.make()?;
+        self.get(start)
+            .add_transition(ByteRange::new(0xF0, 0xF0), f0_intermediate);
+        self.get(f0_intermediate)
+            .add_transition(ByteRange::new(0x90, 0xBF), f0_continuation1);
+        self.get(f0_continuation1)
+            .add_transition(ByteRange::new(0x80, 0xBF), f0_continuation2);
+        self.get(f0_continuation2)
+            .add_transition(ByteRange::new(0x80, 0xBF), end);
+
+        // [F1-F3] [80-BF] [80-BF] [80-BF] (normal 4-byte sequences)
+        let four_byte_intermediate = self.make()?;
+        let four_byte_continuation1 = self.make()?;
+        let four_byte_continuation2 = self.make()?;
+        self.get(start)
+            .add_transition(ByteRange::new(0xF1, 0xF3), four_byte_intermediate);
+        self.get(four_byte_intermediate)
+            .add_transition(ByteRange::new(0x80, 0xBF), four_byte_continuation1);
+        self.get(four_byte_continuation1)
+            .add_transition(ByteRange::new(0x80, 0xBF), four_byte_continuation2);
+        self.get(four_byte_continuation2)
+            .add_transition(ByteRange::new(0x80, 0xBF), end);
+
+        // [F4] [80-8F] [80-BF] [80-BF] (restricted to U+10FFFF max)
+        let f4_intermediate = self.make()?;
+        let f4_continuation1 = self.make()?;
+        let f4_continuation2 = self.make()?;
+        self.get(start)
+            .add_transition(ByteRange::new(0xF4, 0xF4), f4_intermediate);
+        self.get(f4_intermediate)
+            .add_transition(ByteRange::new(0x80, 0x8F), f4_continuation1);
+        self.get(f4_continuation1)
+            .add_transition(ByteRange::new(0x80, 0xBF), f4_continuation2);
+        self.get(f4_continuation2)
+            .add_transition(ByteRange::new(0x80, 0xBF), end);
+
+        Ok(Fragment::new(start, [end]))
     }
 
     // Helper functions to compute UTF-8 first bytes for different sequence lengths
