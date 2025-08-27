@@ -425,18 +425,7 @@ impl Builder {
             );
         }
 
-        // Create shared continuation byte states
-        let cont1 = self.make()?; // [80-BF] -> end
-        let cont2 = self.make()?; // [80-BF] -> cont1
-        let cont3 = self.make()?; // [80-BF] -> cont2
-
-        // Set up continuation byte transitions
-        self.get(cont1)
-            .add_transition(ByteRange::new(0x80, 0xBF), end);
-        self.get(cont2)
-            .add_transition(ByteRange::new(0x80, 0xBF), cont1);
-        self.get(cont3)
-            .add_transition(ByteRange::new(0x80, 0xBF), cont2);
+        // No shared continuation states - create specific intermediate states for exact byte ranges
 
         // Add 1-byte UTF-8 patterns (ASCII)
         for (first_byte, last_byte) in one_byte_ranges {
@@ -448,52 +437,32 @@ impl Builder {
         for (first_byte_start, first_byte_end, second_byte_start, second_byte_end) in
             two_byte_patterns
         {
-            if first_byte_start == first_byte_end
-                && second_byte_start == 0x80
-                && second_byte_end == 0xBF
-            {
-                // Simple case: single first byte, all continuation bytes
+            // Always create specific intermediate states for exact byte ranges
+            for first_byte in first_byte_start..=first_byte_end {
+                let intermediate = self.make()?;
                 self.get(start)
-                    .add_transition(ByteRange::new(first_byte_start, first_byte_start), cont1);
-            } else {
-                // Complex case: need intermediate states for specific ranges
-                for first_byte in first_byte_start..=first_byte_end {
-                    let intermediate = self.make()?;
-                    self.get(start)
-                        .add_transition(ByteRange::new(first_byte, first_byte), intermediate);
-                    self.get(intermediate)
-                        .add_transition(ByteRange::new(second_byte_start, second_byte_end), end);
-                }
+                    .add_transition(ByteRange::new(first_byte, first_byte), intermediate);
+                self.get(intermediate)
+                    .add_transition(ByteRange::new(second_byte_start, second_byte_end), end);
             }
         }
 
         // Add 3-byte UTF-8 patterns
         for (fb_start, fb_end, sb_start, sb_end, tb_start, tb_end) in three_byte_patterns {
-            if fb_start == fb_end
-                && sb_start == 0x80
-                && sb_end == 0xBF
-                && tb_start == 0x80
-                && tb_end == 0xBF
-            {
-                // Simple case: single first byte, all continuation bytes
+            // Always create specific intermediate states for exact byte ranges
+            for first_byte in fb_start..=fb_end {
+                let intermediate1 = self.make()?;
                 self.get(start)
-                    .add_transition(ByteRange::new(fb_start, fb_start), cont2);
-            } else {
-                // Complex case: create intermediate states
-                for first_byte in fb_start..=fb_end {
-                    let intermediate1 = self.make()?;
-                    self.get(start)
-                        .add_transition(ByteRange::new(first_byte, first_byte), intermediate1);
+                    .add_transition(ByteRange::new(first_byte, first_byte), intermediate1);
 
-                    for second_byte in sb_start..=sb_end {
-                        let intermediate2 = self.make()?;
-                        self.get(intermediate1).add_transition(
-                            ByteRange::new(second_byte, second_byte),
-                            intermediate2,
-                        );
-                        self.get(intermediate2)
-                            .add_transition(ByteRange::new(tb_start, tb_end), end);
-                    }
+                for second_byte in sb_start..=sb_end {
+                    let intermediate2 = self.make()?;
+                    self.get(intermediate1).add_transition(
+                        ByteRange::new(second_byte, second_byte),
+                        intermediate2,
+                    );
+                    self.get(intermediate2)
+                        .add_transition(ByteRange::new(tb_start, tb_end), end);
                 }
             }
         }
@@ -502,40 +471,27 @@ impl Builder {
         for (fb_start, fb_end, sb_start, sb_end, tb_start, tb_end, fob_start, fob_end) in
             four_byte_patterns
         {
-            if fb_start == fb_end
-                && sb_start == 0x80
-                && sb_end == 0xBF
-                && tb_start == 0x80
-                && tb_end == 0xBF
-                && fob_start == 0x80
-                && fob_end == 0xBF
-            {
-                // Simple case: single first byte, all continuation bytes
+            // Always create specific intermediate states for exact byte ranges
+            for first_byte in fb_start..=fb_end {
+                let intermediate1 = self.make()?;
                 self.get(start)
-                    .add_transition(ByteRange::new(fb_start, fb_start), cont3);
-            } else {
-                // Complex case: create intermediate states
-                for first_byte in fb_start..=fb_end {
-                    let intermediate1 = self.make()?;
-                    self.get(start)
-                        .add_transition(ByteRange::new(first_byte, first_byte), intermediate1);
+                    .add_transition(ByteRange::new(first_byte, first_byte), intermediate1);
 
-                    for second_byte in sb_start..=sb_end {
-                        let intermediate2 = self.make()?;
-                        self.get(intermediate1).add_transition(
-                            ByteRange::new(second_byte, second_byte),
-                            intermediate2,
+                for second_byte in sb_start..=sb_end {
+                    let intermediate2 = self.make()?;
+                    self.get(intermediate1).add_transition(
+                        ByteRange::new(second_byte, second_byte),
+                        intermediate2,
+                    );
+
+                    for third_byte in tb_start..=tb_end {
+                        let intermediate3 = self.make()?;
+                        self.get(intermediate2).add_transition(
+                            ByteRange::new(third_byte, third_byte),
+                            intermediate3,
                         );
-
-                        for third_byte in tb_start..=tb_end {
-                            let intermediate3 = self.make()?;
-                            self.get(intermediate2).add_transition(
-                                ByteRange::new(third_byte, third_byte),
-                                intermediate3,
-                            );
-                            self.get(intermediate3)
-                                .add_transition(ByteRange::new(fob_start, fob_end), end);
-                        }
+                        self.get(intermediate3)
+                            .add_transition(ByteRange::new(fob_start, fob_end), end);
                     }
                 }
             }
@@ -874,6 +830,7 @@ impl Builder {
         let close_group = self.join_with_write(&body.ends, close_reg)?;
         Ok(Fragment::new(open_group, [close_group]))
     }
+
 }
 
 /// Try converting a regular expression to a NFA.
