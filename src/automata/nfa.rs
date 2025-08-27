@@ -236,8 +236,6 @@ impl Builder {
             Node::CharSet(chars) => self.build_char_set(chars),
             Node::Cat(seq) => self.build_cat(seq),
             Node::Alt(left, right) => self.build_alt(left, right),
-            Node::Loop1CharBody { loopee, quant } => self.build_loop(loopee, quant),
-            Node::Loop { loopee, quant, .. } => self.build_loop(loopee, quant),
             Node::CaptureGroup(contents, group_id) => self.build_capture_group(contents, *group_id),
             Node::NamedCaptureGroup(contents, group_id, _name) => {
                 self.build_capture_group(contents, *group_id)
@@ -246,6 +244,11 @@ impl Builder {
                 "Backreferences not supported by NFAs".to_string(),
             )),
             Node::Bracket(contents) => self.build_bracket(contents),
+            Node::LookaroundAssertion { .. } => Err(Error::UnsupportedInstruction(
+                "Lookaround assertions not supported by NFAs".to_string(),
+            )),
+            Node::Loop1CharBody { loopee, quant } => self.build_loop(loopee, quant),
+            Node::Loop { loopee, quant, .. } => self.build_loop(loopee, quant),
 
             // All other node types are unsupported
             unsupported => Err(Error::UnsupportedInstruction(node_description(unsupported))),
