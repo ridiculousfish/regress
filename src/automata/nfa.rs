@@ -2,8 +2,9 @@
 
 use crate::automata::nfa_optimize::optimize_states;
 use crate::automata::util::node_description;
+use crate::codepointset::CodePointSet;
 use crate::ir::{self, Node};
-use crate::types::CaptureGroupID;
+use crate::types::{BracketContents, CaptureGroupID};
 use crate::unicode;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::ToString, vec::Vec};
@@ -369,56 +370,17 @@ impl Builder {
     }
 
     fn build_char_set(&mut self, cs: &[u32]) -> Result<Fragment> {
-        // Handle empty character set - create a node with no outgoing edges (fails to match)
-        if cs.is_empty() {
-            let start = self.make()?;
-            return Ok(Fragment::new(start, []));
+        // Note in practice char sets are quite small, as enforced in the IR,
+        // so this loop is fine.
+        let mut cps = CodePointSet::new();
+        for &c in cs {
+            cps.add_one(c);
         }
-
-        if cs.len() == 1 {
-            return self.build_char(cs[0]);
-        }
-
-        // For very large character sets (like [\s\S]), create a universal UTF-8 validator
-        // instead of enumerating all codepoints
-        if cs.len() > 500 {
-            return self.build_universal_utf8_validator();
-        }
-
-        // Convert the character set to intervals for range-based optimization
-        let mut intervals = Vec::new();
-        let mut sorted_cs = cs.to_vec();
-        sorted_cs.sort_unstable();
-
-        let mut start_cp = sorted_cs[0];
-        let mut end_cp = sorted_cs[0];
-
-        for &cp in &sorted_cs[1..] {
-            if cp == end_cp + 1 {
-                // Consecutive codepoint - extend the current interval
-                end_cp = cp;
-            } else {
-                // Gap found - close current interval and start new one
-                intervals.push(crate::codepointset::Interval {
-                    first: start_cp,
-                    last: end_cp,
-                });
-                start_cp = cp;
-                end_cp = cp;
-            }
-        }
-        // Don't forget the last interval
-        intervals.push(crate::codepointset::Interval {
-            first: start_cp,
-            last: end_cp,
-        });
-
-        // Use the same range-based approach as brackets
-        self.build_byte_range_trie_from_intervals(&intervals)
+        self.build_byte_range_trie_from_cps(&cps)
     }
 
-    fn build_bracket(&mut self, contents: &crate::types::BracketContents) -> Result<Fragment> {
-        // Invert the code point set if necessary.
+    fn build_bracket(&mut self, contents: &BracketContents) -> Result<Fragment> {
+        // Invert if necessary
         let inverted_cps;
         let cps = if contents.invert {
             inverted_cps = contents.cps.inverted();
@@ -426,60 +388,24 @@ impl Builder {
         } else {
             &contents.cps
         };
-
-        // Build byte range trie from Unicode intervals efficiently
-        self.build_byte_range_trie_from_intervals(cps.intervals())
+        self.build_byte_range_trie_from_cps(cps)
     }
 
-    fn build_byte_range_trie_from_intervals(
-        &mut self,
-        intervals: &[crate::codepointset::Interval],
-    ) -> Result<Fragment> {
-        // Check if this is a truly universal character set (100% coverage)
-        // Only use the universal validator if we literally match ALL valid Unicode codepoints
-        if self.is_truly_universal_character_set(intervals) {
-            return self.build_universal_utf8_validator();
+    fn build_byte_range_trie_from_cps(&mut self, cps: &CodePointSet) -> Result<Fragment> {
+        if cps.is_empty() {
+            // Can't match anything - a state with no exits.
+            let fail = self.make()?;
+            Ok(Fragment::new(fail, []))
+        } else if cps.contains_all_codepoints() {
+            self.build_universal_utf8_validator()
+        } else {
+            self.build_efficient_utf8_trie(cps)
         }
-
-        // Use a more efficient UTF-8 trie construction approach
-        self.build_efficient_utf8_trie(intervals)
-    }
-
-    /// Check if the given intervals represent a truly universal character set.
-    /// This means they cover ALL valid Unicode codepoints (0x0 to 0x10FFFF) with no gaps.
-    fn is_truly_universal_character_set(
-        &self,
-        intervals: &[crate::codepointset::Interval],
-    ) -> bool {
-        if intervals.is_empty() {
-            return false;
-        }
-
-        // Sort intervals by start position to check for gaps
-        let mut sorted_intervals: Vec<_> = intervals.iter().copied().collect();
-        sorted_intervals.sort_by_key(|interval| interval.first);
-
-        // Check that we start at 0 and end at or beyond 0x10FFFF with no gaps
-        let mut expected_next = 0u32;
-        for interval in sorted_intervals {
-            // If there's a gap before this interval, not universal
-            if interval.first > expected_next {
-                return false;
-            }
-            // Update the expected next position (intervals are inclusive)
-            expected_next = interval.last.saturating_add(1);
-        }
-
-        // We're universal if we've covered up to and beyond the last valid Unicode codepoint
-        expected_next > 0x10FFFF
     }
 
     /// Build an efficient UTF-8 trie from Unicode intervals.
     /// Instead of enumerating individual codepoints, this works with UTF-8 byte patterns.
-    fn build_efficient_utf8_trie(
-        &mut self,
-        intervals: &[crate::codepointset::Interval],
-    ) -> Result<Fragment> {
+    fn build_efficient_utf8_trie(&mut self, cps: &CodePointSet) -> Result<Fragment> {
         let start = self.make()?;
         let end = self.make()?;
 
@@ -489,7 +415,7 @@ impl Builder {
         let mut three_byte_patterns = Vec::new();
         let mut four_byte_patterns = Vec::new();
 
-        for &interval in intervals {
+        for &interval in cps.intervals() {
             self.collect_utf8_patterns(
                 interval,
                 &mut one_byte_ranges,
