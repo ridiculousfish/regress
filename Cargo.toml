@@ -36,5 +36,5 @@ utf16 = []
 pattern = []
 
 [dependencies]
-hashbrown = "0.15.0"
+hashbrown = "0.16.0"
 memchr = { version = "2.4.0", default-features = false }
