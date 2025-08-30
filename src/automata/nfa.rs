@@ -457,10 +457,8 @@ impl Builder {
 
                 for second_byte in sb_start..=sb_end {
                     let intermediate2 = self.make()?;
-                    self.get(intermediate1).add_transition(
-                        ByteRange::new(second_byte, second_byte),
-                        intermediate2,
-                    );
+                    self.get(intermediate1)
+                        .add_transition(ByteRange::new(second_byte, second_byte), intermediate2);
                     self.get(intermediate2)
                         .add_transition(ByteRange::new(tb_start, tb_end), end);
                 }
@@ -479,17 +477,13 @@ impl Builder {
 
                 for second_byte in sb_start..=sb_end {
                     let intermediate2 = self.make()?;
-                    self.get(intermediate1).add_transition(
-                        ByteRange::new(second_byte, second_byte),
-                        intermediate2,
-                    );
+                    self.get(intermediate1)
+                        .add_transition(ByteRange::new(second_byte, second_byte), intermediate2);
 
                     for third_byte in tb_start..=tb_end {
                         let intermediate3 = self.make()?;
-                        self.get(intermediate2).add_transition(
-                            ByteRange::new(third_byte, third_byte),
-                            intermediate3,
-                        );
+                        self.get(intermediate2)
+                            .add_transition(ByteRange::new(third_byte, third_byte), intermediate3);
                         self.get(intermediate3)
                             .add_transition(ByteRange::new(fob_start, fob_end), end);
                     }
@@ -634,8 +628,7 @@ impl Builder {
     }
 
     fn build_universal_utf8_validator(&mut self) -> Result<Fragment> {
-        // Create a universal UTF-8 validator that accepts any valid UTF-8 sequence
-        // This is more efficient than enumerating all possible codepoints
+        // Consume a single UTF-8 char.
         let start = self.make()?;
         let end = self.make()?;
 
@@ -650,65 +643,75 @@ impl Builder {
         self.get(two_byte_intermediate)
             .add_transition(ByteRange::new(0x80, 0xBF), end);
 
-        // 3-byte sequences:
-        // [E0] [A0-BF] [80-BF] (excludes overlong sequences)
-        let e0_intermediate = self.make()?;
-        let e0_continuation = self.make()?;
+        // 3-byte sequences: E0 [A0–BF] [80–BF] (avoid overlongs)
+        let e0_b2 = self.make()?;
+        let e0_b3 = self.make()?;
         self.get(start)
-            .add_transition(ByteRange::new(0xE0, 0xE0), e0_intermediate);
-        self.get(e0_intermediate)
-            .add_transition(ByteRange::new(0xA0, 0xBF), e0_continuation);
-        self.get(e0_continuation)
+            .add_transition(ByteRange::new(0xE0, 0xE0), e0_b2);
+        self.get(e0_b2)
+            .add_transition(ByteRange::new(0xA0, 0xBF), e0_b3);
+        self.get(e0_b3)
             .add_transition(ByteRange::new(0x80, 0xBF), end);
 
-        // [E1-EF] [80-BF] [80-BF] (normal 3-byte sequences)
-        let three_byte_intermediate = self.make()?;
-        let three_byte_continuation = self.make()?;
+        // 3-byte sequences: [E1–EC] and [EE–EF:] [80–BF] [80–BF]  (normal 3-byte)
+        let e_gen_b2 = self.make()?;
+        let e_gen_b3 = self.make()?;
         self.get(start)
-            .add_transition(ByteRange::new(0xE1, 0xEF), three_byte_intermediate);
-        self.get(three_byte_intermediate)
-            .add_transition(ByteRange::new(0x80, 0xBF), three_byte_continuation);
-        self.get(three_byte_continuation)
+            .add_transition(ByteRange::new(0xE1, 0xEC), e_gen_b2);
+        self.get(start)
+            .add_transition(ByteRange::new(0xEE, 0xEF), e_gen_b2);
+        self.get(e_gen_b2)
+            .add_transition(ByteRange::new(0x80, 0xBF), e_gen_b3);
+        self.get(e_gen_b3)
             .add_transition(ByteRange::new(0x80, 0xBF), end);
 
-        // 4-byte sequences:
-        // [F0] [90-BF] [80-BF] [80-BF] (excludes overlong sequences)
-        let f0_intermediate = self.make()?;
-        let f0_continuation1 = self.make()?;
-        let f0_continuation2 = self.make()?;
+        // 3-byte sequences: ED: [80–9F] [80–BF]  (exclude surrogates)
+        let ed_b2 = self.make()?;
+        let ed_b3 = self.make()?;
         self.get(start)
-            .add_transition(ByteRange::new(0xF0, 0xF0), f0_intermediate);
-        self.get(f0_intermediate)
-            .add_transition(ByteRange::new(0x90, 0xBF), f0_continuation1);
-        self.get(f0_continuation1)
-            .add_transition(ByteRange::new(0x80, 0xBF), f0_continuation2);
-        self.get(f0_continuation2)
+            .add_transition(ByteRange::new(0xED, 0xED), ed_b2);
+        self.get(ed_b2)
+            .add_transition(ByteRange::new(0x80, 0x9F), ed_b3);
+        self.get(ed_b3)
             .add_transition(ByteRange::new(0x80, 0xBF), end);
 
-        // [F1-F3] [80-BF] [80-BF] [80-BF] (normal 4-byte sequences)
-        let four_byte_intermediate = self.make()?;
-        let four_byte_continuation1 = self.make()?;
-        let four_byte_continuation2 = self.make()?;
+        // 4-byte sequences: F0 [90–BF] [80–BF] [80–BF]  (avoid overlong encodings below U+10000)
+        let f0_b2 = self.make()?;
+        let f0_b3 = self.make()?;
+        let f0_b4 = self.make()?;
         self.get(start)
-            .add_transition(ByteRange::new(0xF1, 0xF3), four_byte_intermediate);
-        self.get(four_byte_intermediate)
-            .add_transition(ByteRange::new(0x80, 0xBF), four_byte_continuation1);
-        self.get(four_byte_continuation1)
-            .add_transition(ByteRange::new(0x80, 0xBF), four_byte_continuation2);
-        self.get(four_byte_continuation2)
+            .add_transition(ByteRange::new(0xF0, 0xF0), f0_b2);
+        self.get(f0_b2)
+            .add_transition(ByteRange::new(0x90, 0xBF), f0_b3);
+        self.get(f0_b3)
+            .add_transition(ByteRange::new(0x80, 0xBF), f0_b4);
+        self.get(f0_b4)
             .add_transition(ByteRange::new(0x80, 0xBF), end);
 
-        // [F4] [80-8F] [80-BF] [80-BF] (restricted to U+10FFFF max)
-        let f4_intermediate = self.make()?;
-        let f4_continuation1 = self.make()?;
-        let f4_continuation2 = self.make()?;
+        // F1–F3 80–BF 80–BF 80–BF  (normal 4-byte)
+        let fgen_b2 = self.make()?;
+        let fgen_b3 = self.make()?;
+        let fgen_b4 = self.make()?;
         self.get(start)
-            .add_transition(ByteRange::new(0xF4, 0xF4), f4_intermediate);
-        self.get(f4_intermediate)
-            .add_transition(ByteRange::new(0x80, 0x8F), f4_continuation1);
-        self.get(f4_continuation1)
-            .add_transition(ByteRange::new(0x80, 0xBF), f4_continuation2);
-        self.get(f4_continuation2)
+            .add_transition(ByteRange::new(0xF1, 0xF3), fgen_b2);
+        self.get(fgen_b2)
+            .add_transition(ByteRange::new(0x80, 0xBF), fgen_b3);
+        self.get(fgen_b3)
+            .add_transition(ByteRange::new(0x80, 0xBF), fgen_b4);
+        self.get(fgen_b4)
+            .add_transition(ByteRange::new(0x80, 0xBF), end);
+
+        // F4 80–8F 80–BF 80–BF  (limit to U+10FFFF; disallow F5–FF entirely)
+        let f4_b2 = self.make()?;
+        let f4_b3 = self.make()?;
+        let f4_b4 = self.make()?;
+        self.get(start)
+            .add_transition(ByteRange::new(0xF4, 0xF4), f4_b2);
+        self.get(f4_b2)
+            .add_transition(ByteRange::new(0x80, 0x8F), f4_b3);
+        self.get(f4_b3)
+            .add_transition(ByteRange::new(0x80, 0xBF), f4_b4);
+        self.get(f4_b4)
             .add_transition(ByteRange::new(0x80, 0xBF), end);
 
         Ok(Fragment::new(start, [end]))
@@ -830,7 +833,6 @@ impl Builder {
         let close_group = self.join_with_write(&body.ends, close_reg)?;
         Ok(Fragment::new(open_group, [close_group]))
     }
-
 }
 
 /// Try converting a regular expression to a NFA.
