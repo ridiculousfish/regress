@@ -5,3 +5,6 @@ pub mod nfa;
 pub mod nfa_backend;
 mod nfa_optimize;
 mod util;
+
+#[cfg(test)]
+mod tests;
