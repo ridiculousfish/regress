@@ -321,14 +321,20 @@ impl CodePointSet {
         self.ivs = new_ivs;
     }
 
-    pub fn intervals_in(&self, intersecting: Interval) -> Intersections {
-        // Skip intervals before our range's start and after its end.
+    // Return a contiguous list of intervals that intersect the given interval.
+    // Here intersect means shares at least one code point in common.
+    // Note the first and last intervals may extend before and after (respectively) the
+    // given 'intersecting' interval; interior intervals are guarnateed to be
+    // fully contained.
+    pub fn intervals_intersecting(&self, intersecting: Interval) -> &[Interval] {
         let start = self.ivs.partition_point(|iv| iv.last < intersecting.first);
         let len = self.ivs[start..].partition_point(|iv| iv.first <= intersecting.last);
-        Intersections {
-            ivs: &self.ivs[start..(start + len)],
-            intersecting,
-        }
+        &self.ivs[start..(start + len)]
+    }
+
+    pub fn intervals_in(&self, intersecting: Interval) -> Intersections {
+        let ivs = self.intervals_intersecting(intersecting);
+        Intersections { ivs, intersecting }
     }
 }
 
