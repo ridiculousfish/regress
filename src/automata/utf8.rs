@@ -14,7 +14,7 @@ const UTF8_BUCKETS_LEN2: &[[ByteRange; 2]] = &[[br(0xC2, 0xDF), br(0x80, 0xBF)]]
 
 // Closed byte ranges for valid UTF-8 sequences of length 3.
 #[rustfmt::skip]
-const UTF8_BUCKETS_LEN3: [[ByteRange; 3]] = &[
+const UTF8_BUCKETS_LEN3: &[[ByteRange; 3]] = &[
     // E0: avoid overlongs -> 2nd byte A0..BF
     [br(0xE0, 0xE0), br(0xA0, 0xBF), br(0x80, 0xBF)],
     // E1–EC, EE–EF: full continuation ranges

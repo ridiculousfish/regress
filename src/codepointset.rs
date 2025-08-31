@@ -320,6 +320,37 @@ impl CodePointSet {
         }
         self.ivs = new_ivs;
     }
+
+    pub fn intervals_in(&self, intersecting: Interval) -> Intersections {
+        // Skip intervals before our range's start and after its end.
+        let start = self.ivs.partition_point(|iv| iv.last < intersecting.first);
+        let len = self.ivs[start..].partition_point(|iv| iv.first <= intersecting.last);
+        Intersections {
+            ivs: &self.ivs[start..(start + len)],
+            intersecting,
+        }
+    }
+}
+
+// An iterator over intersections of a closed range.
+// This has the invariant that every interval intersects the range.
+pub struct Intersections<'a> {
+    ivs: &'a [Interval],
+    intersecting: Interval,
+}
+
+impl<'a> Iterator for Intersections<'a> {
+    type Item = Interval;
+
+    #[inline]
+    fn next(&mut self) -> Option<Interval> {
+        let mut r = *self.ivs.get(0)?;
+        self.ivs = &self.ivs[1..];
+        r.first = r.first.max(self.intersecting.first);
+        r.last = r.last.min(self.intersecting.last);
+        debug_assert!(r.first <= r.last);
+        Some(r)
+    }
 }
 
 #[cfg(test)]
