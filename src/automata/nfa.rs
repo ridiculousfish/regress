@@ -45,7 +45,7 @@ pub(super) struct ByteRange {
 
 impl ByteRange {
     #[inline]
-    pub fn new(start: u8, end: u8) -> Self {
+    pub const fn new(start: u8, end: u8) -> Self {
         assert!(start <= end);
         Self { start, end }
     }
@@ -402,6 +402,8 @@ impl Builder {
             self.build_efficient_utf8_trie(cps)
         }
     }
+
+    //fn match_code_point_set(&mut self, cps: &CodePointSet) -> Result<Fragment> {}
 
     /// Build an efficient UTF-8 trie from Unicode intervals.
     /// Instead of enumerating individual codepoints, this works with UTF-8 byte patterns.

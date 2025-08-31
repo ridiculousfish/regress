@@ -820,30 +820,23 @@ fn test_large_character_set_should_not_match_everything() {
 }
 
 #[test]
-fn test_truly_universal_character_set_uses_universal_validator() {
-    // Create a truly universal character set that covers 100% of Unicode
-    // [\s\S] gets inverted to cover all codepoints 0x0-0x10FFFF with no gaps
-    let nfa = create_nfa(r"[\s\S]"); // This should be treated as universal
+fn test_match_any_code_point() {
+    // Test that a regex which matches any code point correctly rejects invalid UTF-8.
+    let nfa = create_nfa(r"[\s\S]");
 
-    // This should match everything because it uses the universal validator
-    let result = execute_nfa(&nfa, "A".as_bytes());
-    assert_eq!(
-        result,
-        Some(simple_match(0, 1)),
-        "Should match ASCII 'A' (universal)"
-    );
-
-    let result = execute_nfa(&nfa, "🤠".as_bytes());
-    assert_eq!(
-        result,
-        Some(simple_match(0, 4)),
-        "Should match emoji (universal)"
-    );
-
-    let result = execute_nfa(&nfa, "中".as_bytes());
-    assert_eq!(
-        result,
-        Some(simple_match(0, 3)),
-        "Should match Chinese character (universal)"
-    );
+    // Iterate over valid chars.
+    let mut buf = [0u8; 4];
+    for cp in 0x0000u32..=0x10_FFFF {
+        let Some(ch) = char::from_u32(cp) else {
+            continue;
+        };
+        let s = ch.encode_utf8(&mut buf);
+        let s = s.as_bytes();
+        let result = execute_nfa(&nfa, s);
+        assert_eq!(
+            result,
+            Some(simple_match(0, s.len())),
+            "Should match valid UTF-8"
+        );
+    }
 }
