@@ -35,10 +35,30 @@ const UTF8_BUCKETS_LEN4: &[[ByteRange; 4]] = &[
     [br(0xF4, 0xF4), br(0x80, 0x8F), br(0x80, 0xBF), br(0x80, 0xBF)],
 ];
 
-// Length boundaries for mapping from code points to number of UTF-8 bytes.
-pub const UTF8_LENGTH_BOUNDARIES: [u32; 3] = [0x007F, 0x07FF, 0xFFFF];
+#[inline]
+fn patterns_for_len(len: usize) -> &'static [ByteRange] {
+    match len {
+        1 => UTF8_BUCKETS_LEN1,
+        2 => UTF8_BUCKETS_LEN2,
+        3 => UTF8_BUCKETS_LEN3,
+        4 => UTF8_BUCKETS_LEN4,
+        _ => panic!("Invalid UTF-8 length"),
+    }
+}
 
-pub(super) fn code_point_set_to_trie(cps: &CodePointSet) {}
+// Length boundaries for mapping from code points to number of UTF-8 bytes.
+// These are closed boundaries (<=).
+pub const UTF8_LENGTH_BOUNDARIES: [u32; 3] = [0x007F, 0x07FF, 0xFFFF, 0x10FFFF];
+
+struct Trie {}
+
+pub(super) fn code_point_set_to_trie(cps: &CodePointSet) {
+    for idx, boundary in UTF8_LENGTH_BOUNDARIES.iter().enumerate() {
+        let bucket_len = idx + 1;
+        let buckets = buckets_for_len(bucket_len);
+
+    }
+}
 
 #[cfg(test)]
 mod tests {
