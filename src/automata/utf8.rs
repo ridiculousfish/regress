@@ -532,4 +532,42 @@ mod tests {
 
         cps
     }
+
+    #[test]
+    fn test_random_codepoint_ranges_roundtrip() {
+        fn roundtrip(cps: &CodePointSet) -> CodePointSet {
+            let paths = utf8_paths_from_code_point_set(cps);
+            code_point_set_from_utf8_paths(&paths)
+        }
+
+        // Random ranges (avoiding surrogate range)
+        let mut seed = 12345u32;
+        let mut rand = || {
+            seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+            seed
+        };
+
+        for _ in 0..20 {
+            let mut cps = CodePointSet::new();
+            for _ in 0..(rand() % 5 + 1) {
+                // Generate ranges that don't cross surrogate boundaries
+                let choice = rand() % 3;
+                let (start, end) = if choice == 0 {
+                    // Range before surrogates
+                    let s = rand() % 0xD800;
+                    (s, (s + rand() % 100).min(0xD7FF))
+                } else if choice == 1 {
+                    // Range after surrogates
+                    let s = 0xE000 + rand() % 0x2000;
+                    (s, (s + rand() % 100).min(0xFFFF))
+                } else {
+                    // Higher plane range
+                    let s = 0x10000 + rand() % 0x10000;
+                    (s, (s + rand() % 100).min(0x10FFFF))
+                };
+                cps.add(Interval::new(start, end));
+            }
+            assert_eq!(cps.intervals(), roundtrip(&cps).intervals());
+        }
+    }
 }
