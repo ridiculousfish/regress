@@ -449,4 +449,87 @@ mod tests {
         assert!(!bucket.contains(&[0xC2, 0x7F])); // invalid continuation byte
         assert!(!bucket.contains(&[0xE0, 0x80, 0x80])); // wrong length
     }
+
+    #[test]
+    fn test_code_point_set_roundtrip() {
+        // Test that conversion is lossless for various inputs
+        let test_cases = vec![
+            // Single ASCII character
+            {
+                let mut cps = CodePointSet::new();
+                cps.add_one(0x41);
+                cps
+            },
+            // ASCII range
+            {
+                let mut cps = CodePointSet::new();
+                cps.add(Interval::new(0x41, 0x5A));
+                cps
+            },
+            // Single 2-byte character
+            {
+                let mut cps = CodePointSet::new();
+                cps.add_one(0x03B1);
+                cps
+            },
+            // 2-byte range
+            {
+                let mut cps = CodePointSet::new();
+                cps.add(Interval::new(0x03B1, 0x03B3));
+                cps
+            },
+            // Sparse set across multiple byte lengths
+            {
+                let mut cps = CodePointSet::new();
+                cps.add_one(0x41); // 1-byte
+                cps.add_one(0x03B1); // 2-byte
+                cps.add_one(0x4E2D); // 3-byte
+                cps.add_one(0x1F680); // 4-byte
+                cps
+            },
+        ];
+
+        for original_cps in test_cases {
+            let paths = utf8_paths_from_code_point_set(&original_cps);
+            let reconstructed_cps = code_point_set_from_utf8_paths(&paths);
+            assert_eq!(
+                original_cps.intervals(),
+                reconstructed_cps.intervals(),
+                "Roundtrip failed for {:?}",
+                original_cps.intervals()
+            );
+        }
+    }
+
+    /// Reconstruct a CodePointSet from UTF-8 byte range paths.
+    /// This is the inverse operation of utf8_paths_from_code_point_set.
+    fn code_point_set_from_utf8_paths(paths: &[ByteRangePath]) -> CodePointSet {
+        let mut cps = CodePointSet::new();
+
+        for path in paths {
+            if path.is_empty() {
+                continue;
+            }
+
+            // Decode the minimum and maximum of our ByteRangePath.
+            let min_bytes: SmallVec<[u8; 4]> = path.iter().map(|r| r.start).collect();
+            let max_bytes: SmallVec<[u8; 4]> = path.iter().map(|r| r.end).collect();
+
+            let min_cp: u32 = str::from_utf8(&min_bytes)
+                .unwrap()
+                .chars()
+                .next()
+                .unwrap()
+                .into();
+            let max_cp: u32 = str::from_utf8(&max_bytes)
+                .unwrap()
+                .chars()
+                .next()
+                .unwrap()
+                .into();
+            cps.add(Interval::new(min_cp, max_cp));
+        }
+
+        cps
+    }
 }
