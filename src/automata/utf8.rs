@@ -129,10 +129,20 @@ impl Trie<'_> {
         let c2 = char::from_u32(iv.last).unwrap();
         let mut buf1 = [0; 4];
         let mut buf2 = [0; 4];
-        let bytes1 = c1.encode_utf8(&mut buf1);
-        let bytes2 = c2.encode_utf8(&mut buf2);
-        debug_assert_eq!(bytes1.len(), bytes2.len());
-        debug_assert_eq!(bytes1.len(), bucket.byte_ranges.len());
+        let b1 = c1.encode_utf8(&mut buf1);
+        let b1 = b1.as_bytes();
+
+        let b2 = c2.encode_utf8(&mut buf2);
+        let b2 = b2.as_bytes();
+
+        if cfg!(debug_assertions) {
+            debug_assert_eq!(b1.len(), b2.len());
+            debug_assert_eq!(b1.len(), bucket.byte_ranges.len());
+            for idx in 0..b1.len() {
+                debug_assert!(bucket.byte_ranges[idx].contains(b1[idx]));
+                debug_assert!(bucket.byte_ranges[idx].contains(b2[idx]));
+            }
+        }
     }
 }
 
