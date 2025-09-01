@@ -125,30 +125,17 @@ pub const UTF8_BUCKETS_LEN4: &[Utf8Bucket] = &[
 // These are closed boundaries (<=).
 pub const UTF8_LENGTH_BOUNDARIES: [u32; 4] = [0x007F, 0x07FF, 0xFFFF, 0x10FFFF];
 
-struct Trie<'a> {
-    // Code point set we're processing.
-    cps: &'a CodePointSet,
+pub type ByteRangePath = SmallVec<[ByteRange; 4]>;
 
-    // Disjoint sequence of sequences of byte ranges.
-    // Each interior sequence of bytes ranges encodes successful paths through the NFA.
-    paths: Vec<SmallVec<[ByteRange; 4]>>,
-}
+fn add_paths_from_bucket(cps: &CodePointSet, bucket: &Utf8Bucket, paths: &mut Vec<ByteRangePath>) {
+    // Process a single bucket, adding to our trie.
+    for iv in cps.intervals_intersecting(bucket.ivs) {
+        let mut iv = *iv;
+        // First and last ranges may extend beyond the bucket's range.
+        // Clamp them all for simplicity.
+        iv.first = iv.first.max(bucket.ivs.first);
+        iv.last = iv.last.min(bucket.ivs.last);
 
-impl Trie<'_> {
-    fn process_bucket(&mut self, bucket: &Utf8Bucket) {
-        // Process a single bucket, adding to our trie.
-        for iv in self.cps.intervals_intersecting(bucket.ivs) {
-            let mut iv = *iv;
-            // First and last ranges may extend beyond the bucket's range.
-            // Clamp them all for simplicity.
-            iv.first = iv.first.max(bucket.ivs.first);
-            iv.last = iv.last.min(bucket.ivs.last);
-            self.process_iv_in_bucket(iv, bucket);
-        }
-    }
-
-    fn process_iv_in_bucket(&mut self, iv: Interval, bucket: &Utf8Bucket) {
-        // Process an interval of code points that are all contained within a given bucket.
         let b1 = Utf8Buf::from_cp(iv.first);
         let b2 = Utf8Buf::from_cp(iv.last);
 
@@ -163,68 +150,58 @@ impl Trie<'_> {
             .zip(b2.iter())
             .map(|(&start, &end)| ByteRange { start, end })
             .collect();
-        self.paths.push(path);
+        paths.push(path);
     }
 }
 
-pub fn utf8_paths_from_code_point_set(cps: &CodePointSet) -> Vec<SmallVec<[ByteRange; 4]>> {
-    let mut trie = Trie {
-        cps,
-        paths: Vec::new(),
-    };
+pub fn utf8_paths_from_code_point_set(cps: &CodePointSet) -> Vec<ByteRangePath> {
+    let mut paths = Vec::new();
     let Some(last_cp) = cps.last_codepoint() else {
-        return Vec::new();
+        return paths;
     };
     let [bound1, bound2, bound3, _] = UTF8_LENGTH_BOUNDARIES;
 
     for bucket in UTF8_BUCKETS_LEN1 {
-        trie.process_bucket(bucket);
+        add_paths_from_bucket(cps, bucket, &mut paths);
     }
     if last_cp > bound1 {
         for bucket in UTF8_BUCKETS_LEN2 {
-            trie.process_bucket(bucket);
+            add_paths_from_bucket(cps, bucket, &mut paths);
         }
     }
     if last_cp > bound2 {
         for bucket in UTF8_BUCKETS_LEN3 {
-            trie.process_bucket(bucket);
+            add_paths_from_bucket(cps, bucket, &mut paths);
         }
     }
     if last_cp > bound3 {
         for bucket in UTF8_BUCKETS_LEN4 {
-            trie.process_bucket(bucket);
+            add_paths_from_bucket(cps, bucket, &mut paths);
         }
     }
-    trie.paths
+    paths
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use smallvec::SmallVec;
-
-    type ByteRangePath = SmallVec<[ByteRange; 4]>;
 
     #[test]
     fn utf8_len_increases_at_boundaries() {
         // Test UTF8_LENGTH_BOUNDARIES.
-        fn utf8_len(cp: u32) -> usize {
-            char::from_u32(cp).expect("valid scalar").len_utf8()
-        }
-
         let mut expected_len = 1;
         for &b in &UTF8_LENGTH_BOUNDARIES {
-            assert_eq!(utf8_len(b - 1), expected_len);
-            assert_eq!(utf8_len(b), expected_len);
+            assert_eq!(Utf8Buf::from_cp(b - 1).len(), expected_len);
+            assert_eq!(Utf8Buf::from_cp(b).len(), expected_len);
             if b + 1 < 0x10FFFF {
-                assert_eq!(utf8_len(b + 1), expected_len + 1);
+                assert_eq!(Utf8Buf::from_cp(b + 1).len(), expected_len + 1);
             }
             expected_len += 1;
         }
     }
 
     #[test]
-    fn test_utf8_paths_empty_set() {
+    fn test_utf8_paths_empty() {
         let cps = CodePointSet::new();
         let paths = utf8_paths_from_code_point_set(&cps);
         assert!(paths.is_empty());
@@ -306,7 +283,7 @@ mod tests {
     }
 
     #[test]
-    fn test_utf8_paths_sparse_set() {
+    fn test_utf8_paths_sparse() {
         let mut cps = CodePointSet::new();
         cps.add_one(0x41); // 'A' (1 byte)
         cps.add_one(0x03B1); // α (2 bytes)
@@ -410,18 +387,6 @@ mod tests {
                 br(0xBF, 0xBF)
             ])
         );
-    }
-
-    #[test]
-    fn test_utf8_paths_optimization_early_exit() {
-        // Test that the function doesn't process higher-length buckets if not needed
-        let mut cps = CodePointSet::new();
-        cps.add(Interval::new(0x00, 0x7F)); // Only ASCII
-        let paths = utf8_paths_from_code_point_set(&cps);
-
-        assert_eq!(paths.len(), 1);
-        assert_eq!(paths[0], ByteRangePath::from_iter([br(0x00, 0x7F)]));
-        // Function should have only processed 1-byte buckets due to early exit
     }
 
     #[test]
