@@ -121,6 +121,11 @@ impl CodePointSet {
         self.ivs.is_empty()
     }
 
+    // Return the last code point contained by the set, if any.
+    pub(crate) fn last_codepoint(&self) -> Option<CodePoint> {
+        self.ivs.last().map(|iv| iv.last)
+    }
+
     // Return true if we contain all code points.
     pub(crate) fn contains_all_codepoints(&self) -> bool {
         self.ivs.len() == 1 && self.ivs[0] == Interval::new(0, CODE_POINT_MAX)
@@ -332,7 +337,7 @@ impl CodePointSet {
         &self.ivs[start..(start + len)]
     }
 
-    pub fn intervals_in(&self, intersecting: Interval) -> Intersections {
+    pub fn intervals_in(&self, intersecting: Interval) -> Intersections<'_> {
         let ivs = self.intervals_intersecting(intersecting);
         Intersections { ivs, intersecting }
     }
@@ -350,12 +355,14 @@ impl<'a> Iterator for Intersections<'a> {
 
     #[inline]
     fn next(&mut self) -> Option<Interval> {
-        let mut r = *self.ivs.get(0)?;
-        self.ivs = &self.ivs[1..];
-        r.first = r.first.max(self.intersecting.first);
-        r.last = r.last.min(self.intersecting.last);
-        debug_assert!(r.first <= r.last);
-        Some(r)
+        let (r, rest) = self.ivs.split_first()?;
+        self.ivs = rest;
+        let intersect = Interval::new(
+            r.first.max(self.intersecting.first),
+            r.last.min(self.intersecting.last),
+        );
+        debug_assert!(intersect.first <= intersect.last);
+        Some(intersect)
     }
 }
 

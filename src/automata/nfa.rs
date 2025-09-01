@@ -1,6 +1,7 @@
 //! Conversion of IR to non-deterministic finite automata.
 
 use crate::automata::nfa_optimize::optimize_states;
+use crate::automata::utf8::utf8_paths_from_code_point_set;
 use crate::automata::util::node_description;
 use crate::codepointset::CodePointSet;
 use crate::ir::{self, Node};
@@ -10,6 +11,7 @@ use crate::unicode;
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::iter::once;
 use smallvec::{SmallVec, smallvec};
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Nfa {
@@ -37,7 +39,7 @@ pub type TextPos = usize;
 pub const TEXT_POS_NO_MATCH: TextPos = usize::MAX;
 
 // A closed range of bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct ByteRange {
     pub start: u8,
     pub end: u8,
@@ -48,6 +50,12 @@ impl ByteRange {
     pub const fn new(start: u8, end: u8) -> Self {
         assert!(start <= end);
         Self { start, end }
+    }
+
+    #[allow(unused)]
+    #[inline]
+    pub const fn contains(self, b: u8) -> bool {
+        self.start <= b && b <= self.end
     }
 }
 
@@ -376,7 +384,7 @@ impl Builder {
         for &c in cs {
             cps.add_one(c);
         }
-        self.build_byte_range_trie_from_cps(&cps)
+        self.build_from_code_point_set(&cps)
     }
 
     fn build_bracket(&mut self, contents: &BracketContents) -> Result<Fragment> {
@@ -388,245 +396,49 @@ impl Builder {
         } else {
             &contents.cps
         };
-        self.build_byte_range_trie_from_cps(cps)
+        self.build_from_code_point_set(cps)
     }
 
-    fn build_byte_range_trie_from_cps(&mut self, cps: &CodePointSet) -> Result<Fragment> {
+    fn build_from_code_point_set(&mut self, cps: &CodePointSet) -> Result<Fragment> {
         if cps.is_empty() {
             // Can't match anything - a state with no exits.
             let fail = self.make()?;
-            Ok(Fragment::new(fail, []))
-        } else if cps.contains_all_codepoints() {
-            self.build_universal_utf8_validator()
-        } else {
-            self.build_efficient_utf8_trie(cps)
+            return Ok(Fragment::new(fail, []));
         }
-    }
-
-    //fn match_code_point_set(&mut self, cps: &CodePointSet) -> Result<Fragment> {}
-
-    /// Build an efficient UTF-8 trie from Unicode intervals.
-    /// Instead of enumerating individual codepoints, this works with UTF-8 byte patterns.
-    fn build_efficient_utf8_trie(&mut self, cps: &CodePointSet) -> Result<Fragment> {
-        let start = self.make()?;
-        let end = self.make()?;
-
-        // Group intervals by UTF-8 byte length and build patterns for each group
-        let mut one_byte_ranges = Vec::new();
-        let mut two_byte_patterns = Vec::new();
-        let mut three_byte_patterns = Vec::new();
-        let mut four_byte_patterns = Vec::new();
-
-        for &interval in cps.intervals() {
-            self.collect_utf8_patterns(
-                interval,
-                &mut one_byte_ranges,
-                &mut two_byte_patterns,
-                &mut three_byte_patterns,
-                &mut four_byte_patterns,
-            );
+        if cps.contains_all_codepoints() {
+            return self.build_universal_utf8_validator();
         }
 
-        // No shared continuation states - create specific intermediate states for exact byte ranges
+        // Get a list of paths of byte ranges. These all join into a final state.
+        // Join them via suffixes. Maximum length of any path is 4 (max bytes in a UTF-8 char).
+        let trie_start = self.make()?;
+        let trie_end = self.make()?;
+        let paths = utf8_paths_from_code_point_set(cps);
+        let mut suffix_to_state: HashMap<&[ByteRange], u32> = HashMap::new();
+        // Put the end state as the empty suffix.
+        suffix_to_state.insert(&[], trie_end);
 
-        // Add 1-byte UTF-8 patterns (ASCII)
-        for (first_byte, last_byte) in one_byte_ranges {
-            self.get(start)
-                .add_transition(ByteRange::new(first_byte, last_byte), end);
-        }
-
-        // Add 2-byte UTF-8 patterns
-        for (first_byte_start, first_byte_end, second_byte_start, second_byte_end) in
-            two_byte_patterns
-        {
-            // Always create specific intermediate states for exact byte ranges
-            for first_byte in first_byte_start..=first_byte_end {
-                let intermediate = self.make()?;
-                self.get(start)
-                    .add_transition(ByteRange::new(first_byte, first_byte), intermediate);
-                self.get(intermediate)
-                    .add_transition(ByteRange::new(second_byte_start, second_byte_end), end);
-            }
-        }
-
-        // Add 3-byte UTF-8 patterns
-        for (fb_start, fb_end, sb_start, sb_end, tb_start, tb_end) in three_byte_patterns {
-            // Always create specific intermediate states for exact byte ranges
-            for first_byte in fb_start..=fb_end {
-                let intermediate1 = self.make()?;
-                self.get(start)
-                    .add_transition(ByteRange::new(first_byte, first_byte), intermediate1);
-
-                for second_byte in sb_start..=sb_end {
-                    let intermediate2 = self.make()?;
-                    self.get(intermediate1)
-                        .add_transition(ByteRange::new(second_byte, second_byte), intermediate2);
-                    self.get(intermediate2)
-                        .add_transition(ByteRange::new(tb_start, tb_end), end);
+        for path in &paths {
+            let suffix = path.as_ref();
+            // Find the longest cached suffix.
+            // This terminates because suffix_to_state contains the empty slice.
+            let mut k = 0;
+            let target = loop {
+                if let Some(&state) = suffix_to_state.get(&suffix[k..]) {
+                    break state;
                 }
+                k += 1;
+            };
+
+            // Build missing prefix states.
+            let mut cursor = target;
+            for idx in (0..k).rev() {
+                let state = if idx == 0 { trie_start } else { self.make()? };
+                self.get(state).add_transition(suffix[idx], cursor);
+                cursor = state;
             }
         }
-
-        // Add 4-byte UTF-8 patterns
-        for (fb_start, fb_end, sb_start, sb_end, tb_start, tb_end, fob_start, fob_end) in
-            four_byte_patterns
-        {
-            // Always create specific intermediate states for exact byte ranges
-            for first_byte in fb_start..=fb_end {
-                let intermediate1 = self.make()?;
-                self.get(start)
-                    .add_transition(ByteRange::new(first_byte, first_byte), intermediate1);
-
-                for second_byte in sb_start..=sb_end {
-                    let intermediate2 = self.make()?;
-                    self.get(intermediate1)
-                        .add_transition(ByteRange::new(second_byte, second_byte), intermediate2);
-
-                    for third_byte in tb_start..=tb_end {
-                        let intermediate3 = self.make()?;
-                        self.get(intermediate2)
-                            .add_transition(ByteRange::new(third_byte, third_byte), intermediate3);
-                        self.get(intermediate3)
-                            .add_transition(ByteRange::new(fob_start, fob_end), end);
-                    }
-                }
-            }
-        }
-
-        Ok(Fragment::new(start, [end]))
-    }
-
-    /// Collect UTF-8 byte patterns for a Unicode interval without enumerating all codepoints.
-    fn collect_utf8_patterns(
-        &self,
-        interval: crate::codepointset::Interval,
-        one_byte: &mut Vec<(u8, u8)>,
-        two_byte: &mut Vec<(u8, u8, u8, u8)>,
-        three_byte: &mut Vec<(u8, u8, u8, u8, u8, u8)>,
-        four_byte: &mut Vec<(u8, u8, u8, u8, u8, u8, u8, u8)>,
-    ) {
-        let first = interval.first;
-        let last = interval.last;
-
-        // Split the interval by UTF-8 encoding boundaries
-        let mut current = first;
-
-        while current <= last {
-            if current < 0x80 {
-                // 1-byte UTF-8
-                let range_end = (last.min(0x7F)) as u8;
-                one_byte.push((current as u8, range_end));
-                current = 0x80;
-            } else if current < 0x800 {
-                // 2-byte UTF-8
-                let range_end = last.min(0x7FF);
-                self.add_two_byte_pattern(current, range_end, two_byte);
-                current = 0x800;
-            } else if current < 0x10000 {
-                // 3-byte UTF-8
-                let range_end = last.min(0xFFFF);
-                self.add_three_byte_pattern(current, range_end, three_byte);
-                current = 0x10000;
-            } else if current < 0x110000 {
-                // 4-byte UTF-8
-                let range_end = last.min(0x10FFFF);
-                self.add_four_byte_pattern(current, range_end, four_byte);
-                break;
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn add_two_byte_pattern(&self, start: u32, end: u32, patterns: &mut Vec<(u8, u8, u8, u8)>) {
-        let start_first = ((start >> 6) & 0x1F) as u8 | 0b1100_0000;
-        let start_second = (start & 0x3F) as u8 | 0b1000_0000;
-        let end_first = ((end >> 6) & 0x1F) as u8 | 0b1100_0000;
-        let end_second = (end & 0x3F) as u8 | 0b1000_0000;
-
-        if start_first == end_first {
-            // Same first byte
-            patterns.push((start_first, start_first, start_second, end_second));
-        } else {
-            // Multiple first bytes
-            patterns.push((start_first, start_first, start_second, 0xBF));
-            if start_first + 1 < end_first {
-                patterns.push((start_first + 1, end_first - 1, 0x80, 0xBF));
-            }
-            patterns.push((end_first, end_first, 0x80, end_second));
-        }
-    }
-
-    fn add_three_byte_pattern(
-        &self,
-        start: u32,
-        end: u32,
-        patterns: &mut Vec<(u8, u8, u8, u8, u8, u8)>,
-    ) {
-        let start_first = ((start >> 12) & 0x0F) as u8 | 0b1110_0000;
-        let start_second = ((start >> 6) & 0x3F) as u8 | 0b1000_0000;
-        let start_third = (start & 0x3F) as u8 | 0b1000_0000;
-        let end_first = ((end >> 12) & 0x0F) as u8 | 0b1110_0000;
-        let end_second = ((end >> 6) & 0x3F) as u8 | 0b1000_0000;
-        let end_third = (end & 0x3F) as u8 | 0b1000_0000;
-
-        if start_first == end_first {
-            if start_second == end_second {
-                // Same first and second byte
-                patterns.push((
-                    start_first,
-                    start_first,
-                    start_second,
-                    start_second,
-                    start_third,
-                    end_third,
-                ));
-            } else {
-                // Same first byte, different second bytes
-                patterns.push((
-                    start_first,
-                    start_first,
-                    start_second,
-                    start_second,
-                    start_third,
-                    0xBF,
-                ));
-                if start_second + 1 < end_second {
-                    patterns.push((
-                        start_first,
-                        start_first,
-                        start_second + 1,
-                        end_second - 1,
-                        0x80,
-                        0xBF,
-                    ));
-                }
-                patterns.push((
-                    start_first,
-                    start_first,
-                    end_second,
-                    end_second,
-                    0x80,
-                    end_third,
-                ));
-            }
-        } else {
-            // Different first bytes - this gets complex, for now use a simpler approach
-            patterns.push((start_first, end_first, 0x80, 0xBF, 0x80, 0xBF));
-        }
-    }
-
-    fn add_four_byte_pattern(
-        &self,
-        start: u32,
-        end: u32,
-        patterns: &mut Vec<(u8, u8, u8, u8, u8, u8, u8, u8)>,
-    ) {
-        let start_first = ((start >> 18) & 0x07) as u8 | 0b1111_0000;
-        let end_first = ((end >> 18) & 0x07) as u8 | 0b1111_0000;
-
-        // For simplicity, use full continuation byte ranges for 4-byte patterns
-        patterns.push((start_first, end_first, 0x80, 0xBF, 0x80, 0xBF, 0x80, 0xBF));
+        Ok(Fragment::new(trie_start, [trie_end]))
     }
 
     fn build_universal_utf8_validator(&mut self) -> Result<Fragment> {
