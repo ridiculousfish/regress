@@ -430,11 +430,12 @@ impl Builder {
                 k += 1;
             };
 
-            // Build missing prefix states.
+            // Build missing prefix states, populating the cache.
             let mut cursor = target;
             for idx in (0..k).rev() {
                 let state = if idx == 0 { trie_start } else { self.make()? };
                 self.get(state).add_transition(suffix[idx], cursor);
+                suffix_to_state.insert(&suffix[idx..], state);
                 cursor = state;
             }
         }

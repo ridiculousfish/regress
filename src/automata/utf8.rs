@@ -450,59 +450,6 @@ mod tests {
         assert!(!bucket.contains(&[0xE0, 0x80, 0x80])); // wrong length
     }
 
-    #[test]
-    fn test_code_point_set_roundtrip() {
-        // Test that conversion is lossless for various inputs
-        let test_cases = vec![
-            // Single ASCII character
-            {
-                let mut cps = CodePointSet::new();
-                cps.add_one(0x41);
-                cps
-            },
-            // ASCII range
-            {
-                let mut cps = CodePointSet::new();
-                cps.add(Interval::new(0x41, 0x5A));
-                cps
-            },
-            // Single 2-byte character
-            {
-                let mut cps = CodePointSet::new();
-                cps.add_one(0x03B1);
-                cps
-            },
-            // 2-byte range
-            {
-                let mut cps = CodePointSet::new();
-                cps.add(Interval::new(0x03B1, 0x03B3));
-                cps
-            },
-            // Sparse set across multiple byte lengths
-            {
-                let mut cps = CodePointSet::new();
-                cps.add_one(0x41); // 1-byte
-                cps.add_one(0x03B1); // 2-byte
-                cps.add_one(0x4E2D); // 3-byte
-                cps.add_one(0x1F680); // 4-byte
-                cps
-            },
-        ];
-
-        for original_cps in test_cases {
-            let paths = utf8_paths_from_code_point_set(&original_cps);
-            let reconstructed_cps = code_point_set_from_utf8_paths(&paths);
-            assert_eq!(
-                original_cps.intervals(),
-                reconstructed_cps.intervals(),
-                "Roundtrip failed for {:?}",
-                original_cps.intervals()
-            );
-        }
-    }
-
-    /// Reconstruct a CodePointSet from UTF-8 byte range paths.
-    /// This is the inverse operation of utf8_paths_from_code_point_set.
     fn code_point_set_from_utf8_paths(paths: &[ByteRangePath]) -> CodePointSet {
         let mut cps = CodePointSet::new();
 
@@ -535,39 +482,93 @@ mod tests {
 
     #[test]
     fn test_random_codepoint_ranges_roundtrip() {
-        fn roundtrip(cps: &CodePointSet) -> CodePointSet {
-            let paths = utf8_paths_from_code_point_set(cps);
-            code_point_set_from_utf8_paths(&paths)
+        use rand::rngs::SmallRng;
+        use rand::seq::SliceRandom;
+        use rand::{Rng, SeedableRng};
+
+        // UTF-8 bucket cap for a given code point (structural UTF-8 buckets).
+        #[inline]
+        fn utf8_bucket_end(cp: u32) -> u32 {
+            match cp {
+                0x0000..=0x007F => 0x007F,          // 1-byte
+                0x0080..=0x07FF => 0x07FF,          // 2-byte
+                0x0800..=0x0FFF => 0x0FFF,          // 3-byte (E0)
+                0x1000..=0xCFFF => 0xCFFF,          // 3-byte (E1–EC)
+                0xD000..=0xD7FF => 0xD7FF,          // 3-byte (ED)
+                0xE000..=0xFFFF => 0xFFFF,          // 3-byte (EE–EF)
+                0x1_0000..=0x3_FFFF => 0x3_FFFF,    // 4-byte (F0)
+                0x4_0000..=0xF_FFFF => 0xF_FFFF,    // 4-byte (F1–F3)
+                0x10_0000..=0x10_FFFF => 0x10_FFFF, // 4-byte (F4)
+                _ => 0x10_FFFF,
+            }
         }
 
-        // Random ranges (avoiding surrogate range)
-        let mut seed = 12345u32;
-        let mut rand = || {
-            seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
-            seed
-        };
+        // Weighted UTF-8–aware code point sampler, mildly biased to shorter encodings
+        // and occasionally snapping to structural boundaries to stress edge cases.
+        fn sample_cp_biased<R: rand::Rng + ?Sized>(rng: &mut R) -> u32 {
+            // Bucket weights: 1B=40%, 2B=35%, 3B=20%, 4B=5%
+            let p = rng.gen_range(0u32..100);
+            let mut cp = match p {
+                0..=39 => rng.gen_range(0x0000..=0x007F),  // 1-byte
+                40..=74 => rng.gen_range(0x0080..=0x07FF), // 2-byte
+                75..=94 => {
+                    // 3-byte: split to respect E0/ED nuances
+                    match rng.gen_range(0..4) {
+                        0 => rng.gen_range(0x0800..=0x0FFF), // E0
+                        1 => rng.gen_range(0x1000..=0xCFFF), // E1–EC
+                        2 => rng.gen_range(0xD000..=0xD7FF), // ED (surrogate range structurally)
+                        _ => rng.gen_range(0xE000..=0xFFFF), // EE–EF
+                    }
+                }
+                _ => rng.gen_range(0x1_0000..=0x10_FFFF), // 4-byte
+            };
 
-        for _ in 0..20 {
-            let mut cps = CodePointSet::new();
-            for _ in 0..(rand() % 5 + 1) {
-                // Generate ranges that don't cross surrogate boundaries
-                let choice = rand() % 3;
-                let (start, end) = if choice == 0 {
-                    // Range before surrogates
-                    let s = rand() % 0xD800;
-                    (s, (s + rand() % 100).min(0xD7FF))
-                } else if choice == 1 {
-                    // Range after surrogates
-                    let s = 0xE000 + rand() % 0x2000;
-                    (s, (s + rand() % 100).min(0xFFFF))
+            // ~2% snap to interesting boundaries to find off-by-ones.
+            if rng.gen_ratio(1, 50) {
+                const BOUNDS: &[u32] = &[
+                    0x0000, 0x007F, 0x0080, 0x07FF, 0x0800, 0x0FFF, 0x1000, 0xCFFF, 0xD000, 0xD7FF,
+                    0xE000, 0xFFFF, 0x1_0000, 0x10_FFFF,
+                ];
+                if let Some(&choice) = BOUNDS.choose(rng) {
+                    cp = choice;
+                }
+            }
+            cp
+        }
+
+        let mut rng = SmallRng::seed_from_u64(12345);
+        let mut cps = CodePointSet::new();
+        for _ in 0..100_000 {
+            cps.clear();
+            for _ in 0..(rng.gen_range(1..=5)) {
+                let start = sample_cp_biased(&mut rng);
+                let cap = utf8_bucket_end(start);
+
+                // 85% of the time: keep end within the same UTF-8 bucket.
+                // 15%: try to cross the bucket boundary.
+                let stay_in_bucket = rng.gen_ratio(85, 100);
+                let max_end = (start.saturating_add(rng.gen_range(0..=100))).min(0x10_FFFF);
+                let end = if stay_in_bucket {
+                    max_end.min(cap)
                 } else {
-                    // Higher plane range
-                    let s = 0x10000 + rand() % 0x10000;
-                    (s, (s + rand() % 100).min(0x10FFFF))
+                    // Force a boundary-cross when possible; otherwise fall back to max_end.
+                    let next = (cap.saturating_add(1)).min(0x10_FFFF);
+                    if next > start {
+                        next.min(max_end)
+                    } else {
+                        max_end
+                    }
                 };
+
                 cps.add(Interval::new(start, end));
             }
-            assert_eq!(cps.intervals(), roundtrip(&cps).intervals());
+
+            // Remove surrogate range as we are UTF-8.
+            cps.remove(&[Interval::new(0xD800, 0xDFFF)]);
+
+            let paths = utf8_paths_from_code_point_set(&cps);
+            let roundtripped = code_point_set_from_utf8_paths(&paths);
+            assert_eq!(cps, roundtripped);
         }
     }
 }

@@ -42,3 +42,6 @@ nfa = ["smallvec"]
 hashbrown = "0.15.0"
 memchr = { version = "2.4.0", default-features = false }
 smallvec = { version = "1.13", optional = true }
+
+[dev-dependencies]
+rand = { version = "0.8", features = ["small_rng"] }
