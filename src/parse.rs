@@ -1198,13 +1198,11 @@ where
             0x28 /* ( */ | 0x29 /* ) */ | 0x7B /* { */ | 0x7D /* } */ | 0x2F /* / */
             | 0x2D /* - */ | 0x7C /* | */ => error("Invalid class set character"),
             _ => {
-                if Self::is_class_set_reserved_double_punctuator(cp) {
-                    if let Some(cp) = self.peek() {
-                        if Self::is_class_set_reserved_double_punctuator(cp) {
+                if Self::is_class_set_reserved_double_punctuator(cp)
+                    && let Some(cp) = self.peek()
+                        && Self::is_class_set_reserved_double_punctuator(cp) {
                             return error("Invalid class set character");
                         }
-                    }
-                }
                 Ok(cp)
             }
         }
@@ -1367,10 +1365,10 @@ where
             'v' => Ok(0xB),
             // CharacterEscape :: c AsciiLetter
             'c' => {
-                if let Some(nc) = self.next().and_then(char::from_u32) {
-                    if nc.is_ascii_lowercase() || nc.is_ascii_uppercase() {
-                        return Ok((nc as u32) % 32);
-                    }
+                if let Some(nc) = self.next().and_then(char::from_u32)
+                    && (nc.is_ascii_lowercase() || nc.is_ascii_uppercase())
+                {
+                    return Ok((nc as u32) % 32);
                 }
                 error("Invalid character escape")
             }
@@ -1754,16 +1752,14 @@ where
                     }
                 },
                 Some('(') => {
-                    if self.try_consume_str("?") {
-                        if let Some(name) = self.try_consume_named_capture_group_name() {
-                            if self
-                                .named_group_indices
-                                .insert(name, self.group_count_max)
-                                .is_some()
-                            {
-                                return error("Duplicate capture group name");
-                            }
-                        }
+                    if self.try_consume_str("?")
+                        && let Some(name) = self.try_consume_named_capture_group_name()
+                        && self
+                            .named_group_indices
+                            .insert(name, self.group_count_max)
+                            .is_some()
+                    {
+                        return error("Duplicate capture group name");
                     }
                     self.group_count_max = if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
                         MAX_CAPTURE_GROUPS as u32
