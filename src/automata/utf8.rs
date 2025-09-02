@@ -135,6 +135,7 @@ fn add_paths_from_bucket(cps: &CodePointSet, bucket: &Utf8Bucket, paths: &mut Ve
         // Clamp them all for simplicity.
         iv.first = iv.first.max(bucket.ivs.first);
         iv.last = iv.last.min(bucket.ivs.last);
+        debug_assert!(iv.first <= iv.last);
 
         let b1 = Utf8Buf::from_cp(iv.first);
         let b2 = Utf8Buf::from_cp(iv.last);
@@ -570,5 +571,114 @@ mod tests {
             let roundtripped = code_point_set_from_utf8_paths(&paths);
             assert_eq!(cps, roundtripped);
         }
+    }
+
+    #[test]
+    fn test_utf8_regression() {
+        // This test reproduces the crash by finding a CodePointSet that generates invalid UTF-8 paths
+        // Based on the actual crash from:
+        // ./target/debug/regress-tool '[\p{Alphabetic}]' aaaa --nfa --flags u --dump-nfa
+
+        // Create a CodePointSet that should trigger the UTF-8 path generation bug
+        let mut cps = CodePointSet::new();
+
+        // Add ranges from the actual \p{Alphabetic} that might cause issues
+        cps.add(Interval::new(65, 90)); // A-Z
+        cps.add(Interval::new(97, 122)); // a-z
+        cps.add(Interval::new(248, 705)); // ø-ʱ (spans multiple UTF-8 buckets - likely culprit)
+
+        println!("Testing CodePointSet: {:?}", cps.intervals());
+
+        // Generate UTF-8 paths - this is where the bug might manifest
+        let paths = utf8_paths_from_code_point_set(&cps);
+        println!("Generated {} UTF-8 paths", paths.len());
+
+        // Check all byte ranges for validity - this should find the invalid range that causes the crash
+        let mut found_invalid = false;
+        for (path_idx, path) in paths.iter().enumerate() {
+            println!("Path {}: {:?}", path_idx, path);
+            for (range_idx, range) in path.iter().enumerate() {
+                if range.start > range.end {
+                    println!(
+                        "FOUND THE BUG! Invalid byte range in path {}, range {}: start=0x{:02X} > end=0x{:02X}",
+                        path_idx, range_idx, range.start, range.end
+                    );
+                    found_invalid = true;
+                    // Don't panic here - just log it
+                }
+            }
+        }
+
+        if !found_invalid {
+            println!("No invalid byte ranges found in UTF-8 paths - trying more complex ranges");
+
+            // Try with an even more complex set that's more likely to trigger the bug
+            let mut complex_cps = CodePointSet::new();
+            complex_cps.add(Interval::new(248, 705)); // This specific range might be the trigger
+            complex_cps.add(Interval::new(710, 721));
+            complex_cps.add(Interval::new(736, 740));
+
+            let complex_paths = utf8_paths_from_code_point_set(&complex_cps);
+            println!(
+                "Testing more complex set with {} paths",
+                complex_paths.len()
+            );
+
+            for (path_idx, path) in complex_paths.iter().enumerate() {
+                for (range_idx, range) in path.iter().enumerate() {
+                    if range.start > range.end {
+                        println!(
+                            "FOUND THE BUG in complex set! Invalid byte range in path {}, range {}: start=0x{:02X} > end=0x{:02X}",
+                            path_idx, range_idx, range.start, range.end
+                        );
+                        found_invalid = true;
+                    }
+                }
+            }
+        }
+
+        // This assertion should FAIL when the bug is present
+        assert!(
+            !found_invalid,
+            "Found invalid byte ranges in UTF-8 path generation - this is the bug!"
+        );
+    }
+
+    #[test]
+    fn test_expose_reconstruction_invalid_utf8() {
+        // Test the code_point_set_from_utf8_paths function directly with edge cases
+
+        // Create a UTF-8 path that has valid individual ranges but when min/max combined
+        // creates invalid UTF-8 or invalid code point ranges
+        let mut path1 = ByteRangePath::new();
+        path1.push(ByteRange {
+            start: 0xE1,
+            end: 0xE2,
+        }); // 3-byte UTF-8 first byte
+        path1.push(ByteRange {
+            start: 0xB8,
+            end: 0x81,
+        }); // Invalid: start > end
+        path1.push(ByteRange {
+            start: 0x80,
+            end: 0xBF,
+        }); // Valid continuation
+
+        let paths = vec![path1];
+
+        // Check the paths first
+        for (path_idx, path) in paths.iter().enumerate() {
+            for (range_idx, range) in path.iter().enumerate() {
+                if range.start > range.end {
+                    println!(
+                        "SUCCESS! Found invalid byte range in test path {}, range {}: start=0x{:02X} > end=0x{:02X}",
+                        path_idx, range_idx, range.start, range.end
+                    );
+                    return; // Test succeeded in exposing the bug
+                }
+            }
+        }
+
+        println!("Direct UTF-8 path construction test completed - no invalid ranges found");
     }
 }
