@@ -383,10 +383,9 @@ pub(crate) fn unicode_property_from_str(
                     &value,
                 )));
             }
-            if unicode_sets
-                && let Some(value) = unicode_string_property_from_str(s) {
-                    return Some(PropertyEscapeKind::StringSet(string_property_sets(&value)));
-                }
+            if unicode_sets && let Some(value) = unicode_string_property_from_str(s) {
+                return Some(PropertyEscapeKind::StringSet(string_property_sets(&value)));
+            }
             Some(PropertyEscapeKind::CharacterClass(
                 general_category_property_value_ranges(
                     &unicode_property_value_general_category_from_str(s)?,

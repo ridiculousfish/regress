@@ -1369,9 +1369,10 @@ where
             // CharacterEscape :: c AsciiLetter
             'c' => {
                 if let Some(nc) = self.next().and_then(char::from_u32)
-                    && (nc.is_ascii_lowercase() || nc.is_ascii_uppercase()) {
-                        return Ok((nc as u32) % 32);
-                    }
+                    && (nc.is_ascii_lowercase() || nc.is_ascii_uppercase())
+                {
+                    return Ok((nc as u32) % 32);
+                }
                 error("Invalid character escape")
             }
             // CharacterEscape :: 0 [lookahead ∉ DecimalDigit]
@@ -1756,13 +1757,13 @@ where
                 Some('(') => {
                     if self.try_consume_str("?")
                         && let Some(name) = self.try_consume_named_capture_group_name()
-                            && self
-                                .named_group_indices
-                                .insert(name, self.group_count_max)
-                                .is_some()
-                            {
-                                return error("Duplicate capture group name");
-                            }
+                        && self
+                            .named_group_indices
+                            .insert(name, self.group_count_max)
+                            .is_some()
+                    {
+                        return error("Duplicate capture group name");
+                    }
                     self.group_count_max = if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
                         MAX_CAPTURE_GROUPS as u32
                     } else {
