@@ -137,22 +137,111 @@ fn add_paths_from_bucket(cps: &CodePointSet, bucket: &Utf8Bucket, paths: &mut Ve
         iv.last = iv.last.min(bucket.ivs.last);
         debug_assert!(iv.first <= iv.last);
 
-        let b1 = Utf8Buf::from_cp(iv.first);
-        let b2 = Utf8Buf::from_cp(iv.last);
+        add_paths_from_interval_in_bucket(iv, bucket, paths);
+    }
+}
 
-        // Every byte should be within the byte ranges.
-        debug_assert_eq!(b1.len(), b2.len());
-        debug_assert!(bucket.contains(&b1));
-        debug_assert!(bucket.contains(&b2));
+fn add_paths_from_interval_in_bucket(
+    iv: crate::codepointset::Interval,
+    bucket: &Utf8Bucket,
+    paths: &mut Vec<ByteRangePath>,
+) {
+    let b1 = Utf8Buf::from_cp(iv.first);
+    let b2 = Utf8Buf::from_cp(iv.last);
 
-        // Construct our trie path.
+    debug_assert_eq!(b1.len(), b2.len());
+    debug_assert!(bucket.contains(&b1));
+    debug_assert!(bucket.contains(&b2));
+
+    // Check if we can safely use simple byte pairing
+    if can_use_simple_pairing(&b1, &b2) {
         let path = b1
             .iter()
             .zip(b2.iter())
             .map(|(&start, &end)| ByteRange { start, end })
             .collect();
         paths.push(path);
+    } else {
+        // Break range into segments that respect UTF-8 structure
+        segment_interval_for_utf8(iv.first, iv.last, bucket, paths);
     }
+}
+
+fn segment_interval_for_utf8(
+    start: u32,
+    end: u32,
+    bucket: &Utf8Bucket,
+    paths: &mut Vec<ByteRangePath>,
+) {
+    // For multi-byte UTF-8, we need to be careful about byte boundaries
+    // The key insight: break at boundaries where the leading byte changes
+
+    let mut current = start;
+    while current <= end {
+        let current_bytes = Utf8Buf::from_cp(current);
+
+        // Find the last code point that shares the same leading bytes pattern
+        // but may differ in the last byte
+        let mut segment_end = current;
+        let num_bytes = current_bytes.len();
+
+        // For the last byte, find the maximum value within this "row"
+        if num_bytes > 1 {
+            // Calculate the maximum code point with the same leading bytes
+            let leading_bytes = &current_bytes[..num_bytes - 1];
+            let max_last_byte = bucket.byte_ranges[num_bytes - 1].end;
+
+            // Reconstruct the maximum code point with these leading bytes
+            let mut temp_bytes = [0u8; 4];
+            temp_bytes[..num_bytes - 1].copy_from_slice(leading_bytes);
+            temp_bytes[num_bytes - 1] = max_last_byte;
+
+            // Convert back to code point to find the actual boundary
+            if let Ok(temp_str) = core::str::from_utf8(&temp_bytes[..num_bytes]) {
+                if let Some(temp_char) = temp_str.chars().next() {
+                    segment_end = temp_char as u32;
+                }
+            }
+        }
+
+        // Don't go beyond our actual range
+        segment_end = segment_end.min(end);
+
+        let segment_start_bytes = Utf8Buf::from_cp(current);
+        let segment_end_bytes = Utf8Buf::from_cp(segment_end);
+
+        // Now check if this segment can use simple pairing
+        if can_use_simple_pairing(&segment_start_bytes, &segment_end_bytes) {
+            let path = segment_start_bytes
+                .iter()
+                .zip(segment_end_bytes.iter())
+                .map(|(&s, &e)| ByteRange { start: s, end: e })
+                .collect();
+            paths.push(path);
+        } else {
+            // If even this segment can't use simple pairing, split more aggressively
+            // This handles edge cases in UTF-8 boundaries
+            let mid = (current + segment_end) / 2;
+            if mid > current {
+                segment_interval_for_utf8(current, mid, bucket, paths);
+                segment_interval_for_utf8(mid + 1, segment_end, bucket, paths);
+            } else {
+                // Single code point - just add it directly
+                let path = segment_start_bytes
+                    .iter()
+                    .map(|&b| ByteRange { start: b, end: b })
+                    .collect();
+                paths.push(path);
+            }
+        }
+
+        current = segment_end + 1;
+    }
+}
+
+fn can_use_simple_pairing(b1: &Utf8Buf, b2: &Utf8Buf) -> bool {
+    // Simple byte pairing is safe if all bytes are in non-decreasing order
+    b1.iter().zip(b2.iter()).all(|(&start, &end)| start <= end)
 }
 
 pub fn utf8_paths_from_code_point_set(cps: &CodePointSet) -> Vec<ByteRangePath> {
