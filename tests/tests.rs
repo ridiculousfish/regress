@@ -1791,6 +1791,16 @@ fn test_empty_brackets() {
 }
 
 #[test]
+fn test_keeps_capture_groups_for_impossible_matches() {
+    // Regression test for the following issue:
+    // branches which can never match a string but contain a capture group
+    // were being incorrectly removed, leading to capture group misnumbering.
+    test_with_configs(|tc: TestConfig| {
+        tc.test_match_succeeds(r#"(?:[](fail))?(capture)"#, "", "capture");
+    })
+}
+
+#[test]
 fn test_just_fails() {
     test_with_configs(|tc: TestConfig| {
         // Test cases where some part of the regex is guaranteed to fail.

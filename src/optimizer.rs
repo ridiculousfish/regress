@@ -175,8 +175,25 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
     }
 }
 
+/// Check if a node contains any capture groups (direct or nested)
+fn contains_capture_groups(node: &Node) -> bool {
+    match node {
+        Node::CaptureGroup(_, _) | Node::NamedCaptureGroup(_, _, _) => true,
+        Node::Cat(nodes) => nodes.iter().any(contains_capture_groups),
+        Node::Alt(left, right) => contains_capture_groups(left) || contains_capture_groups(right),
+        Node::Loop { loopee, .. } => contains_capture_groups(loopee),
+        Node::LookaroundAssertion { contents, .. } => contains_capture_groups(contents),
+        _ => false,
+    }
+}
+
 // If a node can never match, replace it with an always fails node.
 fn propagate_early_fails(n: &mut Node, _w: &Walk) -> PassAction {
+    // Don't optimize nodes containing capture groups to preserve user-visible group numbers
+    if contains_capture_groups(n) {
+        return PassAction::Keep;
+    }
+
     match n {
         Node::Cat(nodes) => {
             // If any child is an early fail, we are an early fail.
