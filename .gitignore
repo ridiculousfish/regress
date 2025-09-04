@@ -6,6 +6,9 @@ Cargo.lock
 .DS_Store
 regexp-pcre.js
 
+.claude/
+CLAUDE.md
+
 # Unicode Database Files
 DerivedCoreProperties.txt
 DerivedBinaryProperties.txt
