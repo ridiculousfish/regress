@@ -44,6 +44,9 @@ enum BacktrackInsn<Input: InputIndexer> {
         // The IP of the loop.
         // This is guaranteed to point to an EnterLoopInsn.
         ip: IP,
+        // The input position of the loop before entering it.
+        // This is used to set up backtracking that restores this position.
+        orig_pos: Input::Position,
         data: LoopData<Input::Position>,
     },
 
@@ -154,9 +157,11 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
             }
             (true, true) if !loop_fields.greedy => {
                 // Both arms are viable; backtrack into the loop.
+                let orig_pos = loop_data.entry;
                 loop_data.entry = pos;
                 self.bts.push(BacktrackInsn::EnterNonGreedyLoop {
                     ip,
+                    orig_pos,
                     data: *loop_data,
                 });
                 Some(loop_not_taken_ip)
@@ -532,9 +537,11 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     self.pop_backtrack();
                 }
 
-                &mut BacktrackInsn::EnterNonGreedyLoop { ip: loop_ip, data } => {
-                    // Must pop before we enter the loop.
-                    self.pop_backtrack();
+                &mut BacktrackInsn::EnterNonGreedyLoop {
+                    ip: loop_ip,
+                    orig_pos,
+                    data,
+                } => {
                     *ip = loop_ip + 1;
                     *pos = data.entry;
                     let loop_fields = match &self.re.insns.iat(loop_ip) {
@@ -542,6 +549,14 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         _ => rs_unreachable!("EnterNonGreedyLoop must point at a loop instruction"),
                     };
                     let loop_data = self.s.loops.mat(loop_fields.loop_id as usize);
+                    // Need to restore the position should we backtrack out of the loop (#131).
+                    *bt = BacktrackInsn::SetLoopData {
+                        id: loop_fields.loop_id,
+                        data: LoopData {
+                            entry: orig_pos,
+                            ..data
+                        },
+                    };
                     *loop_data = data;
                     MatchAttempter::prepare_to_enter_loop(
                         &mut self.bts,
