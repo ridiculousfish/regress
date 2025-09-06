@@ -2109,3 +2109,13 @@ fn test_non_greedy_quantifiers_tc(tc: TestConfig) {
     // Test zero-width non-greedy match
     tc.compile(r"a.*?a").match1f("aa").test_eq("aa");
 }
+
+#[test]
+fn test_empty_alternation_in_capture() {
+    test_with_configs(test_empty_alternation_in_capture_tc)
+}
+
+fn test_empty_alternation_in_capture_tc(tc: TestConfig) {
+    // Regression tests for empty alternations in capture groups.
+    tc.compile("(z|)*?x").match1f("z0x").test_eq("x,");
+}
