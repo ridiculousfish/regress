@@ -1,4 +1,4 @@
-use crate::bytesearch::{ByteArraySet, ByteSeq, ByteSet, SmallArraySet, charset_contains};
+use crate::bytesearch::{ByteArraySet, ByteSet, SmallArraySet, charset_contains};
 use crate::cursor;
 use crate::cursor::Direction;
 use crate::indexing::{ElementType, InputIndexer};
@@ -147,19 +147,14 @@ impl<Input: InputIndexer, Dir: Direction, ArraySet: SmallArraySet> SingleCharMat
 }
 
 /// A ByteSeq of length <= 4 may match a single char.
-pub struct MatchByteSeq<'a, Bytes: ByteSeq> {
-    pub bytes: &'a Bytes,
-}
+pub struct MatchByteSeq<'a, const N: usize>(pub &'a [u8; N]);
 
-impl<Input: InputIndexer, Dir: Direction, Bytes: ByteSeq> SingleCharMatcher<Input, Dir>
-    for MatchByteSeq<'_, Bytes>
+impl<const N: usize, Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir>
+    for MatchByteSeq<'_, N>
 {
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
-        debug_assert!(
-            Bytes::LENGTH <= 4,
-            "This looks like it could match more than one char"
-        );
-        cursor::try_match_lit(input, dir, pos, self.bytes)
+        debug_assert!(N <= 4, "This looks like it could match more than one char");
+        cursor::try_match_lit(input, dir, pos, self.0)
     }
 }
