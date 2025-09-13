@@ -1,4 +1,4 @@
-use crate::bytesearch::{self, ByteSeq};
+use crate::bytesearch;
 use crate::cursor::Direction;
 use crate::matchers::{self, CharProperties};
 #[cfg(feature = "utf16")]
@@ -144,11 +144,11 @@ where
 
     /// Return whether we match some literal bytes.
     /// If so, update the position. If not, the position is unspecified.
-    fn match_bytes<Dir: Direction, Bytes: ByteSeq>(
+    fn match_bytes<const N: usize, Dir: Direction>(
         &self,
         dir: Dir,
         pos: &mut Self::Position,
-        bytes: &Bytes,
+        bytes: &[u8; N],
     ) -> bool;
 }
 
@@ -532,13 +532,13 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         new_range == old_range
     }
 
-    fn match_bytes<Dir: Direction, Bytes: ByteSeq>(
+    fn match_bytes<const N: usize, Dir: Direction>(
         &self,
         _dir: Dir,
         pos: &mut Self::Position,
-        bytes: &Bytes,
+        bytes: &[u8; N],
     ) -> bool {
-        let len = Bytes::LENGTH;
+        let len = N;
         let (start, end) = if Dir::FORWARD {
             if let Some(end) = self.try_move_right(*pos, len) {
                 let start = *pos;
@@ -564,7 +564,7 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
         let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
 
-        bytes.equals_known_len(new_range)
+        bytes == new_range
     }
 }
 
@@ -813,13 +813,13 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         new_range == old_range
     }
 
-    fn match_bytes<Dir: Direction, Bytes: ByteSeq>(
+    fn match_bytes<const N: usize, Dir: Direction>(
         &self,
         _dir: Dir,
         pos: &mut Self::Position,
-        bytes: &Bytes,
+        bytes: &[u8; N],
     ) -> bool {
-        let len = Bytes::LENGTH;
+        let len = N;
         let (start, end) = if Dir::FORWARD {
             if let Some(end) = self.try_move_right(*pos, len) {
                 let start = *pos;
@@ -845,7 +845,7 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
         let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
 
-        bytes.equals_known_len(new_range)
+        bytes == new_range
     }
 }
 
@@ -1105,11 +1105,11 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         new_range == old_range
     }
 
-    fn match_bytes<Dir: Direction, Bytes: ByteSeq>(
+    fn match_bytes<const N: usize, Dir: Direction>(
         &self,
         _dir: Dir,
         _pos: &mut Self::Position,
-        _bytes: &Bytes,
+        _bytes: &[u8; N],
     ) -> bool {
         panic!("Should never be matching bytes for utf16");
     }
@@ -1278,11 +1278,11 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
         new_range == old_range
     }
 
-    fn match_bytes<Dir: Direction, Bytes: ByteSeq>(
+    fn match_bytes<const N: usize, Dir: Direction>(
         &self,
         _dir: Dir,
         _pos: &mut Self::Position,
-        _bytes: &Bytes,
+        _bytes: &[u8; N],
     ) -> bool {
         panic!("Should never be matching bytes for ucs2");
     }

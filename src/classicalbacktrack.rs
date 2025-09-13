@@ -287,22 +287,22 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteArraySet { bytes })
             }
             Insn::ByteSeq1(bytes) => {
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq(bytes))
             }
             Insn::ByteSeq2(bytes) => {
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq(bytes))
             }
             Insn::ByteSeq3(bytes) => {
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq(bytes))
             }
             Insn::ByteSeq4(bytes) => {
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq(bytes))
             }
             Insn::ByteSeq5(bytes) => {
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq(bytes))
             }
             Insn::ByteSeq6(bytes) => {
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq { bytes })
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq(bytes))
             }
             _ => {
                 unreachable!("Missing SCM: {:?}", re.insns.iat(ip + 1));
@@ -356,22 +356,22 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteArraySet { bytes })
             }
             Insn::ByteSeq1(bytes) => {
-                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq { bytes })
+                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq(bytes))
             }
             Insn::ByteSeq2(bytes) => {
-                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq { bytes })
+                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq(bytes))
             }
             Insn::ByteSeq3(bytes) => {
-                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq { bytes })
+                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq(bytes))
             }
             Insn::ByteSeq4(bytes) => {
-                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq { bytes })
+                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq(bytes))
             }
             Insn::ByteSeq5(bytes) => {
-                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq { bytes })
+                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq(bytes))
             }
             Insn::ByteSeq6(bytes) => {
-                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq { bytes })
+                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq(bytes))
             }
             _ => {
                 unreachable!("Missing SCM: {:?}", re.insns.iat(ip + 1));

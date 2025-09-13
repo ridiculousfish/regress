@@ -1,4 +1,3 @@
-use crate::bytesearch::ByteSeq;
 use crate::indexing::InputIndexer;
 
 #[derive(Debug, Copy, Clone)]
@@ -31,11 +30,11 @@ impl Direction for Backward {
 /// \return whether we match some literal bytes.
 /// If so, update the position. If not, the position is unspecified.
 #[inline(always)]
-pub fn try_match_lit<Input: InputIndexer, Dir: Direction, Bytes: ByteSeq>(
+pub fn try_match_lit<const N: usize, Input: InputIndexer, Dir: Direction>(
     input: &Input,
     dir: Dir,
     pos: &mut Input::Position,
-    bytes: &Bytes,
+    bytes: &[u8; N],
 ) -> bool {
     input.match_bytes(dir, pos, bytes)
 }
