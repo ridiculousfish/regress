@@ -1,4 +1,5 @@
 use core::cmp::Eq;
+use core::fmt;
 use core::marker::PhantomData;
 use core::ops;
 
@@ -25,8 +26,14 @@ pub type DefPosition<'a> = RefPosition<'a>;
 
 /// A simple index-based position.
 /// It remembers the lifetime of the slice it is tied to.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IndexPosition<'a>(usize, PhantomData<&'a ()>);
+
+impl<'a> fmt::Debug for IndexPosition<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("IndexPosition").field(&self.0).finish()
+    }
+}
 
 #[allow(dead_code)]
 impl IndexPosition<'_> {
@@ -89,8 +96,15 @@ impl PositionType for IndexPosition<'_> {}
 /// A reference position holds a reference to a byte and uses pointer arithmetic.
 /// This must use raw pointers because it must be capable of representing the one-past-the-end value.
 /// TODO: thread lifetimes through this.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RefPosition<'a>(core::ptr::NonNull<u8>, PhantomData<&'a ()>);
+
+impl<'a> fmt::Debug for RefPosition<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let addr = self.0.as_ptr() as usize;
+        f.debug_tuple("RefPosition").field(&addr).finish()
+    }
+}
 
 #[allow(dead_code)]
 impl RefPosition<'_> {
