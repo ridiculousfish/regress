@@ -129,9 +129,7 @@ impl<Input: InputIndexer, Dir: Direction, Bytes: ByteSet> SingleCharMatcher<Inpu
 
 /// Provide a variant for ByteArraySet where we hold it directly.
 /// The arrays are small and so we don't want to indirect through a pointer.
-pub struct MatchByteArraySet<ArraySet: SmallArraySet> {
-    pub bytes: ByteArraySet<ArraySet>,
-}
+pub struct MatchByteArraySet<ArraySet: SmallArraySet>(pub ByteArraySet<ArraySet>);
 
 impl<Input: InputIndexer, Dir: Direction, ArraySet: SmallArraySet> SingleCharMatcher<Input, Dir>
     for MatchByteArraySet<ArraySet>
@@ -139,7 +137,7 @@ impl<Input: InputIndexer, Dir: Direction, ArraySet: SmallArraySet> SingleCharMat
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         if let Some(b) = cursor::next_byte(input, dir, pos) {
-            self.bytes.0.contains(b)
+            self.0.contains(b)
         } else {
             false
         }

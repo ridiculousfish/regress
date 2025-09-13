@@ -278,13 +278,13 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::CharSet { chars })
             }
             &Insn::ByteSet2(bytes) => {
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteArraySet { bytes })
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteArraySet(bytes))
             }
             &Insn::ByteSet3(bytes) => {
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteArraySet { bytes })
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteArraySet(bytes))
             }
             &Insn::ByteSet4(bytes) => {
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteArraySet { bytes })
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteArraySet(bytes))
             }
             Insn::ByteSeq1(bytes) => {
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSeq(bytes))
@@ -347,13 +347,13 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 Self::compute_max_pos(input, pos, limit, dir, scm::CharSet { chars })
             }
             &Insn::ByteSet2(bytes) => {
-                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteArraySet { bytes })
+                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteArraySet(bytes))
             }
             &Insn::ByteSet3(bytes) => {
-                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteArraySet { bytes })
+                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteArraySet(bytes))
             }
             &Insn::ByteSet4(bytes) => {
-                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteArraySet { bytes })
+                Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteArraySet(bytes))
             }
             Insn::ByteSeq1(bytes) => {
                 Self::compute_max_pos(input, pos, limit, dir, scm::MatchByteSeq(bytes))
@@ -681,13 +681,13 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     }
 
                     &Insn::ByteSet2(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos))
+                        next_or_bt!(scm::MatchByteArraySet(bytes).matches(input, dir, &mut pos))
                     }
                     &Insn::ByteSet3(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos))
+                        next_or_bt!(scm::MatchByteArraySet(bytes).matches(input, dir, &mut pos))
                     }
                     &Insn::ByteSet4(bytes) => {
-                        next_or_bt!(scm::MatchByteArraySet { bytes }.matches(input, dir, &mut pos))
+                        next_or_bt!(scm::MatchByteArraySet(bytes).matches(input, dir, &mut pos))
                     }
 
                     Insn::ByteSeq1(v) => {
