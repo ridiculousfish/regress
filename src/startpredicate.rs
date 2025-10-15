@@ -13,7 +13,10 @@ use memchr::memmem;
 /// Returns true if the node begins with a StartOfLine anchor.
 fn is_start_anchored(n: &Node) -> bool {
     match n {
-        Node::Anchor(ir::AnchorType::StartOfLine) => true,
+        Node::Anchor {
+            anchor_type: ir::AnchorType::StartOfLine,
+            multiline,
+        } => !multiline,
         Node::Cat(nodes) => {
             // For concatenation, check if the first node is start-anchored
             nodes.first().is_some_and(is_start_anchored)
@@ -150,7 +153,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         Node::MatchAnyExceptLineTerminator => arbitrary,
 
         // TODO: can probably exploit some of these.
-        Node::Anchor(..) => arbitrary,
+        Node::Anchor { .. } => arbitrary,
         Node::WordBoundary { .. } => arbitrary,
 
         // Capture groups delegate to their contents.

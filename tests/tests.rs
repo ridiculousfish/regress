@@ -131,6 +131,33 @@ fn test_multiline() {
     test_with_configs(test_multiline_tc)
 }
 
+fn group_modifiers_tc(tc: TestConfig) {
+    let re = tc.compile(r"(?i:foo)bar");
+    assert!(re.find("FOObar").is_some());
+    assert!(re.find("FOOBAR").is_none());
+
+    let re = tc.compilef(r"foo(?-i:bar)", "i");
+    assert!(re.find("FOObar").is_some());
+    assert!(re.find("FOOBAR").is_none());
+
+    let re = tc.compile(r"(?s:.)a");
+    assert_eq!(re.match1f("\na"), "\na");
+
+    let re = tc.compile(r".a");
+    assert!(re.find("\na").is_none());
+
+    let re = tc.compile(r"(?m:^foo)");
+    assert_eq!(re.match1f("bar\nfoo"), "foo");
+
+    let re = tc.compile(r"^foo");
+    assert!(re.find("bar\nfoo").is_none());
+}
+
+#[test]
+fn group_modifiers() {
+    test_with_configs(group_modifiers_tc)
+}
+
 fn test_dotall_tc(tc: TestConfig) {
     tc.compile(r".").test_fails("\n");
     tc.compilef(r".", "s").match1f("\n").test_eq("\n");

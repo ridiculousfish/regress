@@ -12,10 +12,10 @@ use core::convert::TryInto;
 use {alloc::vec::Vec, hashbrown::HashMap};
 
 /// \return an anchor instruction for a given IR anchor.
-fn make_anchor(anchor_type: ir::AnchorType) -> Insn {
+fn make_anchor(anchor_type: ir::AnchorType, multiline: bool) -> Insn {
     match anchor_type {
-        ir::AnchorType::StartOfLine => Insn::StartOfLine,
-        ir::AnchorType::EndOfLine => Insn::EndOfLine,
+        ir::AnchorType::StartOfLine => Insn::StartOfLine { multiline },
+        ir::AnchorType::EndOfLine => Insn::EndOfLine { multiline },
     }
 }
 
@@ -214,7 +214,10 @@ impl Emitter {
                     Node::MatchAnyExceptLineTerminator => {
                         self.emit_insn(Insn::MatchAnyExceptLineTerminator)
                     }
-                    Node::Anchor(anchor_type) => self.emit_insn(make_anchor(*anchor_type)),
+                    Node::Anchor {
+                        anchor_type,
+                        multiline,
+                    } => self.emit_insn(make_anchor(*anchor_type, *multiline)),
                     Node::Loop {
                         loopee,
                         quant,

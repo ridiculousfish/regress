@@ -47,10 +47,14 @@ pub enum Insn {
     CharICase(u32),
 
     /// Match the start of a line (if multiline); emitted by '^'
-    StartOfLine,
+    StartOfLine {
+        multiline: bool,
+    },
 
     /// Match the end of a line; emitted by '$'
-    EndOfLine,
+    EndOfLine {
+        multiline: bool,
+    },
 
     /// Match any character except a line terminator; emitted by '.' only when
     /// the dot_all flag is set to true.
