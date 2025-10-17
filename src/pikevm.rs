@@ -146,19 +146,21 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         Insn::ByteSeq15(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
         Insn::ByteSeq16(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
 
-        Insn::StartOfLine => {
+        Insn::StartOfLine { multiline } => {
+            let multiline = *multiline;
             let matches = match input.peek_left(s.pos) {
                 None => true,
-                Some(c) if re.flags.multiline && Input::CharProps::is_line_terminator(c) => true,
+                Some(c) if multiline && Input::CharProps::is_line_terminator(c) => true,
                 _ => false,
             };
             nextinsn_or_fail!(matches)
         }
 
-        Insn::EndOfLine => {
+        Insn::EndOfLine { multiline } => {
+            let multiline = *multiline;
             let matches = match input.peek_right(s.pos) {
                 None => true, // we're at the right of the string
-                Some(c) if re.flags.multiline && Input::CharProps::is_line_terminator(c) => true,
+                Some(c) if multiline && Input::CharProps::is_line_terminator(c) => true,
                 _ => false,
             };
             nextinsn_or_fail!(matches)

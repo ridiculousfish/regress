@@ -767,28 +767,20 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         next_or_bt!(is_boundary != invert)
                     }
 
-                    Insn::StartOfLine => {
+                    Insn::StartOfLine { multiline } => {
+                        let multiline = *multiline;
                         let matches = match input.peek_left(pos) {
                             None => true,
-                            Some(c)
-                                if re.flags.multiline
-                                    && Input::CharProps::is_line_terminator(c) =>
-                            {
-                                true
-                            }
+                            Some(c) if multiline && Input::CharProps::is_line_terminator(c) => true,
                             _ => false,
                         };
                         next_or_bt!(matches)
                     }
-                    Insn::EndOfLine => {
+                    Insn::EndOfLine { multiline } => {
+                        let multiline = *multiline;
                         let matches = match input.peek_right(pos) {
                             None => true, // we're at the right of the string
-                            Some(c)
-                                if re.flags.multiline
-                                    && Input::CharProps::is_line_terminator(c) =>
-                            {
-                                true
-                            }
+                            Some(c) if multiline && Input::CharProps::is_line_terminator(c) => true,
                             _ => false,
                         };
                         next_or_bt!(matches)

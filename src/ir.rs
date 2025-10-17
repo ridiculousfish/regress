@@ -62,8 +62,12 @@ pub enum Node {
     /// Match anything except a newline.
     MatchAnyExceptLineTerminator,
 
-    /// Match an anchor like ^ or $
-    Anchor(AnchorType),
+    /// Match an anchor like ^ or $. The `multiline` flag controls whether the
+    /// anchor should treat line terminators as boundaries.
+    Anchor {
+        anchor_type: AnchorType,
+        multiline: bool,
+    },
 
     /// Word boundary (\b or \B).
     WordBoundary { invert: bool },
@@ -187,7 +191,13 @@ impl Node {
             ),
             Node::MatchAny => Node::MatchAny,
             Node::MatchAnyExceptLineTerminator => Node::MatchAnyExceptLineTerminator,
-            &Node::Anchor(anchor_type) => Node::Anchor(anchor_type),
+            &Node::Anchor {
+                anchor_type,
+                multiline,
+            } => Node::Anchor {
+                anchor_type,
+                multiline,
+            },
 
             Node::Loop {
                 loopee,
@@ -505,8 +515,11 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
         Node::MatchAnyExceptLineTerminator => {
             writeln!(f, "MatchAnyExceptLineTerminator")?;
         }
-        Node::Anchor(anchor_type) => {
-            writeln!(f, "Anchor {:?}", anchor_type)?;
+        Node::Anchor {
+            anchor_type,
+            multiline,
+        } => {
+            writeln!(f, "Anchor {:?} multiline={}", anchor_type, multiline)?;
         }
         Node::Loop {
             quant,

@@ -492,13 +492,19 @@ where
                 // Term :: Assertion :: ^
                 '^' => {
                     self.consume('^');
-                    result.push(ir::Node::Anchor(ir::AnchorType::StartOfLine));
+                    result.push(ir::Node::Anchor {
+                        anchor_type: ir::AnchorType::StartOfLine,
+                        multiline: self.flags.multiline,
+                    });
                     quantifier_allowed = false;
                 }
                 // Term :: Assertion :: $
                 '$' => {
                     self.consume('$');
-                    result.push(ir::Node::Anchor(ir::AnchorType::EndOfLine));
+                    result.push(ir::Node::Anchor {
+                        anchor_type: ir::AnchorType::EndOfLine,
+                        multiline: self.flags.multiline,
+                    });
                     quantifier_allowed = false;
                 }
 
@@ -595,6 +601,8 @@ where
                     } else if self.try_consume_str("(?:") {
                         // Non-capturing group.
                         result.push(self.consume_disjunction()?);
+                    } else if let Some(group) = self.try_consume_modifier_group()? {
+                        result.push(group);
                     } else {
                         // Capturing group.
                         self.consume('(');
@@ -702,6 +710,90 @@ where
             }
         }
         Ok(make_cat(result))
+    }
+
+    fn try_consume_modifier_group(&mut self) -> Result<Option<ir::Node>, Error> {
+        let mut cursor = self.input.clone();
+        if cursor.next() != Some('(' as u32) {
+            return Ok(None);
+        }
+        if cursor.next() != Some('?' as u32) {
+            return Ok(None);
+        }
+        let Some(mut current) = cursor.next() else {
+            return Ok(None);
+        };
+
+        if to_char_sat(current) == '<' {
+            return Ok(None);
+        }
+
+        let mut seen_hyphen = false;
+        let mut saw_flag = false;
+        let mut icase_override: Option<bool> = None;
+        let mut multiline_override: Option<bool> = None;
+        let mut dot_all_override: Option<bool> = None;
+
+        loop {
+            let ch = to_char_sat(current);
+            match ch {
+                'i' | 'm' | 's' => {
+                    let value = !seen_hyphen;
+                    let target = match ch {
+                        'i' => &mut icase_override,
+                        'm' => &mut multiline_override,
+                        's' => &mut dot_all_override,
+                        _ => unreachable!(),
+                    };
+                    if target.is_some() {
+                        return error("Invalid group modifier");
+                    }
+                    *target = Some(value);
+                    saw_flag = true;
+                }
+                '-' => {
+                    if seen_hyphen {
+                        return error("Invalid group modifier");
+                    }
+                    seen_hyphen = true;
+                }
+                ':' => {
+                    if !saw_flag {
+                        return error("Invalid group modifier");
+                    }
+                    self.input = cursor;
+                    let mut new_flags = self.flags;
+                    if let Some(value) = icase_override {
+                        new_flags.icase = value;
+                    }
+                    if let Some(value) = multiline_override {
+                        new_flags.multiline = value;
+                    }
+                    if let Some(value) = dot_all_override {
+                        new_flags.dot_all = value;
+                    }
+                    let saved_flags = self.flags;
+                    self.flags = new_flags;
+                    let contents = match self.consume_disjunction() {
+                        Ok(node) => node,
+                        Err(err) => {
+                            self.flags = saved_flags;
+                            return Err(err);
+                        }
+                    };
+                    self.flags = saved_flags;
+                    return Ok(Some(contents));
+                }
+                _ => {
+                    return error("Invalid group modifier");
+                }
+            }
+
+            current = match cursor.next() {
+                Some(next) => next,
+                None => return error("Invalid group modifier"),
+            };
+        }
     }
 
     /// ES6 21.2.2.13 CharacterClass.
