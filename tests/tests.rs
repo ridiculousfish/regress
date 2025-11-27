@@ -2150,7 +2150,8 @@ fn test_empty_alternation_in_capture_tc(tc: TestConfig) {
 // TC39 proposal: duplicate named capturing groups in different alternatives
 fn test_duplicate_named_groups_tc(tc: TestConfig) {
     // Basic duplicate named groups in alternatives - the example from the TC39 proposal
-    let m = tc.compile(r"(?<year>[0-9]{4})-[0-9]{2}|[0-9]{2}-(?<year>[0-9]{4})")
+    let m = tc
+        .compile(r"(?<year>[0-9]{4})-[0-9]{2}|[0-9]{2}-(?<year>[0-9]{4})")
         .find("2025-12")
         .unwrap();
     assert_eq!(m.group(0), Some(0..7));
@@ -2159,7 +2160,8 @@ fn test_duplicate_named_groups_tc(tc: TestConfig) {
     assert!(ng.eq([("year", Some(0..4))]));
 
     // Test the other alternative
-    let m = tc.compile(r"(?<year>[0-9]{4})-[0-9]{2}|[0-9]{2}-(?<year>[0-9]{4})")
+    let m = tc
+        .compile(r"(?<year>[0-9]{4})-[0-9]{2}|[0-9]{2}-(?<year>[0-9]{4})")
         .find("12-2025")
         .unwrap();
     assert_eq!(m.group(0), Some(0..7));
@@ -2168,26 +2170,24 @@ fn test_duplicate_named_groups_tc(tc: TestConfig) {
     assert!(ng.eq([("year", Some(3..7))]));
 
     // Duplicate names in nested alternatives
-    let m = tc.compile(r"(?:(?<a>x)|(?<a>y))")
-        .find("x")
-        .unwrap();
+    let m = tc.compile(r"(?:(?<a>x)|(?<a>y))").find("x").unwrap();
     let ng = m.named_groups();
     assert!(ng.eq([("a", Some(0..1))]));
 
-    let m = tc.compile(r"(?:(?<a>x)|(?<a>y))")
-        .find("y")
-        .unwrap();
+    let m = tc.compile(r"(?:(?<a>x)|(?<a>y))").find("y").unwrap();
     let ng = m.named_groups();
     assert!(ng.eq([("a", Some(0..1))]));
 
     // Multiple duplicate names
-    let m = tc.compile(r"(?<x>a)(?<y>b)|(?<x>c)(?<y>d)")
+    let m = tc
+        .compile(r"(?<x>a)(?<y>b)|(?<x>c)(?<y>d)")
         .find("ab")
         .unwrap();
     let ng = m.named_groups();
     assert!(ng.eq([("x", Some(0..1)), ("y", Some(1..2))]));
 
-    let m = tc.compile(r"(?<x>a)(?<y>b)|(?<x>c)(?<y>d)")
+    let m = tc
+        .compile(r"(?<x>a)(?<y>b)|(?<x>c)(?<y>d)")
         .find("cd")
         .unwrap();
     let ng = m.named_groups();
