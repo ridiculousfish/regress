@@ -311,20 +311,48 @@ impl<'m> Iterator for NamedGroups<'m> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        // Increment next_group_idx until we find a non-empty name.
+        // Increment next_group_idx until we find a non-empty name that we haven't seen yet.
         debug_assert!(self.next_group_idx <= self.mat.group_names.len());
         let end = self.mat.group_names.len();
-        let mut idx = self.next_group_idx;
-        while idx < end && self.mat.group_names[idx].is_empty() {
-            idx += 1;
+
+        loop {
+            let mut idx = self.next_group_idx;
+            // Skip empty names
+            while idx < end && self.mat.group_names[idx].is_empty() {
+                idx += 1;
+            }
+            if idx == end {
+                return None;
+            }
+
+            let name = self.mat.group_names[idx].as_ref();
+
+            // Check if we've already returned this name (by looking backwards)
+            let already_seen = self.mat.group_names[..idx]
+                .iter()
+                .any(|n| n.as_ref() == name && !n.is_empty());
+
+            if already_seen {
+                // Skip this duplicate and continue to next
+                self.next_group_idx = idx + 1;
+                continue;
+            }
+
+            // This is the first occurrence of this name. Find the best range value.
+            // Prefer a Some value over None when there are duplicate names.
+            let mut best_range = self.mat.captures[idx].clone();
+            for check_idx in (idx + 1)..end {
+                if self.mat.group_names[check_idx].as_ref() == name {
+                    // Found a duplicate name. Prefer a Some value over None.
+                    if best_range.is_none() && self.mat.captures[check_idx].is_some() {
+                        best_range = self.mat.captures[check_idx].clone();
+                    }
+                }
+            }
+
+            self.next_group_idx = idx + 1;
+            return Some((name, best_range));
         }
-        if idx == end {
-            return None;
-        }
-        let name = self.mat.group_names[idx].as_ref();
-        let range = self.mat.captures[idx].clone();
-        self.next_group_idx = idx + 1;
-        Some((name, range))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

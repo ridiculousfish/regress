@@ -1823,8 +1823,18 @@ where
     }
 
     // Quickly parse all capture groups.
+    // Per TC39 proposal, duplicate named groups are allowed in different alternatives.
     fn parse_capture_groups(&mut self) -> Result<(), Error> {
         let orig_input = self.input.clone();
+
+        // Track parenthesis depth and alternative index at each depth
+        let mut paren_depth: usize = 0;
+        // Map from depth to current alternative index at that depth
+        let mut alt_indices: HashMap<usize, usize> = HashMap::new();
+        alt_indices.insert(0, 0);
+
+        // Map from group name to the set of alternative paths where it appears.
+        let mut named_groups: HashMap<String, Vec<Vec<(usize, usize)>>> = HashMap::new();
 
         loop {
             match self.next().map(to_char_sat) {
@@ -1846,18 +1856,53 @@ where
                 Some('(') => {
                     if self.try_consume_str("?")
                         && let Some(name) = self.try_consume_named_capture_group_name()
-                        && self
-                            .named_group_indices
-                            .insert(name, self.group_count_max)
-                            .is_some()
                     {
-                        return error("Duplicate capture group name");
+                        // Build current alternative path (depth, alt_index) pairs
+                        let mut current_path = Vec::new();
+                        for d in 0..=paren_depth {
+                            current_path.push((d, *alt_indices.get(&d).unwrap_or(&0)));
+                        }
+
+                        // Check if this name already exists in a conflicting alternative path.
+                        // Two paths conflict if they share the same alternative indices
+                        // at all common depth levels (i.e., one is a prefix of the other
+                        // or they're identical up to the shallower depth).
+                        if let Some(existing_paths) = named_groups.get(&name) {
+                            for existing_path in existing_paths {
+                                let min_len = current_path.len().min(existing_path.len());
+                                if current_path[..min_len] == existing_path[..min_len] {
+                                    return error("Duplicate capture group name");
+                                }
+                            }
+                        }
+
+                        // Add this path for this group name
+                        named_groups.entry(name.clone()).or_insert_with(Vec::new).push(current_path);
+
+                        // Store in named_group_indices (use the first occurrence's index)
+                        self.named_group_indices.entry(name).or_insert(self.group_count_max);
                     }
+
                     self.group_count_max = if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
                         MAX_CAPTURE_GROUPS as u32
                     } else {
                         self.group_count_max + 1
                     };
+
+                    // Entering a new group
+                    paren_depth += 1;
+                    alt_indices.insert(paren_depth, 0);
+                }
+                Some(')') => {
+                    // Exiting a group
+                    if paren_depth > 0 {
+                        alt_indices.remove(&paren_depth);
+                        paren_depth -= 1;
+                    }
+                }
+                Some('|') => {
+                    // Moving to next alternative at current depth
+                    *alt_indices.entry(paren_depth).or_insert(0) += 1;
                 }
                 Some(_) => continue,
                 None => break,
