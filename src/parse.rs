@@ -1877,7 +1877,7 @@ where
                         }
 
                         // Add this path for this group name
-                        named_groups.entry(name.clone()).or_insert_with(Vec::new).push(current_path);
+                        named_groups.entry(name.clone()).or_default().push(current_path);
 
                         // Store in named_group_indices (use the first occurrence's index)
                         self.named_group_indices.entry(name).or_insert(self.group_count_max);
