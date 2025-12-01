@@ -330,7 +330,7 @@ impl<'m> Iterator for NamedGroups<'m> {
             // Check if we've already returned this name (by looking backwards)
             let already_seen = self.mat.group_names[..idx]
                 .iter()
-                .any(|n| n.as_ref() == name && !n.is_empty());
+                .any(|n| n.as_ref() == name);
 
             if already_seen {
                 // Skip this duplicate and continue to next
@@ -346,6 +346,7 @@ impl<'m> Iterator for NamedGroups<'m> {
                     // Found a duplicate name. Prefer a Some value over None.
                     if best_range.is_none() && self.mat.captures[check_idx].is_some() {
                         best_range = self.mat.captures[check_idx].clone();
+                        break; // Stop once we find a Some value
                     }
                 }
             }
