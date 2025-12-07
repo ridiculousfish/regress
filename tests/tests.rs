@@ -2146,3 +2146,86 @@ fn test_empty_alternation_in_capture_tc(tc: TestConfig) {
     // Regression tests for empty alternations in capture groups.
     tc.compile("(z|)*?x").match1f("z0x").test_eq("x,");
 }
+
+// TC39 proposal: duplicate named capturing groups in different alternatives
+fn test_duplicate_named_groups_tc(tc: TestConfig) {
+    // Basic duplicate named groups in alternatives - the example from the TC39 proposal
+    let m = tc
+        .compile(r"(?<year>[0-9]{4})-[0-9]{2}|[0-9]{2}-(?<year>[0-9]{4})")
+        .find("2025-12")
+        .unwrap();
+    assert_eq!(m.group(0), Some(0..7));
+    assert_eq!(m.group(1), Some(0..4));
+    let ng = m.named_groups();
+    assert!(ng.eq([("year", Some(0..4))]));
+
+    // Test the other alternative
+    let m = tc
+        .compile(r"(?<year>[0-9]{4})-[0-9]{2}|[0-9]{2}-(?<year>[0-9]{4})")
+        .find("12-2025")
+        .unwrap();
+    assert_eq!(m.group(0), Some(0..7));
+    assert_eq!(m.group(2), Some(3..7));
+    let ng = m.named_groups();
+    assert!(ng.eq([("year", Some(3..7))]));
+
+    // Duplicate names in nested alternatives
+    let m = tc.compile(r"(?:(?<a>x)|(?<a>y))").find("x").unwrap();
+    let ng = m.named_groups();
+    assert!(ng.eq([("a", Some(0..1))]));
+
+    let m = tc.compile(r"(?:(?<a>x)|(?<a>y))").find("y").unwrap();
+    let ng = m.named_groups();
+    assert!(ng.eq([("a", Some(0..1))]));
+
+    // Multiple duplicate names
+    let m = tc
+        .compile(r"(?<x>a)(?<y>b)|(?<x>c)(?<y>d)")
+        .find("ab")
+        .unwrap();
+    let ng = m.named_groups();
+    assert!(ng.eq([("x", Some(0..1)), ("y", Some(1..2))]));
+
+    let m = tc
+        .compile(r"(?<x>a)(?<y>b)|(?<x>c)(?<y>d)")
+        .find("cd")
+        .unwrap();
+    let ng = m.named_groups();
+    assert!(ng.eq([("x", Some(0..1)), ("y", Some(1..2))]));
+
+    // Backreferences with duplicate names
+    // TODO: Backreferences with duplicate named groups require additional work
+    // in the matcher to determine which group participated. This is deferred.
+    //let m = tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
+    //    .find("xx")
+    //    .unwrap();
+    //assert_eq!(m.group(0), Some(0..2));
+
+    //let m = tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
+    //    .find("yy")
+    //    .unwrap();
+    //assert_eq!(m.group(0), Some(0..2));
+
+    //// Should NOT match when backreference doesn't match
+    //assert!(tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
+    //    .find("xy")
+    //    .is_none());
+}
+
+#[test]
+fn test_duplicate_named_groups() {
+    test_with_configs(test_duplicate_named_groups_tc)
+}
+
+// Test that duplicates in the SAME alternative are still rejected
+#[test]
+fn test_duplicate_named_groups_same_alternative_rejected() {
+    use regress::Regex;
+
+    // Should reject duplicates in the same alternative
+    assert!(Regex::new(r"(?<name>a)(?<name>b)").is_err());
+    assert!(Regex::new(r"(?<x>a)b(?<x>c)").is_err());
+
+    // Should reject duplicates in nested groups within same alternative
+    assert!(Regex::new(r"(?<a>x)(?:(?<a>y))").is_err());
+}

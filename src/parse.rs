@@ -367,6 +367,30 @@ struct LookaroundParams {
     backwards: bool,
 }
 
+/// Represents an alternative path in a regex pattern.
+/// For example, in `/(?<a>x)|(?<a>y)/`, the two occurrences of 'a' are in different
+/// alternative paths (separated by |), so they don't conflict.
+/// Each element in the vector is (depth, alternative_index) where:
+/// - depth: parenthesis nesting level (0 = top level)
+/// - alternative_index: which alternative at that depth (0 = first, 1 = second after |, etc.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AlternativePath {
+    /// Vector of (depth, alternative_index) pairs representing the path through alternatives
+    segments: Vec<(usize, usize)>,
+}
+
+impl AlternativePath {
+    /// Check if two alternative paths conflict (i.e., are in the same alternative branch).
+    /// Two paths conflict if they share the same alternative indices at all common depth levels.
+    /// Example:
+    ///   - [(0, 0)] and [(0, 0), (1, 0)] conflict (second is nested within first)
+    ///   - [(0, 0)] and [(0, 1)] don't conflict (different alternatives at depth 0)
+    fn conflicts_with(&self, other: &AlternativePath) -> bool {
+        let min_len = self.segments.len().min(other.segments.len());
+        self.segments[..min_len] == other.segments[..min_len]
+    }
+}
+
 /// Represents the state used to parse a regex.
 struct Parser<I>
 where
@@ -1823,8 +1847,33 @@ where
     }
 
     // Quickly parse all capture groups.
+    // Per TC39 proposal, duplicate named groups are allowed in different alternatives.
     fn parse_capture_groups(&mut self) -> Result<(), Error> {
         let orig_input = self.input.clone();
+
+        // Pass 1: Collect all named capture groups with their alternative paths
+        let named_group_locations = self.collect_named_group_locations()?;
+
+        // Pass 2: Check for conflicts (duplicates in the same alternative path)
+        self.check_duplicate_conflicts(&named_group_locations)?;
+
+        self.input = orig_input;
+
+        Ok(())
+    }
+
+    /// Pass 1: Collect all named capture groups and record which alternative path each appears in.
+    fn collect_named_group_locations(
+        &mut self,
+    ) -> Result<HashMap<String, Vec<AlternativePath>>, Error> {
+        // Track parenthesis depth and alternative index at each depth
+        let mut paren_depth: usize = 0;
+        // Map from depth to current alternative index at that depth
+        let mut alt_indices: HashMap<usize, usize> = HashMap::new();
+        alt_indices.insert(0, 0);
+
+        // Map from group name to all alternative paths where it appears
+        let mut named_group_locations: HashMap<String, Vec<AlternativePath>> = HashMap::new();
 
         loop {
             match self.next().map(to_char_sat) {
@@ -1846,26 +1895,73 @@ where
                 Some('(') => {
                     if self.try_consume_str("?")
                         && let Some(name) = self.try_consume_named_capture_group_name()
-                        && self
-                            .named_group_indices
-                            .insert(name, self.group_count_max)
-                            .is_some()
                     {
-                        return error("Duplicate capture group name");
+                        // Build current alternative path from depth 0 to current depth
+                        let mut segments = Vec::new();
+                        for d in 0..=paren_depth {
+                            segments.push((d, *alt_indices.get(&d).unwrap_or(&0)));
+                        }
+                        let current_path = AlternativePath { segments };
+
+                        // Record this location
+                        named_group_locations
+                            .entry(name.clone())
+                            .or_default()
+                            .push(current_path);
+
+                        // Store in named_group_indices (use the first occurrence's index)
+                        self.named_group_indices
+                            .entry(name)
+                            .or_insert(self.group_count_max);
                     }
+
                     self.group_count_max = if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
                         MAX_CAPTURE_GROUPS as u32
                     } else {
                         self.group_count_max + 1
                     };
+
+                    // Entering a new group
+                    paren_depth += 1;
+                    alt_indices.insert(paren_depth, 0);
+                }
+                Some(')') => {
+                    // Exiting a group
+                    if paren_depth > 0 {
+                        alt_indices.remove(&paren_depth);
+                        paren_depth -= 1;
+                    }
+                }
+                Some('|') => {
+                    // Moving to next alternative at current depth
+                    *alt_indices.entry(paren_depth).or_insert(0) += 1;
                 }
                 Some(_) => continue,
                 None => break,
             }
         }
 
-        self.input = orig_input;
+        Ok(named_group_locations)
+    }
 
+    /// Pass 2: Check that named groups with the same name don't conflict.
+    /// Groups conflict if they appear in the same alternative path.
+    /// Per TC39 proposal, `/(?<a>x)|(?<a>y)/` is valid (different alternatives),
+    /// but `/(?<a>x)(?<a>y)/` is invalid (same alternative).
+    fn check_duplicate_conflicts(
+        &self,
+        named_group_locations: &HashMap<String, Vec<AlternativePath>>,
+    ) -> Result<(), Error> {
+        for paths in named_group_locations.values() {
+            // Check each pair of paths for this group name
+            for i in 0..paths.len() {
+                for j in (i + 1)..paths.len() {
+                    if paths[i].conflicts_with(&paths[j]) {
+                        return error("Duplicate capture group name");
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
