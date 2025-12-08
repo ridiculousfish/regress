@@ -7,5 +7,5 @@ license = "MIT OR Apache-2.0"
 edition = "2024"
 
 [dependencies]
-codegen = "0.2.0"
+codegen = "0.3.0"
 ucd-parse = "0.1.13"
