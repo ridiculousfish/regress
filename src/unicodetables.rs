@@ -19893,10 +19893,9 @@ const ARABIC: [Interval; 58] = [
     Interval::new(126704, 126705),
 ];
 
-const ARABIC_EXTENSIONS: [Interval; 53] = [
+const ARABIC_EXTENSIONS: [Interval; 52] = [
     Interval::new(1536, 1540),
-    Interval::new(1542, 1564),
-    Interval::new(1564, 1756),
+    Interval::new(1542, 1756),
     Interval::new(1758, 1791),
     Interval::new(1872, 1919),
     Interval::new(2160, 2190),
@@ -19985,7 +19984,7 @@ const BENGALI: [Interval; 14] = [
     Interval::new(2534, 2558),
 ];
 
-const BENGALI_EXTENSIONS: [Interval; 27] = [
+const BENGALI_EXTENSIONS: [Interval; 26] = [
     Interval::new(2385, 2386),
     Interval::new(2404, 2405),
     Interval::new(2432, 2435),
@@ -20001,7 +20000,6 @@ const BENGALI_EXTENSIONS: [Interval; 27] = [
     Interval::new(2519, 2519),
     Interval::new(2524, 2525),
     Interval::new(2527, 2531),
-    Interval::new(2534, 2543),
     Interval::new(2534, 2558),
     Interval::new(7376, 7376),
     Interval::new(7378, 7378),
@@ -20147,10 +20145,8 @@ const CYRILLIC: [Interval; 10] = [
     Interval::new(123023, 123023),
 ];
 
-const CYRILLIC_EXTENSIONS: [Interval; 13] = [
-    Interval::new(1024, 1156),
-    Interval::new(1155, 1159),
-    Interval::new(1159, 1327),
+const CYRILLIC_EXTENSIONS: [Interval; 11] = [
+    Interval::new(1024, 1327),
     Interval::new(7296, 7304),
     Interval::new(7467, 7467),
     Interval::new(7544, 7544),
@@ -20171,10 +20167,9 @@ const DEVANAGARI: [Interval; 5] = [
     Interval::new(72448, 72457),
 ];
 
-const DEVANAGARI_EXTENSIONS: [Interval; 9] = [
+const DEVANAGARI_EXTENSIONS: [Interval; 8] = [
     Interval::new(2304, 2386),
-    Interval::new(2389, 2415),
-    Interval::new(2406, 2431),
+    Interval::new(2389, 2431),
     Interval::new(7376, 7414),
     Interval::new(7416, 7417),
     Interval::new(8432, 8432),
@@ -20372,7 +20367,7 @@ const GRANTHA: [Interval; 15] = [
     Interval::new(70512, 70516),
 ];
 
-const GRANTHA_EXTENSIONS: [Interval; 26] = [
+const GRANTHA_EXTENSIONS: [Interval; 25] = [
     Interval::new(2385, 2386),
     Interval::new(2404, 2405),
     Interval::new(3046, 3059),
@@ -20388,8 +20383,7 @@ const GRANTHA_EXTENSIONS: [Interval; 26] = [
     Interval::new(70442, 70448),
     Interval::new(70450, 70451),
     Interval::new(70453, 70457),
-    Interval::new(70459, 70460),
-    Interval::new(70460, 70468),
+    Interval::new(70459, 70468),
     Interval::new(70471, 70472),
     Interval::new(70475, 70477),
     Interval::new(70480, 70480),
@@ -20498,7 +20492,7 @@ const GUJARATI: [Interval; 14] = [
     Interval::new(2809, 2815),
 ];
 
-const GUJARATI_EXTENSIONS: [Interval; 18] = [
+const GUJARATI_EXTENSIONS: [Interval; 17] = [
     Interval::new(2385, 2386),
     Interval::new(2404, 2405),
     Interval::new(2689, 2691),
@@ -20513,7 +20507,6 @@ const GUJARATI_EXTENSIONS: [Interval; 18] = [
     Interval::new(2763, 2765),
     Interval::new(2768, 2768),
     Interval::new(2784, 2787),
-    Interval::new(2790, 2799),
     Interval::new(2790, 2801),
     Interval::new(2809, 2815),
     Interval::new(43056, 43065),
@@ -20538,7 +20531,7 @@ const GURMUKHI: [Interval; 16] = [
     Interval::new(2662, 2678),
 ];
 
-const GURMUKHI_EXTENSIONS: [Interval; 20] = [
+const GURMUKHI_EXTENSIONS: [Interval; 19] = [
     Interval::new(2385, 2386),
     Interval::new(2404, 2405),
     Interval::new(2561, 2563),
@@ -20556,7 +20549,6 @@ const GURMUKHI_EXTENSIONS: [Interval; 20] = [
     Interval::new(2641, 2641),
     Interval::new(2649, 2652),
     Interval::new(2654, 2654),
-    Interval::new(2662, 2671),
     Interval::new(2662, 2678),
     Interval::new(43056, 43065),
 ];
@@ -21528,7 +21520,7 @@ const TAMIL: [Interval; 18] = [
     Interval::new(73727, 73727),
 ];
 
-const TAMIL_EXTENSIONS: [Interval; 26] = [
+const TAMIL_EXTENSIONS: [Interval; 25] = [
     Interval::new(2385, 2386),
     Interval::new(2404, 2405),
     Interval::new(2946, 2947),
@@ -21546,7 +21538,6 @@ const TAMIL_EXTENSIONS: [Interval; 26] = [
     Interval::new(3018, 3021),
     Interval::new(3024, 3024),
     Interval::new(3031, 3031),
-    Interval::new(3046, 3059),
     Interval::new(3046, 3066),
     Interval::new(7386, 7386),
     Interval::new(43251, 43251),
