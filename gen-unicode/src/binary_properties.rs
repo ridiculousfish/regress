@@ -1,4 +1,4 @@
-use crate::{GenUnicode, codepoints_to_range, format_interval_table, pack_adjacent_codepoints};
+use crate::{GenUnicode, codepoints_to_range, format_interval_table, merge_sorted_ranges};
 use codegen::{Block, Enum, Function};
 
 impl GenUnicode {
@@ -30,7 +30,7 @@ impl GenUnicode {
             let mut codepoints = ucd_file.chars(orig_name, self);
 
             codepoints.sort();
-            pack_adjacent_codepoints(&mut codepoints);
+            merge_sorted_ranges(&mut codepoints);
 
             self.scope.raw(format_interval_table(
                 &orig_name.to_uppercase(),
@@ -94,7 +94,7 @@ impl GenUnicode {
             }
         }
         unassigned_codepoints.sort();
-        pack_adjacent_codepoints(&mut unassigned_codepoints);
+        merge_sorted_ranges(&mut unassigned_codepoints);
         let mut assigned_codepoints = Vec::new();
         let mut start = 0;
         for iv in unassigned_codepoints {

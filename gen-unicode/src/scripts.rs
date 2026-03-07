@@ -1,6 +1,5 @@
 use crate::{
-    GenUnicode, codepoints_to_range, format_interval_table, pack_adjacent_codepoints,
-    remove_codepoints,
+    GenUnicode, codepoints_to_range, format_interval_table, merge_sorted_ranges, remove_codepoints,
 };
 use codegen::{Block, Enum, Function};
 
@@ -43,7 +42,7 @@ impl GenUnicode {
                     })
                     .collect();
                 script_ranges.sort();
-                pack_adjacent_codepoints(&mut script_ranges);
+                merge_sorted_ranges(&mut script_ranges);
 
                 let mut script_extension_ranges: Vec<_> = self
                     .script_extensions
@@ -57,7 +56,7 @@ impl GenUnicode {
                     })
                     .collect();
                 script_extension_ranges.sort();
-                pack_adjacent_codepoints(&mut script_extension_ranges);
+                merge_sorted_ranges(&mut script_extension_ranges);
                 scx_ranges.extend(script_extension_ranges.clone());
 
                 scripts.push(Script {
@@ -73,7 +72,7 @@ impl GenUnicode {
         }
 
         scx_ranges.sort();
-        pack_adjacent_codepoints(&mut scx_ranges);
+        merge_sorted_ranges(&mut scx_ranges);
 
         // Delete script extensions ranges from the "Common" and "Inherited" script extension ranges.
         for script in &mut scripts {
@@ -89,7 +88,7 @@ impl GenUnicode {
                 }
 
                 script.codepoints_scx.sort();
-                pack_adjacent_codepoints(&mut script.codepoints_scx);
+                merge_sorted_ranges(&mut script.codepoints_scx);
             }
         }
 
@@ -175,7 +174,7 @@ impl GenUnicode {
                 let mut codepoints = script.codepoints_sc.clone();
                 codepoints.extend(&script.codepoints_scx);
                 codepoints.sort();
-                pack_adjacent_codepoints(&mut codepoints);
+                merge_sorted_ranges(&mut codepoints);
 
                 self.scope.raw(format_interval_table(
                     &script.codepoints_scx_name,

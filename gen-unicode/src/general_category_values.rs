@@ -1,4 +1,4 @@
-use crate::{GenUnicode, codepoints_to_range, format_interval_table, pack_adjacent_codepoints};
+use crate::{GenUnicode, codepoints_to_range, format_interval_table, merge_sorted_ranges};
 use codegen::{Block, Enum, Function};
 use std::collections::HashMap;
 
@@ -38,7 +38,7 @@ impl GenUnicode {
             }
 
             codepoints.sort();
-            pack_adjacent_codepoints(&mut codepoints);
+            merge_sorted_ranges(&mut codepoints);
 
             self.scope.raw(format_interval_table(
                 &orig_name.to_uppercase(),
@@ -85,7 +85,7 @@ impl GenUnicode {
             }
 
             codepoints.sort();
-            pack_adjacent_codepoints(&mut codepoints);
+            merge_sorted_ranges(&mut codepoints);
 
             self.scope.raw(format_interval_table(
                 &orig_name.to_uppercase(),

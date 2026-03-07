@@ -123,30 +123,29 @@ fn main() {
         .expect("Failed to run 'cargo fmt' on tests file");
 }
 
-// Combine unicode code point ranges, if they are adjacent.
-pub(crate) fn pack_adjacent_codepoints(codepoints: &mut Vec<(u32, u32)>) {
-    let codepoints_original = codepoints.clone();
-    let mut codepoints_iter = codepoints_original.iter().cloned().peekable();
-
-    codepoints.clear();
-
-    while let Some((start, mut end)) = codepoints_iter.next() {
-        while let Some((next_start, next_end)) = codepoints_iter.peek() {
-            if (start..=end).contains(next_start) && (start..=end).contains(next_end) {
-                codepoints_iter.next();
-                continue;
-            }
-
-            if end + 1 == *next_start {
-                end = *next_end;
-                codepoints_iter.next();
-            } else {
-                break;
-            }
-        }
-
-        codepoints.push((start, end));
-    }
+/// Merge sorted code point ranges into a minimal set of disjoint, non-abutting ranges.
+/// Input must be sorted by range start. Handles overlapping and abutting ranges.
+pub(crate) fn merge_sorted_ranges(codepoints: &mut Vec<(u32, u32)>) {
+    // Fold ranges into a new vec, merging overlapping/abutting ranges as we go
+    let merged_codepoints =
+        codepoints
+            .iter()
+            .copied()
+            .fold(Vec::new(), |mut acc: Vec<(u32, u32)>, (start, end)| {
+                if let Some(last) = acc.last() {
+                    assert!(start >= last.0, "ranges must be sorted by start");
+                }
+                match acc.last_mut() {
+                    Some(last) if start <= last.1 + 1 => {
+                        last.1 = last.1.max(end);
+                    }
+                    _ => {
+                        acc.push((start, end));
+                    }
+                }
+                acc
+            });
+    *codepoints = merged_codepoints;
 }
 
 // Remove a unicode code point range from the given ranges.
@@ -257,6 +256,18 @@ impl DeltaBlock {
 
 /// Format code points
 pub(crate) fn format_interval_table(name: &str, codepoints: &[(u32, u32)]) -> String {
+    // Verify ranges are sorted and non-overlapping
+    for window in codepoints.windows(2) {
+        let (_, prev_end) = window[0];
+        let (next_start, _) = window[1];
+        assert!(
+            prev_end < next_start,
+            "{}: ranges overlap or abut: {:?}",
+            name,
+            window
+        );
+    }
+
     format!(
         "const {}: [Interval; {}] = [{}];",
         name,
@@ -267,4 +278,19 @@ pub(crate) fn format_interval_table(name: &str, codepoints: &[(u32, u32)]) -> St
             .collect::<Vec<String>>()
             .join("")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_sorted_ranges_overlapping() {
+        // Simulates the Cyrillic Script Extensions case from ScriptExtensions.txt
+        // where different entries have overlapping ranges
+        let mut ranges = vec![(1024, 1156), (1155, 1159), (1159, 1327)];
+        ranges.sort();
+        merge_sorted_ranges(&mut ranges);
+        assert_eq!(ranges, vec![(1024, 1327)]);
+    }
 }
