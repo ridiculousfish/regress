@@ -2229,3 +2229,10 @@ fn test_duplicate_named_groups_same_alternative_rejected() {
     // Should reject duplicates in nested groups within same alternative
     assert!(Regex::new(r"(?<a>x)(?:(?<a>y))").is_err());
 }
+
+#[test]
+fn test_regression_142() {
+    // Regression test for issue #142.
+    use regress::Regex;
+    let _ = Regex::with_flags(r"\p{scx=Cyrl}", "u").expect("Should succeed");
+}
