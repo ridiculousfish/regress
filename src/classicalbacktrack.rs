@@ -11,7 +11,7 @@ use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
 use crate::insn::StartPredicate;
 use crate::insn::{CompiledRegex, Insn, LoopFields};
 use crate::matchers;
-use crate::matchers::CharProperties;
+use crate::matchers::{CharProperties, is_icase_word_char};
 use crate::position::PositionType;
 use crate::scm;
 use crate::scm::SingleCharMatcher;
@@ -770,14 +770,30 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         )
                     }
 
-                    &Insn::WordBoundary { invert } => {
-                        // Copy the positions since these destructively move them.
-                        let prev_wordchar = input
-                            .peek_left(pos)
-                            .is_some_and(Input::CharProps::is_word_char);
-                        let curr_wordchar = input
-                            .peek_right(pos)
-                            .is_some_and(Input::CharProps::is_word_char);
+                    &Insn::WordBoundary {
+                        invert,
+                        icase,
+                        unicode,
+                    } => {
+                        // When icase+unicode, use expanded word character check
+                        let prev_wordchar = if icase && unicode {
+                            input
+                                .peek_left(pos)
+                                .is_some_and(|c| is_icase_word_char(c.as_u32()))
+                        } else {
+                            input
+                                .peek_left(pos)
+                                .is_some_and(Input::CharProps::is_word_char)
+                        };
+                        let curr_wordchar = if icase && unicode {
+                            input
+                                .peek_right(pos)
+                                .is_some_and(|c| is_icase_word_char(c.as_u32()))
+                        } else {
+                            input
+                                .peek_right(pos)
+                                .is_some_and(Input::CharProps::is_word_char)
+                        };
                         let is_boundary = prev_wordchar != curr_wordchar;
                         next_or_bt!(is_boundary != invert)
                     }
@@ -856,14 +872,17 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         next_or_bt!(true)
                     }
 
-                    &Insn::BackRef(cg_idx) => {
+                    &Insn::BackRef {
+                        group: cg_idx,
+                        icase,
+                    } => {
                         let cg = self.s.groups.mat(cg_idx as usize);
                         // Backreferences to a capture group that did not match always succeed (ES5
                         // 15.10.2.9).
                         // Note we may be in the capture group we are examining, e.g. /(abc\1)/.
                         let matched;
                         if let Some(orig_range) = cg.as_range() {
-                            if re.flags.icase {
+                            if icase {
                                 matched = matchers::backref_icase(input, dir, orig_range, &mut pos);
                             } else {
                                 matched = matchers::backref(input, dir, orig_range, &mut pos);
@@ -871,6 +890,30 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         } else {
                             // This group has not been exited and so the match succeeds (ES6
                             // 21.2.2.9).
+                            matched = true;
+                        }
+                        next_or_bt!(matched)
+                    }
+
+                    &Insn::NamedBackRef { ref groups, icase } => {
+                        // For duplicate named groups: find the first group that participated
+                        let mut participated_range = None;
+                        for &cg_idx in groups.iter() {
+                            let cg = self.s.groups.mat(cg_idx as usize);
+                            if let Some(range) = cg.as_range() {
+                                participated_range = Some(range);
+                                break;
+                            }
+                        }
+                        let matched;
+                        if let Some(orig_range) = participated_range {
+                            if icase {
+                                matched = matchers::backref_icase(input, dir, orig_range, &mut pos);
+                            } else {
+                                matched = matchers::backref(input, dir, orig_range, &mut pos);
+                            }
+                        } else {
+                            // No group participated, match succeeds (empty match)
                             matched = true;
                         }
                         next_or_bt!(matched)

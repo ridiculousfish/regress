@@ -414,6 +414,9 @@ where
     /// Named capture group references.
     named_group_indices: HashMap<CaptureGroupName, u32>,
 
+    /// All indices for each named capture group (for duplicate named groups).
+    named_group_all_indices: HashMap<CaptureGroupName, Vec<u32>>,
+
     /// Whether a lookbehind was encountered.
     has_lookbehind: bool,
 }
@@ -541,12 +544,20 @@ where
                         // Term :: Assertion :: \b
                         'b' => {
                             self.consume('b');
-                            result.push(ir::Node::WordBoundary { invert: false });
+                            result.push(ir::Node::WordBoundary {
+                                invert: false,
+                                icase: self.flags.icase,
+                                unicode: self.flags.unicode || self.flags.unicode_sets,
+                            });
                         }
                         // Term :: Assertion :: \B
                         'B' => {
                             self.consume('B');
-                            result.push(ir::Node::WordBoundary { invert: true });
+                            result.push(ir::Node::WordBoundary {
+                                invert: true,
+                                icase: self.flags.icase,
+                                unicode: self.flags.unicode || self.flags.unicode_sets,
+                            });
                         }
                         // Term :: Atom :: \ AtomEscape :: CharacterEscape :: c AsciiLetter
                         // Term :: ExtendedAtom :: \ [lookahead = c]
@@ -1587,10 +1598,22 @@ where
 
             'w' | 'W' => {
                 self.consume(c);
-                Ok(make_bracket_class(
-                    CharacterClassType::Words,
-                    c == 'w' as u32,
-                ))
+                let positive = c == 'w' as u32;
+                // In unicode+icase mode, expand the POSITIVE word char set
+                // with case-folded variants, then use invert for \W.
+                // This is necessary because make_bracket_class pre-inverts cps
+                // for negative classes, which would cause add_icase_code_points
+                // to expand the wrong set.
+                if self.flags.icase && (self.flags.unicode || self.flags.unicode_sets) {
+                    let mut cps = codepoints_from_class(CharacterClassType::Words, true);
+                    cps = unicode::add_icase_code_points(cps);
+                    Ok(ir::Node::Bracket(BracketContents {
+                        invert: !positive,
+                        cps,
+                    }))
+                } else {
+                    Ok(make_bracket_class(CharacterClassType::Words, positive))
+                }
             }
 
             // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
@@ -1601,9 +1624,20 @@ where
                 let property_escape = self.try_consume_unicode_property_escape()?;
                 match property_escape {
                     PropertyEscapeKind::CharacterClass(s) => {
+                        let mut cps = CodePointSet::from_sorted_disjoint_intervals(s.to_vec());
+                        if self.flags.icase {
+                            if negate {
+                                // CharacterComplement semantics (ES2025): for \P{prop}
+                                // with icase, compute the non-matching set N and invert.
+                                cps = unicode::compute_icase_complement_nonmatching(&cps);
+                            } else {
+                                // For \p{prop} with icase, expand with case-folded variants
+                                cps = unicode::add_icase_code_points(cps);
+                            }
+                        }
                         Ok(ir::Node::Bracket(BracketContents {
                             invert: negate,
-                            cps: CodePointSet::from_sorted_disjoint_intervals(s.to_vec()),
+                            cps,
                         }))
                     }
                     PropertyEscapeKind::StringSet(_) if negate => error("Invalid character escape"),
@@ -1630,7 +1664,10 @@ where
             '1'..='9' if self.flags.unicode => {
                 let group = self.try_consume_decimal_integer_literal().unwrap();
                 if group <= self.group_count_max as usize {
-                    Ok(ir::Node::BackRef(group as u32))
+                    Ok(ir::Node::BackRef {
+                        group: group as u32,
+                        icase: self.flags.icase,
+                    })
                 } else {
                     error("Invalid character escape")
                 }
@@ -1644,7 +1681,10 @@ where
                 let group = self.try_consume_decimal_integer_literal().unwrap();
 
                 if group <= self.group_count_max as usize {
-                    Ok(ir::Node::BackRef(group as u32))
+                    Ok(ir::Node::BackRef {
+                        group: group as u32,
+                        icase: self.flags.icase,
+                    })
                 } else {
                     self.input = input;
                     let c = self.consume_character_escape()?;
@@ -1661,8 +1701,27 @@ where
 
                 // The sequence `\k` must be the start of a backreference to a named capture group.
                 if let Some(group_name) = self.try_consume_named_capture_group_name() {
-                    if let Some(index) = self.named_group_indices.get(&group_name) {
-                        Ok(ir::Node::BackRef(*index + 1))
+                    // Check if there are multiple groups with this name (duplicate named groups)
+                    if let Some(all_indices) = self.named_group_all_indices.get(&group_name) {
+                        if all_indices.len() > 1 {
+                            // Multiple groups with this name - emit NamedBackRef
+                            let groups: Vec<u32> = all_indices.iter().map(|i| i + 1).collect();
+                            Ok(ir::Node::NamedBackRef {
+                                groups,
+                                icase: self.flags.icase,
+                            })
+                        } else {
+                            // Single group - use regular BackRef
+                            Ok(ir::Node::BackRef {
+                                group: all_indices[0] + 1,
+                                icase: self.flags.icase,
+                            })
+                        }
+                    } else if let Some(index) = self.named_group_indices.get(&group_name) {
+                        Ok(ir::Node::BackRef {
+                            group: *index + 1,
+                            icase: self.flags.icase,
+                        })
                     } else {
                         error(format!(
                             "Backreference to invalid named capture group: {}",
@@ -1893,35 +1952,50 @@ where
                     }
                 },
                 Some('(') => {
-                    if self.try_consume_str("?")
-                        && let Some(name) = self.try_consume_named_capture_group_name()
-                    {
-                        // Build current alternative path from depth 0 to current depth
-                        let mut segments = Vec::new();
-                        for d in 0..=paren_depth {
-                            segments.push((d, *alt_indices.get(&d).unwrap_or(&0)));
+                    let mut is_capturing = true;
+
+                    if self.try_consume_str("?") {
+                        if let Some(name) = self.try_consume_named_capture_group_name() {
+                            // Named capturing group
+                            // Build current alternative path from depth 0 to current depth
+                            let mut segments = Vec::new();
+                            for d in 0..=paren_depth {
+                                segments.push((d, *alt_indices.get(&d).unwrap_or(&0)));
+                            }
+                            let current_path = AlternativePath { segments };
+
+                            // Record this location
+                            named_group_locations
+                                .entry(name.clone())
+                                .or_default()
+                                .push(current_path);
+
+                            // Store in named_group_indices (use the first occurrence's index)
+                            self.named_group_indices
+                                .entry(name.clone())
+                                .or_insert(self.group_count_max);
+
+                            // Store ALL indices for this name (for NamedBackRef)
+                            self.named_group_all_indices
+                                .entry(name)
+                                .or_default()
+                                .push(self.group_count_max);
+                        } else {
+                            // Non-capturing group (?:), lookahead (?=), (?!), etc.
+                            is_capturing = false;
                         }
-                        let current_path = AlternativePath { segments };
-
-                        // Record this location
-                        named_group_locations
-                            .entry(name.clone())
-                            .or_default()
-                            .push(current_path);
-
-                        // Store in named_group_indices (use the first occurrence's index)
-                        self.named_group_indices
-                            .entry(name)
-                            .or_insert(self.group_count_max);
                     }
 
-                    self.group_count_max = if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
-                        MAX_CAPTURE_GROUPS as u32
-                    } else {
-                        self.group_count_max + 1
-                    };
+                    if is_capturing {
+                        self.group_count_max =
+                            if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
+                                MAX_CAPTURE_GROUPS as u32
+                            } else {
+                                self.group_count_max + 1
+                            };
+                    }
 
-                    // Entering a new group
+                    // Entering a new group (track nesting for ALL groups)
                     paren_depth += 1;
                     alt_indices.insert(paren_depth, 0);
                 }
@@ -2030,6 +2104,7 @@ where
         loop_count: 0,
         group_count: 0,
         named_group_indices: HashMap::new(),
+        named_group_all_indices: HashMap::new(),
         group_count_max: 0,
         has_lookbehind: false,
     };

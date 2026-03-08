@@ -160,7 +160,10 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
             // Capture groups could in principle be optimized if they only match empties.
             PassAction::Keep
         }
-        Node::WordBoundary { .. } | Node::BackRef { .. } | Node::Bracket { .. } => PassAction::Keep,
+        Node::WordBoundary { .. }
+        | Node::BackRef { .. }
+        | Node::NamedBackRef { .. }
+        | Node::Bracket { .. } => PassAction::Keep,
         Node::LookaroundAssertion {
             negate, contents, ..
         } => {

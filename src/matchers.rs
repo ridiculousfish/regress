@@ -100,3 +100,23 @@ pub fn backref_icase<Input: InputIndexer, Dir: Direction>(
     }
     true
 }
+
+/// Check whether a code point is in the expanded WordCharacters set
+/// under Unicode + IgnoreCase semantics (ES2024 §22.2.2.9).
+///
+/// A character `d` is a word char iff there exists a basic word char `c`
+/// such that `Canonicalize(rer, d) == Canonicalize(rer, c)`.
+/// Since fold of any basic word char is always a basic word char,
+/// this reduces to: `fold(d)` is a basic word char.
+pub fn is_icase_word_char(cp: u32) -> bool {
+    is_basic_word_char(unicode::fold(cp))
+}
+
+fn is_basic_word_char(cp: u32) -> bool {
+    matches!(cp,
+        0x30..=0x39 | // 0-9
+        0x41..=0x5A | // A-Z
+        0x61..=0x7A | // a-z
+        0x5F          // _
+    )
+}
