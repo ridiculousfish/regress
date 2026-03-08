@@ -164,7 +164,7 @@ impl GenUnicode {
                 .collect();
 
             f.line(format!(
-                "const CODE_POINTS: [&str; {}] = [\n    {},\n];",
+                "static CODE_POINTS: [&str; {}] = [\n    {},\n];",
                 code_points.len(),
                 code_points.join(",\n    ")
             ));

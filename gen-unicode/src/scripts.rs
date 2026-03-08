@@ -223,7 +223,7 @@ impl GenUnicode {
                 .arg("tc", "TestConfig");
 
             f.line(format!(
-                "const CODE_POINTS: [std::ops::RangeInclusive<u32>; {}] = [\n    {}\n];",
+                "static CODE_POINTS: [std::ops::RangeInclusive<u32>; {}] = [\n    {}\n];",
                 script.codepoints_sc.len(),
                 script
                     .codepoints_sc
@@ -245,7 +245,7 @@ impl GenUnicode {
                 regexes.join(",\n    ")
             ));
 
-            f.line(r#"for regex in REGEXES { let regex = tc.compilef(regex, "u"); for range in CODE_POINTS { for cp in range { regex.test_succeeds(&char::from_u32(cp).unwrap().to_string()); } } }"#);
+            f.line(r#"for regex in REGEXES { let regex = tc.compilef(regex, "u"); for range in &CODE_POINTS { for cp in range.clone() { regex.test_succeeds(&char::from_u32(cp).unwrap().to_string()); } } }"#);
         }
     }
 }

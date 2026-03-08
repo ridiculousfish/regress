@@ -7,7 +7,7 @@ fn unicode_escape_property_script_adlam() {
 }
 
 fn unicode_escape_property_script_adlam_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [125184..=125259, 125264..=125273, 125278..=125279];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Adlam}+$",
@@ -17,8 +17,8 @@ fn unicode_escape_property_script_adlam_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -31,7 +31,7 @@ fn unicode_escape_property_script_caucasian_albanian() {
 }
 
 fn unicode_escape_property_script_caucasian_albanian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66864..=66915, 66927..=66927];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66864..=66915, 66927..=66927];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Caucasian_Albanian}+$",
         "^\\p{sc=Caucasian_Albanian}+$",
@@ -40,8 +40,8 @@ fn unicode_escape_property_script_caucasian_albanian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -54,13 +54,13 @@ fn unicode_escape_property_script_ahom() {
 }
 
 fn unicode_escape_property_script_ahom_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [71424..=71450, 71453..=71467, 71472..=71494];
     const REGEXES: [&str; 2] = ["^\\p{Script=Ahom}+$", "^\\p{sc=Ahom}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -73,7 +73,7 @@ fn unicode_escape_property_script_arabic() {
 }
 
 fn unicode_escape_property_script_arabic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 56] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 56] = [
         1536..=1540,
         1542..=1547,
         1549..=1562,
@@ -139,8 +139,8 @@ fn unicode_escape_property_script_arabic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -153,7 +153,7 @@ fn unicode_escape_property_script_imperial_aramaic() {
 }
 
 fn unicode_escape_property_script_imperial_aramaic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [67648..=67669, 67671..=67679];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [67648..=67669, 67671..=67679];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Imperial_Aramaic}+$",
         "^\\p{sc=Imperial_Aramaic}+$",
@@ -162,8 +162,8 @@ fn unicode_escape_property_script_imperial_aramaic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -176,7 +176,7 @@ fn unicode_escape_property_script_armenian() {
 }
 
 fn unicode_escape_property_script_armenian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
         [1329..=1366, 1369..=1418, 1421..=1423, 64275..=64279];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Armenian}+$",
@@ -186,8 +186,8 @@ fn unicode_escape_property_script_armenian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -200,7 +200,7 @@ fn unicode_escape_property_script_avestan() {
 }
 
 fn unicode_escape_property_script_avestan_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [68352..=68405, 68409..=68415];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [68352..=68405, 68409..=68415];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Avestan}+$",
         "^\\p{sc=Avestan}+$",
@@ -209,8 +209,8 @@ fn unicode_escape_property_script_avestan_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -223,7 +223,7 @@ fn unicode_escape_property_script_balinese() {
 }
 
 fn unicode_escape_property_script_balinese_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [6912..=6988, 6990..=7039];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [6912..=6988, 6990..=7039];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Balinese}+$",
         "^\\p{sc=Balinese}+$",
@@ -232,8 +232,8 @@ fn unicode_escape_property_script_balinese_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -246,7 +246,7 @@ fn unicode_escape_property_script_bamum() {
 }
 
 fn unicode_escape_property_script_bamum_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [42656..=42743, 92160..=92728];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [42656..=42743, 92160..=92728];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Bamum}+$",
         "^\\p{sc=Bamum}+$",
@@ -255,8 +255,8 @@ fn unicode_escape_property_script_bamum_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -269,7 +269,7 @@ fn unicode_escape_property_script_bassa_vah() {
 }
 
 fn unicode_escape_property_script_bassa_vah_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [92880..=92909, 92912..=92917];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [92880..=92909, 92912..=92917];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Bassa_Vah}+$",
         "^\\p{sc=Bassa_Vah}+$",
@@ -278,8 +278,8 @@ fn unicode_escape_property_script_bassa_vah_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -292,7 +292,7 @@ fn unicode_escape_property_script_batak() {
 }
 
 fn unicode_escape_property_script_batak_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [7104..=7155, 7164..=7167];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [7104..=7155, 7164..=7167];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Batak}+$",
         "^\\p{sc=Batak}+$",
@@ -301,8 +301,8 @@ fn unicode_escape_property_script_batak_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -315,7 +315,7 @@ fn unicode_escape_property_script_bengali() {
 }
 
 fn unicode_escape_property_script_bengali_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 14] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 14] = [
         2432..=2435,
         2437..=2444,
         2447..=2448,
@@ -339,8 +339,8 @@ fn unicode_escape_property_script_bengali_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -353,7 +353,7 @@ fn unicode_escape_property_script_beria_erfe() {
 }
 
 fn unicode_escape_property_script_beria_erfe_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [93856..=93880, 93883..=93907];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [93856..=93880, 93883..=93907];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Beria_Erfe}+$",
         "^\\p{sc=Beria_Erfe}+$",
@@ -362,8 +362,8 @@ fn unicode_escape_property_script_beria_erfe_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -376,7 +376,7 @@ fn unicode_escape_property_script_bhaiksuki() {
 }
 
 fn unicode_escape_property_script_bhaiksuki_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
         [72704..=72712, 72714..=72758, 72760..=72773, 72784..=72812];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Bhaiksuki}+$",
@@ -386,8 +386,8 @@ fn unicode_escape_property_script_bhaiksuki_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -400,7 +400,7 @@ fn unicode_escape_property_script_bopomofo() {
 }
 
 fn unicode_escape_property_script_bopomofo_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [746..=747, 12549..=12591, 12704..=12735];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Bopomofo}+$",
@@ -410,8 +410,8 @@ fn unicode_escape_property_script_bopomofo_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -424,7 +424,7 @@ fn unicode_escape_property_script_brahmi() {
 }
 
 fn unicode_escape_property_script_brahmi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [69632..=69709, 69714..=69749, 69759..=69759];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Brahmi}+$",
@@ -434,8 +434,8 @@ fn unicode_escape_property_script_brahmi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -448,7 +448,7 @@ fn unicode_escape_property_script_braille() {
 }
 
 fn unicode_escape_property_script_braille_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [10240..=10495];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [10240..=10495];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Braille}+$",
         "^\\p{sc=Braille}+$",
@@ -457,8 +457,8 @@ fn unicode_escape_property_script_braille_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -471,7 +471,7 @@ fn unicode_escape_property_script_buginese() {
 }
 
 fn unicode_escape_property_script_buginese_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [6656..=6683, 6686..=6687];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [6656..=6683, 6686..=6687];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Buginese}+$",
         "^\\p{sc=Buginese}+$",
@@ -480,8 +480,8 @@ fn unicode_escape_property_script_buginese_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -494,7 +494,7 @@ fn unicode_escape_property_script_buhid() {
 }
 
 fn unicode_escape_property_script_buhid_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [5952..=5971];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [5952..=5971];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Buhid}+$",
         "^\\p{sc=Buhid}+$",
@@ -503,8 +503,8 @@ fn unicode_escape_property_script_buhid_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -517,7 +517,7 @@ fn unicode_escape_property_script_chakma() {
 }
 
 fn unicode_escape_property_script_chakma_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [69888..=69940, 69942..=69959];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [69888..=69940, 69942..=69959];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Chakma}+$",
         "^\\p{sc=Chakma}+$",
@@ -526,8 +526,8 @@ fn unicode_escape_property_script_chakma_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -540,7 +540,7 @@ fn unicode_escape_property_script_canadian_aboriginal() {
 }
 
 fn unicode_escape_property_script_canadian_aboriginal_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [5120..=5759, 6320..=6389, 72368..=72383];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Canadian_Aboriginal}+$",
@@ -550,8 +550,8 @@ fn unicode_escape_property_script_canadian_aboriginal_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -564,7 +564,7 @@ fn unicode_escape_property_script_carian() {
 }
 
 fn unicode_escape_property_script_carian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66208..=66256];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66208..=66256];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Carian}+$",
         "^\\p{sc=Carian}+$",
@@ -573,8 +573,8 @@ fn unicode_escape_property_script_carian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -587,13 +587,13 @@ fn unicode_escape_property_script_cham() {
 }
 
 fn unicode_escape_property_script_cham_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
         [43520..=43574, 43584..=43597, 43600..=43609, 43612..=43615];
     const REGEXES: [&str; 2] = ["^\\p{Script=Cham}+$", "^\\p{sc=Cham}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -606,7 +606,7 @@ fn unicode_escape_property_script_cherokee() {
 }
 
 fn unicode_escape_property_script_cherokee_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [5024..=5109, 5112..=5117, 43888..=43967];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Cherokee}+$",
@@ -616,8 +616,8 @@ fn unicode_escape_property_script_cherokee_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -630,7 +630,7 @@ fn unicode_escape_property_script_chorasmian() {
 }
 
 fn unicode_escape_property_script_chorasmian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69552..=69579];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69552..=69579];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Chorasmian}+$",
         "^\\p{sc=Chorasmian}+$",
@@ -639,8 +639,8 @@ fn unicode_escape_property_script_chorasmian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -653,7 +653,7 @@ fn unicode_escape_property_script_coptic() {
 }
 
 fn unicode_escape_property_script_coptic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [994..=1007, 11392..=11507, 11513..=11519];
     const REGEXES: [&str; 6] = [
         "^\\p{Script=Coptic}+$",
@@ -665,8 +665,8 @@ fn unicode_escape_property_script_coptic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -679,7 +679,7 @@ fn unicode_escape_property_script_cypro_minoan() {
 }
 
 fn unicode_escape_property_script_cypro_minoan_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [77712..=77810];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [77712..=77810];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Cypro_Minoan}+$",
         "^\\p{sc=Cypro_Minoan}+$",
@@ -688,8 +688,8 @@ fn unicode_escape_property_script_cypro_minoan_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -702,7 +702,7 @@ fn unicode_escape_property_script_cypriot() {
 }
 
 fn unicode_escape_property_script_cypriot_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 6] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 6] = [
         67584..=67589,
         67592..=67592,
         67594..=67637,
@@ -718,8 +718,8 @@ fn unicode_escape_property_script_cypriot_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -732,7 +732,7 @@ fn unicode_escape_property_script_cyrillic() {
 }
 
 fn unicode_escape_property_script_cyrillic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 10] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 10] = [
         1024..=1156,
         1159..=1327,
         7296..=7306,
@@ -752,8 +752,8 @@ fn unicode_escape_property_script_cyrillic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -766,7 +766,7 @@ fn unicode_escape_property_script_devanagari() {
 }
 
 fn unicode_escape_property_script_devanagari_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
         2304..=2384,
         2389..=2403,
         2406..=2431,
@@ -781,8 +781,8 @@ fn unicode_escape_property_script_devanagari_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -795,7 +795,7 @@ fn unicode_escape_property_script_dives_akuru() {
 }
 
 fn unicode_escape_property_script_dives_akuru_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 8] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 8] = [
         71936..=71942,
         71945..=71945,
         71948..=71955,
@@ -813,8 +813,8 @@ fn unicode_escape_property_script_dives_akuru_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -827,7 +827,7 @@ fn unicode_escape_property_script_dogra() {
 }
 
 fn unicode_escape_property_script_dogra_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [71680..=71739];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [71680..=71739];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Dogra}+$",
         "^\\p{sc=Dogra}+$",
@@ -836,8 +836,8 @@ fn unicode_escape_property_script_dogra_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -850,7 +850,7 @@ fn unicode_escape_property_script_deseret() {
 }
 
 fn unicode_escape_property_script_deseret_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66560..=66639];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66560..=66639];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Deseret}+$",
         "^\\p{sc=Deseret}+$",
@@ -859,8 +859,8 @@ fn unicode_escape_property_script_deseret_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -873,7 +873,7 @@ fn unicode_escape_property_script_duployan() {
 }
 
 fn unicode_escape_property_script_duployan_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
         113664..=113770,
         113776..=113788,
         113792..=113800,
@@ -888,8 +888,8 @@ fn unicode_escape_property_script_duployan_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -902,7 +902,7 @@ fn unicode_escape_property_script_egyptian_hieroglyphs() {
 }
 
 fn unicode_escape_property_script_egyptian_hieroglyphs_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [77824..=78933, 78944..=82938];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [77824..=78933, 78944..=82938];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Egyptian_Hieroglyphs}+$",
         "^\\p{sc=Egyptian_Hieroglyphs}+$",
@@ -911,8 +911,8 @@ fn unicode_escape_property_script_egyptian_hieroglyphs_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -925,7 +925,7 @@ fn unicode_escape_property_script_elbasan() {
 }
 
 fn unicode_escape_property_script_elbasan_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66816..=66855];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66816..=66855];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Elbasan}+$",
         "^\\p{sc=Elbasan}+$",
@@ -934,8 +934,8 @@ fn unicode_escape_property_script_elbasan_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -948,7 +948,7 @@ fn unicode_escape_property_script_elymaic() {
 }
 
 fn unicode_escape_property_script_elymaic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69600..=69622];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69600..=69622];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Elymaic}+$",
         "^\\p{sc=Elymaic}+$",
@@ -957,8 +957,8 @@ fn unicode_escape_property_script_elymaic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -971,7 +971,7 @@ fn unicode_escape_property_script_ethiopic() {
 }
 
 fn unicode_escape_property_script_ethiopic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 36] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 36] = [
         4608..=4680,
         4682..=4685,
         4688..=4694,
@@ -1017,8 +1017,8 @@ fn unicode_escape_property_script_ethiopic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1031,7 +1031,7 @@ fn unicode_escape_property_script_garay() {
 }
 
 fn unicode_escape_property_script_garay_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [68928..=68965, 68969..=68997, 69006..=69007];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Garay}+$",
@@ -1041,8 +1041,8 @@ fn unicode_escape_property_script_garay_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1055,7 +1055,7 @@ fn unicode_escape_property_script_georgian() {
 }
 
 fn unicode_escape_property_script_georgian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 10] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 10] = [
         4256..=4293,
         4295..=4295,
         4301..=4301,
@@ -1075,8 +1075,8 @@ fn unicode_escape_property_script_georgian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1089,7 +1089,7 @@ fn unicode_escape_property_script_glagolitic() {
 }
 
 fn unicode_escape_property_script_glagolitic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 6] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 6] = [
         11264..=11359,
         122880..=122886,
         122888..=122904,
@@ -1105,8 +1105,8 @@ fn unicode_escape_property_script_glagolitic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1119,7 +1119,7 @@ fn unicode_escape_property_script_gunjala_gondi() {
 }
 
 fn unicode_escape_property_script_gunjala_gondi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 6] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 6] = [
         73056..=73061,
         73063..=73064,
         73066..=73102,
@@ -1135,8 +1135,8 @@ fn unicode_escape_property_script_gunjala_gondi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1149,7 +1149,7 @@ fn unicode_escape_property_script_masaram_gondi() {
 }
 
 fn unicode_escape_property_script_masaram_gondi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 7] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 7] = [
         72960..=72966,
         72968..=72969,
         72971..=73014,
@@ -1166,8 +1166,8 @@ fn unicode_escape_property_script_masaram_gondi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1180,7 +1180,7 @@ fn unicode_escape_property_script_gothic() {
 }
 
 fn unicode_escape_property_script_gothic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66352..=66378];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66352..=66378];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Gothic}+$",
         "^\\p{sc=Gothic}+$",
@@ -1189,8 +1189,8 @@ fn unicode_escape_property_script_gothic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1203,7 +1203,7 @@ fn unicode_escape_property_script_grantha() {
 }
 
 fn unicode_escape_property_script_grantha_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 15] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 15] = [
         70400..=70403,
         70405..=70412,
         70415..=70416,
@@ -1228,8 +1228,8 @@ fn unicode_escape_property_script_grantha_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1242,7 +1242,7 @@ fn unicode_escape_property_script_greek() {
 }
 
 fn unicode_escape_property_script_greek_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 36] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 36] = [
         880..=883,
         885..=887,
         890..=893,
@@ -1288,8 +1288,8 @@ fn unicode_escape_property_script_greek_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1302,7 +1302,7 @@ fn unicode_escape_property_script_gujarati() {
 }
 
 fn unicode_escape_property_script_gujarati_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 14] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 14] = [
         2689..=2691,
         2693..=2701,
         2703..=2705,
@@ -1326,8 +1326,8 @@ fn unicode_escape_property_script_gujarati_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1340,7 +1340,7 @@ fn unicode_escape_property_script_gurung_khema() {
 }
 
 fn unicode_escape_property_script_gurung_khema_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [90368..=90425];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [90368..=90425];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Gurung_Khema}+$",
         "^\\p{sc=Gurung_Khema}+$",
@@ -1349,8 +1349,8 @@ fn unicode_escape_property_script_gurung_khema_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1363,7 +1363,7 @@ fn unicode_escape_property_script_gurmukhi() {
 }
 
 fn unicode_escape_property_script_gurmukhi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 16] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 16] = [
         2561..=2563,
         2565..=2570,
         2575..=2576,
@@ -1389,8 +1389,8 @@ fn unicode_escape_property_script_gurmukhi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1403,7 +1403,7 @@ fn unicode_escape_property_script_hangul() {
 }
 
 fn unicode_escape_property_script_hangul_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 14] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 14] = [
         4352..=4607,
         12334..=12335,
         12593..=12686,
@@ -1427,8 +1427,8 @@ fn unicode_escape_property_script_hangul_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1441,7 +1441,7 @@ fn unicode_escape_property_script_han() {
 }
 
 fn unicode_escape_property_script_han_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 21] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 21] = [
         11904..=11929,
         11931..=12019,
         12032..=12245,
@@ -1472,8 +1472,8 @@ fn unicode_escape_property_script_han_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1486,7 +1486,7 @@ fn unicode_escape_property_script_hanunoo() {
 }
 
 fn unicode_escape_property_script_hanunoo_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [5920..=5940];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [5920..=5940];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Hanunoo}+$",
         "^\\p{sc=Hanunoo}+$",
@@ -1495,8 +1495,8 @@ fn unicode_escape_property_script_hanunoo_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1509,7 +1509,7 @@ fn unicode_escape_property_script_hatran() {
 }
 
 fn unicode_escape_property_script_hatran_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [67808..=67826, 67828..=67829, 67835..=67839];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Hatran}+$",
@@ -1519,8 +1519,8 @@ fn unicode_escape_property_script_hatran_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1533,7 +1533,7 @@ fn unicode_escape_property_script_hebrew() {
 }
 
 fn unicode_escape_property_script_hebrew_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 9] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 9] = [
         1425..=1479,
         1488..=1514,
         1519..=1524,
@@ -1552,8 +1552,8 @@ fn unicode_escape_property_script_hebrew_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1566,7 +1566,7 @@ fn unicode_escape_property_script_hiragana() {
 }
 
 fn unicode_escape_property_script_hiragana_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 6] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 6] = [
         12353..=12438,
         12445..=12447,
         110593..=110879,
@@ -1582,8 +1582,8 @@ fn unicode_escape_property_script_hiragana_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1596,7 +1596,7 @@ fn unicode_escape_property_script_anatolian_hieroglyphs() {
 }
 
 fn unicode_escape_property_script_anatolian_hieroglyphs_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [82944..=83526];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [82944..=83526];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Anatolian_Hieroglyphs}+$",
         "^\\p{sc=Anatolian_Hieroglyphs}+$",
@@ -1605,8 +1605,8 @@ fn unicode_escape_property_script_anatolian_hieroglyphs_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1619,7 +1619,7 @@ fn unicode_escape_property_script_pahawh_hmong() {
 }
 
 fn unicode_escape_property_script_pahawh_hmong_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
         92928..=92997,
         93008..=93017,
         93019..=93025,
@@ -1634,8 +1634,8 @@ fn unicode_escape_property_script_pahawh_hmong_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1648,7 +1648,7 @@ fn unicode_escape_property_script_nyiakeng_puachue_hmong() {
 }
 
 fn unicode_escape_property_script_nyiakeng_puachue_hmong_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] = [
         123136..=123180,
         123184..=123197,
         123200..=123209,
@@ -1662,8 +1662,8 @@ fn unicode_escape_property_script_nyiakeng_puachue_hmong_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1676,7 +1676,7 @@ fn unicode_escape_property_script_old_hungarian() {
 }
 
 fn unicode_escape_property_script_old_hungarian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [68736..=68786, 68800..=68850, 68858..=68863];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Old_Hungarian}+$",
@@ -1686,8 +1686,8 @@ fn unicode_escape_property_script_old_hungarian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1700,7 +1700,7 @@ fn unicode_escape_property_script_old_italic() {
 }
 
 fn unicode_escape_property_script_old_italic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66304..=66339, 66349..=66351];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66304..=66339, 66349..=66351];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Old_Italic}+$",
         "^\\p{sc=Old_Italic}+$",
@@ -1709,8 +1709,8 @@ fn unicode_escape_property_script_old_italic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1723,7 +1723,7 @@ fn unicode_escape_property_script_javanese() {
 }
 
 fn unicode_escape_property_script_javanese_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [43392..=43469, 43472..=43481, 43486..=43487];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Javanese}+$",
@@ -1733,8 +1733,8 @@ fn unicode_escape_property_script_javanese_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1747,7 +1747,7 @@ fn unicode_escape_property_script_kayah_li() {
 }
 
 fn unicode_escape_property_script_kayah_li_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [43264..=43309, 43311..=43311];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [43264..=43309, 43311..=43311];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Kayah_Li}+$",
         "^\\p{sc=Kayah_Li}+$",
@@ -1756,8 +1756,8 @@ fn unicode_escape_property_script_kayah_li_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1770,7 +1770,7 @@ fn unicode_escape_property_script_katakana() {
 }
 
 fn unicode_escape_property_script_katakana_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 14] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 14] = [
         12449..=12538,
         12541..=12543,
         12784..=12799,
@@ -1794,8 +1794,8 @@ fn unicode_escape_property_script_katakana_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1808,13 +1808,13 @@ fn unicode_escape_property_script_kawi() {
 }
 
 fn unicode_escape_property_script_kawi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [73472..=73488, 73490..=73530, 73534..=73562];
     const REGEXES: [&str; 2] = ["^\\p{Script=Kawi}+$", "^\\p{sc=Kawi}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1827,7 +1827,7 @@ fn unicode_escape_property_script_kharoshthi() {
 }
 
 fn unicode_escape_property_script_kharoshthi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 8] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 8] = [
         68096..=68099,
         68101..=68102,
         68108..=68115,
@@ -1845,8 +1845,8 @@ fn unicode_escape_property_script_kharoshthi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1859,7 +1859,7 @@ fn unicode_escape_property_script_khmer() {
 }
 
 fn unicode_escape_property_script_khmer_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
         [6016..=6109, 6112..=6121, 6128..=6137, 6624..=6655];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Khmer}+$",
@@ -1869,8 +1869,8 @@ fn unicode_escape_property_script_khmer_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1883,7 +1883,7 @@ fn unicode_escape_property_script_khojki() {
 }
 
 fn unicode_escape_property_script_khojki_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [70144..=70161, 70163..=70209];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [70144..=70161, 70163..=70209];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Khojki}+$",
         "^\\p{sc=Khojki}+$",
@@ -1892,8 +1892,8 @@ fn unicode_escape_property_script_khojki_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1906,7 +1906,7 @@ fn unicode_escape_property_script_khitan_small_script() {
 }
 
 fn unicode_escape_property_script_khitan_small_script_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [94180..=94180, 101120..=101589, 101631..=101631];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Khitan_Small_Script}+$",
@@ -1916,8 +1916,8 @@ fn unicode_escape_property_script_khitan_small_script_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1930,7 +1930,7 @@ fn unicode_escape_property_script_kannada() {
 }
 
 fn unicode_escape_property_script_kannada_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 13] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 13] = [
         3200..=3212,
         3214..=3216,
         3218..=3240,
@@ -1953,8 +1953,8 @@ fn unicode_escape_property_script_kannada_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1967,7 +1967,7 @@ fn unicode_escape_property_script_kirat_rai() {
 }
 
 fn unicode_escape_property_script_kirat_rai_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [93504..=93561];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [93504..=93561];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Kirat_Rai}+$",
         "^\\p{sc=Kirat_Rai}+$",
@@ -1976,8 +1976,8 @@ fn unicode_escape_property_script_kirat_rai_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -1990,7 +1990,7 @@ fn unicode_escape_property_script_kaithi() {
 }
 
 fn unicode_escape_property_script_kaithi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [69760..=69826, 69837..=69837];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [69760..=69826, 69837..=69837];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Kaithi}+$",
         "^\\p{sc=Kaithi}+$",
@@ -1999,8 +1999,8 @@ fn unicode_escape_property_script_kaithi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2013,7 +2013,7 @@ fn unicode_escape_property_script_tai_tham() {
 }
 
 fn unicode_escape_property_script_tai_tham_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
         6688..=6750,
         6752..=6780,
         6783..=6793,
@@ -2028,8 +2028,8 @@ fn unicode_escape_property_script_tai_tham_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2042,7 +2042,7 @@ fn unicode_escape_property_script_lao() {
 }
 
 fn unicode_escape_property_script_lao_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 11] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 11] = [
         3713..=3714,
         3716..=3716,
         3718..=3722,
@@ -2063,8 +2063,8 @@ fn unicode_escape_property_script_lao_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2077,7 +2077,7 @@ fn unicode_escape_property_script_latin() {
 }
 
 fn unicode_escape_property_script_latin_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 36] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 36] = [
         65..=90,
         97..=122,
         170..=170,
@@ -2123,8 +2123,8 @@ fn unicode_escape_property_script_latin_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2137,7 +2137,8 @@ fn unicode_escape_property_script_lepcha() {
 }
 
 fn unicode_escape_property_script_lepcha_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] = [7168..=7223, 7227..=7241, 7245..=7247];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+        [7168..=7223, 7227..=7241, 7245..=7247];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Lepcha}+$",
         "^\\p{sc=Lepcha}+$",
@@ -2146,8 +2147,8 @@ fn unicode_escape_property_script_lepcha_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2160,7 +2161,7 @@ fn unicode_escape_property_script_limbu() {
 }
 
 fn unicode_escape_property_script_limbu_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
         6400..=6430,
         6432..=6443,
         6448..=6459,
@@ -2175,8 +2176,8 @@ fn unicode_escape_property_script_limbu_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2189,7 +2190,7 @@ fn unicode_escape_property_script_linear_a() {
 }
 
 fn unicode_escape_property_script_linear_a_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [67072..=67382, 67392..=67413, 67424..=67431];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Linear_A}+$",
@@ -2199,8 +2200,8 @@ fn unicode_escape_property_script_linear_a_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2213,7 +2214,7 @@ fn unicode_escape_property_script_linear_b() {
 }
 
 fn unicode_escape_property_script_linear_b_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 7] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 7] = [
         65536..=65547,
         65549..=65574,
         65576..=65594,
@@ -2230,8 +2231,8 @@ fn unicode_escape_property_script_linear_b_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2244,12 +2245,12 @@ fn unicode_escape_property_script_lisu() {
 }
 
 fn unicode_escape_property_script_lisu_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [42192..=42239, 73648..=73648];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [42192..=42239, 73648..=73648];
     const REGEXES: [&str; 2] = ["^\\p{Script=Lisu}+$", "^\\p{sc=Lisu}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2262,7 +2263,7 @@ fn unicode_escape_property_script_lycian() {
 }
 
 fn unicode_escape_property_script_lycian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66176..=66204];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66176..=66204];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Lycian}+$",
         "^\\p{sc=Lycian}+$",
@@ -2271,8 +2272,8 @@ fn unicode_escape_property_script_lycian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2285,7 +2286,7 @@ fn unicode_escape_property_script_lydian() {
 }
 
 fn unicode_escape_property_script_lydian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [67872..=67897, 67903..=67903];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [67872..=67897, 67903..=67903];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Lydian}+$",
         "^\\p{sc=Lydian}+$",
@@ -2294,8 +2295,8 @@ fn unicode_escape_property_script_lydian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2308,7 +2309,7 @@ fn unicode_escape_property_script_mahajani() {
 }
 
 fn unicode_escape_property_script_mahajani_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69968..=70006];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69968..=70006];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Mahajani}+$",
         "^\\p{sc=Mahajani}+$",
@@ -2317,8 +2318,8 @@ fn unicode_escape_property_script_mahajani_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2331,7 +2332,7 @@ fn unicode_escape_property_script_makasar() {
 }
 
 fn unicode_escape_property_script_makasar_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [73440..=73464];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [73440..=73464];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Makasar}+$",
         "^\\p{sc=Makasar}+$",
@@ -2340,8 +2341,8 @@ fn unicode_escape_property_script_makasar_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2354,7 +2355,7 @@ fn unicode_escape_property_script_mandaic() {
 }
 
 fn unicode_escape_property_script_mandaic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [2112..=2139, 2142..=2142];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [2112..=2139, 2142..=2142];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Mandaic}+$",
         "^\\p{sc=Mandaic}+$",
@@ -2363,8 +2364,8 @@ fn unicode_escape_property_script_mandaic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2377,7 +2378,7 @@ fn unicode_escape_property_script_manichaean() {
 }
 
 fn unicode_escape_property_script_manichaean_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [68288..=68326, 68331..=68342];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [68288..=68326, 68331..=68342];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Manichaean}+$",
         "^\\p{sc=Manichaean}+$",
@@ -2386,8 +2387,8 @@ fn unicode_escape_property_script_manichaean_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2400,7 +2401,7 @@ fn unicode_escape_property_script_marchen() {
 }
 
 fn unicode_escape_property_script_marchen_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [72816..=72847, 72850..=72871, 72873..=72886];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Marchen}+$",
@@ -2410,8 +2411,8 @@ fn unicode_escape_property_script_marchen_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2424,7 +2425,7 @@ fn unicode_escape_property_script_medefaidrin() {
 }
 
 fn unicode_escape_property_script_medefaidrin_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [93760..=93850];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [93760..=93850];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Medefaidrin}+$",
         "^\\p{sc=Medefaidrin}+$",
@@ -2433,8 +2434,8 @@ fn unicode_escape_property_script_medefaidrin_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2447,7 +2448,7 @@ fn unicode_escape_property_script_mende_kikakui() {
 }
 
 fn unicode_escape_property_script_mende_kikakui_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [124928..=125124, 125127..=125142];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [124928..=125124, 125127..=125142];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Mende_Kikakui}+$",
         "^\\p{sc=Mende_Kikakui}+$",
@@ -2456,8 +2457,8 @@ fn unicode_escape_property_script_mende_kikakui_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2470,7 +2471,7 @@ fn unicode_escape_property_script_meroitic_cursive() {
 }
 
 fn unicode_escape_property_script_meroitic_cursive_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [68000..=68023, 68028..=68047, 68050..=68095];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Meroitic_Cursive}+$",
@@ -2480,8 +2481,8 @@ fn unicode_escape_property_script_meroitic_cursive_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2494,7 +2495,7 @@ fn unicode_escape_property_script_meroitic_hieroglyphs() {
 }
 
 fn unicode_escape_property_script_meroitic_hieroglyphs_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [67968..=67999];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [67968..=67999];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Meroitic_Hieroglyphs}+$",
         "^\\p{sc=Meroitic_Hieroglyphs}+$",
@@ -2503,8 +2504,8 @@ fn unicode_escape_property_script_meroitic_hieroglyphs_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2517,7 +2518,7 @@ fn unicode_escape_property_script_malayalam() {
 }
 
 fn unicode_escape_property_script_malayalam_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 7] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 7] = [
         3328..=3340,
         3342..=3344,
         3346..=3396,
@@ -2534,8 +2535,8 @@ fn unicode_escape_property_script_malayalam_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2548,12 +2549,12 @@ fn unicode_escape_property_script_modi() {
 }
 
 fn unicode_escape_property_script_modi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [71168..=71236, 71248..=71257];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [71168..=71236, 71248..=71257];
     const REGEXES: [&str; 2] = ["^\\p{Script=Modi}+$", "^\\p{sc=Modi}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2566,7 +2567,7 @@ fn unicode_escape_property_script_mongolian() {
 }
 
 fn unicode_escape_property_script_mongolian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 6] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 6] = [
         6144..=6145,
         6148..=6148,
         6150..=6169,
@@ -2582,8 +2583,8 @@ fn unicode_escape_property_script_mongolian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2596,7 +2597,7 @@ fn unicode_escape_property_script_mro() {
 }
 
 fn unicode_escape_property_script_mro_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [92736..=92766, 92768..=92777, 92782..=92783];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Mro}+$",
@@ -2606,8 +2607,8 @@ fn unicode_escape_property_script_mro_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2620,7 +2621,7 @@ fn unicode_escape_property_script_meetei_mayek() {
 }
 
 fn unicode_escape_property_script_meetei_mayek_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [43744..=43766, 43968..=44013, 44016..=44025];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Meetei_Mayek}+$",
@@ -2630,8 +2631,8 @@ fn unicode_escape_property_script_meetei_mayek_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2644,7 +2645,7 @@ fn unicode_escape_property_script_multani() {
 }
 
 fn unicode_escape_property_script_multani_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 5] = [
         70272..=70278,
         70280..=70280,
         70282..=70285,
@@ -2659,8 +2660,8 @@ fn unicode_escape_property_script_multani_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2673,7 +2674,7 @@ fn unicode_escape_property_script_myanmar() {
 }
 
 fn unicode_escape_property_script_myanmar_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
         [4096..=4255, 43488..=43518, 43616..=43647, 71376..=71395];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Myanmar}+$",
@@ -2683,8 +2684,8 @@ fn unicode_escape_property_script_myanmar_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2697,7 +2698,7 @@ fn unicode_escape_property_script_nag_mundari() {
 }
 
 fn unicode_escape_property_script_nag_mundari_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [124112..=124153];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [124112..=124153];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Nag_Mundari}+$",
         "^\\p{sc=Nag_Mundari}+$",
@@ -2706,8 +2707,8 @@ fn unicode_escape_property_script_nag_mundari_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2720,7 +2721,7 @@ fn unicode_escape_property_script_nandinagari() {
 }
 
 fn unicode_escape_property_script_nandinagari_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [72096..=72103, 72106..=72151, 72154..=72164];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Nandinagari}+$",
@@ -2730,8 +2731,8 @@ fn unicode_escape_property_script_nandinagari_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2744,7 +2745,7 @@ fn unicode_escape_property_script_old_north_arabian() {
 }
 
 fn unicode_escape_property_script_old_north_arabian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [68224..=68255];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [68224..=68255];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Old_North_Arabian}+$",
         "^\\p{sc=Old_North_Arabian}+$",
@@ -2753,8 +2754,8 @@ fn unicode_escape_property_script_old_north_arabian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2767,7 +2768,7 @@ fn unicode_escape_property_script_nabataean() {
 }
 
 fn unicode_escape_property_script_nabataean_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [67712..=67742, 67751..=67759];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [67712..=67742, 67751..=67759];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Nabataean}+$",
         "^\\p{sc=Nabataean}+$",
@@ -2776,8 +2777,8 @@ fn unicode_escape_property_script_nabataean_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2790,12 +2791,12 @@ fn unicode_escape_property_script_newa() {
 }
 
 fn unicode_escape_property_script_newa_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [70656..=70747, 70749..=70753];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [70656..=70747, 70749..=70753];
     const REGEXES: [&str; 2] = ["^\\p{Script=Newa}+$", "^\\p{sc=Newa}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2808,7 +2809,7 @@ fn unicode_escape_property_script_nko() {
 }
 
 fn unicode_escape_property_script_nko_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [1984..=2042, 2045..=2047];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [1984..=2042, 2045..=2047];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Nko}+$",
         "^\\p{sc=Nko}+$",
@@ -2817,8 +2818,8 @@ fn unicode_escape_property_script_nko_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2831,7 +2832,7 @@ fn unicode_escape_property_script_nushu() {
 }
 
 fn unicode_escape_property_script_nushu_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [94177..=94177, 110960..=111355];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [94177..=94177, 110960..=111355];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Nushu}+$",
         "^\\p{sc=Nushu}+$",
@@ -2840,8 +2841,8 @@ fn unicode_escape_property_script_nushu_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2854,7 +2855,7 @@ fn unicode_escape_property_script_ogham() {
 }
 
 fn unicode_escape_property_script_ogham_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [5760..=5788];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [5760..=5788];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Ogham}+$",
         "^\\p{sc=Ogham}+$",
@@ -2863,8 +2864,8 @@ fn unicode_escape_property_script_ogham_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2877,7 +2878,7 @@ fn unicode_escape_property_script_ol_chiki() {
 }
 
 fn unicode_escape_property_script_ol_chiki_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [7248..=7295];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [7248..=7295];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Ol_Chiki}+$",
         "^\\p{sc=Ol_Chiki}+$",
@@ -2886,8 +2887,8 @@ fn unicode_escape_property_script_ol_chiki_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2900,7 +2901,7 @@ fn unicode_escape_property_script_ol_onal() {
 }
 
 fn unicode_escape_property_script_ol_onal_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [124368..=124410, 124415..=124415];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [124368..=124410, 124415..=124415];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Ol_Onal}+$",
         "^\\p{sc=Ol_Onal}+$",
@@ -2909,8 +2910,8 @@ fn unicode_escape_property_script_ol_onal_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2923,7 +2924,7 @@ fn unicode_escape_property_script_old_turkic() {
 }
 
 fn unicode_escape_property_script_old_turkic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [68608..=68680];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [68608..=68680];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Old_Turkic}+$",
         "^\\p{sc=Old_Turkic}+$",
@@ -2932,8 +2933,8 @@ fn unicode_escape_property_script_old_turkic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2946,7 +2947,7 @@ fn unicode_escape_property_script_oriya() {
 }
 
 fn unicode_escape_property_script_oriya_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 14] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 14] = [
         2817..=2819,
         2821..=2828,
         2831..=2832,
@@ -2970,8 +2971,8 @@ fn unicode_escape_property_script_oriya_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -2984,7 +2985,7 @@ fn unicode_escape_property_script_osage() {
 }
 
 fn unicode_escape_property_script_osage_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66736..=66771, 66776..=66811];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66736..=66771, 66776..=66811];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Osage}+$",
         "^\\p{sc=Osage}+$",
@@ -2993,8 +2994,8 @@ fn unicode_escape_property_script_osage_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3007,7 +3008,7 @@ fn unicode_escape_property_script_osmanya() {
 }
 
 fn unicode_escape_property_script_osmanya_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66688..=66717, 66720..=66729];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66688..=66717, 66720..=66729];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Osmanya}+$",
         "^\\p{sc=Osmanya}+$",
@@ -3016,8 +3017,8 @@ fn unicode_escape_property_script_osmanya_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3030,7 +3031,7 @@ fn unicode_escape_property_script_old_uyghur() {
 }
 
 fn unicode_escape_property_script_old_uyghur_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69488..=69513];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69488..=69513];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Old_Uyghur}+$",
         "^\\p{sc=Old_Uyghur}+$",
@@ -3039,8 +3040,8 @@ fn unicode_escape_property_script_old_uyghur_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3053,7 +3054,7 @@ fn unicode_escape_property_script_palmyrene() {
 }
 
 fn unicode_escape_property_script_palmyrene_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [67680..=67711];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [67680..=67711];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Palmyrene}+$",
         "^\\p{sc=Palmyrene}+$",
@@ -3062,8 +3063,8 @@ fn unicode_escape_property_script_palmyrene_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3076,7 +3077,7 @@ fn unicode_escape_property_script_pau_cin_hau() {
 }
 
 fn unicode_escape_property_script_pau_cin_hau_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [72384..=72440];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [72384..=72440];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Pau_Cin_Hau}+$",
         "^\\p{sc=Pau_Cin_Hau}+$",
@@ -3085,8 +3086,8 @@ fn unicode_escape_property_script_pau_cin_hau_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3099,7 +3100,7 @@ fn unicode_escape_property_script_old_permic() {
 }
 
 fn unicode_escape_property_script_old_permic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66384..=66426];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66384..=66426];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Old_Permic}+$",
         "^\\p{sc=Old_Permic}+$",
@@ -3108,8 +3109,8 @@ fn unicode_escape_property_script_old_permic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3122,7 +3123,7 @@ fn unicode_escape_property_script_phags_pa() {
 }
 
 fn unicode_escape_property_script_phags_pa_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [43072..=43127];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [43072..=43127];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Phags_Pa}+$",
         "^\\p{sc=Phags_Pa}+$",
@@ -3131,8 +3132,8 @@ fn unicode_escape_property_script_phags_pa_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3145,7 +3146,7 @@ fn unicode_escape_property_script_inscriptional_pahlavi() {
 }
 
 fn unicode_escape_property_script_inscriptional_pahlavi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [68448..=68466, 68472..=68479];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [68448..=68466, 68472..=68479];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Inscriptional_Pahlavi}+$",
         "^\\p{sc=Inscriptional_Pahlavi}+$",
@@ -3154,8 +3155,8 @@ fn unicode_escape_property_script_inscriptional_pahlavi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3168,7 +3169,7 @@ fn unicode_escape_property_script_psalter_pahlavi() {
 }
 
 fn unicode_escape_property_script_psalter_pahlavi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [68480..=68497, 68505..=68508, 68521..=68527];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Psalter_Pahlavi}+$",
@@ -3178,8 +3179,8 @@ fn unicode_escape_property_script_psalter_pahlavi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3192,7 +3193,7 @@ fn unicode_escape_property_script_phoenician() {
 }
 
 fn unicode_escape_property_script_phoenician_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [67840..=67867, 67871..=67871];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [67840..=67867, 67871..=67871];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Phoenician}+$",
         "^\\p{sc=Phoenician}+$",
@@ -3201,8 +3202,8 @@ fn unicode_escape_property_script_phoenician_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3215,7 +3216,7 @@ fn unicode_escape_property_script_miao() {
 }
 
 fn unicode_escape_property_script_miao_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [93952..=94026, 94031..=94087, 94095..=94111];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Miao}+$",
@@ -3225,8 +3226,8 @@ fn unicode_escape_property_script_miao_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3239,7 +3240,7 @@ fn unicode_escape_property_script_inscriptional_parthian() {
 }
 
 fn unicode_escape_property_script_inscriptional_parthian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [68416..=68437, 68440..=68447];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [68416..=68437, 68440..=68447];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Inscriptional_Parthian}+$",
         "^\\p{sc=Inscriptional_Parthian}+$",
@@ -3248,8 +3249,8 @@ fn unicode_escape_property_script_inscriptional_parthian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3262,7 +3263,7 @@ fn unicode_escape_property_script_rejang() {
 }
 
 fn unicode_escape_property_script_rejang_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [43312..=43347, 43359..=43359];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [43312..=43347, 43359..=43359];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Rejang}+$",
         "^\\p{sc=Rejang}+$",
@@ -3271,8 +3272,8 @@ fn unicode_escape_property_script_rejang_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3285,7 +3286,7 @@ fn unicode_escape_property_script_hanifi_rohingya() {
 }
 
 fn unicode_escape_property_script_hanifi_rohingya_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [68864..=68903, 68912..=68921];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [68864..=68903, 68912..=68921];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Hanifi_Rohingya}+$",
         "^\\p{sc=Hanifi_Rohingya}+$",
@@ -3294,8 +3295,8 @@ fn unicode_escape_property_script_hanifi_rohingya_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3308,7 +3309,7 @@ fn unicode_escape_property_script_runic() {
 }
 
 fn unicode_escape_property_script_runic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [5792..=5866, 5870..=5880];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [5792..=5866, 5870..=5880];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Runic}+$",
         "^\\p{sc=Runic}+$",
@@ -3317,8 +3318,8 @@ fn unicode_escape_property_script_runic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3331,7 +3332,7 @@ fn unicode_escape_property_script_samaritan() {
 }
 
 fn unicode_escape_property_script_samaritan_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [2048..=2093, 2096..=2110];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [2048..=2093, 2096..=2110];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Samaritan}+$",
         "^\\p{sc=Samaritan}+$",
@@ -3340,8 +3341,8 @@ fn unicode_escape_property_script_samaritan_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3354,7 +3355,7 @@ fn unicode_escape_property_script_old_south_arabian() {
 }
 
 fn unicode_escape_property_script_old_south_arabian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [68192..=68223];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [68192..=68223];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Old_South_Arabian}+$",
         "^\\p{sc=Old_South_Arabian}+$",
@@ -3363,8 +3364,8 @@ fn unicode_escape_property_script_old_south_arabian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3377,7 +3378,7 @@ fn unicode_escape_property_script_saurashtra() {
 }
 
 fn unicode_escape_property_script_saurashtra_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [43136..=43205, 43214..=43225];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [43136..=43205, 43214..=43225];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Saurashtra}+$",
         "^\\p{sc=Saurashtra}+$",
@@ -3386,8 +3387,8 @@ fn unicode_escape_property_script_saurashtra_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3400,7 +3401,7 @@ fn unicode_escape_property_script_signwriting() {
 }
 
 fn unicode_escape_property_script_signwriting_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [120832..=121483, 121499..=121503, 121505..=121519];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=SignWriting}+$",
@@ -3410,8 +3411,8 @@ fn unicode_escape_property_script_signwriting_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3424,7 +3425,7 @@ fn unicode_escape_property_script_shavian() {
 }
 
 fn unicode_escape_property_script_shavian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66640..=66687];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [66640..=66687];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Shavian}+$",
         "^\\p{sc=Shavian}+$",
@@ -3433,8 +3434,8 @@ fn unicode_escape_property_script_shavian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3447,7 +3448,7 @@ fn unicode_escape_property_script_sharada() {
 }
 
 fn unicode_escape_property_script_sharada_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [70016..=70111, 72544..=72551];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [70016..=70111, 72544..=72551];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Sharada}+$",
         "^\\p{sc=Sharada}+$",
@@ -3456,8 +3457,8 @@ fn unicode_escape_property_script_sharada_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3470,7 +3471,7 @@ fn unicode_escape_property_script_siddham() {
 }
 
 fn unicode_escape_property_script_siddham_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [71040..=71093, 71096..=71133];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [71040..=71093, 71096..=71133];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Siddham}+$",
         "^\\p{sc=Siddham}+$",
@@ -3479,8 +3480,8 @@ fn unicode_escape_property_script_siddham_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3493,7 +3494,7 @@ fn unicode_escape_property_script_sidetic() {
 }
 
 fn unicode_escape_property_script_sidetic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [67904..=67929];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [67904..=67929];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Sidetic}+$",
         "^\\p{sc=Sidetic}+$",
@@ -3502,8 +3503,8 @@ fn unicode_escape_property_script_sidetic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3516,7 +3517,7 @@ fn unicode_escape_property_script_khudawadi() {
 }
 
 fn unicode_escape_property_script_khudawadi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [70320..=70378, 70384..=70393];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [70320..=70378, 70384..=70393];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Khudawadi}+$",
         "^\\p{sc=Khudawadi}+$",
@@ -3525,8 +3526,8 @@ fn unicode_escape_property_script_khudawadi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3539,7 +3540,7 @@ fn unicode_escape_property_script_sinhala() {
 }
 
 fn unicode_escape_property_script_sinhala_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 13] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 13] = [
         3457..=3459,
         3461..=3478,
         3482..=3505,
@@ -3562,8 +3563,8 @@ fn unicode_escape_property_script_sinhala_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3576,7 +3577,7 @@ fn unicode_escape_property_script_sogdian() {
 }
 
 fn unicode_escape_property_script_sogdian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69424..=69465];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69424..=69465];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Sogdian}+$",
         "^\\p{sc=Sogdian}+$",
@@ -3585,8 +3586,8 @@ fn unicode_escape_property_script_sogdian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3599,7 +3600,7 @@ fn unicode_escape_property_script_old_sogdian() {
 }
 
 fn unicode_escape_property_script_old_sogdian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69376..=69415];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [69376..=69415];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Old_Sogdian}+$",
         "^\\p{sc=Old_Sogdian}+$",
@@ -3608,8 +3609,8 @@ fn unicode_escape_property_script_old_sogdian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3622,7 +3623,7 @@ fn unicode_escape_property_script_sora_sompeng() {
 }
 
 fn unicode_escape_property_script_sora_sompeng_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [69840..=69864, 69872..=69881];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [69840..=69864, 69872..=69881];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Sora_Sompeng}+$",
         "^\\p{sc=Sora_Sompeng}+$",
@@ -3631,8 +3632,8 @@ fn unicode_escape_property_script_sora_sompeng_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3645,7 +3646,7 @@ fn unicode_escape_property_script_soyombo() {
 }
 
 fn unicode_escape_property_script_soyombo_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [72272..=72354];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [72272..=72354];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Soyombo}+$",
         "^\\p{sc=Soyombo}+$",
@@ -3654,8 +3655,8 @@ fn unicode_escape_property_script_soyombo_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3668,7 +3669,7 @@ fn unicode_escape_property_script_sundanese() {
 }
 
 fn unicode_escape_property_script_sundanese_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [7040..=7103, 7360..=7367];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [7040..=7103, 7360..=7367];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Sundanese}+$",
         "^\\p{sc=Sundanese}+$",
@@ -3677,8 +3678,8 @@ fn unicode_escape_property_script_sundanese_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3691,7 +3692,7 @@ fn unicode_escape_property_script_sunuwar() {
 }
 
 fn unicode_escape_property_script_sunuwar_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [72640..=72673, 72688..=72697];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [72640..=72673, 72688..=72697];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Sunuwar}+$",
         "^\\p{sc=Sunuwar}+$",
@@ -3700,8 +3701,8 @@ fn unicode_escape_property_script_sunuwar_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3714,7 +3715,7 @@ fn unicode_escape_property_script_syloti_nagri() {
 }
 
 fn unicode_escape_property_script_syloti_nagri_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [43008..=43052];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [43008..=43052];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Syloti_Nagri}+$",
         "^\\p{sc=Syloti_Nagri}+$",
@@ -3723,8 +3724,8 @@ fn unicode_escape_property_script_syloti_nagri_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3737,7 +3738,7 @@ fn unicode_escape_property_script_syriac() {
 }
 
 fn unicode_escape_property_script_syriac_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
         [1792..=1805, 1807..=1866, 1869..=1871, 2144..=2154];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Syriac}+$",
@@ -3747,8 +3748,8 @@ fn unicode_escape_property_script_syriac_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3761,7 +3762,8 @@ fn unicode_escape_property_script_tagbanwa() {
 }
 
 fn unicode_escape_property_script_tagbanwa_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] = [5984..=5996, 5998..=6000, 6002..=6003];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+        [5984..=5996, 5998..=6000, 6002..=6003];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Tagbanwa}+$",
         "^\\p{sc=Tagbanwa}+$",
@@ -3770,8 +3772,8 @@ fn unicode_escape_property_script_tagbanwa_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3784,7 +3786,7 @@ fn unicode_escape_property_script_takri() {
 }
 
 fn unicode_escape_property_script_takri_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [71296..=71353, 71360..=71369];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [71296..=71353, 71360..=71369];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Takri}+$",
         "^\\p{sc=Takri}+$",
@@ -3793,8 +3795,8 @@ fn unicode_escape_property_script_takri_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3807,7 +3809,7 @@ fn unicode_escape_property_script_tai_le() {
 }
 
 fn unicode_escape_property_script_tai_le_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [6480..=6509, 6512..=6516];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [6480..=6509, 6512..=6516];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Tai_Le}+$",
         "^\\p{sc=Tai_Le}+$",
@@ -3816,8 +3818,8 @@ fn unicode_escape_property_script_tai_le_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3830,7 +3832,7 @@ fn unicode_escape_property_script_new_tai_lue() {
 }
 
 fn unicode_escape_property_script_new_tai_lue_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
         [6528..=6571, 6576..=6601, 6608..=6618, 6622..=6623];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=New_Tai_Lue}+$",
@@ -3840,8 +3842,8 @@ fn unicode_escape_property_script_new_tai_lue_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3854,7 +3856,7 @@ fn unicode_escape_property_script_tamil() {
 }
 
 fn unicode_escape_property_script_tamil_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 18] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 18] = [
         2946..=2947,
         2949..=2954,
         2958..=2960,
@@ -3882,8 +3884,8 @@ fn unicode_escape_property_script_tamil_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3896,7 +3898,7 @@ fn unicode_escape_property_script_tangut() {
 }
 
 fn unicode_escape_property_script_tangut_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] = [
         94176..=94176,
         94208..=101119,
         101632..=101662,
@@ -3910,8 +3912,8 @@ fn unicode_escape_property_script_tangut_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3924,7 +3926,7 @@ fn unicode_escape_property_script_tai_viet() {
 }
 
 fn unicode_escape_property_script_tai_viet_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [43648..=43714, 43739..=43743];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [43648..=43714, 43739..=43743];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Tai_Viet}+$",
         "^\\p{sc=Tai_Viet}+$",
@@ -3933,8 +3935,8 @@ fn unicode_escape_property_script_tai_viet_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3947,7 +3949,7 @@ fn unicode_escape_property_script_tai_yo() {
 }
 
 fn unicode_escape_property_script_tai_yo_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [124608..=124638, 124640..=124661, 124670..=124671];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Tai_Yo}+$",
@@ -3957,8 +3959,8 @@ fn unicode_escape_property_script_tai_yo_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -3971,7 +3973,7 @@ fn unicode_escape_property_script_telugu() {
 }
 
 fn unicode_escape_property_script_telugu_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 13] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 13] = [
         3072..=3084,
         3086..=3088,
         3090..=3112,
@@ -3994,8 +3996,8 @@ fn unicode_escape_property_script_telugu_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4008,7 +4010,7 @@ fn unicode_escape_property_script_tifinagh() {
 }
 
 fn unicode_escape_property_script_tifinagh_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [11568..=11623, 11631..=11632, 11647..=11647];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Tifinagh}+$",
@@ -4018,8 +4020,8 @@ fn unicode_escape_property_script_tifinagh_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4032,7 +4034,7 @@ fn unicode_escape_property_script_tagalog() {
 }
 
 fn unicode_escape_property_script_tagalog_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [5888..=5909, 5919..=5919];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [5888..=5909, 5919..=5919];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Tagalog}+$",
         "^\\p{sc=Tagalog}+$",
@@ -4041,8 +4043,8 @@ fn unicode_escape_property_script_tagalog_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4055,7 +4057,7 @@ fn unicode_escape_property_script_thaana() {
 }
 
 fn unicode_escape_property_script_thaana_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [1920..=1969];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [1920..=1969];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Thaana}+$",
         "^\\p{sc=Thaana}+$",
@@ -4064,8 +4066,8 @@ fn unicode_escape_property_script_thaana_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4078,12 +4080,12 @@ fn unicode_escape_property_script_thai() {
 }
 
 fn unicode_escape_property_script_thai_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [3585..=3642, 3648..=3675];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [3585..=3642, 3648..=3675];
     const REGEXES: [&str; 2] = ["^\\p{Script=Thai}+$", "^\\p{sc=Thai}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4096,7 +4098,7 @@ fn unicode_escape_property_script_tibetan() {
 }
 
 fn unicode_escape_property_script_tibetan_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 7] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 7] = [
         3840..=3911,
         3913..=3948,
         3953..=3991,
@@ -4113,8 +4115,8 @@ fn unicode_escape_property_script_tibetan_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4127,7 +4129,7 @@ fn unicode_escape_property_script_tirhuta() {
 }
 
 fn unicode_escape_property_script_tirhuta_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [70784..=70855, 70864..=70873];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [70784..=70855, 70864..=70873];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Tirhuta}+$",
         "^\\p{sc=Tirhuta}+$",
@@ -4136,8 +4138,8 @@ fn unicode_escape_property_script_tirhuta_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4150,7 +4152,7 @@ fn unicode_escape_property_script_tangsa() {
 }
 
 fn unicode_escape_property_script_tangsa_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [92784..=92862, 92864..=92873];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [92784..=92862, 92864..=92873];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Tangsa}+$",
         "^\\p{sc=Tangsa}+$",
@@ -4159,8 +4161,8 @@ fn unicode_escape_property_script_tangsa_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4173,7 +4175,7 @@ fn unicode_escape_property_script_todhri() {
 }
 
 fn unicode_escape_property_script_todhri_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [67008..=67059];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [67008..=67059];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Todhri}+$",
         "^\\p{sc=Todhri}+$",
@@ -4182,8 +4184,8 @@ fn unicode_escape_property_script_todhri_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4196,7 +4198,7 @@ fn unicode_escape_property_script_tolong_siki() {
 }
 
 fn unicode_escape_property_script_tolong_siki_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [73136..=73179, 73184..=73193];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [73136..=73179, 73184..=73193];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Tolong_Siki}+$",
         "^\\p{sc=Tolong_Siki}+$",
@@ -4205,8 +4207,8 @@ fn unicode_escape_property_script_tolong_siki_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4219,12 +4221,12 @@ fn unicode_escape_property_script_toto() {
 }
 
 fn unicode_escape_property_script_toto_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [123536..=123566];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [123536..=123566];
     const REGEXES: [&str; 2] = ["^\\p{Script=Toto}+$", "^\\p{sc=Toto}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4237,7 +4239,7 @@ fn unicode_escape_property_script_tulu_tigalari() {
 }
 
 fn unicode_escape_property_script_tulu_tigalari_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 11] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 11] = [
         70528..=70537,
         70539..=70539,
         70542..=70542,
@@ -4258,8 +4260,8 @@ fn unicode_escape_property_script_tulu_tigalari_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4272,7 +4274,7 @@ fn unicode_escape_property_script_ugaritic() {
 }
 
 fn unicode_escape_property_script_ugaritic_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66432..=66461, 66463..=66463];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66432..=66461, 66463..=66463];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Ugaritic}+$",
         "^\\p{sc=Ugaritic}+$",
@@ -4281,8 +4283,8 @@ fn unicode_escape_property_script_ugaritic_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4295,7 +4297,7 @@ fn unicode_escape_property_script_vai() {
 }
 
 fn unicode_escape_property_script_vai_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [42240..=42539];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [42240..=42539];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Vai}+$",
         "^\\p{sc=Vai}+$",
@@ -4304,8 +4306,8 @@ fn unicode_escape_property_script_vai_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4318,7 +4320,7 @@ fn unicode_escape_property_script_vithkuqi() {
 }
 
 fn unicode_escape_property_script_vithkuqi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 8] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 8] = [
         66928..=66938,
         66940..=66954,
         66956..=66962,
@@ -4336,8 +4338,8 @@ fn unicode_escape_property_script_vithkuqi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4350,7 +4352,7 @@ fn unicode_escape_property_script_warang_citi() {
 }
 
 fn unicode_escape_property_script_warang_citi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [71840..=71922, 71935..=71935];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [71840..=71922, 71935..=71935];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Warang_Citi}+$",
         "^\\p{sc=Warang_Citi}+$",
@@ -4359,8 +4361,8 @@ fn unicode_escape_property_script_warang_citi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4373,7 +4375,7 @@ fn unicode_escape_property_script_wancho() {
 }
 
 fn unicode_escape_property_script_wancho_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [123584..=123641, 123647..=123647];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [123584..=123641, 123647..=123647];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Wancho}+$",
         "^\\p{sc=Wancho}+$",
@@ -4382,8 +4384,8 @@ fn unicode_escape_property_script_wancho_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4396,7 +4398,7 @@ fn unicode_escape_property_script_old_persian() {
 }
 
 fn unicode_escape_property_script_old_persian_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66464..=66499, 66504..=66517];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [66464..=66499, 66504..=66517];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Old_Persian}+$",
         "^\\p{sc=Old_Persian}+$",
@@ -4405,8 +4407,8 @@ fn unicode_escape_property_script_old_persian_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4419,7 +4421,7 @@ fn unicode_escape_property_script_cuneiform() {
 }
 
 fn unicode_escape_property_script_cuneiform_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 4] =
         [73728..=74649, 74752..=74862, 74864..=74868, 74880..=75075];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Cuneiform}+$",
@@ -4429,8 +4431,8 @@ fn unicode_escape_property_script_cuneiform_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4443,7 +4445,7 @@ fn unicode_escape_property_script_yezidi() {
 }
 
 fn unicode_escape_property_script_yezidi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 3] =
         [69248..=69289, 69291..=69293, 69296..=69297];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Yezidi}+$",
@@ -4453,8 +4455,8 @@ fn unicode_escape_property_script_yezidi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4467,7 +4469,7 @@ fn unicode_escape_property_script_yi() {
 }
 
 fn unicode_escape_property_script_yi_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [40960..=42124, 42128..=42182];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 2] = [40960..=42124, 42128..=42182];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Yi}+$",
         "^\\p{sc=Yi}+$",
@@ -4476,8 +4478,8 @@ fn unicode_escape_property_script_yi_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4490,7 +4492,7 @@ fn unicode_escape_property_script_zanabazar_square() {
 }
 
 fn unicode_escape_property_script_zanabazar_square_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [72192..=72263];
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 1] = [72192..=72263];
     const REGEXES: [&str; 4] = [
         "^\\p{Script=Zanabazar_Square}+$",
         "^\\p{sc=Zanabazar_Square}+$",
@@ -4499,8 +4501,8 @@ fn unicode_escape_property_script_zanabazar_square_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4513,7 +4515,7 @@ fn unicode_escape_property_script_inherited() {
 }
 
 fn unicode_escape_property_script_inherited_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 30] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 30] = [
         768..=879,
         1157..=1158,
         1611..=1621,
@@ -4555,8 +4557,8 @@ fn unicode_escape_property_script_inherited_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4569,7 +4571,7 @@ fn unicode_escape_property_script_common() {
 }
 
 fn unicode_escape_property_script_common_tc(tc: TestConfig) {
-    const CODE_POINTS: [std::ops::RangeInclusive<u32>; 176] = [
+    static CODE_POINTS: [std::ops::RangeInclusive<u32>; 176] = [
         0..=64,
         91..=96,
         123..=169,
@@ -4755,8 +4757,8 @@ fn unicode_escape_property_script_common_tc(tc: TestConfig) {
     ];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
-        for range in CODE_POINTS {
-            for cp in range {
+        for range in &CODE_POINTS {
+            for cp in range.clone() {
                 regex.test_succeeds(&char::from_u32(cp).unwrap().to_string());
             }
         }
@@ -4771,7 +4773,7 @@ fn unicode_escape_property_binary_alphabetic() {
 }
 
 fn unicode_escape_property_binary_alphabetic_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1202] = [
+    static CODE_POINTS: [&str; 1202] = [
         "\u{41}",
         "\u{61}",
         "\u{aa}",
@@ -5990,7 +5992,7 @@ fn unicode_escape_property_binary_caseignorable() {
 }
 
 fn unicode_escape_property_binary_caseignorable_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 518] = [
+    static CODE_POINTS: [&str; 518] = [
         "\u{27}",
         "\u{2e}",
         "\u{3a}",
@@ -6525,7 +6527,7 @@ fn unicode_escape_property_binary_cased() {
 }
 
 fn unicode_escape_property_binary_cased_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 175] = [
+    static CODE_POINTS: [&str; 175] = [
         "\u{41}",
         "\u{61}",
         "\u{aa}",
@@ -6717,7 +6719,7 @@ fn unicode_escape_property_binary_changeswhencasefolded() {
 }
 
 fn unicode_escape_property_binary_changeswhencasefolded_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 630] = [
+    static CODE_POINTS: [&str; 630] = [
         "\u{41}",
         "\u{b5}",
         "\u{c0}",
@@ -7364,7 +7366,7 @@ fn unicode_escape_property_binary_changeswhencasemapped() {
 }
 
 fn unicode_escape_property_binary_changeswhencasemapped_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 131] = [
+    static CODE_POINTS: [&str; 131] = [
         "\u{41}",
         "\u{61}",
         "\u{b5}",
@@ -7512,7 +7514,7 @@ fn unicode_escape_property_binary_changeswhenlowercased() {
 }
 
 fn unicode_escape_property_binary_changeswhenlowercased_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 618] = [
+    static CODE_POINTS: [&str; 618] = [
         "\u{41}",
         "\u{c0}",
         "\u{d8}",
@@ -8147,7 +8149,7 @@ fn unicode_escape_property_binary_changeswhentitlecased() {
 }
 
 fn unicode_escape_property_binary_changeswhentitlecased_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 633] = [
+    static CODE_POINTS: [&str; 633] = [
         "\u{61}",
         "\u{b5}",
         "\u{df}",
@@ -8797,7 +8799,7 @@ fn unicode_escape_property_binary_changeswhenuppercased() {
 }
 
 fn unicode_escape_property_binary_changeswhenuppercased_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 634] = [
+    static CODE_POINTS: [&str; 634] = [
         "\u{61}",
         "\u{b5}",
         "\u{df}",
@@ -9448,7 +9450,7 @@ fn unicode_escape_property_binary_defaultignorablecodepoint() {
 }
 
 fn unicode_escape_property_binary_defaultignorablecodepoint_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 27] = [
+    static CODE_POINTS: [&str; 27] = [
         "\u{ad}",
         "\u{34f}",
         "\u{61c}",
@@ -9492,7 +9494,7 @@ fn unicode_escape_property_binary_graphemebase() {
 }
 
 fn unicode_escape_property_binary_graphemebase_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1799] = [
+    static CODE_POINTS: [&str; 1799] = [
         "\u{20}",
         "\u{21}",
         "\u{24}",
@@ -11308,7 +11310,7 @@ fn unicode_escape_property_binary_graphemeextend() {
 }
 
 fn unicode_escape_property_binary_graphemeextend_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 419] = [
+    static CODE_POINTS: [&str; 419] = [
         "\u{300}",
         "\u{483}",
         "\u{488}",
@@ -11744,7 +11746,7 @@ fn unicode_escape_property_binary_idcontinue() {
 }
 
 fn unicode_escape_property_binary_idcontinue_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1418] = [
+    static CODE_POINTS: [&str; 1418] = [
         "\u{30}",
         "\u{41}",
         "\u{5f}",
@@ -13179,7 +13181,7 @@ fn unicode_escape_property_binary_idstart() {
 }
 
 fn unicode_escape_property_binary_idstart_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 776] = [
+    static CODE_POINTS: [&str; 776] = [
         "\u{41}",
         "\u{61}",
         "\u{aa}",
@@ -13972,7 +13974,7 @@ fn unicode_escape_property_binary_math() {
 }
 
 fn unicode_escape_property_binary_math_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 243] = [
+    static CODE_POINTS: [&str; 243] = [
         "\u{2b}",
         "\u{3c}",
         "\u{5e}",
@@ -14232,7 +14234,7 @@ fn unicode_escape_property_binary_xidcontinue() {
 }
 
 fn unicode_escape_property_binary_xidcontinue_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1422] = [
+    static CODE_POINTS: [&str; 1422] = [
         "\u{30}",
         "\u{41}",
         "\u{5f}",
@@ -15671,7 +15673,7 @@ fn unicode_escape_property_binary_xidstart() {
 }
 
 fn unicode_escape_property_binary_xidstart_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 779] = [
+    static CODE_POINTS: [&str; 779] = [
         "\u{41}",
         "\u{61}",
         "\u{aa}",
@@ -16467,7 +16469,7 @@ fn unicode_escape_property_binary_asciihexdigit() {
 }
 
 fn unicode_escape_property_binary_asciihexdigit_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 3] = ["\u{30}", "\u{41}", "\u{61}"];
+    static CODE_POINTS: [&str; 3] = ["\u{30}", "\u{41}", "\u{61}"];
     const REGEXES: [&str; 2] = ["^\\p{ASCII_Hex_Digit}+$", "^\\p{AHex}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
@@ -16483,7 +16485,7 @@ fn unicode_escape_property_binary_bidicontrol() {
 }
 
 fn unicode_escape_property_binary_bidicontrol_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 4] = ["\u{61c}", "\u{200e}", "\u{202a}", "\u{2066}"];
+    static CODE_POINTS: [&str; 4] = ["\u{61c}", "\u{200e}", "\u{202a}", "\u{2066}"];
     const REGEXES: [&str; 2] = ["^\\p{Bidi_Control}+$", "^\\p{Bidi_C}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
@@ -16499,7 +16501,7 @@ fn unicode_escape_property_binary_dash() {
 }
 
 fn unicode_escape_property_binary_dash_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 24] = [
+    static CODE_POINTS: [&str; 24] = [
         "\u{2d}",
         "\u{58a}",
         "\u{5be}",
@@ -16540,7 +16542,7 @@ fn unicode_escape_property_binary_deprecated() {
 }
 
 fn unicode_escape_property_binary_deprecated_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 9] = [
+    static CODE_POINTS: [&str; 9] = [
         "\u{149}",
         "\u{673}",
         "\u{f77}",
@@ -16566,7 +16568,7 @@ fn unicode_escape_property_binary_diacritic() {
 }
 
 fn unicode_escape_property_binary_diacritic_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 266] = [
+    static CODE_POINTS: [&str; 266] = [
         "\u{5e}",
         "\u{60}",
         "\u{a8}",
@@ -16849,7 +16851,7 @@ fn unicode_escape_property_binary_extender() {
 }
 
 fn unicode_escape_property_binary_extender_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 44] = [
+    static CODE_POINTS: [&str; 44] = [
         "\u{b7}",
         "\u{2d0}",
         "\u{640}",
@@ -16910,7 +16912,7 @@ fn unicode_escape_property_binary_hexdigit() {
 }
 
 fn unicode_escape_property_binary_hexdigit_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 6] = [
+    static CODE_POINTS: [&str; 6] = [
         "\u{30}", "\u{41}", "\u{61}", "\u{ff10}", "\u{ff21}", "\u{ff41}",
     ];
     const REGEXES: [&str; 2] = ["^\\p{Hex_Digit}+$", "^\\p{Hex}+$"];
@@ -16928,7 +16930,7 @@ fn unicode_escape_property_binary_idsbinaryoperator() {
 }
 
 fn unicode_escape_property_binary_idsbinaryoperator_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 3] = ["\u{2ff0}", "\u{2ff4}", "\u{31ef}"];
+    static CODE_POINTS: [&str; 3] = ["\u{2ff0}", "\u{2ff4}", "\u{31ef}"];
     const REGEXES: [&str; 2] = ["^\\p{IDS_Binary_Operator}+$", "^\\p{IDSB}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
@@ -16944,7 +16946,7 @@ fn unicode_escape_property_binary_idstrinaryoperator() {
 }
 
 fn unicode_escape_property_binary_idstrinaryoperator_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1] = ["\u{2ff2}"];
+    static CODE_POINTS: [&str; 1] = ["\u{2ff2}"];
     const REGEXES: [&str; 2] = ["^\\p{IDS_Trinary_Operator}+$", "^\\p{IDST}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
@@ -16960,7 +16962,7 @@ fn unicode_escape_property_binary_ideographic() {
 }
 
 fn unicode_escape_property_binary_ideographic_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 23] = [
+    static CODE_POINTS: [&str; 23] = [
         "\u{3006}",
         "\u{3007}",
         "\u{3021}",
@@ -17000,7 +17002,7 @@ fn unicode_escape_property_binary_joincontrol() {
 }
 
 fn unicode_escape_property_binary_joincontrol_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1] = ["\u{200c}"];
+    static CODE_POINTS: [&str; 1] = ["\u{200c}"];
     const REGEXES: [&str; 2] = ["^\\p{Join_Control}+$", "^\\p{Join_C}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
@@ -17016,7 +17018,7 @@ fn unicode_escape_property_binary_logicalorderexception() {
 }
 
 fn unicode_escape_property_binary_logicalorderexception_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 7] = [
+    static CODE_POINTS: [&str; 7] = [
         "\u{e40}", "\u{ec0}", "\u{19b5}", "\u{19ba}", "\u{aab5}", "\u{aab9}", "\u{aabb}",
     ];
     const REGEXES: [&str; 2] = ["^\\p{Logical_Order_Exception}+$", "^\\p{LOE}+$"];
@@ -17034,7 +17036,7 @@ fn unicode_escape_property_binary_lowercase() {
 }
 
 fn unicode_escape_property_binary_lowercase_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 692] = [
+    static CODE_POINTS: [&str; 692] = [
         "\u{61}",
         "\u{aa}",
         "\u{b5}",
@@ -17743,7 +17745,7 @@ fn unicode_escape_property_binary_noncharactercodepoint() {
 }
 
 fn unicode_escape_property_binary_noncharactercodepoint_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 18] = [
+    static CODE_POINTS: [&str; 18] = [
         "\u{fdd0}",
         "\u{fffe}",
         "\u{1fffe}",
@@ -17778,7 +17780,7 @@ fn unicode_escape_property_binary_patternsyntax() {
 }
 
 fn unicode_escape_property_binary_patternsyntax_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 255] = [
+    static CODE_POINTS: [&str; 255] = [
         "\u{21}", "\u{24}", "\u{25}", "\u{28}", "\u{29}", "\u{2a}", "\u{2b}", "\u{2c}", "\u{2d}",
         "\u{2e}", "\u{3a}", "\u{3c}", "\u{3f}", "\u{5b}", "\u{5c}", "\u{5d}", "\u{5e}", "\u{60}",
         "\u{7b}", "\u{7c}", "\u{7d}", "\u{7e}", "\u{a1}", "\u{a2}", "\u{a6}", "\u{a7}", "\u{a9}",
@@ -17831,7 +17833,7 @@ fn unicode_escape_property_binary_patternwhitespace() {
 }
 
 fn unicode_escape_property_binary_patternwhitespace_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 6] = [
+    static CODE_POINTS: [&str; 6] = [
         "\u{9}", "\u{20}", "\u{85}", "\u{200e}", "\u{2028}", "\u{2029}",
     ];
     const REGEXES: [&str; 2] = ["^\\p{Pattern_White_Space}+$", "^\\p{Pat_WS}+$"];
@@ -17849,7 +17851,7 @@ fn unicode_escape_property_binary_quotationmark() {
 }
 
 fn unicode_escape_property_binary_quotationmark_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 28] = [
+    static CODE_POINTS: [&str; 28] = [
         "\u{22}", "\u{27}", "\u{ab}", "\u{bb}", "\u{2018}", "\u{2019}", "\u{201a}", "\u{201b}",
         "\u{201d}", "\u{201e}", "\u{201f}", "\u{2039}", "\u{203a}", "\u{2e42}", "\u{300c}",
         "\u{300d}", "\u{300e}", "\u{300f}", "\u{301d}", "\u{301e}", "\u{fe41}", "\u{fe42}",
@@ -17870,7 +17872,7 @@ fn unicode_escape_property_binary_radical() {
 }
 
 fn unicode_escape_property_binary_radical_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 3] = ["\u{2e80}", "\u{2e9b}", "\u{2f00}"];
+    static CODE_POINTS: [&str; 3] = ["\u{2e80}", "\u{2e9b}", "\u{2f00}"];
     const REGEXES: [&str; 1] = ["^\\p{Radical}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
@@ -17886,7 +17888,7 @@ fn unicode_escape_property_binary_regionalindicator() {
 }
 
 fn unicode_escape_property_binary_regionalindicator_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1] = ["\u{1f1e6}"];
+    static CODE_POINTS: [&str; 1] = ["\u{1f1e6}"];
     const REGEXES: [&str; 2] = ["^\\p{Regional_Indicator}+$", "^\\p{RI}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
@@ -17902,7 +17904,7 @@ fn unicode_escape_property_binary_sentenceterminal() {
 }
 
 fn unicode_escape_property_binary_sentenceterminal_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 88] = [
+    static CODE_POINTS: [&str; 88] = [
         "\u{21}",
         "\u{2e}",
         "\u{3f}",
@@ -18007,7 +18009,7 @@ fn unicode_escape_property_binary_softdotted() {
 }
 
 fn unicode_escape_property_binary_softdotted_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 34] = [
+    static CODE_POINTS: [&str; 34] = [
         "\u{69}",
         "\u{12f}",
         "\u{249}",
@@ -18058,7 +18060,7 @@ fn unicode_escape_property_binary_terminalpunctuation() {
 }
 
 fn unicode_escape_property_binary_terminalpunctuation_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 116] = [
+    static CODE_POINTS: [&str; 116] = [
         "\u{21}",
         "\u{2c}",
         "\u{2e}",
@@ -18191,7 +18193,7 @@ fn unicode_escape_property_binary_unifiedideograph() {
 }
 
 fn unicode_escape_property_binary_unifiedideograph_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 16] = [
+    static CODE_POINTS: [&str; 16] = [
         "\u{3400}",
         "\u{4e00}",
         "\u{fa0e}",
@@ -18224,7 +18226,7 @@ fn unicode_escape_property_binary_uppercase() {
 }
 
 fn unicode_escape_property_binary_uppercase_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 660] = [
+    static CODE_POINTS: [&str; 660] = [
         "\u{41}",
         "\u{c0}",
         "\u{d8}",
@@ -18901,7 +18903,7 @@ fn unicode_escape_property_binary_variationselector() {
 }
 
 fn unicode_escape_property_binary_variationselector_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 4] = ["\u{180b}", "\u{180f}", "\u{fe00}", "\u{e0100}"];
+    static CODE_POINTS: [&str; 4] = ["\u{180b}", "\u{180f}", "\u{fe00}", "\u{e0100}"];
     const REGEXES: [&str; 2] = ["^\\p{Variation_Selector}+$", "^\\p{VS}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
@@ -18917,7 +18919,7 @@ fn unicode_escape_property_binary_whitespace() {
 }
 
 fn unicode_escape_property_binary_whitespace_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 11] = [
+    static CODE_POINTS: [&str; 11] = [
         "\u{9}", "\u{20}", "\u{85}", "\u{a0}", "\u{1680}", "\u{2000}", "\u{2028}", "\u{2029}",
         "\u{202f}", "\u{205f}", "\u{3000}",
     ];
@@ -18936,7 +18938,7 @@ fn unicode_escape_property_binary_emoji() {
 }
 
 fn unicode_escape_property_binary_emoji_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 418] = [
+    static CODE_POINTS: [&str; 418] = [
         "\u{23}",
         "\u{2a}",
         "\u{30}",
@@ -19371,7 +19373,7 @@ fn unicode_escape_property_binary_emojicomponent() {
 }
 
 fn unicode_escape_property_binary_emojicomponent_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 10] = [
+    static CODE_POINTS: [&str; 10] = [
         "\u{23}",
         "\u{2a}",
         "\u{30}",
@@ -19398,7 +19400,7 @@ fn unicode_escape_property_binary_emojimodifier() {
 }
 
 fn unicode_escape_property_binary_emojimodifier_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1] = ["\u{1f3fb}"];
+    static CODE_POINTS: [&str; 1] = ["\u{1f3fb}"];
     const REGEXES: [&str; 2] = ["^\\p{Emoji_Modifier}+$", "^\\p{EMod}+$"];
     for regex in REGEXES {
         let regex = tc.compilef(regex, "u");
@@ -19414,7 +19416,7 @@ fn unicode_escape_property_binary_emojimodifierbase() {
 }
 
 fn unicode_escape_property_binary_emojimodifierbase_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 50] = [
+    static CODE_POINTS: [&str; 50] = [
         "\u{261d}",
         "\u{26f9}",
         "\u{270a}",
@@ -19481,7 +19483,7 @@ fn unicode_escape_property_binary_emojipresentation() {
 }
 
 fn unicode_escape_property_binary_emojipresentation_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 296] = [
+    static CODE_POINTS: [&str; 296] = [
         "\u{231a}",
         "\u{23e9}",
         "\u{23f0}",
@@ -19794,7 +19796,7 @@ fn unicode_escape_property_binary_extendedpictographic() {
 }
 
 fn unicode_escape_property_binary_extendedpictographic_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 451] = [
+    static CODE_POINTS: [&str; 451] = [
         "\u{a9}",
         "\u{ae}",
         "\u{203c}",
@@ -20262,7 +20264,7 @@ fn unicode_escape_property_binary_changeswhennfkccasefolded() {
 }
 
 fn unicode_escape_property_binary_changeswhennfkccasefolded_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1013] = [
+    static CODE_POINTS: [&str; 1013] = [
         "\u{41}",
         "\u{a0}",
         "\u{a8}",
@@ -21292,7 +21294,7 @@ fn unicode_escape_property_binary_bidimirrored() {
 }
 
 fn unicode_escape_property_binary_bidimirrored_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 224] = [
+    static CODE_POINTS: [&str; 224] = [
         "\u{28}",
         "\u{29}",
         "\u{3c}",
@@ -21533,7 +21535,7 @@ fn unicode_escape_property_gc_closepunctuation() {
 }
 
 fn unicode_escape_property_gc_closepunctuation_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 76] = [
+    static CODE_POINTS: [&str; 76] = [
         "\u{29}", "\u{5d}", "\u{7d}", "\u{f3b}", "\u{f3d}", "\u{169c}", "\u{2046}", "\u{207e}",
         "\u{208e}", "\u{2309}", "\u{230b}", "\u{232a}", "\u{2769}", "\u{276b}", "\u{276d}",
         "\u{276f}", "\u{2771}", "\u{2773}", "\u{2775}", "\u{27c6}", "\u{27e7}", "\u{27e9}",
@@ -21568,7 +21570,7 @@ fn unicode_escape_property_gc_connectorpunctuation() {
 }
 
 fn unicode_escape_property_gc_connectorpunctuation_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 6] = [
+    static CODE_POINTS: [&str; 6] = [
         "\u{5f}", "\u{203f}", "\u{2054}", "\u{fe33}", "\u{fe4d}", "\u{ff3f}",
     ];
     const REGEXES: [&str; 6] = [
@@ -21593,7 +21595,7 @@ fn unicode_escape_property_gc_control() {
 }
 
 fn unicode_escape_property_gc_control_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 2] = ["\u{0}", "\u{7f}"];
+    static CODE_POINTS: [&str; 2] = ["\u{0}", "\u{7f}"];
     const REGEXES: [&str; 9] = [
         "^\\p{General_Category=Control}+$",
         "^\\p{gc=Control}+$",
@@ -21619,7 +21621,7 @@ fn unicode_escape_property_gc_currencysymbol() {
 }
 
 fn unicode_escape_property_gc_currencysymbol_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 21] = [
+    static CODE_POINTS: [&str; 21] = [
         "\u{24}",
         "\u{a2}",
         "\u{58f}",
@@ -21664,7 +21666,7 @@ fn unicode_escape_property_gc_dashpunctuation() {
 }
 
 fn unicode_escape_property_gc_dashpunctuation_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 20] = [
+    static CODE_POINTS: [&str; 20] = [
         "\u{2d}",
         "\u{58a}",
         "\u{5be}",
@@ -21708,7 +21710,7 @@ fn unicode_escape_property_gc_decimalnumber() {
 }
 
 fn unicode_escape_property_gc_decimalnumber_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 72] = [
+    static CODE_POINTS: [&str; 72] = [
         "\u{30}",
         "\u{660}",
         "\u{6f0}",
@@ -21807,7 +21809,7 @@ fn unicode_escape_property_gc_enclosingmark() {
 }
 
 fn unicode_escape_property_gc_enclosingmark_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 5] = ["\u{488}", "\u{1abe}", "\u{20dd}", "\u{20e2}", "\u{a670}"];
+    static CODE_POINTS: [&str; 5] = ["\u{488}", "\u{1abe}", "\u{20dd}", "\u{20e2}", "\u{a670}"];
     const REGEXES: [&str; 6] = [
         "^\\p{General_Category=Enclosing_Mark}+$",
         "^\\p{gc=Enclosing_Mark}+$",
@@ -21830,7 +21832,7 @@ fn unicode_escape_property_gc_finalpunctuation() {
 }
 
 fn unicode_escape_property_gc_finalpunctuation_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 10] = [
+    static CODE_POINTS: [&str; 10] = [
         "\u{bb}", "\u{2019}", "\u{201d}", "\u{203a}", "\u{2e03}", "\u{2e05}", "\u{2e0a}",
         "\u{2e0d}", "\u{2e1d}", "\u{2e21}",
     ];
@@ -21856,7 +21858,7 @@ fn unicode_escape_property_gc_format() {
 }
 
 fn unicode_escape_property_gc_format_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 21] = [
+    static CODE_POINTS: [&str; 21] = [
         "\u{ad}",
         "\u{600}",
         "\u{61c}",
@@ -21901,7 +21903,7 @@ fn unicode_escape_property_gc_initialpunctuation() {
 }
 
 fn unicode_escape_property_gc_initialpunctuation_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 11] = [
+    static CODE_POINTS: [&str; 11] = [
         "\u{ab}", "\u{2018}", "\u{201b}", "\u{201f}", "\u{2039}", "\u{2e02}", "\u{2e04}",
         "\u{2e09}", "\u{2e0c}", "\u{2e1c}", "\u{2e20}",
     ];
@@ -21927,7 +21929,7 @@ fn unicode_escape_property_gc_letternumber() {
 }
 
 fn unicode_escape_property_gc_letternumber_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 13] = [
+    static CODE_POINTS: [&str; 13] = [
         "\u{16ee}",
         "\u{2160}",
         "\u{2185}",
@@ -21964,7 +21966,7 @@ fn unicode_escape_property_gc_lineseparator() {
 }
 
 fn unicode_escape_property_gc_lineseparator_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1] = ["\u{2028}"];
+    static CODE_POINTS: [&str; 1] = ["\u{2028}"];
     const REGEXES: [&str; 6] = [
         "^\\p{General_Category=Line_Separator}+$",
         "^\\p{gc=Line_Separator}+$",
@@ -21987,7 +21989,7 @@ fn unicode_escape_property_gc_lowercaseletter() {
 }
 
 fn unicode_escape_property_gc_lowercaseletter_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 664] = [
+    static CODE_POINTS: [&str; 664] = [
         "\u{61}",
         "\u{b5}",
         "\u{df}",
@@ -22675,7 +22677,7 @@ fn unicode_escape_property_gc_mathsymbol() {
 }
 
 fn unicode_escape_property_gc_mathsymbol_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 67] = [
+    static CODE_POINTS: [&str; 67] = [
         "\u{2b}",
         "\u{3c}",
         "\u{7c}",
@@ -22766,7 +22768,7 @@ fn unicode_escape_property_gc_modifierletter() {
 }
 
 fn unicode_escape_property_gc_modifierletter_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 79] = [
+    static CODE_POINTS: [&str; 79] = [
         "\u{2b0}",
         "\u{2c6}",
         "\u{2e0}",
@@ -22869,7 +22871,7 @@ fn unicode_escape_property_gc_modifiersymbol() {
 }
 
 fn unicode_escape_property_gc_modifiersymbol_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 31] = [
+    static CODE_POINTS: [&str; 31] = [
         "\u{5e}",
         "\u{60}",
         "\u{a8}",
@@ -22924,7 +22926,7 @@ fn unicode_escape_property_gc_nonspacingmark() {
 }
 
 fn unicode_escape_property_gc_nonspacingmark_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 365] = [
+    static CODE_POINTS: [&str; 365] = [
         "\u{300}",
         "\u{483}",
         "\u{591}",
@@ -23313,7 +23315,7 @@ fn unicode_escape_property_gc_openpunctuation() {
 }
 
 fn unicode_escape_property_gc_openpunctuation_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 79] = [
+    static CODE_POINTS: [&str; 79] = [
         "\u{28}", "\u{5b}", "\u{7b}", "\u{f3a}", "\u{f3c}", "\u{169b}", "\u{201a}", "\u{201e}",
         "\u{2045}", "\u{207d}", "\u{208d}", "\u{2308}", "\u{230a}", "\u{2329}", "\u{2768}",
         "\u{276a}", "\u{276c}", "\u{276e}", "\u{2770}", "\u{2772}", "\u{2774}", "\u{27c5}",
@@ -23349,7 +23351,7 @@ fn unicode_escape_property_gc_otherletter() {
 }
 
 fn unicode_escape_property_gc_otherletter_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 537] = [
+    static CODE_POINTS: [&str; 537] = [
         "\u{aa}",
         "\u{ba}",
         "\u{1bb}",
@@ -23910,7 +23912,7 @@ fn unicode_escape_property_gc_othernumber() {
 }
 
 fn unicode_escape_property_gc_othernumber_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 72] = [
+    static CODE_POINTS: [&str; 72] = [
         "\u{b2}",
         "\u{b9}",
         "\u{bc}",
@@ -24006,7 +24008,7 @@ fn unicode_escape_property_gc_otherpunctuation() {
 }
 
 fn unicode_escape_property_gc_otherpunctuation_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 194] = [
+    static CODE_POINTS: [&str; 194] = [
         "\u{21}",
         "\u{25}",
         "\u{2a}",
@@ -24224,7 +24226,7 @@ fn unicode_escape_property_gc_othersymbol() {
 }
 
 fn unicode_escape_property_gc_othersymbol_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 193] = [
+    static CODE_POINTS: [&str; 193] = [
         "\u{a6}",
         "\u{a9}",
         "\u{ae}",
@@ -24441,7 +24443,7 @@ fn unicode_escape_property_gc_paragraphseparator() {
 }
 
 fn unicode_escape_property_gc_paragraphseparator_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1] = ["\u{2029}"];
+    static CODE_POINTS: [&str; 1] = ["\u{2029}"];
     const REGEXES: [&str; 6] = [
         "^\\p{General_Category=Paragraph_Separator}+$",
         "^\\p{gc=Paragraph_Separator}+$",
@@ -24464,7 +24466,7 @@ fn unicode_escape_property_gc_privateuse() {
 }
 
 fn unicode_escape_property_gc_privateuse_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 3] = ["\u{e000}", "\u{f0000}", "\u{100000}"];
+    static CODE_POINTS: [&str; 3] = ["\u{e000}", "\u{f0000}", "\u{100000}"];
     const REGEXES: [&str; 6] = [
         "^\\p{General_Category=Private_Use}+$",
         "^\\p{gc=Private_Use}+$",
@@ -24487,7 +24489,7 @@ fn unicode_escape_property_gc_spaceseparator() {
 }
 
 fn unicode_escape_property_gc_spaceseparator_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 7] = [
+    static CODE_POINTS: [&str; 7] = [
         "\u{20}", "\u{a0}", "\u{1680}", "\u{2000}", "\u{202f}", "\u{205f}", "\u{3000}",
     ];
     const REGEXES: [&str; 6] = [
@@ -24512,7 +24514,7 @@ fn unicode_escape_property_gc_spacingmark() {
 }
 
 fn unicode_escape_property_gc_spacingmark_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 193] = [
+    static CODE_POINTS: [&str; 193] = [
         "\u{903}",
         "\u{93b}",
         "\u{93e}",
@@ -24729,7 +24731,7 @@ fn unicode_escape_property_gc_titlecaseletter() {
 }
 
 fn unicode_escape_property_gc_titlecaseletter_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 10] = [
+    static CODE_POINTS: [&str; 10] = [
         "\u{1c5}", "\u{1c8}", "\u{1cb}", "\u{1f2}", "\u{1f88}", "\u{1f98}", "\u{1fa8}", "\u{1fbc}",
         "\u{1fcc}", "\u{1ffc}",
     ];
@@ -24755,7 +24757,7 @@ fn unicode_escape_property_gc_unassigned() {
 }
 
 fn unicode_escape_property_gc_unassigned_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 735] = [
+    static CODE_POINTS: [&str; 735] = [
         "\u{378}",
         "\u{380}",
         "\u{38b}",
@@ -25514,7 +25516,7 @@ fn unicode_escape_property_gc_uppercaseletter() {
 }
 
 fn unicode_escape_property_gc_uppercaseletter_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 655] = [
+    static CODE_POINTS: [&str; 655] = [
         "\u{41}",
         "\u{c0}",
         "\u{d8}",
@@ -26193,7 +26195,7 @@ fn unicode_escape_property_gc_casedletter() {
 }
 
 fn unicode_escape_property_gc_casedletter_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1329] = [
+    static CODE_POINTS: [&str; 1329] = [
         "\u{61}",
         "\u{b5}",
         "\u{df}",
@@ -27546,7 +27548,7 @@ fn unicode_escape_property_gc_other() {
 }
 
 fn unicode_escape_property_gc_other_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 761] = [
+    static CODE_POINTS: [&str; 761] = [
         "\u{0}",
         "\u{7f}",
         "\u{ad}",
@@ -28331,7 +28333,7 @@ fn unicode_escape_property_gc_letter() {
 }
 
 fn unicode_escape_property_gc_letter_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 1945] = [
+    static CODE_POINTS: [&str; 1945] = [
         "\u{61}",
         "\u{b5}",
         "\u{df}",
@@ -30300,7 +30302,7 @@ fn unicode_escape_property_gc_mark() {
 }
 
 fn unicode_escape_property_gc_mark_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 563] = [
+    static CODE_POINTS: [&str; 563] = [
         "\u{903}",
         "\u{93b}",
         "\u{93e}",
@@ -30890,7 +30892,7 @@ fn unicode_escape_property_gc_number() {
 }
 
 fn unicode_escape_property_gc_number_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 157] = [
+    static CODE_POINTS: [&str; 157] = [
         "\u{30}",
         "\u{660}",
         "\u{6f0}",
@@ -31071,7 +31073,7 @@ fn unicode_escape_property_gc_punctuation() {
 }
 
 fn unicode_escape_property_gc_punctuation_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 396] = [
+    static CODE_POINTS: [&str; 396] = [
         "\u{5f}",
         "\u{203f}",
         "\u{2054}",
@@ -31494,7 +31496,7 @@ fn unicode_escape_property_gc_symbol() {
 }
 
 fn unicode_escape_property_gc_symbol_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 312] = [
+    static CODE_POINTS: [&str; 312] = [
         "\u{24}",
         "\u{a2}",
         "\u{58f}",
@@ -31830,7 +31832,7 @@ fn unicode_escape_property_gc_separator() {
 }
 
 fn unicode_escape_property_gc_separator_tc(tc: TestConfig) {
-    const CODE_POINTS: [&str; 9] = [
+    static CODE_POINTS: [&str; 9] = [
         "\u{2028}", "\u{2029}", "\u{20}", "\u{a0}", "\u{1680}", "\u{2000}", "\u{202f}", "\u{205f}",
         "\u{3000}",
     ];
