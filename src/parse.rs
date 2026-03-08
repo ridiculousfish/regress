@@ -1627,11 +1627,14 @@ where
                         let mut cps = CodePointSet::from_sorted_disjoint_intervals(s.to_vec());
                         if self.flags.icase {
                             if negate {
-                                // CharacterComplement semantics (ES2025): for \P{prop}
-                                // with icase, compute the non-matching set N and invert.
+                                // Negated classes simply reuse the normal icase
+                                // expansion; the surrounding bracket is marked
+                                // `invert = true` so the result is automatically
+                                // complemented.  the helper used here is now just
+                                // a thin wrapper around add_icase_code_points.
                                 cps = unicode::compute_icase_complement_nonmatching(&cps);
                             } else {
-                                // For \p{prop} with icase, expand with case-folded variants
+                                // For positive \p, expand with case-folded variants
                                 cps = unicode::add_icase_code_points(cps);
                             }
                         }

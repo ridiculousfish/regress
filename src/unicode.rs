@@ -322,36 +322,29 @@ pub(crate) fn unfold_uppercase_char(c: u32) -> Vec<u32> {
     res
 }
 
-/// Compute the non-matching set for a negated character class (e.g. `\P{Lu}`)
-/// under icase semantics, implementing ES2025 CharacterComplement.
+/// Compute the set to use for an icase negated character class (`\P{...}`).
 ///
-/// Given the positive base set S (e.g. Lu for `\P{Lu}`), returns N where:
-///   N = { c ∈ fold_set(S) : unfold(c) ⊆ fold_set(S) }
-///   fold_set(S) = { fold(c) : c ∈ S }   (MaybeSimpleCaseFolding)
+/// Under the ECMAScript semantics, a character `c` belongs to the *negative*
+/// class iff `fold(c)` is **not** in the folded positive set.  When the
+/// caller eventually constructs a `BracketContents` it will set `invert = true`.
 ///
-/// The caller should use `BracketContents { cps: N, invert: true }` to
-/// correctly implement `\P{S}` with icase (matches everything NOT in N).
+/// The simplest way to satisfy this condition is to expand the positive set
+/// exactly the same way `\p` does and then let the `invert` flag perform the
+/// negation.  i.e.
+/// ```rust,ignore
+///     compute_icase_complement_nonmatching(S) == add_icase_code_points(S)
+/// ```
+/// The previous implementation tried to compute the complement directly and
+/// ended up excluding most of the relevant code points (see comments in the
+/// review discussion).  That algorithm was incorrect and produced a nearly
+/// empty set for many properties, causing `\P{Lu}` with `icase` to match
+/// almost everything.
+///
+/// Keeping the helper around makes the parse code slightly clearer, but the
+/// actual work is just delegated to `add_icase_code_points`.
 pub fn compute_icase_complement_nonmatching(positive_set: &CodePointSet) -> CodePointSet {
-    // Step 1: fold_set = { fold(c) : c ∈ positive_set }
-    let mut fold_set = CodePointSet::new();
-    for iv in positive_set.intervals() {
-        for cp in iv.codepoints() {
-            fold_set.add_one(fold(cp));
-        }
-    }
-
-    // Step 2: N = fold_set members whose entire fold-equivalence class is within fold_set
-    let intervals_snapshot: Vec<Interval> = fold_set.intervals().to_vec();
-    let mut n = CodePointSet::new();
-    for iv in &intervals_snapshot {
-        for cp in iv.codepoints() {
-            let equiv = unfold_char(cp);
-            if equiv.iter().all(|&d| fold_set.contains(d)) {
-                n.add_one(cp);
-            }
-        }
-    }
-    n
+    // same module, call helper directly
+    add_icase_code_points(positive_set.clone())
 }
 
 // Fold every character in \p input, then find all the prefolds.
@@ -571,6 +564,24 @@ mod tests {
                 from = last;
             }
         }
+    }
+
+    #[test]
+    fn test_icase_complement_nonmatching_equals_add_icase() {
+        // Simple sanity check for the regression discussed in code review.
+        let mut uppercase = CodePointSet::new();
+        uppercase.add(Interval {
+            first: 0x41,
+            last: 0x5A,
+        }); // 'A'..'Z'
+
+        let comp = compute_icase_complement_nonmatching(&uppercase);
+        let expanded = add_icase_code_points(uppercase.clone());
+        assert_eq!(comp, expanded);
+
+        // both cases should be present
+        assert!(comp.contains(0x41));
+        assert!(comp.contains(0x61));
     }
 
     #[test]
