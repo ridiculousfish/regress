@@ -89,6 +89,7 @@ fn main() {
 
     r#gen.generate_binary_properties();
     r#gen.generate_case_folds();
+    r#gen.generate_nonascii_folds_to_ascii_word_char();
     r#gen.generate_general_category();
     r#gen.generate_scripts();
     r#gen.generate_uppercase();

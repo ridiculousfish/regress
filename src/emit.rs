@@ -295,8 +295,12 @@ impl Emitter {
                         });
                         stack.push(Emitter::Node(contents));
                     }
-                    Node::WordBoundary { invert } => {
-                        self.emit_insn(Insn::WordBoundary { invert: *invert })
+                    &Node::WordBoundary { invert } => {
+                        if self.result.flags.unicode && self.result.flags.icase {
+                            self.emit_insn(Insn::WordBoundaryUnicodeICase { invert })
+                        } else {
+                            self.emit_insn(Insn::WordBoundary { invert })
+                        }
                     }
                     &Node::BackRef(group) => {
                         debug_assert!(group >= 1, "Group should not be zero");

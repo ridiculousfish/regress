@@ -13407,6 +13407,16 @@ pub(crate) const FOLDS: [FoldRange; 208] = [
     FoldRange::from(0x1E900, 34, 34, 1),
 ];
 
+// \return whether a non-ASCII character folds to an ASCII word char.
+#[inline]
+pub(crate) fn nonascii_folds_to_ascii_word_char(cp: u32) -> bool {
+    match cp {
+        0x017F => true, // folds to 's'
+        0x212A => true, // folds to 'k'
+        _ => false,
+    }
+}
+
 const CLOSE_PUNCTUATION: [Interval; 76] = [
     Interval::new(41, 41),
     Interval::new(93, 93),

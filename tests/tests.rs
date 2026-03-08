@@ -2248,3 +2248,36 @@ fn test_regression_142() {
     use regress::Regex;
     let _ = Regex::with_flags(r"\p{scx=Cyrl}", "u").expect("Should succeed");
 }
+
+#[test]
+fn test_high_unicode_folds_to_ascii() {
+    test_with_configs(test_high_unicode_folds_to_ascii_tc)
+}
+
+fn test_high_unicode_folds_to_ascii_tc(tc: TestConfig) {
+    // The Kelvin character (U+212A) case-folds to lowercase k,
+    // which means that it's a word character iff we're using case-insensitive Unicode.
+    tc.test_match_fails(r"\b\u212A", "", "\u{212A}");
+    tc.test_match_succeeds(r"\b\u212A", "iu", "\u{212A}");
+    tc.test_match_fails(r"^\w$", "", "\u{212A}");
+    tc.test_match_succeeds(r"^\w$", "iu", "\u{212A}");
+    // \W should NOT match Kelvin in icase unicode mode (since it's a word char)
+    tc.test_match_succeeds(r"^\W$", "", "\u{212A}");
+    tc.test_match_fails(r"^\W$", "iu", "\u{212A}");
+
+    // U+017F (Latin Small Letter Long S) case-folds to 's'.
+    tc.test_match_fails(r"\b\u017F", "", "\u{017F}");
+    tc.test_match_succeeds(r"\b\u017F", "iu", "\u{017F}");
+    tc.test_match_fails(r"^\w$", "", "\u{017F}");
+    tc.test_match_succeeds(r"^\w$", "iu", "\u{017F}");
+    tc.test_match_succeeds(r"^\W$", "", "\u{017F}");
+    tc.test_match_fails(r"^\W$", "iu", "\u{017F}");
+
+    // U+0131 (Latin Small Letter Dotless I) does NOT case-fold to ASCII.
+    tc.test_match_fails(r"\b\u0131", "", "\u{0131}");
+    tc.test_match_fails(r"\b\u0131", "iu", "\u{0131}");
+    tc.test_match_fails(r"^\w$", "", "\u{0131}");
+    tc.test_match_fails(r"^\w$", "iu", "\u{0131}");
+    tc.test_match_succeeds(r"^\W$", "", "\u{0131}");
+    tc.test_match_succeeds(r"^\W$", "iu", "\u{0131}");
+}

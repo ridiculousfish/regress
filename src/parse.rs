@@ -313,7 +313,8 @@ fn make_alt(nodes: ir::NodeList) -> ir::Node {
 
 /// \return a CodePointSet for a given character escape (positive or negative).
 /// See ES9 21.2.2.12.
-fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet {
+/// Returns the positive (non-inverted) code point set for a character class.
+fn codepoints_from_class_positive(ct: CharacterClassType) -> CodePointSet {
     let mut cps;
     match ct {
         CharacterClassType::Digits => {
@@ -328,19 +329,28 @@ fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet
                 cps.add(iv)
             }
         }
-    };
-    if !positive {
-        cps = cps.inverted()
     }
     cps
 }
 
+/// Returns code points for a character class, optionally inverted.
+fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet {
+    let cps = codepoints_from_class_positive(ct);
+    if positive { cps } else { cps.inverted() }
+}
+
 /// \return a Bracket for a given character escape (positive or negative).
-fn make_bracket_class(ct: CharacterClassType, positive: bool) -> ir::Node {
-    ir::Node::Bracket(BracketContents {
-        invert: false,
-        cps: codepoints_from_class(ct, positive),
-    })
+/// For icase mode, we expand the positive set first, then invert if needed.
+fn make_bracket_class(ct: CharacterClassType, positive: bool, icase: bool) -> ir::Node {
+    // Get the positive (non-inverted) set, perform any icase expansion, then maybe invert.
+    let mut cps = codepoints_from_class_positive(ct);
+    if icase {
+        cps = unicode::add_icase_code_points(cps);
+    }
+    if !positive {
+        cps = cps.inverted();
+    }
+    ir::Node::Bracket(BracketContents { invert: false, cps })
 }
 
 fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom) {
@@ -1574,6 +1584,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Digits,
                     c == 'd' as u32,
+                    self.flags.icase,
                 ))
             }
 
@@ -1582,6 +1593,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Spaces,
                     c == 's' as u32,
+                    self.flags.icase,
                 ))
             }
 
@@ -1590,6 +1602,7 @@ where
                 Ok(make_bracket_class(
                     CharacterClassType::Words,
                     c == 'w' as u32,
+                    self.flags.icase,
                 ))
             }
 

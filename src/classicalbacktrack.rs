@@ -782,6 +782,17 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         next_or_bt!(is_boundary != invert)
                     }
 
+                    &Insn::WordBoundaryUnicodeICase { invert } => {
+                        let prev_wordchar = input
+                            .peek_left(pos)
+                            .is_some_and(Input::CharProps::is_word_char_unicode_icase);
+                        let curr_wordchar = input
+                            .peek_right(pos)
+                            .is_some_and(Input::CharProps::is_word_char_unicode_icase);
+                        let is_boundary = prev_wordchar != curr_wordchar;
+                        next_or_bt!(is_boundary != invert)
+                    }
+
                     Insn::StartOfLine { multiline } => {
                         let multiline = *multiline;
                         let matches = match input.peek_left(pos) {

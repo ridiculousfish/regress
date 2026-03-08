@@ -130,6 +130,13 @@ pub enum Insn {
         invert: bool,
     },
 
+    /// \w or \W word boundaries in Unicode case-insensitive mode.
+    /// This considers characters that fold to ASCII word chars as word chars,
+    /// per ES9 21.2.2.6.1.
+    WordBoundaryUnicodeICase {
+        invert: bool,
+    },
+
     /// Match any of the contained chars
     /// There is no length field; characters are simply duplicated as necessary.
     CharSet([u32; MAX_CHAR_SET_LENGTH]),

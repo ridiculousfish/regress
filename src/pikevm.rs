@@ -315,6 +315,17 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             let is_boundary = prev_wordchar != curr_wordchar;
             nextinsn_or_fail!(is_boundary != invert)
         }
+
+        &Insn::WordBoundaryUnicodeICase { invert } => {
+            let prev_wordchar = input
+                .peek_left(s.pos)
+                .is_some_and(Input::CharProps::is_word_char_unicode_icase);
+            let curr_wordchar = input
+                .peek_right(s.pos)
+                .is_some_and(Input::CharProps::is_word_char_unicode_icase);
+            let is_boundary = prev_wordchar != curr_wordchar;
+            nextinsn_or_fail!(is_boundary != invert)
+        }
     }
 }
 
