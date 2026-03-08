@@ -120,3 +120,24 @@ fn is_basic_word_char(cp: u32) -> bool {
         0x5F          // _
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Some edge cases illustrating `is_icase_word_char` logic.  The Kelvin
+    // sign (U+212A) is not itself an ASCII word character, but it folds to
+    // 'k', so under `unicode+icase` it should behave as a word character.
+    #[test]
+    fn test_icase_word_char_examples() {
+        assert!(!is_basic_word_char(0x212A));
+        assert!(is_icase_word_char(0x212A));
+
+        // ascii letters/digits remain word chars
+        assert!(is_icase_word_char('k' as u32));
+        assert!(is_icase_word_char('0' as u32));
+
+        // whitespace never becomes a word char
+        assert!(!is_icase_word_char(' ' as u32));
+    }
+}

@@ -141,6 +141,26 @@ fn test_pattern_zero_width_match() {
 }
 
 #[test]
+fn test_word_boundary_icase_unicode() {
+    // Kelvin sign folds to 'k' which is an ASCII word char.  Without icase+u
+    // the character is not treated as a word char and the boundary assertions
+    // fail.
+    let s = "K"; // U+212A
+
+    let re_no = Regex::new(r"\bK").unwrap();
+    assert!(re_no.find(s).is_none());
+
+    let re_yes = Regex::with_flags(r"\bK", "iu").unwrap();
+    assert!(re_yes.find(s).is_some());
+
+    // likewise \w should cover it under iu but not otherwise
+    let re_w_no = Regex::new(r"^\w$").unwrap();
+    assert!(re_w_no.find(s).is_none());
+    let re_w_yes = Regex::with_flags(r"^\w$", "iu").unwrap();
+    assert!(re_w_yes.find(s).is_some());
+}
+
+#[test]
 fn test_pattern_overlapping_pattern() {
     let re = Regex::new(r"aa").unwrap();
     let text = "aaaa";

@@ -1090,6 +1090,14 @@ fn run_regexp_regexp_tc(tc: TestConfig) {
     tc.test_match_succeeds(",\\B", "", ",");
     tc.test_match_succeeds(",\\B$", "", ",");
     tc.test_match_succeeds("\\B,", "", ",");
+
+    // special word-boundary case: Kelvin sign U+212A folds to 'k', so it is
+    // considered a word char under unicode+icase.  Without those flags the
+    // boundary does not exist.
+    tc.compilef("\\bK", "iu").test_succeeds("K");
+    tc.compilef("\\bK", "").test_fails("K");
+    tc.compilef("^\\w$", "iu").test_succeeds("K");
+    tc.compilef("^\\w$", "").test_fails("K");
     tc.test_match_succeeds("^\\B,", "", ",");
     tc.test_match_succeeds("b\\b", "", "b,");
     tc.compilef("b\\b", "").test_fails("ba");
@@ -2193,23 +2201,17 @@ fn test_duplicate_named_groups_tc(tc: TestConfig) {
     let ng = m.named_groups();
     assert!(ng.eq([("x", Some(0..1)), ("y", Some(1..2))]));
 
-    // Backreferences with duplicate names
-    // TODO: Backreferences with duplicate named groups require additional work
-    // in the matcher to determine which group participated. This is deferred.
-    //let m = tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
-    //    .find("xx")
-    //    .unwrap();
-    //assert_eq!(m.group(0), Some(0..2));
+    // Backreferences with duplicate names.  once the matcher supports the
+    // new `NamedBackRef` instructions this should behave correctly; earlier
+    // versions left these commented out.
+    let m = tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>").find("xx").unwrap();
+    assert_eq!(m.group(0), Some(0..2));
 
-    //let m = tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
-    //    .find("yy")
-    //    .unwrap();
-    //assert_eq!(m.group(0), Some(0..2));
+    let m = tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>").find("yy").unwrap();
+    assert_eq!(m.group(0), Some(0..2));
 
-    //// Should NOT match when backreference doesn't match
-    //assert!(tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
-    //    .find("xy")
-    //    .is_none());
+    // Should NOT match when backreference doesn't match
+    assert!(tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>").find("xy").is_none());
 }
 
 #[test]
