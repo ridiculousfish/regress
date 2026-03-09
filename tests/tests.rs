@@ -2243,6 +2243,45 @@ fn test_ascii_unicode_icase_backref() {
 }
 
 #[test]
+fn test_duplicate_named_groups_distinct_alternations_backref() {
+    test_with_configs(test_duplicate_named_groups_distinct_alternations_backref_tc)
+}
+
+// A named backreference to an alternation with duplicate named groups
+// should only match the group which participated in the match.
+fn test_duplicate_named_groups_distinct_alternations_backref_tc(tc: TestConfig) {
+    let pattern = r"^(?:(?<a>x)|(?<a>y))\k<a>$";
+
+    // Alterations with duplicate names groups: backref should match whichever group matched.
+    let re = tc.compile(pattern);
+    re.test_succeeds("xx");
+    re.test_succeeds("yy");
+    re.test_fails("xy");
+    re.test_fails("yx");
+
+    // Same but icase
+    let re = tc.compilef(pattern, "i");
+    re.test_succeeds("XX");
+    re.test_succeeds("YY");
+    re.test_fails("XY");
+    re.test_fails("YX");
+
+    // Same but unicode
+    let re = tc.compilef(pattern, "u");
+    re.test_succeeds("xx");
+    re.test_succeeds("yy");
+    re.test_fails("xy");
+    re.test_fails("yx");
+
+    // Same but icase unicode
+    let re = tc.compilef(pattern, "iu");
+    re.test_succeeds("XX");
+    re.test_succeeds("YY");
+    re.test_fails("XY");
+    re.test_fails("YX");
+}
+
+#[test]
 fn test_regression_142() {
     // Regression test for issue #142.
     use regress::Regex;

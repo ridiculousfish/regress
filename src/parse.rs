@@ -421,8 +421,10 @@ where
     /// Maximum number of capturing groups.
     group_count_max: u32,
 
-    /// Named capture group references.
-    named_group_indices: HashMap<CaptureGroupName, u32>,
+    /// A map each from capture group name to corresponding group indices in order.
+    /// Note duplicate names may appear in distinct alternations, per the TC39 proposal.
+    /// See <https://github.com/tc39/proposal-duplicate-named-capturing-groups>
+    named_group_indices: HashMap<CaptureGroupName, Vec<u32>>,
 
     /// Whether a lookbehind was encountered.
     has_lookbehind: bool,
@@ -646,25 +648,20 @@ where
                         }
                         self.group_count += 1;
 
-                        // Parse capture group name.
+                        // Maybe the capture group has a name!
+                        let mut group_name = None;
                         if self.try_consume_str("?") {
-                            let group_name = if let Some(group_name) =
-                                self.try_consume_named_capture_group_name()
-                            {
-                                group_name
-                            } else {
+                            group_name = self.try_consume_named_capture_group_name();
+                            if group_name.is_none() {
                                 return error("Invalid token at named capture group identifier");
                             };
-                            let contents = self.consume_disjunction()?;
-                            result.push(ir::Node::NamedCaptureGroup(
-                                Box::new(contents),
-                                group,
-                                group_name,
-                            ))
-                        } else {
-                            let contents = self.consume_disjunction()?;
-                            result.push(ir::Node::CaptureGroup(Box::new(contents), group))
                         }
+                        let contents = Box::new(self.consume_disjunction()?);
+                        result.push(ir::Node::CaptureGroup {
+                            id: group,
+                            contents,
+                            name: group_name,
+                        })
                     }
                     if !self.try_consume(')') {
                         return error("Unbalanced parenthesis");
@@ -1670,21 +1667,40 @@ where
 
             // [+NamedCaptureGroups] k GroupName
             'k' if self.flags.unicode || !self.named_group_indices.is_empty() => {
-                self.consume('k');
-
                 // The sequence `\k` must be the start of a backreference to a named capture group.
-                if let Some(group_name) = self.try_consume_named_capture_group_name() {
-                    if let Some(index) = self.named_group_indices.get(&group_name) {
-                        Ok(ir::Node::BackRef(*index + 1))
-                    } else {
-                        error(format!(
-                            "Backreference to invalid named capture group: {}",
-                            &group_name
-                        ))
+                // Note multiple capture groups may have the same name; we must map all of them to their indices.
+                self.consume('k');
+                // Must have a valid group name.
+                let Some(group_name) = self.try_consume_named_capture_group_name() else {
+                    return error("Invalid named backreference syntax");
+                };
+                // The group name must be the name of a previously defined capture group.
+                let Some(group_indices) = self.named_group_indices.get(&group_name) else {
+                    return error(format!(
+                        "Backreference to invalid named capture group: {}",
+                        &group_name
+                    ));
+                };
+                // Note backreferences are 1-based.
+                let node = match group_indices.len() {
+                    0 => unreachable!("Should not have empty indices for group name"),
+                    1 => {
+                        // Common case of a backref matching a single group.
+                        ir::Node::BackRef(group_indices[0] + 1)
                     }
-                } else {
-                    error("Unexpected end of named backreference")
-                }
+                    _ => {
+                        // Unusual case of multiple groups sharing a name: the backref should try each in turn.
+                        // Lower to alternations of backreferences. Reverse to keep it right-associative: a | (b | (c | d))...
+                        let backrefs = group_indices
+                            .iter()
+                            .rev()
+                            .map(|group_index| ir::Node::BackRef(*group_index + 1));
+                        backrefs
+                            .reduce(|right, left| ir::Node::Alt(Box::new(left), Box::new(right)))
+                            .unwrap()
+                    }
+                };
+                Ok(node)
             }
 
             // [~NamedCaptureGroups] k GroupName
@@ -1930,10 +1946,11 @@ where
                             .or_default()
                             .push(AlternativePath { segments });
 
-                        // Store in named_group_indices (use the first occurrence's index)
+                        // Store all occurrences in named_group_indices.
                         self.named_group_indices
                             .entry(name)
-                            .or_insert(self.group_count_max);
+                            .or_default()
+                            .push(self.group_count_max);
                     }
 
                     if is_capturing {

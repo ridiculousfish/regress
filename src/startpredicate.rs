@@ -21,9 +21,7 @@ fn is_start_anchored(n: &Node) -> bool {
             // For concatenation, check if the first node is start-anchored
             nodes.first().is_some_and(is_start_anchored)
         }
-        Node::CaptureGroup(child, ..) | Node::NamedCaptureGroup(child, ..) => {
-            is_start_anchored(child)
-        }
+        Node::CaptureGroup { contents, .. } => is_start_anchored(contents),
         // Other nodes are not anchored
         _ => false,
     }
@@ -157,9 +155,7 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         Node::WordBoundary { .. } => arbitrary,
 
         // Capture groups delegate to their contents.
-        Node::CaptureGroup(child, ..) | Node::NamedCaptureGroup(child, ..) => {
-            compute_start_predicate(child)
-        }
+        Node::CaptureGroup { contents, .. } => compute_start_predicate(contents),
 
         // Zero-width assertions are one of the few instructions that impose no start predicate.
         Node::LookaroundAssertion { .. } => None,

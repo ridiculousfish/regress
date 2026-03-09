@@ -73,12 +73,19 @@ pub enum Node {
     WordBoundary { invert: bool },
 
     /// A capturing group.
-    CaptureGroup(Box<Node>, CaptureGroupID),
-
-    /// A named capturing group.
-    NamedCaptureGroup(Box<Node>, CaptureGroupID, CaptureGroupName),
+    /// If the name is set, it is guaranteed nonempty.
+    /// Note that multiple capture groups may share the same name in different alternations.
+    CaptureGroup {
+        id: CaptureGroupID,
+        contents: Box<Node>,
+        name: Option<CaptureGroupName>,
+    },
 
     /// A backreference.
+    /// Indices are 1-based. That is, it matches JS syntax: \1 is the first capture group,
+    /// not everything.
+    /// A backreference that logically may match multiple capture groups (through shared names)
+    /// are emitted through alternations of backreferences.
     BackRef(u32),
 
     /// A bracket.
@@ -220,7 +227,7 @@ impl Node {
                 quant: *quant,
             },
 
-            Node::CaptureGroup(..) | Node::NamedCaptureGroup(..) => {
+            Node::CaptureGroup { .. } => {
                 panic!("Refusing to duplicate a capture group");
             }
             &Node::WordBoundary { invert } => Node::WordBoundary { invert },
@@ -316,9 +323,7 @@ where
             }
 
             Node::Loop { loopee, .. } | Node::Loop1CharBody { loopee, .. } => self.process(loopee),
-            Node::CaptureGroup(contents, ..) | Node::NamedCaptureGroup(contents, ..) => {
-                self.process(contents.as_ref())
-            }
+            Node::CaptureGroup { contents, .. } => self.process(contents.as_ref()),
 
             Node::LookaroundAssertion {
                 backwards,
@@ -388,9 +393,7 @@ where
             Node::Loop { loopee, .. } | Node::Loop1CharBody { loopee, .. } => {
                 self.process(loopee);
             }
-            Node::CaptureGroup(contents, ..) | Node::NamedCaptureGroup(contents, ..) => {
-                self.process(contents.as_mut())
-            }
+            Node::CaptureGroup { contents, .. } => self.process(contents.as_mut()),
 
             Node::LookaroundAssertion {
                 backwards,
@@ -531,11 +534,12 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
         Node::Loop1CharBody { quant, .. } => {
             writeln!(f, "Loop1Char {:?}", quant)?;
         }
-        Node::CaptureGroup(_node, idx, ..) => {
-            writeln!(f, "CaptureGroup {:?}", idx)?;
-        }
-        Node::NamedCaptureGroup(_node, _, name) => {
-            writeln!(f, "NamedCaptureGroup {:?}", name)?;
+        Node::CaptureGroup { id, name, .. } => {
+            if let Some(name) = name {
+                writeln!(f, "CaptureGroup {:?} {:?}", id, name)?;
+            } else {
+                writeln!(f, "CaptureGroup {:?}", id)?;
+            }
         }
         &Node::WordBoundary { invert } => {
             let kind = if invert { "\\B" } else { "\\b" };

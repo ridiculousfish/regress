@@ -252,18 +252,10 @@ impl Emitter {
                         });
                         stack.push(Emitter::Node(loopee));
                     }
-                    Node::CaptureGroup(contents, group) => {
-                        let group = *group as CaptureGroupID;
+                    Node::CaptureGroup { id, contents, name } => {
+                        let group = *id;
                         self.result.groups += 1;
-                        self.group_names.push("".into());
-                        self.emit_insn(Insn::BeginCaptureGroup(group));
-                        stack.push(Emitter::EndCaptureGroup { group });
-                        stack.push(Emitter::Node(contents));
-                    }
-                    Node::NamedCaptureGroup(contents, group, name) => {
-                        let group = *group as CaptureGroupID;
-                        self.result.groups += 1;
-                        self.group_names.push(name.as_str().into());
+                        self.group_names.push(name.as_deref().unwrap_or("").into());
                         self.emit_insn(Insn::BeginCaptureGroup(group));
                         stack.push(Emitter::EndCaptureGroup { group });
                         stack.push(Emitter::Node(contents));

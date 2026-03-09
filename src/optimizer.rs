@@ -156,7 +156,7 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
             }
         }
         Node::Loop1CharBody { .. } => PassAction::Keep,
-        Node::CaptureGroup(..) | Node::NamedCaptureGroup(..) => {
+        Node::CaptureGroup { .. } => {
             // Capture groups could in principle be optimized if they only match empties.
             PassAction::Keep
         }
@@ -178,7 +178,7 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
 /// Check if a node contains any capture groups (direct or nested)
 fn contains_capture_groups(node: &Node) -> bool {
     match node {
-        Node::CaptureGroup(_, _) | Node::NamedCaptureGroup(_, _, _) => true,
+        Node::CaptureGroup { .. } => true,
         Node::Cat(nodes) => nodes.iter().any(contains_capture_groups),
         Node::Alt(left, right) => contains_capture_groups(left) || contains_capture_groups(right),
         Node::Loop { loopee, .. } => contains_capture_groups(loopee),
