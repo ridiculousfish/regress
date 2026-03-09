@@ -50,8 +50,12 @@ pub struct ASCIICharProperties {}
 impl CharProperties for ASCIICharProperties {
     type Element = u8;
 
-    fn fold(c: Self::Element, _: bool) -> Self::Element {
-        c.to_ascii_uppercase()
+    fn fold(c: Self::Element, unicode: bool) -> Self::Element {
+        if unicode {
+            c.to_ascii_lowercase()
+        } else {
+            c.to_ascii_uppercase()
+        }
     }
 }
 

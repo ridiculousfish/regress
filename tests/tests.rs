@@ -2231,6 +2231,18 @@ fn test_duplicate_named_groups_same_alternative_rejected() {
 }
 
 #[test]
+fn test_ascii_unicode_icase_backref() {
+    test_with_configs(|tc| {
+        // Regression test for ASCII with Unicode case-insensitive folding.
+        let re = tc.compilef(r"^(x)\1$", "iu");
+        re.test_succeeds("xx");
+        re.test_succeeds("XX");
+        re.test_fails("xy");
+        re.test_fails("XY");
+    })
+}
+
+#[test]
 fn test_regression_142() {
     // Regression test for issue #142.
     use regress::Regex;

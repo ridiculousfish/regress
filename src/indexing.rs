@@ -571,6 +571,7 @@ impl<'a> InputIndexer for Utf8Input<'a> {
 #[derive(Debug, Copy, Clone)]
 pub struct AsciiInput<'a> {
     input: &'a [u8],
+    unicode: bool,
 }
 
 impl<'a> AsciiInput<'a> {
@@ -606,12 +607,13 @@ impl<'a> AsciiInput<'a> {
         res
     }
 
-    pub fn new(s: &'a str) -> Self {
+    pub fn new(s: &'a str, unicode: bool) -> Self {
         // The big idea of RefPosition is enforced here.
         <Self as InputIndexer>::Position::check_size();
 
         Self {
             input: s.as_bytes(),
+            unicode,
         }
     }
 
@@ -642,7 +644,7 @@ impl<'a> InputIndexer for AsciiInput<'a> {
 
     #[inline(always)]
     fn unicode(&self) -> bool {
-        false
+        self.unicode
     }
 
     #[inline(always)]
@@ -655,6 +657,7 @@ impl<'a> InputIndexer for AsciiInput<'a> {
                 start: self.pos_to_offset(range.start),
                 end: self.pos_to_offset(range.end),
             }],
+            unicode: self.unicode(),
         }
     }
 

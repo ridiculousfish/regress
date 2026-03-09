@@ -1152,7 +1152,7 @@ impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, AsciiInput<'t>> {
     type AsAscii = BacktrackExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
-        let input = AsciiInput::new(text);
+        let input = AsciiInput::new(text, re.flags.unicode);
         Self {
             input,
             matcher: MatchAttempter::new(re, input.left_end()),
