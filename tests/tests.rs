@@ -2320,3 +2320,19 @@ fn test_high_unicode_folds_to_ascii_tc(tc: TestConfig) {
     tc.test_match_succeeds(r"^\W$", "", "\u{0131}");
     tc.test_match_succeeds(r"^\W$", "iu", "\u{0131}");
 }
+
+// Regression test for the case where a non-capturing group precedes the named groups,
+// which could cause off-by-one errors in group index tracking.
+#[test]
+fn test_duplicate_named_groups_with_noncapturing_prefix() {
+    test_with_configs(|tc| {
+        let pattern = r"^(?:(?<a>x)|(?<a>y))\k<a>$";
+
+        // Backrefs should match whichever group matched.
+        let re = tc.compile(pattern);
+        re.test_succeeds("xx");
+        re.test_succeeds("yy");
+        re.test_fails("xy");
+        re.test_fails("yx");
+    })
+}
