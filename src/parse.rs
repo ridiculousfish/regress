@@ -1893,21 +1893,29 @@ where
                     }
                 },
                 Some('(') => {
-                    if self.try_consume_str("?")
-                        && let Some(name) = self.try_consume_named_capture_group_name()
-                    {
-                        // Build current alternative path from depth 0 to current depth
+                    // Determine whether we're a capturing group, and optionally the name.
+                    let is_capturing;
+                    let group_name;
+                    if self.try_consume_str("?") {
+                        group_name = self.try_consume_named_capture_group_name();
+                        is_capturing = group_name.is_some(); // (?:, (?=, (?!, etc. are non-capturing.
+                    } else {
+                        is_capturing = true;
+                        group_name = None; // Unnamed capture group
+                    }
+
+                    if let Some(name) = group_name {
+                        // Build current alternative path from depth 0 to current depth.
                         let mut segments = Vec::new();
                         for d in 0..=paren_depth {
                             segments.push((d, *alt_indices.get(&d).unwrap_or(&0)));
                         }
-                        let current_path = AlternativePath { segments };
 
-                        // Record this location
+                        // Record this location.
                         named_group_locations
                             .entry(name.clone())
                             .or_default()
-                            .push(current_path);
+                            .push(AlternativePath { segments });
 
                         // Store in named_group_indices (use the first occurrence's index)
                         self.named_group_indices
@@ -1915,13 +1923,16 @@ where
                             .or_insert(self.group_count_max);
                     }
 
-                    self.group_count_max = if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
-                        MAX_CAPTURE_GROUPS as u32
-                    } else {
-                        self.group_count_max + 1
-                    };
+                    if is_capturing {
+                        self.group_count_max =
+                            if self.group_count_max + 1 > MAX_CAPTURE_GROUPS as u32 {
+                                MAX_CAPTURE_GROUPS as u32
+                            } else {
+                                self.group_count_max + 1
+                            };
+                    }
 
-                    // Entering a new group
+                    // Entering a new group.
                     paren_depth += 1;
                     alt_indices.insert(paren_depth, 0);
                 }
