@@ -41,7 +41,7 @@ pub struct Flags {
     pub multiline: bool,
 
     /// If set, . matches at line separators as well as any other character.
-    /// Equivalent to the 'm' flag in JavaScript.
+    /// Equivalent to the 's' flag in JavaScript.
     pub dot_all: bool,
 
     /// If set, disable regex IR passes.
