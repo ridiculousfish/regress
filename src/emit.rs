@@ -57,15 +57,46 @@ struct Emitter {
 impl Emitter {
     /// Emit a ByteSet instruction.
     /// We awkwardly optimize it like so.
-    fn make_byte_set_insn(&self, bytes: &[u8]) -> Insn {
-        match bytes.len() {
+    fn emit_byte_set_insn(&mut self, bytes: &[u8]) {
+        let insn = match bytes.len() {
             0 => Insn::JustFail,
             1 => Insn::ByteSeq1(bytes.try_into().unwrap()),
             2 => Insn::ByteSet2(ByteArraySet(bytes.try_into().unwrap())),
             3 => Insn::ByteSet3(ByteArraySet(bytes.try_into().unwrap())),
             4 => Insn::ByteSet4(ByteArraySet(bytes.try_into().unwrap())),
             _ => panic!("Byte set is too long"),
-        }
+        };
+        self.emit_insn(insn);
+    }
+
+    // Emit a nonempty byte sequence instruction. The sequence must be at most MAX_BYTE_SEQ_LENGTH bytes.
+    fn emit_byte_sequence_insn(&mut self, seq: &[u8]) {
+        const {
+            assert!(
+                MAX_BYTE_SEQ_LENGTH == 16,
+                "Need to update our emitting logic"
+            );
+        };
+        let insn = match seq.len() {
+            1 => Insn::ByteSeq1(seq.try_into().unwrap()),
+            2 => Insn::ByteSeq2(seq.try_into().unwrap()),
+            3 => Insn::ByteSeq3(seq.try_into().unwrap()),
+            4 => Insn::ByteSeq4(seq.try_into().unwrap()),
+            5 => Insn::ByteSeq5(seq.try_into().unwrap()),
+            6 => Insn::ByteSeq6(seq.try_into().unwrap()),
+            7 => Insn::ByteSeq7(seq.try_into().unwrap()),
+            8 => Insn::ByteSeq8(seq.try_into().unwrap()),
+            9 => Insn::ByteSeq9(seq.try_into().unwrap()),
+            10 => Insn::ByteSeq10(seq.try_into().unwrap()),
+            11 => Insn::ByteSeq11(seq.try_into().unwrap()),
+            12 => Insn::ByteSeq12(seq.try_into().unwrap()),
+            13 => Insn::ByteSeq13(seq.try_into().unwrap()),
+            14 => Insn::ByteSeq14(seq.try_into().unwrap()),
+            15 => Insn::ByteSeq15(seq.try_into().unwrap()),
+            16 => Insn::ByteSeq16(seq.try_into().unwrap()),
+            _ => panic!("Unexpected chunk size"),
+        };
+        self.emit_insn(insn);
     }
 
     /// Emit an instruction.
@@ -309,7 +340,7 @@ impl Emitter {
                         self.emit_insn(Insn::BackRef(group - 1))
                     }
 
-                    Node::ByteSet(bytes) => self.emit_insn(self.make_byte_set_insn(bytes)),
+                    Node::ByteSet(bytes) => self.emit_byte_set_insn(bytes),
 
                     Node::CharSet(chars) => {
                         debug_assert!(chars.len() <= MAX_CHAR_SET_LENGTH);
@@ -322,47 +353,21 @@ impl Emitter {
                         }
                     }
 
-                    #[allow(clippy::assertions_on_constants)]
                     Node::ByteSequence(bytes) => {
-                        assert!(
-                            MAX_BYTE_SEQ_LENGTH == 16,
-                            "Need to update our emitting logic"
-                        );
-                        let emit_chunk = |this: &mut Self, chunk: &[u8]| {
-                            let insn = match chunk.len() {
-                                1 => Insn::ByteSeq1(chunk.try_into().unwrap()),
-                                2 => Insn::ByteSeq2(chunk.try_into().unwrap()),
-                                3 => Insn::ByteSeq3(chunk.try_into().unwrap()),
-                                4 => Insn::ByteSeq4(chunk.try_into().unwrap()),
-                                5 => Insn::ByteSeq5(chunk.try_into().unwrap()),
-                                6 => Insn::ByteSeq6(chunk.try_into().unwrap()),
-                                7 => Insn::ByteSeq7(chunk.try_into().unwrap()),
-                                8 => Insn::ByteSeq8(chunk.try_into().unwrap()),
-                                9 => Insn::ByteSeq9(chunk.try_into().unwrap()),
-                                10 => Insn::ByteSeq10(chunk.try_into().unwrap()),
-                                11 => Insn::ByteSeq11(chunk.try_into().unwrap()),
-                                12 => Insn::ByteSeq12(chunk.try_into().unwrap()),
-                                13 => Insn::ByteSeq13(chunk.try_into().unwrap()),
-                                14 => Insn::ByteSeq14(chunk.try_into().unwrap()),
-                                15 => Insn::ByteSeq15(chunk.try_into().unwrap()),
-                                16 => Insn::ByteSeq16(chunk.try_into().unwrap()),
-                                _ => panic!("Unexpected chunk size"),
-                            };
-                            this.emit_insn(insn);
-                        };
                         // In a lookbehind, instruction order is reversed, but ByteSequence contents are not,
                         // to take advantage of optimized memcmp. For example, `(?<=abcd)` may be emitted
                         // as "d", "c", "b", "a" char matches (traversing input from right to left), or
                         // optimized to a single forwards ByteSequence("abcd"), which matches left-to-right.
                         // Therefore if we split a byte sequence into multiple instructions,
                         // we need to emit them in reverse order iff in a lookbehind.
-                        if !self.in_lookbehind {
-                            for chunk in bytes.as_slice().chunks(MAX_BYTE_SEQ_LENGTH) {
-                                emit_chunk(self, chunk);
+                        let chunks = bytes.as_slice().chunks(MAX_BYTE_SEQ_LENGTH);
+                        if self.in_lookbehind {
+                            for chunk in chunks.rev() {
+                                self.emit_byte_sequence_insn(chunk);
                             }
                         } else {
-                            for chunk in bytes.as_slice().chunks(MAX_BYTE_SEQ_LENGTH).rev() {
-                                emit_chunk(self, chunk);
+                            for chunk in chunks {
+                                self.emit_byte_sequence_insn(chunk);
                             }
                         }
                     }
