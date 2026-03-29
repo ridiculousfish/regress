@@ -2289,6 +2289,41 @@ fn test_regression_142() {
 }
 
 #[test]
+fn test_lookbehind_long_byteseq_regression_146() {
+    // Regression test for issue #146.
+    // Lookbehinds reverse the order of their instructions but not the literal byte sequences
+    // for fast memcmp. If the byte sequence is overlong, the emitter splits it; ensure that the
+    // splits are properly reversed.
+    test_with_configs(|tc| {
+        // In lookbehind, instruction order is reversed, but ByteSequence
+        // contents are not. So splitting a long literal into chunks must still
+        // preserve correct backward execution at every length.
+        // Original report:
+        const REPORTED_NEEDLE: &str = r"(?<=aaaa={bbbbbbbbbb:c)";
+        const REPORTED_HAYSTACK: &str = r#"aaaa={bbbbbbbbbb:c"#;
+        assert_eq!(
+            tc.compile(REPORTED_NEEDLE)
+                .find(REPORTED_HAYSTACK)
+                .map(|m| m.range()),
+            Some(REPORTED_HAYSTACK.len()..REPORTED_HAYSTACK.len())
+        );
+
+        // Exhaustive test.
+        const ALPHABET: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-=";
+        let mut it = ALPHABET.chars().cycle();
+        for len in 0..=128 {
+            let haystack: String = it.by_ref().take(len).collect();
+            let needle = format!(r"(?<={haystack})");
+            assert_eq!(
+                tc.compile(&needle).find(&haystack).map(|m| m.range()),
+                Some(len..len),
+                "len={len}"
+            );
+        }
+    })
+}
+
+#[test]
 fn test_high_unicode_folds_to_ascii() {
     test_with_configs(test_high_unicode_folds_to_ascii_tc)
 }

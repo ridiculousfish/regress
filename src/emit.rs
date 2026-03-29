@@ -49,6 +49,9 @@ struct Emitter {
 
     // List of group names, in order, with empties for unnamed groups.
     group_names: Vec<Box<str>>,
+
+    // Whether the current node is within a lookbehind.
+    in_lookbehind: bool,
 }
 
 impl Emitter {
@@ -96,6 +99,7 @@ impl Emitter {
             },
             NodeLookaroundAssertionFinish {
                 lookaround_instruction_index: u32,
+                prev_in_lookbehind: bool,
             },
             NodeAltMiddle {
                 alt_instruction_index: u32,
@@ -130,6 +134,7 @@ impl Emitter {
                 }
                 Emitter::NodeLookaroundAssertionFinish {
                     lookaround_instruction_index,
+                    prev_in_lookbehind,
                 } => {
                     self.emit_insn(Insn::Goal);
                     // Fix up the continuation.
@@ -139,6 +144,7 @@ impl Emitter {
                         Insn::Lookahead { continuation, .. } => *continuation = next_insn,
                         _ => panic!("Should be a Lookaround instruction"),
                     }
+                    self.in_lookbehind = prev_in_lookbehind;
                 }
                 Emitter::NodeAltMiddle {
                     alt_instruction_index,
@@ -282,8 +288,11 @@ impl Emitter {
                                 continuation: 0,
                             })
                         };
+                        let prev_in_lookbehind = self.in_lookbehind;
+                        self.in_lookbehind = *backwards;
                         stack.push(Emitter::NodeLookaroundAssertionFinish {
                             lookaround_instruction_index: lookaround,
+                            prev_in_lookbehind,
                         });
                         stack.push(Emitter::Node(contents));
                     }
@@ -319,7 +328,7 @@ impl Emitter {
                             MAX_BYTE_SEQ_LENGTH == 16,
                             "Need to update our emitting logic"
                         );
-                        for chunk in bytes.as_slice().chunks(MAX_BYTE_SEQ_LENGTH) {
+                        let emit_chunk = |this: &mut Self, chunk: &[u8]| {
                             let insn = match chunk.len() {
                                 1 => Insn::ByteSeq1(chunk.try_into().unwrap()),
                                 2 => Insn::ByteSeq2(chunk.try_into().unwrap()),
@@ -339,7 +348,22 @@ impl Emitter {
                                 16 => Insn::ByteSeq16(chunk.try_into().unwrap()),
                                 _ => panic!("Unexpected chunk size"),
                             };
-                            self.emit_insn(insn)
+                            this.emit_insn(insn);
+                        };
+                        // In a lookbehind, instruction order is reversed, but ByteSequence contents are not,
+                        // to take advantage of optimized memcmp. For example, `(?<=abcd)` may be emitted
+                        // as "d", "c", "b", "a" char matches (traversing input from right to left), or
+                        // optimized to a single forwards ByteSequence("abcd"), which matches left-to-right.
+                        // Therefore if we split a byte sequence into multiple instructions,
+                        // we need to emit them in reverse order iff in a lookbehind.
+                        if !self.in_lookbehind {
+                            for chunk in bytes.as_slice().chunks(MAX_BYTE_SEQ_LENGTH) {
+                                emit_chunk(self, chunk);
+                            }
+                        } else {
+                            for chunk in bytes.as_slice().chunks(MAX_BYTE_SEQ_LENGTH).rev() {
+                                emit_chunk(self, chunk);
+                            }
                         }
                     }
                 },
@@ -353,6 +377,7 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
     let mut emitter = Emitter {
         next_loop_id: 0,
         group_names: Vec::new(),
+        in_lookbehind: false,
         result: CompiledRegex {
             insns: Vec::new(),
             brackets: Vec::new(),
