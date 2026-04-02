@@ -27,7 +27,7 @@ pub struct Quantifier {
 }
 
 /// The node types of our IR.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Node {
     /// Matches the empty string.
     Empty,
@@ -70,7 +70,7 @@ pub enum Node {
     },
 
     /// Word boundary (\b or \B).
-    WordBoundary { invert: bool },
+    WordBoundary { invert: bool, unicode_icase: bool },
 
     /// A capturing group.
     /// If the name is set, it is guaranteed nonempty.
@@ -86,7 +86,7 @@ pub enum Node {
     /// not everything.
     /// A backreference that logically may match multiple capture groups (through shared names)
     /// are emitted through alternations of backreferences.
-    BackRef(u32),
+    BackRef { group: u32, icase: bool },
 
     /// A bracket.
     Bracket(BracketContents),
@@ -230,8 +230,14 @@ impl Node {
             Node::CaptureGroup { .. } => {
                 panic!("Refusing to duplicate a capture group");
             }
-            &Node::WordBoundary { invert } => Node::WordBoundary { invert },
-            &Node::BackRef(idx) => Node::BackRef(idx),
+            &Node::WordBoundary {
+                invert,
+                unicode_icase,
+            } => Node::WordBoundary {
+                invert,
+                unicode_icase,
+            },
+            &Node::BackRef { group, icase } => Node::BackRef { group, icase },
             Node::Bracket(bc) => Node::Bracket(bc.clone()),
             // Do not reverse into lookarounds, they already have the right sense.
             Node::LookaroundAssertion {
@@ -541,11 +547,11 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
                 writeln!(f, "CaptureGroup {:?}", id)?;
             }
         }
-        &Node::WordBoundary { invert } => {
+        &Node::WordBoundary { invert, .. } => {
             let kind = if invert { "\\B" } else { "\\b" };
             writeln!(f, "WordBoundary {:?} ", kind)?;
         }
-        &Node::BackRef(group) => {
+        &Node::BackRef { group, .. } => {
             writeln!(f, "BackRef {:?} ", group)?;
         }
         Node::Bracket(contents) => {
