@@ -158,6 +158,74 @@ fn group_modifiers() {
     test_with_configs(group_modifiers_tc)
 }
 
+fn group_modifier_backref_icase_tc(tc: TestConfig) {
+    // Backreference inside a case-insensitive modifier group should inherit icase.
+    // (?i:(a)\1) — both (a) and \1 are inside (?i:...), so the backreference
+    // should match case-insensitively.
+    let re = tc.compile(r"(?i:(a)\1)");
+    assert!(re.find("aA").is_some());
+    assert!(re.find("Aa").is_some());
+    assert!(re.find("aa").is_some());
+    assert!(re.find("AA").is_some());
+
+    // Backreference outside the modifier group should NOT inherit icase.
+    // (?i:(a))\1 — \1 is outside (?i:...), so it must match the captured text exactly.
+    let re = tc.compile(r"(?i:(a))\1");
+    assert!(re.find("aa").is_some());  // captures 'a', backref matches 'a'
+    assert!(re.find("AA").is_some());  // captures 'A', backref matches 'A'
+    assert!(re.find("aA").is_none());  // captures 'a', backref needs 'a' but gets 'A'
+    assert!(re.find("Aa").is_none());  // captures 'A', backref needs 'A' but gets 'a'
+
+    // Verify that without modifier group, global icase flag works on backrefs.
+    let re = tc.compilef(r"(a)\1", "i");
+    assert!(re.find("aA").is_some());
+    assert!(re.find("Aa").is_some());
+
+    // Without any icase, backreference is case-sensitive.
+    let re = tc.compile(r"(a)\1");
+    assert!(re.find("aa").is_some());
+    assert!(re.find("aA").is_none());
+}
+
+#[test]
+fn group_modifier_backref_icase() {
+    test_with_configs(group_modifier_backref_icase_tc)
+}
+
+fn unicode_property_escape_icase_tc(tc: TestConfig) {
+    // \p{Lu} matches uppercase letters. With icase flag, it should also match lowercase.
+    let re = tc.compilef(r"^\p{Lu}+$", "iu");
+    re.test_succeeds("ABC");
+    re.test_succeeds("abc"); // icase: lowercase should match too
+    re.test_succeeds("AbC");
+
+    // Without icase, \p{Lu} only matches uppercase.
+    let re = tc.compilef(r"^\p{Lu}+$", "u");
+    re.test_succeeds("ABC");
+    re.test_fails("abc");
+    re.test_fails("AbC");
+
+    // \P{Lu} (negated) with icase should match everything — per ES2024 existential
+    // quantifier semantics, for any char c there exists a case variant in complement(Lu)
+    // whose fold equals fold(c).
+    let re = tc.compilef(r"^\P{Lu}+$", "iu");
+    re.test_succeeds("123");
+    re.test_succeeds("abc");
+    re.test_succeeds("ABC"); // even uppercase matches because of existential semantics
+
+    // \P{Lu} without icase excludes uppercase.
+    let re = tc.compilef(r"^\P{Lu}+$", "u");
+    re.test_succeeds("123");
+    re.test_succeeds("abc");
+    re.test_fails("ABC");
+    re.test_fails("AbC");
+}
+
+#[test]
+fn unicode_property_escape_icase() {
+    test_with_configs(unicode_property_escape_icase_tc)
+}
+
 fn test_dotall_tc(tc: TestConfig) {
     tc.compile(r".").test_fails("\n");
     tc.compilef(r".", "s").match1f("\n").test_eq("\n");

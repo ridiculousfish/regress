@@ -14,7 +14,7 @@ struct Script {
 }
 
 // TODO: Wait for https://github.com/tc39/ecma262/issues/3190 to be resolved.
-const EXCLUDED_SCRIPTS: [&str; 2] = ["Unknown", "Katakana_Or_Hiragana"];
+const EXCLUDED_SCRIPTS: [&str; 1] = ["Katakana_Or_Hiragana"];
 
 impl GenUnicode {
     pub(crate) fn generate_scripts(&mut self) {
