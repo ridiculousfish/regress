@@ -23190,6 +23190,8 @@ const COMMON_EXTENSIONS: [Interval; 161] = [
     Interval::new(917536, 917631),
 ];
 
+const UNKNOWN: [Interval; 0] = [];
+
 #[derive(Debug, Clone, Copy)]
 pub enum UnicodePropertyValueScript {
     Adlam,
@@ -23366,6 +23368,7 @@ pub enum UnicodePropertyValueScript {
     ZanabazarSquare,
     Inherited,
     Common,
+    Unknown,
 }
 
 pub(crate) fn unicode_property_value_script_from_str(
@@ -23547,6 +23550,7 @@ pub(crate) fn unicode_property_value_script_from_str(
         "Zanabazar_Square" | "Zanb" => Some(ZanabazarSquare),
         "Inherited" | "Zinh" | "Qaai" => Some(Inherited),
         "Common" | "Zyyy" => Some(Common),
+        "Unknown" | "Zzzz" => Some(Unknown),
         _ => None,
     }
 }
@@ -23728,6 +23732,7 @@ pub(crate) fn script_value_ranges(value: &UnicodePropertyValueScript) -> &'stati
         ZanabazarSquare => &ZANABAZAR_SQUARE,
         Inherited => &INHERITED,
         Common => &COMMON,
+        Unknown => &UNKNOWN,
     }
 }
 
@@ -23910,6 +23915,7 @@ pub(crate) fn script_extensions_value_ranges(
         ZanabazarSquare => &ZANABAZAR_SQUARE,
         Inherited => &INHERITED_EXTENSIONS,
         Common => &COMMON_EXTENSIONS,
+        Unknown => &UNKNOWN,
     }
 }
 

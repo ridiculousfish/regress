@@ -221,11 +221,11 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             nextinsn_or_fail!(true)
         }
 
-        &Insn::BackRef(group_idx) => {
+        &Insn::BackRef { group: group_idx, icase } => {
             let matched;
             let group = &mut s.groups[group_idx as usize];
             if let Some(orig_range) = group.as_range() {
-                if re.flags.icase {
+                if icase {
                     matched = matchers::backref_icase(input, dir, orig_range, &mut s.pos);
                 } else {
                     matched = matchers::backref(input, dir, orig_range, &mut s.pos)
