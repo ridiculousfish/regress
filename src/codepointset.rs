@@ -121,6 +121,11 @@ impl CodePointSet {
         self.ivs.is_empty()
     }
 
+    // Return the last code point contained by the set, if any.
+    pub(crate) fn last_codepoint(&self) -> Option<CodePoint> {
+        self.ivs.last().map(|iv| iv.last)
+    }
+
     // Return true if we contain all code points.
     pub(crate) fn contains_all_codepoints(&self) -> bool {
         self.ivs.len() == 1 && self.ivs[0] == Interval::new(0, CODE_POINT_MAX)
@@ -319,6 +324,45 @@ impl CodePointSet {
             }
         }
         self.ivs = new_ivs;
+    }
+
+    // Return a contiguous list of intervals that intersect the given interval.
+    // Here intersect means shares at least one code point in common.
+    // Note the first and last intervals may extend before and after (respectively) the
+    // given 'intersecting' interval; interior intervals are guarnateed to be
+    // fully contained.
+    pub fn intervals_intersecting(&self, intersecting: Interval) -> &[Interval] {
+        let start = self.ivs.partition_point(|iv| iv.last < intersecting.first);
+        let len = self.ivs[start..].partition_point(|iv| iv.first <= intersecting.last);
+        &self.ivs[start..(start + len)]
+    }
+
+    pub fn intervals_in(&self, intersecting: Interval) -> Intersections<'_> {
+        let ivs = self.intervals_intersecting(intersecting);
+        Intersections { ivs, intersecting }
+    }
+}
+
+// An iterator over intersections of a closed range.
+// This has the invariant that every interval intersects the range.
+pub struct Intersections<'a> {
+    ivs: &'a [Interval],
+    intersecting: Interval,
+}
+
+impl<'a> Iterator for Intersections<'a> {
+    type Item = Interval;
+
+    #[inline]
+    fn next(&mut self) -> Option<Interval> {
+        let (r, rest) = self.ivs.split_first()?;
+        self.ivs = rest;
+        let intersect = Interval::new(
+            r.first.max(self.intersecting.first),
+            r.last.min(self.intersecting.last),
+        );
+        debug_assert!(intersect.first <= intersect.last);
+        Some(intersect)
     }
 }
 

@@ -23,7 +23,7 @@ use core::{fmt, str::FromStr};
 #[cfg(not(feature = "std"))]
 use {
     alloc::{string::String, vec::Vec},
-    hashbrown::{HashMap, hash_map::Iter},
+    hashbrown::{hash_map::Iter, HashMap},
 };
 
 pub use parse::Error;
@@ -908,9 +908,13 @@ pub use pattern_impl::*;
 // Currently there is only the classical backtracking, and PikeVM.
 #[doc(hidden)]
 pub mod backends {
-    use super::Regex;
     use super::exec;
     use super::indexing;
+    use super::Regex;
+    #[cfg(feature = "nfa")]
+    pub use crate::automata::dfa::Dfa;
+    #[cfg(feature = "nfa")]
+    pub use crate::automata::nfa::{Error as NfaError, Nfa};
     pub use crate::emit::emit;
     pub use crate::optimizer::optimize;
     pub use crate::parse::try_parse;

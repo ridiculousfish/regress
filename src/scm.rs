@@ -1,4 +1,4 @@
-use crate::bytesearch::{ByteArraySet, ByteSet, SmallArraySet, charset_contains};
+use crate::bytesearch::{charset_contains, ByteArraySet, ByteSet, SmallArraySet};
 use crate::cursor;
 use crate::cursor::Direction;
 use crate::indexing::{ElementType, InputIndexer};
