@@ -17,15 +17,13 @@ use crate::{
 use crate::pikevm;
 use crate::util::to_char_sat;
 
-use core::{fmt, iter::FusedIterator, str::FromStr};
 #[cfg(not(feature = "std"))]
-use {
-    alloc::{
-        boxed::Box,
-        string::{String, ToString},
-        vec::Vec,
-    },
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    vec::Vec,
 };
+use core::{fmt, iter::FusedIterator, str::FromStr};
 
 pub use parse::Error;
 
@@ -912,6 +910,10 @@ pub mod backends {
     use super::Regex;
     use super::exec;
     use super::indexing;
+    #[cfg(feature = "nfa")]
+    pub use crate::automata::dfa::Dfa;
+    #[cfg(feature = "nfa")]
+    pub use crate::automata::nfa::{Error as NfaError, Nfa};
     pub use crate::emit::emit;
     pub use crate::optimizer::optimize;
     pub use crate::parse::try_parse;

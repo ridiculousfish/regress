@@ -1,4 +1,7 @@
-use crate::{GenUnicode, codepoints_to_range, format_interval_table, merge_sorted_ranges};
+use crate::{
+    codepoints_to_range, format_interval_table, merge_sorted_ranges, pack_adjacent_codepoints,
+    GenUnicode,
+};
 use codegen::{Block, Enum, Function};
 use std::collections::HashMap;
 

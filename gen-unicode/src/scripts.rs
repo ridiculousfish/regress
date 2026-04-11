@@ -1,5 +1,6 @@
 use crate::{
-    GenUnicode, codepoints_to_range, format_interval_table, merge_sorted_ranges, remove_codepoints,
+    codepoints_to_range, format_interval_table, merge_sorted_ranges, pack_adjacent_codepoints,
+    remove_codepoints, GenUnicode,
 };
 use codegen::{Block, Enum, Function};
 
