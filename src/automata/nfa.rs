@@ -1,7 +1,8 @@
 //! Conversion of IR to non-deterministic finite automata.
 
 use crate::automata::nfa_optimize::optimize_states;
-use crate::automata::utf8::utf8_paths_from_code_point_set;
+use crate::automata::utf8::{ByteRangePath, utf8_paths_from_code_point_set};
+use std::collections::HashMap;
 use crate::automata::util::node_description;
 use crate::codepointset::CodePointSet;
 use crate::ir::{self, Node};
@@ -11,7 +12,6 @@ use crate::unicode;
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::iter::once;
 use smallvec::{SmallVec, smallvec};
-use std::collections::HashMap;
 
 #[derive(Debug)]
 pub struct Nfa {
@@ -410,37 +410,56 @@ impl Builder {
             return self.build_universal_utf8_validator();
         }
 
-        // Get a list of paths of byte ranges. These all join into a final state.
-        // Join them via suffixes. Maximum length of any path is 4 (max bytes in a UTF-8 char).
         let trie_start = self.make()?;
         let trie_end = self.make()?;
         let paths = utf8_paths_from_code_point_set(cps);
-        let mut suffix_to_state: HashMap<&[ByteRange], u32> = HashMap::new();
-        // Put the end state as the empty suffix.
-        suffix_to_state.insert(&[], trie_end);
+        let indices: Vec<usize> = (0..paths.len()).collect();
+        let mut dedup = HashMap::new();
+        self.build_trie(trie_start, trie_end, &paths, &indices, 0, &mut dedup)?;
+        Ok(Fragment::new(trie_start, [trie_end]))
+    }
 
-        for path in &paths {
-            let suffix = path.as_ref();
-            // Find the longest cached suffix.
-            // This terminates because suffix_to_state contains the empty slice.
-            let mut k = 0;
-            let target = loop {
-                if let Some(&state) = suffix_to_state.get(&suffix[k..]) {
-                    break state;
-                }
-                k += 1;
-            };
-
-            // Build missing prefix states, populating the cache.
-            let mut cursor = target;
-            for idx in (0..k).rev() {
-                let state = if idx == 0 { trie_start } else { self.make()? };
-                self.get(state).add_transition(suffix[idx], cursor);
-                suffix_to_state.insert(&suffix[idx..], state);
-                cursor = state;
+    /// Build a trie from `paths` rooted at `from`, all terminating at `to`.
+    ///
+    /// Paths are grouped by their byte range at `depth` so that each group
+    /// gets exactly one outgoing edge from `from` — no overlapping transitions.
+    ///
+    /// After building each intermediate state, we dedup by its actual
+    /// transition vector: if two states end up with identical transitions,
+    /// we reuse the first one. This gives us suffix sharing (e.g. a 2-byte
+    /// path's last byte and a 3-byte path's last byte both `[(80,BF)]`
+    /// share one NFA state) without needing to pre-compute memo keys.
+    fn build_trie(
+        &mut self,
+        from: StateHandle,
+        to: StateHandle,
+        paths: &[ByteRangePath],
+        indices: &[usize],
+        depth: usize,
+        dedup: &mut HashMap<Vec<(ByteRange, StateHandle)>, StateHandle>,
+    ) -> Result<()> {
+        let mut groups: Vec<(ByteRange, Vec<usize>)> = Vec::new();
+        for &i in indices {
+            let range = paths[i][depth];
+            match groups.iter_mut().find(|(r, _)| *r == range) {
+                Some(g) => g.1.push(i),
+                None => groups.push((range, vec![i])),
             }
         }
-        Ok(Fragment::new(trie_start, [trie_end]))
+        for (range, sub_indices) in groups {
+            let is_last = depth + 1 == paths[sub_indices[0]].len();
+            if is_last {
+                self.get(from).add_transition(range, to);
+            } else {
+                let mid = self.make()?;
+                self.build_trie(mid, to, paths, &sub_indices, depth + 1, dedup)?;
+                let actual = *dedup
+                    .entry(self.states[mid as usize].transitions.clone())
+                    .or_insert(mid);
+                self.get(from).add_transition(range, actual);
+            }
+        }
+        Ok(())
     }
 
     fn build_universal_utf8_validator(&mut self) -> Result<Fragment> {
