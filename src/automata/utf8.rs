@@ -23,7 +23,10 @@ impl Utf8Buf {
             len: 0,
         };
         let s = c.encode_utf8(&mut res.buf);
-        res.len = s.len() as u8;
+        res.len = s
+            .len()
+            .try_into()
+            .expect("UTF-8 encoding should fit in 4 bytes");
         res
     }
 }
@@ -39,14 +42,13 @@ impl std::ops::Deref for Utf8Buf {
 /// A UTF-8 structural bucket: the exact code-point span it covers and
 /// the per-byte closed ranges that encode that span.
 #[derive(Copy, Clone)]
-pub struct Utf8Bucket {
-    pub ivs: Interval,                     // closed code-point interval
-    pub byte_ranges: &'static [ByteRange], // per-byte closed ranges
+struct Utf8Bucket {
+    ivs: Interval,                     // closed code-point interval
+    byte_ranges: &'static [ByteRange], // per-byte closed ranges
 }
 
 impl Utf8Bucket {
-    // Check if a sequence of bytes is contained within our sequence of byte ranges.
-    pub fn contains(&self, bytes: &[u8]) -> bool {
+    fn contains(&self, bytes: &[u8]) -> bool {
         bytes.len() == self.byte_ranges.len()
             && bytes
                 .iter()
@@ -55,101 +57,29 @@ impl Utf8Bucket {
     }
 }
 
-// ---- Length 1 (U+0000..U+007F) ---------------------------------------------
 #[rustfmt::skip]
-pub const UTF8_BUCKETS_LEN1: &[Utf8Bucket] = &[Utf8Bucket {
-    ivs: Interval::new(0x0000, 0x007F),
-    byte_ranges:&[br(0x00, 0x7F)],
-}];
-
-// ---- Length 2 (U+0080..U+07FF) --------------------------------------------
-#[rustfmt::skip]
-pub const UTF8_BUCKETS_LEN2: &[Utf8Bucket] = &[Utf8Bucket {
-    ivs: Interval::new(0x0080, 0x07FF),
-    byte_ranges:&[br(0xC2, 0xDF), br(0x80, 0xBF)],
-}];
-
-// ---- Length 3 (split by lead-byte buckets)
-#[rustfmt::skip]
-pub const UTF8_BUCKETS_LEN3: &[Utf8Bucket] = &[
-    // E0: avoid overlongs -> A0..BF
-    Utf8Bucket {
-        ivs: Interval::new(0x0800, 0x0FFF),
-        byte_ranges:&[br(0xE0, 0xE0), br(0xA0, 0xBF), br(0x80, 0xBF)],
-    },
-    // E1–EC: full continuations
-    Utf8Bucket {
-        ivs: Interval::new(0x1000, 0xCFFF),
-        byte_ranges:&[br(0xE1, 0xEC), br(0x80, 0xBF), br(0x80, 0xBF)],
-    },
-    // ED: (surrogates) clamp second byte 80..9F
-    Utf8Bucket {
-        ivs: Interval::new(0xD000, 0xD7FF),
-        byte_ranges:&[br(0xED, 0xED), br(0x80, 0x9F), br(0x80, 0xBF)],
-    },
-    // EE–EF: full continuations
-    Utf8Bucket {
-        ivs: Interval::new(0xE000, 0xFFFF),
-        byte_ranges:&[br(0xEE, 0xEF), br(0x80, 0xBF), br(0x80, 0xBF)],
-    },
+const ALL_UTF8_BUCKETS: &[Utf8Bucket] = &[
+    // 1-byte: U+0000..U+007F
+    Utf8Bucket { ivs: Interval::new(0x0000, 0x007F),     byte_ranges: &[br(0x00, 0x7F)] },
+    // 2-byte: U+0080..U+07FF
+    Utf8Bucket { ivs: Interval::new(0x0080, 0x07FF),     byte_ranges: &[br(0xC2, 0xDF), br(0x80, 0xBF)] },
+    // 3-byte E0: avoid overlongs -> 2nd byte A0..BF
+    Utf8Bucket { ivs: Interval::new(0x0800, 0x0FFF),     byte_ranges: &[br(0xE0, 0xE0), br(0xA0, 0xBF), br(0x80, 0xBF)] },
+    // 3-byte E1–EC: full continuations
+    Utf8Bucket { ivs: Interval::new(0x1000, 0xCFFF),     byte_ranges: &[br(0xE1, 0xEC), br(0x80, 0xBF), br(0x80, 0xBF)] },
+    // 3-byte ED: surrogates -> 2nd byte 80..9F
+    Utf8Bucket { ivs: Interval::new(0xD000, 0xD7FF),     byte_ranges: &[br(0xED, 0xED), br(0x80, 0x9F), br(0x80, 0xBF)] },
+    // 3-byte EE–EF: full continuations
+    Utf8Bucket { ivs: Interval::new(0xE000, 0xFFFF),     byte_ranges: &[br(0xEE, 0xEF), br(0x80, 0xBF), br(0x80, 0xBF)] },
+    // 4-byte F0: avoid overlongs -> 2nd byte 90..BF
+    Utf8Bucket { ivs: Interval::new(0x1_0000, 0x3_FFFF), byte_ranges: &[br(0xF0, 0xF0), br(0x90, 0xBF), br(0x80, 0xBF), br(0x80, 0xBF)] },
+    // 4-byte F1–F3: full continuations
+    Utf8Bucket { ivs: Interval::new(0x4_0000, 0xF_FFFF), byte_ranges: &[br(0xF1, 0xF3), br(0x80, 0xBF), br(0x80, 0xBF), br(0x80, 0xBF)] },
+    // 4-byte F4: cap at U+10FFFF -> 2nd byte 80..8F
+    Utf8Bucket { ivs: Interval::new(0x10_0000, 0x10_FFFF), byte_ranges: &[br(0xF4, 0xF4), br(0x80, 0x8F), br(0x80, 0xBF), br(0x80, 0xBF)] },
 ];
-
-// ---- Length 4
-#[rustfmt::skip]
-pub const UTF8_BUCKETS_LEN4: &[Utf8Bucket] = &[
-    // F0: avoid overlongs -> 2nd byte 90..BF
-    Utf8Bucket {
-        ivs: Interval::new(0x1_0000, 0x3_FFFF),
-        byte_ranges:&[
-            br(0xF0, 0xF0), br(0x90, 0xBF), br(0x80, 0xBF), br(0x80, 0xBF)
-        ],
-    },
-    // F1–F3: full continuations
-    Utf8Bucket {
-        ivs: Interval::new(0x4_0000, 0xF_FFFF),
-        byte_ranges:&[
-            br(0xF1, 0xF3), br(0x80, 0xBF), br(0x80, 0xBF), br(0x80, 0xBF)
-        ],
-    },
-
-    // F4: cap at U+10FFFF -> 2nd byte 80..8F
-    Utf8Bucket {
-        ivs: Interval::new(0x10_0000, 0x10_FFFF),
-        byte_ranges:&[
-            br(0xF4, 0xF4), br(0x80, 0x8F), br(0x80, 0xBF), br(0x80, 0xBF)
-        ],
-    },
-];
-
-// Length boundaries for mapping from code points to number of UTF-8 bytes.
-// These are closed boundaries (<=).
-pub const UTF8_LENGTH_BOUNDARIES: [u32; 4] = [0x007F, 0x07FF, 0xFFFF, 0x10FFFF];
 
 pub type ByteRangePath = SmallVec<[ByteRange; 4]>;
-
-fn add_paths_from_bucket(cps: &CodePointSet, bucket: &Utf8Bucket, paths: &mut Vec<ByteRangePath>) {
-    // Process a single bucket, adding to our trie.
-    for iv in cps.intervals_intersecting(bucket.ivs) {
-        let mut iv = *iv;
-        // First and last ranges may extend beyond the bucket's range.
-        // Clamp them all for simplicity.
-        iv.first = iv.first.max(bucket.ivs.first);
-        iv.last = iv.last.min(bucket.ivs.last);
-        debug_assert!(iv.first <= iv.last);
-
-        add_paths_from_interval_in_bucket(iv, bucket, paths);
-    }
-}
-
-fn add_paths_from_interval_in_bucket(
-    iv: crate::codepointset::Interval,
-    bucket: &Utf8Bucket,
-    paths: &mut Vec<ByteRangePath>,
-) {
-    debug_assert!(bucket.contains(&Utf8Buf::from_cp(iv.first)));
-    debug_assert!(bucket.contains(&Utf8Buf::from_cp(iv.last)));
-    segment_interval_for_utf8(iv.first, iv.last, bucket, paths);
-}
 
 // Decode a UTF-8 byte slice to a codepoint.
 fn decode_utf8_cp(bytes: &[u8]) -> u32 {
@@ -171,7 +101,10 @@ fn segment_interval_for_utf8(
     let split_level = match (0..n).find(|&i| start_bytes[i] != end_bytes[i]) {
         None => {
             // start == end: emit a single-codepoint path.
-            let path = start_bytes.iter().map(|&b| ByteRange { start: b, end: b }).collect();
+            let path = start_bytes
+                .iter()
+                .map(|&b| ByteRange { start: b, end: b })
+                .collect();
             paths.push(path);
             return;
         }
@@ -227,27 +160,13 @@ fn segment_interval_for_utf8(
 
 pub fn utf8_paths_from_code_point_set(cps: &CodePointSet) -> Vec<ByteRangePath> {
     let mut paths = Vec::new();
-    let Some(last_cp) = cps.last_codepoint() else {
-        return paths;
-    };
-    let [bound1, bound2, bound3, _] = UTF8_LENGTH_BOUNDARIES;
-
-    for bucket in UTF8_BUCKETS_LEN1 {
-        add_paths_from_bucket(cps, bucket, &mut paths);
-    }
-    if last_cp > bound1 {
-        for bucket in UTF8_BUCKETS_LEN2 {
-            add_paths_from_bucket(cps, bucket, &mut paths);
-        }
-    }
-    if last_cp > bound2 {
-        for bucket in UTF8_BUCKETS_LEN3 {
-            add_paths_from_bucket(cps, bucket, &mut paths);
-        }
-    }
-    if last_cp > bound3 {
-        for bucket in UTF8_BUCKETS_LEN4 {
-            add_paths_from_bucket(cps, bucket, &mut paths);
+    for bucket in ALL_UTF8_BUCKETS {
+        for iv in cps.intervals_intersecting(bucket.ivs) {
+            let first = iv.first.max(bucket.ivs.first);
+            let last = iv.last.min(bucket.ivs.last);
+            debug_assert!(bucket.contains(&Utf8Buf::from_cp(first)));
+            debug_assert!(bucket.contains(&Utf8Buf::from_cp(last)));
+            segment_interval_for_utf8(first, last, bucket, &mut paths);
         }
     }
     paths
@@ -259,9 +178,9 @@ mod tests {
 
     #[test]
     fn utf8_len_increases_at_boundaries() {
-        // Test UTF8_LENGTH_BOUNDARIES.
+        const BOUNDARIES: [u32; 4] = [0x007F, 0x07FF, 0xFFFF, 0x10FFFF];
         let mut expected_len = 1;
-        for &b in &UTF8_LENGTH_BOUNDARIES {
+        for &b in &BOUNDARIES {
             assert_eq!(Utf8Buf::from_cp(b - 1).len(), expected_len);
             assert_eq!(Utf8Buf::from_cp(b).len(), expected_len);
             if b + 1 < 0x10FFFF {
@@ -427,11 +346,7 @@ mod tests {
         for cp in [0x00F8u32, 0x00FF, 0x0100, 0x0101, 0x013F] {
             let enc = Utf8Buf::from_cp(cp);
             let covered = paths.iter().any(|path| {
-                path.len() == enc.len()
-                    && path
-                        .iter()
-                        .zip(enc.iter())
-                        .all(|(r, &b)| r.contains(b))
+                path.len() == enc.len() && path.iter().zip(enc.iter()).all(|(r, &b)| r.contains(b))
             });
             assert!(covered, "U+{cp:04X} is not covered by any path");
         }
@@ -529,7 +444,7 @@ mod tests {
 
     #[test]
     fn test_utf8_bucket_contains() {
-        let bucket = &UTF8_BUCKETS_LEN2[0]; // 2-byte bucket
+        let bucket = &ALL_UTF8_BUCKETS[1]; // 2-byte bucket
 
         // Should contain valid 2-byte sequences
         assert!(bucket.contains(&[0xC2, 0x80])); // U+0080
@@ -735,25 +650,43 @@ mod tests {
         // One point from each side of every UTF-8 bucket edge, plus the
         // endpoints of the overall range.
         const BOUNDARIES: &[u32] = &[
-            0x0000, 0x0001,
-            0x007E, 0x007F,
-            0x0080, 0x0081,
-            0x07FE, 0x07FF,
-            0x0800, 0x0801,
-            0x0FFE, 0x0FFF,
-            0x1000, 0x1001,
-            0xCFFE, 0xCFFF,
-            0xD000, 0xD001,
-            0xD7FE, 0xD7FF,
+            0x0000,
+            0x0001,
+            0x007E,
+            0x007F,
+            0x0080,
+            0x0081,
+            0x07FE,
+            0x07FF,
+            0x0800,
+            0x0801,
+            0x0FFE,
+            0x0FFF,
+            0x1000,
+            0x1001,
+            0xCFFE,
+            0xCFFF,
+            0xD000,
+            0xD001,
+            0xD7FE,
+            0xD7FF,
             // skip surrogate block 0xD800..=0xDFFF
-            0xE000, 0xE001,
-            0xFFFE, 0xFFFF,
-            0x0001_0000, 0x0001_0001,
-            0x0003_FFFE, 0x0003_FFFF,
-            0x0004_0000, 0x0004_0001,
-            0x000F_FFFE, 0x000F_FFFF,
-            0x0010_0000, 0x0010_0001,
-            0x0010_FFFE, 0x0010_FFFF,
+            0xE000,
+            0xE001,
+            0xFFFE,
+            0xFFFF,
+            0x0001_0000,
+            0x0001_0001,
+            0x0003_FFFE,
+            0x0003_FFFF,
+            0x0004_0000,
+            0x0004_0001,
+            0x000F_FFFE,
+            0x000F_FFFF,
+            0x0010_0000,
+            0x0010_0001,
+            0x0010_FFFE,
+            0x0010_FFFF,
         ];
 
         for &lo in BOUNDARIES {
@@ -867,7 +800,7 @@ mod tests {
             end: 0xBF,
         }); // Valid continuation
 
-        let paths = vec![path1];
+        let paths = [path1];
 
         // Check the paths first
         for (path_idx, path) in paths.iter().enumerate() {

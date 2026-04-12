@@ -121,11 +121,6 @@ impl CodePointSet {
         self.ivs.is_empty()
     }
 
-    // Return the last code point contained by the set, if any.
-    pub(crate) fn last_codepoint(&self) -> Option<CodePoint> {
-        self.ivs.last().map(|iv| iv.last)
-    }
-
     // Return true if we contain all code points.
     pub(crate) fn contains_all_codepoints(&self) -> bool {
         self.ivs.len() == 1 && self.ivs[0] == Interval::new(0, CODE_POINT_MAX)
