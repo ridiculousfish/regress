@@ -9,7 +9,7 @@ use crate::types::{BracketContents, CaptureGroupID, LoopID};
 use crate::unicode;
 use core::convert::TryInto;
 #[cfg(not(feature = "std"))]
-use {alloc::vec::Vec, hashbrown::HashMap};
+use alloc::{boxed::Box, vec::Vec};
 
 /// \return an anchor instruction for a given IR anchor.
 fn make_anchor(anchor_type: ir::AnchorType, multiline: bool) -> Insn {

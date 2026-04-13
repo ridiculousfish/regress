@@ -17,7 +17,7 @@ use crate::{
 use core::{fmt, iter::Peekable};
 #[cfg(feature = "std")]
 use std::collections::HashMap;
-#[cfg(not(feature = "std"))]
+#[cfg(all(not(feature = "std"), feature = "alloc"))]
 use {
     alloc::{
         boxed::Box,

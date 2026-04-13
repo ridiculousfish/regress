@@ -398,6 +398,9 @@ pub(crate) fn unicode_property_from_str(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(feature = "std"))]
+    use hashbrown::HashMap;
+    #[cfg(feature = "std")]
     use std::collections::HashMap;
 
     // Map from folded char to the chars that folded to it.

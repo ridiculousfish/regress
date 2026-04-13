@@ -15,7 +15,7 @@ use crate::scm::SingleCharMatcher;
 use crate::types::{GroupData, LoopData};
 use crate::util::DebugCheckIndex;
 #[cfg(not(feature = "std"))]
-use alloc::{string::String, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use core::ops::Range;
 
 #[derive(Debug, Clone)]

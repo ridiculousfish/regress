@@ -20,6 +20,9 @@ default = ["backend-pikevm", "std"]
 
 std = ["memchr/std"]
 
+# Enables dependencies needed for `no_std` + `alloc` builds.
+alloc = ["dep:hashbrown", "memchr/alloc"]
+
 # Enables the PikeVM backend.
 backend-pikevm = []
 
@@ -36,5 +39,5 @@ utf16 = []
 pattern = []
 
 [dependencies]
-hashbrown = "0.16.0"
+hashbrown = { version = "0.16.0", optional = true }
 memchr = { version = "2.4.0", default-features = false }

@@ -153,6 +153,11 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 // Clippy's manual_range_contains suggestion produces worse codegen.
 #![allow(clippy::manual_range_contains)]
 
+#[cfg(all(not(feature = "std"), not(feature = "alloc")))]
+compile_error!(
+    "`regress` requires the `alloc` feature when building without `std`; use `--no-default-features --features alloc`."
+);
+
 #[cfg(not(feature = "std"))]
 #[macro_use]
 extern crate alloc;

@@ -42,6 +42,24 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --features "${{ matrix.features }}" --verbose
 
+  build-no-std:
+    name: Build (no_std)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p regress --lib --no-default-features --features "alloc" --verbose
+
+  test-no-std:
+    name: Test (no_std)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p regress --no-default-features --features "alloc,backend-pikevm" --verbose
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

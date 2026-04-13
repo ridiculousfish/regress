@@ -6,7 +6,6 @@ use crate::insn::CompiledRegex;
 use crate::optimizer;
 use crate::parse;
 use crate::types::MAX_CAPTURE_GROUPS;
-use std::iter::FusedIterator;
 
 #[cfg(feature = "utf16")]
 use crate::{
@@ -18,12 +17,14 @@ use crate::{
 use crate::pikevm;
 use crate::util::to_char_sat;
 
-use core::{fmt, str::FromStr};
-#[cfg(feature = "std")]
+use core::{fmt, iter::FusedIterator, str::FromStr};
 #[cfg(not(feature = "std"))]
 use {
-    alloc::{string::String, vec::Vec},
-    hashbrown::{HashMap, hash_map::Iter},
+    alloc::{
+        boxed::Box,
+        string::{String, ToString},
+        vec::Vec,
+    },
 };
 
 pub use parse::Error;

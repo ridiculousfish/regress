@@ -1,10 +1,7 @@
 //! Bytecode instructions for a compiled regex
 
 #[cfg(not(feature = "std"))]
-use {
-    alloc::{string::String, vec::Vec},
-    hashbrown::HashMap,
-};
+use alloc::{boxed::Box, vec::Vec};
 
 use crate::api;
 use crate::bytesearch::{AsciiBitmap, ByteArraySet, ByteBitmap};
