@@ -33,8 +33,12 @@ pub struct Dfa {
 /// Two bytes are in the same class iff they trigger exactly the same set of
 /// NFA transitions. We find class boundaries by collecting every `range.start`
 /// and `range.end + 1` from every NFA transition.
-fn compute_byte_classes(nfa: &Nfa) -> ([u8; 256], usize) {
-    let mut cut_bitmap = [false; 257];
+pub(super) fn compute_byte_classes(nfa: &Nfa) -> ([u8; 256], usize) {
+    // Mark each cut position. cut_bitmap[k] = true means byte k is the start
+    // of a new class. Duplicate writes are idempotent — this is the implicit
+    // "set" semantics we used to get from sort+dedup.
+    let mut cut_bitmap = [false; 256];
+    cut_bitmap[0] = true;
     for state in nfa.states.iter() {
         for &(ref range, _) in &state.transitions {
             cut_bitmap[range.start as usize] = true;
@@ -94,7 +98,7 @@ fn epsilon_closure(nfa: &Nfa, seeds: &[StateHandle], scratch: &mut Vec<bool>) ->
 }
 
 /// Build a lookup table: for each byte class, one representative byte value.
-fn representative_bytes(byte_to_class: &[u8; 256], num_classes: usize) -> Vec<u8> {
+pub(super) fn representative_bytes(byte_to_class: &[u8; 256], num_classes: usize) -> Vec<u8> {
     let mut reps = vec![0u8; num_classes];
     for (byte, &class) in byte_to_class.iter().enumerate() {
         // First byte found for each class wins.

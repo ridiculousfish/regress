@@ -575,6 +575,15 @@ impl Builder {
 
     /// Build a Loop node (handles both Loop and Loop1CharBody).
     fn build_loop(&mut self, loopee: &Node, quant: &crate::ir::Quantifier) -> Result<Fragment> {
+        // Thompson/subset-construction engines produce wrong captures for
+        // loops whose body can match empty (rust-lang/regex#779). Rather than
+        // rewrite the IR, reject the pattern here — the NFA backend and any
+        // future TDFA built from it are then safe by construction.
+        if loopee.can_match_empty() {
+            return Err(Error::UnsupportedInstruction(
+                "Loop over empty-matching body not supported by NFAs".to_string(),
+            ));
+        }
         let start = self.make()?;
         let greedy = quant.greedy;
         let mut current_ends = smallvec![start];
