@@ -33,7 +33,7 @@ pub struct Dfa {
 /// Two bytes are in the same class iff they trigger exactly the same set of
 /// NFA transitions. We find class boundaries by collecting every `range.start`
 /// and `range.end + 1` from every NFA transition.
-fn compute_byte_classes(nfa: &Nfa) -> ([u8; 256], usize) {
+pub(super) fn compute_byte_classes(nfa: &Nfa) -> ([u8; 256], usize) {
     let mut cuts: Vec<u16> = Vec::new();
     cuts.push(0);
     for state in nfa.states.iter() {
@@ -102,7 +102,7 @@ fn epsilon_closure(nfa: &Nfa, seeds: &[StateHandle], scratch: &mut Vec<bool>) ->
 }
 
 /// Build a lookup table: for each byte class, one representative byte value.
-fn representative_bytes(byte_to_class: &[u8; 256], num_classes: usize) -> Vec<u8> {
+pub(super) fn representative_bytes(byte_to_class: &[u8; 256], num_classes: usize) -> Vec<u8> {
     let mut reps = vec![0u8; num_classes];
     for (byte, &class) in byte_to_class.iter().enumerate() {
         // First byte found for each class wins.

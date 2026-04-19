@@ -1,15 +1,30 @@
-//! Tagged DFA — data structure primitives and canonicalization.
+//! Tagged DFA — priority-ordered subset construction over a TNFA.
 //!
-//! Milestone 1 of an incremental TDFA implementation. Defines the types used
-//! to represent TDFA configurations and tag commands, plus the canonicalization
-//! routine that renumbers abstract `InputMark`s into a first-appearance form.
-//! Construction from an NFA and execution come later.
+//! Milestone 2: determinization with order-sensitive state identity (so greedy
+//! and lazy quantifiers produce different automata), but no tag tracking yet —
+//! `tag_map`s stay empty throughout and `TagCommand` sequences are unused.
+//! Phase A (mark minting and command emission) lands in a later milestone.
 
-use crate::automata::nfa::StateHandle;
+use crate::automata::dfa::{compute_byte_classes, representative_bytes};
+use crate::automata::nfa::{GOAL_STATE, Nfa, StateHandle};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use smallvec::SmallVec;
 use std::collections::HashMap;
+
+pub type TdfaStateId = u32;
+
+/// The dead state: all transitions loop to self, not accepting.
+pub const TDFA_DEAD_STATE: TdfaStateId = 0;
+
+/// Maximum number of TDFA states before we bail out. Matches
+/// `dfa::DFA_STATE_BUDGET`.
+const TDFA_STATE_BUDGET: usize = 4096;
+
+#[derive(Debug)]
+pub enum Error {
+    BudgetExceeded,
+}
 
 /// An abstract tag-version identifier. During Phase A construction every
 /// register write on an epsilon edge mints a fresh `InputMark`. A later pass
@@ -76,7 +91,7 @@ pub struct TdfaState(pub SmallVec<[TaggedNfaState; 4]>);
 /// Returns the canonical configuration and the command sequence that moves
 /// each raw `InputMark`'s value into its canonical destination. The command
 /// list is empty when the input is already canonical.
-pub fn canonicalize(cfg: &TdfaState) -> (TdfaState, SmallVec<[TagCommand; 4]>) {
+pub fn canonicalize(cfg: TdfaState) -> (TdfaState, SmallVec<[TagCommand; 4]>) {
     // `mapping[raw] = canon` records which canonical id each raw mark was
     // assigned. A single raw mark may appear in multiple entries / tag slots;
     // all occurrences must rewrite to the same canonical id, so we memoize.
@@ -97,7 +112,7 @@ pub fn canonicalize(cfg: &TdfaState) -> (TdfaState, SmallVec<[TagCommand; 4]>) {
     // Walk threads in priority order (outer loop) and, within each thread,
     // tag slots in index order (inner loop). This fixed traversal is what
     // makes "first appearance" a well-defined notion.
-    for entry in &cfg.0 {
+    for entry in cfg.0 {
         let mut tag_map = SmallVec::with_capacity(entry.tag_map.len());
         for &slot in &entry.tag_map {
             // `None` (unset tag) passes through unchanged — only real marks
@@ -126,22 +141,191 @@ pub fn canonicalize(cfg: &TdfaState) -> (TdfaState, SmallVec<[TagCommand; 4]>) {
         .into_iter()
         .map(|(raw, canon)| (canon, raw))
         .collect();
-    pairs.sort_by_key(|&(canon, _)| canon);
+    pairs.sort();
 
     // Skip no-op `canon := canon` copies — when `raw == canon` the value is
     // already in the right place. This is why an already-canonical input
     // produces an empty command list.
-    let mut commands: SmallVec<[TagCommand; 4]> = SmallVec::new();
-    for (canon, raw) in pairs {
-        if raw != canon {
-            commands.push(TagCommand {
-                dst: canon,
-                src: MarkValue::Copy(raw),
-            });
+    let commands = pairs
+        .into_iter()
+        .filter(|&(canon, raw)| canon != raw)
+        .map(|(canon, raw)| TagCommand {
+            dst: canon,
+            src: MarkValue::Copy(raw),
+        })
+        .collect();
+
+    (TdfaState(entries), commands)
+}
+
+/// Priority-ordered epsilon closure. Pre-order DFS: first visit to an NFA
+/// state wins, later duplicates are dropped. Within each NFA state, epsilon
+/// edges are walked in source order (`State.eps` is already priority-ordered
+/// by the builder). Seeds contribute their priorities in the order given.
+///
+/// In Milestone 2 `tag_map`s stay empty and epsilon ops are ignored; the
+/// only thing priority ordering buys us here is that greedy and lazy
+/// quantifiers produce different closures.
+fn close_priority(nfa: &Nfa, seeds: &[TaggedNfaState]) -> TdfaState {
+    let mut threads: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
+    let mut seen = vec![false; nfa.states.len()];
+
+    // DFS with an explicit stack: push in reverse so the first seed / first
+    // eps edge comes off the stack first, preserving source order in output.
+    let mut stack: Vec<TaggedNfaState> = seeds.iter().rev().cloned().collect();
+
+    while let Some(thread) = stack.pop() {
+        if seen[thread.state as usize] {
+            continue;
+        }
+        seen[thread.state as usize] = true;
+        let state = thread.state;
+        threads.push(thread);
+        let eps = &nfa.states[state as usize].eps;
+        for edge in eps.iter().rev() {
+            if !seen[edge.target as usize] {
+                // Tag ops on eps edges are ignored in M2; tag_map inherits
+                // unchanged from the parent thread (empty throughout M2).
+                stack.push(TaggedNfaState {
+                    state: edge.target,
+                    tag_map: SmallVec::new(),
+                });
+            }
         }
     }
 
-    (TdfaState(entries), commands)
+    TdfaState(threads)
+}
+
+/// Leftmost-greedy truncation: if any thread is at GOAL, keep `[0..=goal_idx]`
+/// and drop lower-priority threads after it (they can only produce worse
+/// matches). Higher-priority threads before the goal stay alive as live
+/// continuations — on a longer input they might still reach GOAL and win.
+fn truncate_at_first_goal(mut s: TdfaState) -> TdfaState {
+    if let Some(idx) = s.0.iter().position(|t| t.state == GOAL_STATE) {
+        s.0.truncate(idx + 1);
+    }
+    s
+}
+
+#[derive(Debug)]
+pub struct Tdfa {
+    start: TdfaStateId,
+    num_classes: usize,
+    byte_to_class: [u8; 256],
+    transitions: Box<[TdfaStateId]>,
+    accepting: Box<[bool]>,
+}
+
+impl Tdfa {
+    pub fn try_from(nfa: &Nfa) -> Result<Self, Error> {
+        let (byte_to_class, num_classes) = compute_byte_classes(nfa);
+        let rep_bytes = representative_bytes(&byte_to_class, num_classes);
+
+        let mut state_map: HashMap<TdfaState, TdfaStateId> = HashMap::new();
+        let mut transitions: Vec<TdfaStateId> = Vec::new();
+        let mut accepting: Vec<bool> = Vec::new();
+        let mut worklist: Vec<TdfaState> = Vec::new();
+
+        // State 0 = dead state (self-loops, not accepting). Represented as
+        // the empty TdfaState so that an exhausted step() lands here.
+        state_map.insert(TdfaState::default(), TDFA_DEAD_STATE);
+        transitions.resize(num_classes, TDFA_DEAD_STATE);
+        accepting.push(false);
+
+        // Start state = priority-ordered closure of {nfa.start}, canonicalized.
+        let start_seed = TaggedNfaState {
+            state: nfa.start(),
+            tag_map: SmallVec::new(),
+        };
+        let start_closure = close_priority(nfa, &[start_seed]);
+        let start_closure = truncate_at_first_goal(start_closure);
+        let (canon_start, _cmds) = canonicalize(start_closure);
+        let start_id: TdfaStateId = 1;
+        let start_accepting = canon_start.0.iter().any(|t| t.state == GOAL_STATE);
+        state_map.insert(canon_start.clone(), start_id);
+        transitions.resize(transitions.len() + num_classes, TDFA_DEAD_STATE);
+        accepting.push(start_accepting);
+        worklist.push(canon_start);
+
+        while let Some(state) = worklist.pop() {
+            let dfa_state = state_map[&state];
+            let row_offset = dfa_state as usize * num_classes;
+
+            for class in 0..num_classes {
+                let rep = rep_bytes[class];
+
+                // Priority-ordered step: walk threads in order, take each
+                // byte transition, seed the next closure. Threads with no
+                // outgoing byte edge simply drop out.
+                let mut seeds: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
+                for thread in &state.0 {
+                    if let Some(tgt) = nfa.states[thread.state as usize].transition_for_byte(rep) {
+                        seeds.push(TaggedNfaState {
+                            state: tgt,
+                            tag_map: SmallVec::new(),
+                        });
+                    }
+                }
+                if seeds.is_empty() {
+                    continue; // Already TDFA_DEAD_STATE.
+                }
+
+                let next = close_priority(nfa, &seeds);
+                let next = truncate_at_first_goal(next);
+                let (canon_next, _cmds) = canonicalize(next);
+
+                let target_id = match state_map.get(&canon_next) {
+                    Some(&id) => id,
+                    None => {
+                        let id = accepting.len() as TdfaStateId;
+                        if id as usize >= TDFA_STATE_BUDGET {
+                            return Err(Error::BudgetExceeded);
+                        }
+                        let is_accepting = canon_next.0.iter().any(|t| t.state == GOAL_STATE);
+                        accepting.push(is_accepting);
+                        transitions.resize(transitions.len() + num_classes, TDFA_DEAD_STATE);
+                        state_map.insert(canon_next.clone(), id);
+                        worklist.push(canon_next);
+                        id
+                    }
+                };
+                transitions[row_offset + class] = target_id;
+            }
+        }
+
+        Ok(Tdfa {
+            start: start_id,
+            num_classes,
+            byte_to_class,
+            transitions: transitions.into_boxed_slice(),
+            accepting: accepting.into_boxed_slice(),
+        })
+    }
+
+    pub fn num_states(&self) -> usize {
+        self.accepting.len()
+    }
+
+    pub fn num_classes(&self) -> usize {
+        self.num_classes
+    }
+
+    pub fn start(&self) -> TdfaStateId {
+        self.start
+    }
+
+    pub fn byte_to_class(&self) -> &[u8; 256] {
+        &self.byte_to_class
+    }
+
+    pub fn transitions(&self) -> &[TdfaStateId] {
+        &self.transitions
+    }
+
+    pub fn accepting(&self) -> &[bool] {
+        &self.accepting
+    }
 }
 
 #[cfg(test)]
@@ -185,15 +369,15 @@ mod tests {
     fn canonicalize_first_appearance_order() {
         // Raw versions 7, 3, 7, 9 canonicalize to 0, 1, 0, 2.
         let c = cfg(&[entry(0, &[7, 3]), entry(1, &[7, 9])]);
-        let (canon, _) = canonicalize(&c);
+        let (canon, _) = canonicalize(c);
         assert_eq!(canon, cfg(&[entry(0, &[0, 1]), entry(1, &[0, 2])]));
     }
 
     #[test]
     fn canonicalize_is_idempotent() {
         let c = cfg(&[entry(0, &[7, 3]), entry(1, &[7, 9])]);
-        let (once, _) = canonicalize(&c);
-        let (twice, cmds) = canonicalize(&once);
+        let (once, _) = canonicalize(c.clone());
+        let (twice, cmds) = canonicalize(once.clone());
         assert_eq!(once, twice);
         assert!(cmds.is_empty());
     }
@@ -202,14 +386,14 @@ mod tests {
     fn canonicalize_iso_configs_collapse() {
         let a = cfg(&[entry(0, &[3, 5]), entry(1, &[5, 3])]);
         let b = cfg(&[entry(0, &[100, 200]), entry(1, &[200, 100])]);
-        assert_eq!(canonicalize(&a).0, canonicalize(&b).0);
+        assert_eq!(canonicalize(a).0, canonicalize(b).0);
     }
 
     #[test]
     fn canonicalize_emits_copy_commands_in_canonical_order() {
         // Raw 7 -> canonical 0, raw 3 -> canonical 1.
         let c = cfg(&[entry(0, &[7, 3])]);
-        let (_, cmds) = canonicalize(&c);
+        let (_, cmds) = canonicalize(c);
         assert_eq!(
             cmds.as_slice(),
             &[
@@ -228,7 +412,7 @@ mod tests {
     #[test]
     fn canonicalize_already_canonical_emits_no_commands() {
         let c = cfg(&[entry(0, &[0, 1]), entry(1, &[0, 2])]);
-        let (canon, cmds) = canonicalize(&c);
+        let (canon, cmds) = canonicalize(c.clone());
         assert_eq!(canon, c);
         assert!(cmds.is_empty());
     }
@@ -236,7 +420,7 @@ mod tests {
     #[test]
     fn empty_configuration_canonicalizes_to_empty() {
         let empty = TdfaState::default();
-        let (canon, cmds) = canonicalize(&empty);
+        let (canon, cmds) = canonicalize(empty.clone());
         assert_eq!(canon, empty);
         assert!(cmds.is_empty());
     }

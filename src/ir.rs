@@ -156,6 +156,38 @@ impl Node {
         }
     }
 
+    /// \return true if this node may match the empty string.
+    /// Conservative: a true return is always safe; a false return means the
+    /// node definitely consumes at least one character. Used to reject loop
+    /// bodies that can match empty in automata construction, since Thompson-
+    /// style subset construction produces incorrect captures for such loops
+    /// (see rust-lang/regex#779).
+    pub fn can_match_empty(&self) -> bool {
+        match self {
+            Node::Empty => true,
+            Node::Goal => true,
+            Node::Anchor { .. } => true,
+            Node::WordBoundary { .. } => true,
+            Node::LookaroundAssertion { .. } => true,
+            Node::BackRef { .. } => true,
+
+            Node::Char { .. } => false,
+            Node::ByteSequence(seq) => seq.is_empty(),
+            Node::ByteSet(bytes) => bytes.is_empty(),
+            Node::CharSet(contents) => contents.is_empty(),
+            Node::Bracket(contents) => contents.is_empty(),
+            Node::MatchAny => false,
+            Node::MatchAnyExceptLineTerminator => false,
+
+            Node::Cat(nodes) => nodes.iter().all(|n| n.can_match_empty()),
+            Node::Alt(a, b) => a.can_match_empty() || b.can_match_empty(),
+            Node::CaptureGroup { contents, .. } => contents.can_match_empty(),
+            Node::Loop { loopee, quant, .. } | Node::Loop1CharBody { loopee, quant } => {
+                quant.min == 0 || loopee.can_match_empty()
+            }
+        }
+    }
+
     /// \return true if this node will always fail to match.
     /// Note this is different than matching the empty string.
     /// For example, an empty bracket /[]/ tries to match one char
