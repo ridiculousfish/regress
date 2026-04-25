@@ -1,6 +1,6 @@
 //! Classical backtracking execution engine
 
-use crate::api::Match;
+use crate::api::{ExecConfig, ExecError, Match};
 use crate::bytesearch;
 use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
@@ -74,10 +74,32 @@ pub(crate) struct MatchAttempter<'a, Input: InputIndexer> {
     re: &'a CompiledRegex,
     bts: Vec<BacktrackInsn<Input>>,
     s: State<Input::Position>,
+    // Backtracking step counter. Incremented once per iteration of the
+    // `'nextinsn` loop in `try_at_pos`, which covers both every instruction
+    // dispatch AND every backtrack-stack pop (since `try_backtrack` re-enters
+    // via `continue 'nextinsn`). Reset to zero at the top of each
+    // `try_at_pos` call so the budget applies per match attempt.
+    step_count: u64,
+    // Maximum step count per `try_at_pos` call. `None` means unbounded —
+    // matches pre-`ExecConfig` behavior byte-for-byte.
+    step_limit: Option<u64>,
+    // Non-`None` when the most recent match attempt was aborted by an
+    // `ExecError` (e.g. `step_limit` exceeded). Callers surface this via
+    // `BacktrackExecutor::take_exec_error` once the outer iterator observes
+    // that `next_match` returned `None`. Cleared when consumed.
+    exec_error: Option<ExecError>,
 }
 
 impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
     pub(crate) fn new(re: &'a CompiledRegex, entry: Input::Position) -> Self {
+        Self::new_with_config(re, entry, ExecConfig::default())
+    }
+
+    pub(crate) fn new_with_config(
+        re: &'a CompiledRegex,
+        entry: Input::Position,
+        config: ExecConfig,
+    ) -> Self {
         Self {
             re,
             bts: vec![BacktrackInsn::Exhausted],
@@ -85,6 +107,9 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 loops: vec![LoopData::new(entry); re.loops as usize],
                 groups: vec![GroupData::new(); re.groups as usize],
             },
+            step_count: 0,
+            step_limit: config.backtrack_limit,
+            exec_error: None,
         }
     }
 
@@ -648,10 +673,29 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         // TODO: we are inconsistent about passing Input by reference or value.
         let input = &inp;
         let re = self.re;
+        // Note: step_count / exec_error are reset at `next_match` level
+        // (see `BacktrackExecutor::begin_next_match`) so that recursive
+        // lookaround calls share the same budget as the enclosing attempt.
         // These are not really loops, they are just labels that we effectively 'goto'
         // to.
         #[allow(clippy::never_loop)]
         'nextinsn: loop {
+            // Step-limit check. When `step_limit` is `None` (the default)
+            // this compiles to a single predicted branch. See
+            // `ExecConfig::backtrack_limit` for rationale.
+            if let Some(limit) = self.step_limit {
+                self.step_count = self.step_count.saturating_add(1);
+                if self.step_count > limit {
+                    self.exec_error = Some(ExecError::StepLimitExceeded);
+                    // Restore the clean-state invariant that callers of
+                    // `try_at_pos` expect (bts holds only the sentinel
+                    // `Exhausted`). Group / loop data can remain "dirty";
+                    // callers of the outer `next_match` will observe
+                    // `exec_error` and must not read captures.
+                    self.bts.truncate(1);
+                    return None;
+                }
+            }
             'backtrack: loop {
                 // Helper macro to either increment ip and go to the next insn, or backtrack.
                 macro_rules! next_or_bt {
@@ -1027,6 +1071,19 @@ impl<'r, Input: InputIndexer> BacktrackExecutor<'r, Input> {
 }
 
 impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
+    /// Reset the per-attempt step counter and `exec_error` slot. Called at
+    /// the start of each `next_match` so an `ExecConfig::backtrack_limit`
+    /// applies to one exec call (covering all per-starting-position scans
+    /// and any recursive lookaround), matching V8's
+    /// `--regexp-backtrack-limit` semantics.
+    #[inline]
+    fn begin_next_match(&mut self) {
+        self.matcher.step_count = 0;
+        self.matcher.exec_error = None;
+    }
+}
+
+impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
     fn successful_match(&mut self, start: Input::Position, end: Input::Position) -> Match {
         // We want to simultaneously map our groups to offsets, and clear the groups.
         // A for loop is the easiest way to do this while satisfying the borrow checker.
@@ -1100,6 +1157,13 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
                 }
                 return Some(self.successful_match(pos, end));
             }
+            // If execution was aborted by an `ExecConfig::backtrack_limit`
+            // exhaustion, stop scanning. Callers (the outer `RichMatches`
+            // iterator) pull the error via `take_exec_error` and surface it.
+            if self.matcher.exec_error.is_some() {
+                *next_start = None;
+                return None;
+            }
             // Didn't find it at this position, try the next one.
             pos = inp.next_right_pos(pos)?;
         }
@@ -1113,11 +1177,16 @@ impl<Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'_, Input> {
         self.input.try_move_right(self.input.left_end(), offset)
     }
 
+    fn take_exec_error(&mut self) -> Option<crate::api::ExecError> {
+        self.matcher.exec_error.take()
+    }
+
     fn next_match(
         &mut self,
         pos: Input::Position,
         next_start: &mut Option<Input::Position>,
     ) -> Option<Match> {
+        self.begin_next_match();
         // When UTF-16 support is active prefix search is not used due to the different encoding.
         #[cfg(feature = "utf16")]
         return self.next_match_with_prefix_search(pos, next_start, &bytesearch::EmptyString {});
@@ -1157,6 +1226,14 @@ impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, Utf8Input<'t>> {
             matcher: MatchAttempter::new(re, input.left_end()),
         }
     }
+
+    fn new_with_config(re: &'r CompiledRegex, text: &'t str, config: crate::api::ExecConfig) -> Self {
+        let input = Utf8Input::new(text, re.flags.unicode);
+        Self {
+            input,
+            matcher: MatchAttempter::new_with_config(re, input.left_end(), config),
+        }
+    }
 }
 
 impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, AsciiInput<'t>> {
@@ -1166,7 +1243,15 @@ impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, AsciiInput<'t>> {
         let input = AsciiInput::new(text, re.flags.unicode);
         Self {
             input,
-            matcher: MatchAttempter::new(re, input.left_end()),
+            matcher: MatchAttempter::new_with_config(re, input.left_end(), crate::api::ExecConfig::default()),
+        }
+    }
+
+    fn new_with_config(re: &'r CompiledRegex, text: &'t str, config: crate::api::ExecConfig) -> Self {
+        let input = AsciiInput::new(text, re.flags.unicode);
+        Self {
+            input,
+            matcher: MatchAttempter::new_with_config(re, input.left_end(), config),
         }
     }
 }

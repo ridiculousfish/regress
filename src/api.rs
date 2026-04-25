@@ -29,6 +29,61 @@ use {
 
 pub use parse::Error;
 
+/// Runtime configuration for a regex execution. Passed to the `*_with_config`
+/// methods on [`Regex`] to bound or otherwise tune a single match attempt.
+///
+/// `ExecConfig::default()` preserves the legacy unbounded behavior so existing
+/// callers see no semantic change.
+///
+/// # Example
+///
+/// ```
+/// use regress::{ExecConfig, Regex};
+/// let re = Regex::new(r"a+b").unwrap();
+/// let cfg = ExecConfig { backtrack_limit: Some(100_000) };
+/// let mut it = re.find_iter_with_config("aaab", cfg);
+/// assert!(it.next().is_some());
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExecConfig {
+    /// Maximum number of backtracking "steps" (bytecode instructions plus
+    /// backtrack-stack pops) that one call on the returned iterator may
+    /// perform. `None` (the default) means unbounded — identical to calling
+    /// the non-`_with_config` methods.
+    ///
+    /// Intended as a ReDoS safety net for untrusted inputs. A budget of
+    /// `10_000_000` cuts pathological patterns like `(a+)+b` within a few
+    /// milliseconds on modern hardware while leaving realistic patterns
+    /// untouched. Tune upwards for expensive legitimate workloads.
+    pub backtrack_limit: Option<u64>,
+}
+
+/// Error returned when a regex execution could not complete under the
+/// constraints of an [`ExecConfig`]. Returned by the `Result`-yielding
+/// iterators produced by the `*_with_config` methods on [`Regex`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ExecError {
+    /// The [`ExecConfig::backtrack_limit`] budget was exhausted before the
+    /// engine could decide whether any match exists. The caller should treat
+    /// the input+pattern pair as untrusted and either reject it, raise the
+    /// limit, or swap in a linear-time engine.
+    StepLimitExceeded,
+}
+
+impl fmt::Display for ExecError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExecError::StepLimitExceeded => f.write_str(
+                "regex backtracking step limit exceeded (possible ReDoS input)",
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for ExecError {}
+
 /// Flags used to control regex parsing.
 /// The default flags are case-sensitive, not-multiline, and optimizing.
 #[derive(Debug, Copy, Clone, Default)]
@@ -129,6 +184,15 @@ pub type Matches<'r, 't> = exec::Matches<backends::DefaultExecutor<'r, 't>>;
 /// An iterator type which yields `Match`es found in a string, supporting ASCII
 /// only.
 pub type AsciiMatches<'r, 't> = exec::Matches<backends::DefaultAsciiExecutor<'r, 't>>;
+
+/// An iterator type which yields `Result<Match, ExecError>`, used by the
+/// `*_with_config` entry points on [`Regex`]. A successful match yields `Ok`;
+/// a budget exhaustion yields exactly one `Err(ExecError::StepLimitExceeded)`
+/// and then the iterator ends.
+pub type RichMatches<'r, 't> = exec::RichMatches<backends::DefaultExecutor<'r, 't>>;
+
+/// ASCII-only counterpart of [`RichMatches`].
+pub type AsciiRichMatches<'r, 't> = exec::RichMatches<backends::DefaultAsciiExecutor<'r, 't>>;
 
 /// A Match represents a portion of a string which was found to match a Regex.
 #[derive(Debug, Clone)]
@@ -457,6 +521,50 @@ impl Regex {
         backends::find(self, text, start)
     }
 
+    /// Returns an iterator over matches honoring the given [`ExecConfig`].
+    /// When `config.backtrack_limit` is exceeded the iterator yields one
+    /// `Err(ExecError::StepLimitExceeded)` and then ends — the same policy
+    /// as [`Regex::find_from_with_config`]. Callers that want the legacy
+    /// unbounded iterator should pass `ExecConfig::default()` or call
+    /// [`Regex::find_iter`].
+    #[inline]
+    pub fn find_iter_with_config<'r, 't>(
+        &'r self,
+        text: &'t str,
+        config: ExecConfig,
+    ) -> RichMatches<'r, 't> {
+        self.find_from_with_config(text, 0, config)
+    }
+
+    /// Like [`Regex::find_from`] but honors `config`. On budget exhaustion
+    /// the iterator yields one `Err(ExecError::StepLimitExceeded)` and then
+    /// `None`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use regress::{ExecConfig, ExecError, Regex};
+    /// // Pathological pattern: classical catastrophic backtracking.
+    /// let re = Regex::new(r"(a+)+b").unwrap();
+    /// let input: String = core::iter::repeat('a').take(30).collect::<String>() + "c";
+    /// let cfg = ExecConfig { backtrack_limit: Some(100_000) };
+    /// let err = re
+    ///     .find_from_with_config(&input, 0, cfg)
+    ///     .next()
+    ///     .expect("iterator should yield budget error")
+    ///     .expect_err("should be StepLimitExceeded");
+    /// assert_eq!(err, ExecError::StepLimitExceeded);
+    /// ```
+    #[inline]
+    pub fn find_from_with_config<'r, 't>(
+        &'r self,
+        text: &'t str,
+        start: usize,
+        config: ExecConfig,
+    ) -> RichMatches<'r, 't> {
+        backends::find_with_config(self, text, start, config)
+    }
+
     /// Searches `text` to find the first match.
     /// The input text is expected to be ascii-only: only ASCII case-folding is
     /// supported.
@@ -498,6 +606,26 @@ impl Regex {
         )
     }
 
+    /// Like [`Regex::find_from_utf16`] but honors the supplied [`ExecConfig`].
+    /// See [`Regex::find_from_with_config`] for the error-surfacing contract.
+    #[cfg(feature = "utf16")]
+    pub fn find_from_utf16_with_config<'r, 't>(
+        &'r self,
+        text: &'t [u16],
+        start: usize,
+        config: ExecConfig,
+    ) -> exec::RichMatches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Utf16Input<'t>>>
+    {
+        let input = Utf16Input::new(text, self.cr.flags.unicode);
+        exec::RichMatches::new(
+            super::classicalbacktrack::BacktrackExecutor::new(
+                input,
+                MatchAttempter::new_with_config(&self.cr, input.left_end(), config),
+            ),
+            start,
+        )
+    }
+
     /// Returns an iterator for matches found in 'text' starting at index `start`.
     #[cfg(feature = "utf16")]
     pub fn find_from_ucs2<'r, 't>(
@@ -511,6 +639,26 @@ impl Regex {
             super::classicalbacktrack::BacktrackExecutor::new(
                 input,
                 MatchAttempter::new(&self.cr, input.left_end()),
+            ),
+            start,
+        )
+    }
+
+    /// Like [`Regex::find_from_ucs2`] but honors the supplied [`ExecConfig`].
+    /// See [`Regex::find_from_with_config`] for the error-surfacing contract.
+    #[cfg(feature = "utf16")]
+    pub fn find_from_ucs2_with_config<'r, 't>(
+        &'r self,
+        text: &'t [u16],
+        start: usize,
+        config: ExecConfig,
+    ) -> exec::RichMatches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Ucs2Input<'t>>>
+    {
+        let input = Ucs2Input::new(text, self.cr.flags.unicode);
+        exec::RichMatches::new(
+            super::classicalbacktrack::BacktrackExecutor::new(
+                input,
+                MatchAttempter::new_with_config(&self.cr, input.left_end(), config),
             ),
             start,
         )
@@ -948,6 +1096,17 @@ pub mod backends {
         start: usize,
     ) -> exec::Matches<Executor::AsAscii> {
         find::<Executor::AsAscii>(re, text, start)
+    }
+
+    /// Same as [`find`] but honors `config` and returns a `Result`-yielding
+    /// iterator so the caller can observe `ExecError`s.
+    pub fn find_with_config<'r, 't, Executor: exec::Executor<'r, 't>>(
+        re: &'r Regex,
+        text: &'t str,
+        start: usize,
+        config: crate::api::ExecConfig,
+    ) -> exec::RichMatches<Executor> {
+        exec::RichMatches::new(Executor::new_with_config(&re.cr, text, config), start)
     }
 }
 
