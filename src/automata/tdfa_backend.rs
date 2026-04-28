@@ -1,75 +1,51 @@
-//! TDFA execution backend. Milestone 2: boolean anchored match only.
+//! TDFA execution backend. Milestone 2: anchored match, no tag tracking.
 
-use crate::automata::tdfa::{TDFA_DEAD_STATE, Tdfa};
+use crate::automata::tdfa::{TDFA_COMMITTED_ACCEPT_STATE, TDFA_LAST_SENTINEL, Tdfa};
+use core::ops::Range;
 
-/// Anchored match: returns true if input matches from the start (full match
-/// to end of input).
-pub fn execute_anchored(tdfa: &Tdfa, input: &[u8]) -> bool {
+/// Anchored leftmost match. Scans from position 0, tracking the last accepting
+/// position seen, and stops at dead-state, committed-accept, or end of input.
+///
+/// Greedy vs lazy semantics fall out of TDFA construction: lazy quantifiers
+/// dead-state after their shortest accept, greedy quantifiers stay alive and
+/// keep updating the last-accept position. Leftmost-first alternation is
+/// likewise baked in by truncate-at-first-GOAL during determinization.
+///
+/// Sentinel IDs `<= TDFA_LAST_SENTINEL` short-circuit the scan: `DEAD` breaks
+/// with the current last-accept; `COMMITTED_ACCEPT` returns `0..input.len()`
+/// immediately (every reachable state is accepting, so further scanning can
+/// only extend the match to end of input).
+pub fn execute_anchored(tdfa: &Tdfa, input: &[u8]) -> Option<Range<usize>> {
     let mut state = tdfa.start();
     let byte_to_class = tdfa.byte_to_class();
     let transitions = tdfa.transitions();
     let accepting = tdfa.accepting();
     let num_classes = tdfa.num_classes();
-    for &byte in input {
-        if state == TDFA_DEAD_STATE {
-            return false;
-        }
-        let class = byte_to_class[byte as usize] as usize;
-        state = transitions[state as usize * num_classes + class];
+
+    if state <= TDFA_LAST_SENTINEL {
+        return if state == TDFA_COMMITTED_ACCEPT_STATE {
+            Some(0..input.len())
+        } else {
+            None
+        };
     }
-    accepting[state as usize]
-}
 
-/// Scan `input` from position 0 and return the **longest** prefix length whose
-/// TDFA state is accepting, or `None` if no prefix (including the empty one)
-/// accepts. Used to observe leftmost-greedy match length without capture
-/// tracking.
-pub fn execute_anchored_longest_accept(tdfa: &Tdfa, input: &[u8]) -> Option<usize> {
-    let mut state = tdfa.start();
-    let byte_to_class = tdfa.byte_to_class();
-    let transitions = tdfa.transitions();
-    let accepting = tdfa.accepting();
-    let num_classes = tdfa.num_classes();
-
-    let mut best: Option<usize> = None;
+    let mut last_accept: Option<usize> = None;
     if accepting[state as usize] {
-        best = Some(0);
+        last_accept = Some(0);
     }
     for (i, &byte) in input.iter().enumerate() {
-        if state == TDFA_DEAD_STATE {
+        let class = byte_to_class[byte as usize] as usize;
+        state = transitions[state as usize * num_classes + class];
+        if state <= TDFA_LAST_SENTINEL {
+            if state == TDFA_COMMITTED_ACCEPT_STATE {
+                return Some(0..input.len());
+            }
             break;
         }
-        let class = byte_to_class[byte as usize] as usize;
-        state = transitions[state as usize * num_classes + class];
-        if state != TDFA_DEAD_STATE && accepting[state as usize] {
-            best = Some(i + 1);
+        if accepting[state as usize] {
+            last_accept = Some(i + 1);
         }
     }
-    best
-}
-
-/// Scan `input` from position 0 and return the **shortest** prefix length
-/// whose TDFA state is accepting, or `None` if no prefix accepts. Used to
-/// observe lazy match length.
-pub fn execute_anchored_shortest_accept(tdfa: &Tdfa, input: &[u8]) -> Option<usize> {
-    let mut state = tdfa.start();
-    let byte_to_class = tdfa.byte_to_class();
-    let transitions = tdfa.transitions();
-    let accepting = tdfa.accepting();
-    let num_classes = tdfa.num_classes();
-
-    if accepting[state as usize] {
-        return Some(0);
-    }
-    for (i, &byte) in input.iter().enumerate() {
-        if state == TDFA_DEAD_STATE {
-            return None;
-        }
-        let class = byte_to_class[byte as usize] as usize;
-        state = transitions[state as usize * num_classes + class];
-        if state != TDFA_DEAD_STATE && accepting[state as usize] {
-            return Some(i + 1);
-        }
-    }
-    None
+    last_accept.map(|end| 0..end)
 }

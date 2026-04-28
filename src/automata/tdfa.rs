@@ -10,12 +10,21 @@ use crate::automata::nfa::{GOAL_STATE, Nfa, StateHandle};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use smallvec::SmallVec;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 pub type TdfaStateId = u32;
 
 /// The dead state: all transitions loop to self, not accepting.
 pub const TDFA_DEAD_STATE: TdfaStateId = 0;
+
+/// Committed-accept sentinel: every reachable state stays accepting, so the
+/// match answer is already known to be `0..input.len()`. All transitions
+/// self-loop. Accepting.
+pub const TDFA_COMMITTED_ACCEPT_STATE: TdfaStateId = 1;
+
+/// IDs `<= TDFA_LAST_SENTINEL` are sentinels. The executor's hot-path check
+/// is a single comparison against this bound.
+pub const TDFA_LAST_SENTINEL: TdfaStateId = TDFA_COMMITTED_ACCEPT_STATE;
 
 /// Maximum number of TDFA states before we bail out. Matches
 /// `dfa::DFA_STATE_BUDGET`.
@@ -217,6 +226,124 @@ pub struct Tdfa {
     accepting: Box<[bool]>,
 }
 
+/// Post-construction pass: detect *committed-dead* states (can never reach an
+/// accepting state) and *committed-accept* states (accepting, and every
+/// transitively reachable state is also accepting), merge them into the two
+/// sentinel IDs `TDFA_DEAD_STATE` (0) and `TDFA_COMMITTED_ACCEPT_STATE` (1),
+/// and renumber the survivors to IDs `>= 2`. The executor's hot-path check
+/// becomes `state <= TDFA_LAST_SENTINEL`.
+fn rewrite_with_sentinels(
+    old_start: TdfaStateId,
+    num_classes: usize,
+    old_trans: &[TdfaStateId],
+    old_accept: &[bool],
+) -> (TdfaStateId, Box<[TdfaStateId]>, Box<[bool]>) {
+    let n = old_accept.len();
+
+    // Reverse adjacency — one entry per (src, class), duplicates fine.
+    let mut rev: Vec<Vec<u32>> = vec![Vec::new(); n];
+    for s in 0..n {
+        for c in 0..num_classes {
+            let t = old_trans[s * num_classes + c] as usize;
+            rev[t].push(s as u32);
+        }
+    }
+
+    // (1) reaches_accept[s]: some accepting state is reachable from s. BFS
+    // backward from accepting states through the reverse graph.
+    let mut reaches_accept = vec![false; n];
+    let mut q: VecDeque<usize> = VecDeque::new();
+    for s in 0..n {
+        if old_accept[s] {
+            reaches_accept[s] = true;
+            q.push_back(s);
+        }
+    }
+    while let Some(t) = q.pop_front() {
+        for &s in &rev[t] {
+            let s = s as usize;
+            if !reaches_accept[s] {
+                reaches_accept[s] = true;
+                q.push_back(s);
+            }
+        }
+    }
+
+    // (2) committed_accept[s]: accepting AND every transition goes to another
+    // committed_accept. Start from {accepting}, remove any s with a transition
+    // to a non-committed state, propagate removals through predecessors.
+    let mut committed_accept = old_accept.to_vec();
+    let mut q: VecDeque<usize> = VecDeque::new();
+    for s in 0..n {
+        if committed_accept[s] {
+            for c in 0..num_classes {
+                let t = old_trans[s * num_classes + c] as usize;
+                if !old_accept[t] {
+                    committed_accept[s] = false;
+                    q.push_back(s);
+                    break;
+                }
+            }
+        }
+    }
+    while let Some(removed) = q.pop_front() {
+        for &p in &rev[removed] {
+            let p = p as usize;
+            if committed_accept[p] {
+                committed_accept[p] = false;
+                q.push_back(p);
+            }
+        }
+    }
+
+    // (3) Remap. Sentinels occupy IDs 0 and 1; everyone else gets IDs >= 2 in
+    // original order.
+    let mut remap = vec![0u32; n];
+    let mut next_id: u32 = TDFA_LAST_SENTINEL + 1;
+    for s in 0..n {
+        if !reaches_accept[s] {
+            remap[s] = TDFA_DEAD_STATE;
+        } else if committed_accept[s] {
+            remap[s] = TDFA_COMMITTED_ACCEPT_STATE;
+        } else {
+            remap[s] = next_id;
+            next_id += 1;
+        }
+    }
+
+    let new_n = next_id as usize;
+    let mut new_trans = vec![TDFA_DEAD_STATE; new_n * num_classes];
+    let mut new_accept = vec![false; new_n];
+
+    // Sentinels: self-loop; dead non-accepting, committed-accept accepting.
+    for c in 0..num_classes {
+        new_trans[TDFA_DEAD_STATE as usize * num_classes + c] = TDFA_DEAD_STATE;
+        new_trans[TDFA_COMMITTED_ACCEPT_STATE as usize * num_classes + c] =
+            TDFA_COMMITTED_ACCEPT_STATE;
+    }
+    new_accept[TDFA_DEAD_STATE as usize] = false;
+    new_accept[TDFA_COMMITTED_ACCEPT_STATE as usize] = true;
+
+    // Real states: translate transitions through remap.
+    for s in 0..n {
+        let new_s = remap[s] as usize;
+        if (new_s as TdfaStateId) <= TDFA_LAST_SENTINEL {
+            continue;
+        }
+        new_accept[new_s] = old_accept[s];
+        for c in 0..num_classes {
+            let t = old_trans[s * num_classes + c] as usize;
+            new_trans[new_s * num_classes + c] = remap[t];
+        }
+    }
+
+    (
+        remap[old_start as usize],
+        new_trans.into_boxed_slice(),
+        new_accept.into_boxed_slice(),
+    )
+}
+
 impl Tdfa {
     pub fn try_from(nfa: &Nfa) -> Result<Self, Error> {
         let (byte_to_class, num_classes) = compute_byte_classes(nfa);
@@ -294,12 +421,19 @@ impl Tdfa {
             }
         }
 
+        let (start, transitions, accepting) = rewrite_with_sentinels(
+            start_id,
+            num_classes,
+            &transitions,
+            &accepting,
+        );
+
         Ok(Tdfa {
-            start: start_id,
+            start,
             num_classes,
             byte_to_class,
-            transitions: transitions.into_boxed_slice(),
-            accepting: accepting.into_boxed_slice(),
+            transitions,
+            accepting,
         })
     }
 
