@@ -31,6 +31,7 @@ fn format_class(ranges: &[(u8, u8)]) -> String {
 }
 
 /// Generate a verbose human-readable representation of the DFA.
+#[allow(dead_code)]
 pub fn to_readable_string(dfa: &Dfa) -> String {
     let mut out = String::new();
     let class_ranges = class_ranges(dfa);
