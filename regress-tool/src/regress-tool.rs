@@ -167,6 +167,10 @@ fn bench_re_on_path(re: &Regex, path: &Path) {
 #[path = "dfa_display.rs"]
 mod dfa_display;
 
+#[cfg(feature = "nfa")]
+#[path = "tdfa_display.rs"]
+mod tdfa_display;
+
 fn main() -> Result<(), Error> {
     let args = Opt::from_args();
 
@@ -201,19 +205,16 @@ fn main() -> Result<(), Error> {
         if args.dump_nfa {
             println!("NFA:\n{}", nfa.to_readable_string());
         }
-        if args.dump_dfa || args.dump_dfa_dot {
+        if args.dump_dfa {
+            match regress::automata::tdfa::Tdfa::try_from(&nfa) {
+                Ok(tdfa) => println!("{}", tdfa_display::to_readable_string(&tdfa)),
+                Err(err) => println!("Failed to generate TDFA: {:?}", err),
+            }
+        }
+        if args.dump_dfa_dot {
             match regress::automata::dfa::Dfa::try_from(&nfa) {
-                Ok(dfa) => {
-                    if args.dump_dfa {
-                        println!("DFA:\n{}", dfa_display::to_readable_string(&dfa));
-                    }
-                    if args.dump_dfa_dot {
-                        print!("{}", dfa_display::to_dot_string(&dfa));
-                    }
-                }
-                Err(err) => {
-                    println!("Failed to generate DFA: {:?}", err);
-                }
+                Ok(dfa) => print!("{}", dfa_display::to_dot_string(&dfa)),
+                Err(err) => println!("Failed to generate DFA: {:?}", err),
             }
         }
         if let Some(ref path) = args.file {
