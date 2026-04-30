@@ -1,12 +1,12 @@
 //! Tagged DFA — priority-ordered subset construction over a TNFA.
 //!
-//! Milestone 2: determinization with order-sensitive state identity (so greedy
-//! and lazy quantifiers produce different automata), but no tag tracking yet —
-//! `tag_map`s stay empty throughout and `TagCommand` sequences are unused.
-//! Phase A (mark minting and command emission) lands in a later milestone.
+//! Phase A (this milestone): epsilon writes mint fresh `InputMark`s during
+//! determinization, and commands ride on incoming TDFA transitions to update
+//! a runtime `marks` array. On accept, per-state `finals` copy canonical
+//! marks into the runtime register slots used by `NfaMatch`.
 
 use crate::automata::dfa::{compute_byte_classes, representative_bytes};
-use crate::automata::nfa::{GOAL_STATE, Nfa, StateHandle};
+use crate::automata::nfa::{GOAL_STATE, Nfa, StateHandle, TagIdx};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use smallvec::SmallVec;
@@ -33,6 +33,30 @@ const TDFA_STATE_BUDGET: usize = 4096;
 #[derive(Debug)]
 pub enum Error {
     BudgetExceeded,
+}
+
+/// Source of a `FinalCommand`: copy a canonical mark into the runtime tag
+/// slot, or write the unset sentinel.
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct FinalCommand {
+    pub tag: TagIdx,
+    pub src: MarkValue,
+}
+
+/// Mints fresh, globally-unique `InputMark` IDs during construction.
+struct MarkAlloc(u32);
+impl MarkAlloc {
+    fn new() -> Self {
+        Self(0)
+    }
+    fn next(&mut self) -> InputMark {
+        let m = InputMark(self.0);
+        self.0 += 1;
+        m
+    }
+    fn count(&self) -> u32 {
+        self.0
+    }
 }
 
 /// An abstract tag-version identifier. During Phase A construction every
@@ -172,38 +196,90 @@ pub fn canonicalize(cfg: TdfaState) -> (TdfaState, SmallVec<[TagCommand; 4]>) {
 /// edges are walked in source order (`State.eps` is already priority-ordered
 /// by the builder). Seeds contribute their priorities in the order given.
 ///
-/// In Milestone 2 `tag_map`s stay empty and epsilon ops are ignored; the
-/// only thing priority ordering buys us here is that greedy and lazy
-/// quantifiers produce different closures.
-fn close_priority(nfa: &Nfa, seeds: &[TaggedNfaState]) -> TdfaState {
+/// Each child thread inherits its parent's `tag_map`. When traversing an
+/// `EpsEdge` whose `ops` is non-empty, fresh `InputMark`s are minted for the
+/// named tags and a `CurrentPos` command is emitted per minted mark — the
+/// caller stitches these onto the incoming TDFA transition's command list.
+fn close_priority(
+    alloc: &mut MarkAlloc,
+    nfa: &Nfa,
+    seeds: &[TaggedNfaState],
+) -> (TdfaState, SmallVec<[TagCommand; 4]>) {
     let mut threads: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
+    let mut commands: SmallVec<[TagCommand; 4]> = SmallVec::new();
     let mut seen = vec![false; nfa.states.len()];
 
     // DFS with an explicit stack: push in reverse so the first seed / first
     // eps edge comes off the stack first, preserving source order in output.
+    // Mark `seen` at push time (not pop) so we don't mint duplicate marks for
+    // a child that will later be dropped by dedup — and so that lower-priority
+    // siblings correctly see "already reached" once a higher-priority path has
+    // claimed an NFA state.
     let mut stack: Vec<TaggedNfaState> = seeds.iter().rev().cloned().collect();
-
-    while let Some(thread) = stack.pop() {
-        if seen[thread.state as usize] {
+    for seed in seeds.iter().rev() {
+        if seen[seed.state as usize] {
             continue;
         }
-        seen[thread.state as usize] = true;
+        seen[seed.state as usize] = true;
+        stack.push(seed.clone());
+    }
+    while let Some(thread) = stack.pop() {
+        let parent_tag_map = thread.tag_map.clone();
         let state = thread.state;
         threads.push(thread);
         let eps = &nfa.states[state as usize].eps;
         for edge in eps.iter().rev() {
-            if !seen[edge.target as usize] {
-                // Tag ops on eps edges are ignored in M2; tag_map inherits
-                // unchanged from the parent thread (empty throughout M2).
-                stack.push(TaggedNfaState {
-                    state: edge.target,
-                    tag_map: SmallVec::new(),
+            if seen[edge.target as usize] {
+                continue;
+            }
+            seen[edge.target as usize] = true;
+            let mut child_tag_map = parent_tag_map.clone();
+            for &reg in &edge.ops {
+                let m = alloc.next();
+                child_tag_map[reg as usize] = Some(m);
+                commands.push(TagCommand {
+                    dst: m,
+                    src: MarkValue::CurrentPos,
                 });
             }
+            stack.push(TaggedNfaState {
+                state: edge.target,
+                tag_map: child_tag_map,
+            });
         }
     }
 
-    TdfaState(threads)
+    (TdfaState(threads), commands)
+}
+
+/// Build an all-`None` tag map of length `num_tags` for seeding a new entry.
+fn empty_tag_map(num_tags: usize) -> SmallVec<[Option<InputMark>; 4]> {
+    let mut v = SmallVec::with_capacity(num_tags);
+    v.resize(num_tags, None);
+    v
+}
+
+/// Synthesize the `finals` row for a (canonicalized) configuration. Reads the
+/// first GOAL thread's `tag_map` — leftmost-greedy / leftmost-first semantics
+/// already baked in by truncate-at-first-GOAL. Non-accepting states get an
+/// empty list.
+fn synthesize_finals(canon: &TdfaState, num_tags: usize) -> SmallVec<[FinalCommand; 4]> {
+    let goal = match canon.0.iter().find(|t| t.state == GOAL_STATE) {
+        Some(t) => t,
+        None => return SmallVec::new(),
+    };
+    let mut out: SmallVec<[FinalCommand; 4]> = SmallVec::new();
+    for tag in 0..num_tags {
+        let src = match goal.tag_map.get(tag).copied().flatten() {
+            Some(mark) => MarkValue::Copy(mark),
+            None => MarkValue::Nil,
+        };
+        out.push(FinalCommand {
+            tag: tag as TagIdx,
+            src,
+        });
+    }
+    out
 }
 
 /// Leftmost-greedy truncation: if any thread is at GOAL, keep `[0..=goal_idx]`
@@ -221,23 +297,44 @@ fn truncate_at_first_goal(mut s: TdfaState) -> TdfaState {
 pub struct Tdfa {
     start: TdfaStateId,
     num_classes: usize,
+    num_tags: usize,
+    num_marks: usize,
     byte_to_class: [u8; 256],
     transitions: Box<[TdfaStateId]>,
     accepting: Box<[bool]>,
+    /// Same shape as `transitions`: indexed by `state * num_classes + class`.
+    /// Each entry is the sequence of `TagCommand`s to apply when that
+    /// transition fires (CurrentPos writes first, then Copy writes from
+    /// canonicalization).
+    transition_commands: Box<[SmallVec<[TagCommand; 4]>]>,
+    /// Per-state finalization. Indexed by state. For accepting states, this is
+    /// `num_tags` commands (one per tag); for non-accepting states, empty.
+    finals: Box<[SmallVec<[FinalCommand; 4]>]>,
+    /// Commands to apply once at scan start (before consuming any input). These
+    /// come from the start state's epsilon closure.
+    entry_commands: SmallVec<[TagCommand; 4]>,
 }
 
 /// Post-construction pass: detect *committed-dead* states (can never reach an
-/// accepting state) and *committed-accept* states (accepting, and every
-/// transitively reachable state is also accepting), merge them into the two
-/// sentinel IDs `TDFA_DEAD_STATE` (0) and `TDFA_COMMITTED_ACCEPT_STATE` (1),
-/// and renumber the survivors to IDs `>= 2`. The executor's hot-path check
-/// becomes `state <= TDFA_LAST_SENTINEL`.
+/// accepting state) and merge them into `TDFA_DEAD_STATE`. Renumber survivors
+/// to IDs `>= 2`. The committed-accept sentinel slot is preserved for
+/// invariants, but folding into it is disabled in M3 because it would discard
+/// per-state `finals` and outbound command lists.
 fn rewrite_with_sentinels(
     old_start: TdfaStateId,
     num_classes: usize,
+    num_tags: usize,
     old_trans: &[TdfaStateId],
     old_accept: &[bool],
-) -> (TdfaStateId, Box<[TdfaStateId]>, Box<[bool]>) {
+    old_trans_cmds: &[SmallVec<[TagCommand; 4]>],
+    old_finals: &[SmallVec<[FinalCommand; 4]>],
+) -> (
+    TdfaStateId,
+    Box<[TdfaStateId]>,
+    Box<[bool]>,
+    Box<[SmallVec<[TagCommand; 4]>]>,
+    Box<[SmallVec<[FinalCommand; 4]>]>,
+) {
     let n = old_accept.len();
 
     // Reverse adjacency — one entry per (src, class), duplicates fine.
@@ -269,32 +366,9 @@ fn rewrite_with_sentinels(
         }
     }
 
-    // (2) committed_accept[s]: accepting AND every transition goes to another
-    // committed_accept. Start from {accepting}, remove any s with a transition
-    // to a non-committed state, propagate removals through predecessors.
-    let mut committed_accept = old_accept.to_vec();
-    let mut q: VecDeque<usize> = VecDeque::new();
-    for s in 0..n {
-        if committed_accept[s] {
-            for c in 0..num_classes {
-                let t = old_trans[s * num_classes + c] as usize;
-                if !old_accept[t] {
-                    committed_accept[s] = false;
-                    q.push_back(s);
-                    break;
-                }
-            }
-        }
-    }
-    while let Some(removed) = q.pop_front() {
-        for &p in &rev[removed] {
-            let p = p as usize;
-            if committed_accept[p] {
-                committed_accept[p] = false;
-                q.push_back(p);
-            }
-        }
-    }
+    // (2) Committed-accept folding disabled in M3: would lose per-state finals
+    // and outbound command lists. The sentinel slot still exists but no real
+    // state remaps to it.
 
     // (3) Remap. Sentinels occupy IDs 0 and 1; everyone else gets IDs >= 2 in
     // original order.
@@ -303,8 +377,6 @@ fn rewrite_with_sentinels(
     for s in 0..n {
         if !reaches_accept[s] {
             remap[s] = TDFA_DEAD_STATE;
-        } else if committed_accept[s] {
-            remap[s] = TDFA_COMMITTED_ACCEPT_STATE;
         } else {
             remap[s] = next_id;
             next_id += 1;
@@ -314,6 +386,9 @@ fn rewrite_with_sentinels(
     let new_n = next_id as usize;
     let mut new_trans = vec![TDFA_DEAD_STATE; new_n * num_classes];
     let mut new_accept = vec![false; new_n];
+    let mut new_trans_cmds: Vec<SmallVec<[TagCommand; 4]>> =
+        vec![SmallVec::new(); new_n * num_classes];
+    let mut new_finals: Vec<SmallVec<[FinalCommand; 4]>> = vec![SmallVec::new(); new_n];
 
     // Sentinels: self-loop; dead non-accepting, committed-accept accepting.
     for c in 0..num_classes {
@@ -323,6 +398,18 @@ fn rewrite_with_sentinels(
     }
     new_accept[TDFA_DEAD_STATE as usize] = false;
     new_accept[TDFA_COMMITTED_ACCEPT_STATE as usize] = true;
+    // The committed-accept sentinel slot needs a finals row even though no real
+    // state currently remaps to it (folding is disabled in M3). Synthesize a
+    // trivial all-Nil finalization so the executor would still produce a valid
+    // (empty-capture) NfaMatch if it ever did land there.
+    let mut sentinel_finals: SmallVec<[FinalCommand; 4]> = SmallVec::new();
+    for tag in 0..num_tags {
+        sentinel_finals.push(FinalCommand {
+            tag: tag as TagIdx,
+            src: MarkValue::Nil,
+        });
+    }
+    new_finals[TDFA_COMMITTED_ACCEPT_STATE as usize] = sentinel_finals;
 
     // Real states: translate transitions through remap.
     for s in 0..n {
@@ -331,9 +418,18 @@ fn rewrite_with_sentinels(
             continue;
         }
         new_accept[new_s] = old_accept[s];
+        new_finals[new_s] = old_finals[s].clone();
         for c in 0..num_classes {
             let t = old_trans[s * num_classes + c] as usize;
             new_trans[new_s * num_classes + c] = remap[t];
+            // Drop command lists on transitions that are now dead — the
+            // executor never inspects them once it sees the sentinel.
+            if remap[t] == TDFA_DEAD_STATE {
+                new_trans_cmds[new_s * num_classes + c] = SmallVec::new();
+            } else {
+                new_trans_cmds[new_s * num_classes + c] =
+                    old_trans_cmds[s * num_classes + c].clone();
+            }
         }
     }
 
@@ -341,6 +437,8 @@ fn rewrite_with_sentinels(
         remap[old_start as usize],
         new_trans.into_boxed_slice(),
         new_accept.into_boxed_slice(),
+        new_trans_cmds.into_boxed_slice(),
+        new_finals.into_boxed_slice(),
     )
 }
 
@@ -348,31 +446,48 @@ impl Tdfa {
     pub fn try_from(nfa: &Nfa) -> Result<Self, Error> {
         let (byte_to_class, num_classes) = compute_byte_classes(nfa);
         let rep_bytes = representative_bytes(&byte_to_class, num_classes);
+        let num_tags = nfa.num_tags();
+
+        let mut alloc = MarkAlloc::new();
 
         let mut state_map: HashMap<TdfaState, TdfaStateId> = HashMap::new();
         let mut transitions: Vec<TdfaStateId> = Vec::new();
         let mut accepting: Vec<bool> = Vec::new();
+        let mut transition_commands: Vec<SmallVec<[TagCommand; 4]>> = Vec::new();
+        let mut finals: Vec<SmallVec<[FinalCommand; 4]>> = Vec::new();
         let mut worklist: Vec<TdfaState> = Vec::new();
 
         // State 0 = dead state (self-loops, not accepting). Represented as
         // the empty TdfaState so that an exhausted step() lands here.
         state_map.insert(TdfaState::default(), TDFA_DEAD_STATE);
         transitions.resize(num_classes, TDFA_DEAD_STATE);
+        transition_commands.resize(num_classes, SmallVec::new());
         accepting.push(false);
+        finals.push(SmallVec::new());
 
         // Start state = priority-ordered closure of {nfa.start}, canonicalized.
+        // The initial closure may emit CurrentPos commands (e.g. the
+        // FULL_MATCH_START write); we capture them as `entry_commands` to fire
+        // once at scan start before any input is consumed.
         let start_seed = TaggedNfaState {
             state: nfa.start(),
-            tag_map: SmallVec::new(),
+            tag_map: empty_tag_map(num_tags),
         };
-        let start_closure = close_priority(nfa, &[start_seed]);
+        let (start_closure, start_current_cmds) = close_priority(&mut alloc, nfa, &[start_seed]);
         let start_closure = truncate_at_first_goal(start_closure);
-        let (canon_start, _cmds) = canonicalize(start_closure);
+        let (canon_start, start_copy_cmds) = canonicalize(start_closure);
+        let mut entry_commands: SmallVec<[TagCommand; 4]> = SmallVec::new();
+        entry_commands.extend(start_current_cmds.into_iter());
+        entry_commands.extend(start_copy_cmds.into_iter());
+
         let start_id: TdfaStateId = 1;
         let start_accepting = canon_start.0.iter().any(|t| t.state == GOAL_STATE);
+        let start_finals = synthesize_finals(&canon_start, num_tags);
         state_map.insert(canon_start.clone(), start_id);
         transitions.resize(transitions.len() + num_classes, TDFA_DEAD_STATE);
+        transition_commands.resize(transition_commands.len() + num_classes, SmallVec::new());
         accepting.push(start_accepting);
+        finals.push(start_finals);
         worklist.push(canon_start);
 
         while let Some(state) = worklist.pop() {
@@ -383,14 +498,15 @@ impl Tdfa {
                 let rep = rep_bytes[class];
 
                 // Priority-ordered step: walk threads in order, take each
-                // byte transition, seed the next closure. Threads with no
-                // outgoing byte edge simply drop out.
+                // byte transition, seed the next closure. Threads carry their
+                // tag_map verbatim across the byte step (byte transitions
+                // don't write registers in the NFA).
                 let mut seeds: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
                 for thread in &state.0 {
                     if let Some(tgt) = nfa.states[thread.state as usize].transition_for_byte(rep) {
                         seeds.push(TaggedNfaState {
                             state: tgt,
-                            tag_map: SmallVec::new(),
+                            tag_map: thread.tag_map.clone(),
                         });
                     }
                 }
@@ -398,9 +514,13 @@ impl Tdfa {
                     continue; // Already TDFA_DEAD_STATE.
                 }
 
-                let next = close_priority(nfa, &seeds);
+                let (next, current_cmds) = close_priority(&mut alloc, nfa, &seeds);
                 let next = truncate_at_first_goal(next);
-                let (canon_next, _cmds) = canonicalize(next);
+                let (canon_next, copy_cmds) = canonicalize(next);
+
+                let mut combined: SmallVec<[TagCommand; 4]> = SmallVec::new();
+                combined.extend(current_cmds.into_iter());
+                combined.extend(copy_cmds.into_iter());
 
                 let target_id = match state_map.get(&canon_next) {
                     Some(&id) => id,
@@ -410,31 +530,65 @@ impl Tdfa {
                             return Err(Error::BudgetExceeded);
                         }
                         let is_accepting = canon_next.0.iter().any(|t| t.state == GOAL_STATE);
+                        let state_finals = synthesize_finals(&canon_next, num_tags);
                         accepting.push(is_accepting);
+                        finals.push(state_finals);
                         transitions.resize(transitions.len() + num_classes, TDFA_DEAD_STATE);
+                        transition_commands
+                            .resize(transition_commands.len() + num_classes, SmallVec::new());
                         state_map.insert(canon_next.clone(), id);
                         worklist.push(canon_next);
                         id
                     }
                 };
                 transitions[row_offset + class] = target_id;
+                transition_commands[row_offset + class] = combined;
             }
         }
 
-        let (start, transitions, accepting) = rewrite_with_sentinels(
+        let num_marks = alloc.count() as usize;
+        let (start, transitions, accepting, transition_commands, finals) = rewrite_with_sentinels(
             start_id,
             num_classes,
+            num_tags,
             &transitions,
             &accepting,
+            &transition_commands,
+            &finals,
         );
 
         Ok(Tdfa {
             start,
             num_classes,
+            num_tags,
+            num_marks,
             byte_to_class,
             transitions,
             accepting,
+            transition_commands,
+            finals,
+            entry_commands,
         })
+    }
+
+    pub fn num_tags(&self) -> usize {
+        self.num_tags
+    }
+
+    pub fn num_marks(&self) -> usize {
+        self.num_marks
+    }
+
+    pub fn transition_commands(&self) -> &[SmallVec<[TagCommand; 4]>] {
+        &self.transition_commands
+    }
+
+    pub fn finals(&self) -> &[SmallVec<[FinalCommand; 4]>] {
+        &self.finals
+    }
+
+    pub fn entry_commands(&self) -> &[TagCommand] {
+        &self.entry_commands
     }
 
     pub fn num_states(&self) -> usize {

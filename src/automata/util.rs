@@ -143,7 +143,7 @@ impl Nfa {
                         let ops_str = edge
                             .ops
                             .iter()
-                            .map(|&reg| format!("r{}", reg))
+                            .map(|&tag| format!("t{}", tag))
                             .collect::<Vec<_>>()
                             .join(",");
                         result.push_str(&format!("    ε [{}] ──> {}\n", ops_str, dest));

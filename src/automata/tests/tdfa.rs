@@ -1,8 +1,9 @@
 //! TDFA construction and execution tests (Milestone 2).
 
 use crate::automata::nfa::Nfa;
+use crate::automata::nfa_backend::execute_nfa;
 use crate::automata::tdfa::Tdfa;
-use crate::automata::tdfa_backend::execute_anchored;
+use crate::automata::tdfa_backend::{execute_anchored, execute_anchored_match};
 use crate::Flags;
 
 fn parse_ir(pattern: &str) -> crate::ir::Regex {
@@ -183,4 +184,101 @@ fn lazy_start_is_not_committed_accept() {
     assert!(t.start() > crate::automata::tdfa::TDFA_LAST_SENTINEL);
     assert!(t.accepting()[t.start() as usize]);
     assert_eq!(end(&t, b"aaa"), Some(0));
+}
+
+// ===== M3: cross-validation against NFA backend =====
+
+fn cross_check(pattern: &str, input: &[u8]) {
+    let re = parse_ir(pattern);
+    let nfa = Nfa::try_from(&re).expect("nfa build");
+    let tdfa = Tdfa::try_from(&nfa).expect("tdfa build");
+    let nfa_result = execute_nfa(&nfa, input);
+    let tdfa_result = execute_anchored_match(&tdfa, input);
+    assert_eq!(
+        nfa_result, tdfa_result,
+        "mismatch on pattern {:?} input {:?}",
+        pattern,
+        std::str::from_utf8(input).unwrap_or("<binary>")
+    );
+}
+
+#[test]
+fn xv_no_captures() {
+    cross_check("abc", b"abc");
+    cross_check("abc", b"abcd");
+    cross_check("abc", b"ab");
+    cross_check("a*", b"");
+    cross_check("a*", b"aaa");
+    cross_check("a*", b"aaab");
+    cross_check("[a-z]+", b"hello");
+    cross_check("[a-z]+", b"abc123");
+    cross_check("(?:ab|cd)+", b"abcdab");
+    cross_check("(?:ab|cd)+", b"x");
+}
+
+#[test]
+fn xv_single_capture_mandatory() {
+    cross_check("(abc)", b"abc");
+    cross_check("(a+)b", b"aaab");
+    cross_check("a(b*)c", b"abbbc");
+    cross_check("a(b*)c", b"ac");
+}
+
+#[test]
+fn xv_single_capture_optional() {
+    cross_check("(a)?b", b"b");
+    cross_check("(a)?b", b"ab");
+    cross_check("(ab)?cd", b"cd");
+    cross_check("(ab)?cd", b"abcd");
+}
+
+#[test]
+fn xv_alternation_with_capture() {
+    cross_check("(a)|(b)", b"a");
+    cross_check("(a)|(b)", b"b");
+}
+
+#[test]
+fn xv_greedy_vs_lazy_capture() {
+    cross_check("(a*)a", b"aaa");
+    // `(a*?)a` is intentionally NOT cross-validated: the NFA backend's
+    // current execute_nfa is leftmost-LONGEST (returns the latest-arriving
+    // GOAL thread), so on "aaa" it produces range 0..3, capture 0..2. The
+    // TDFA is correctly leftmost-first (priority-ordered, no backtrack), so
+    // it produces 0..1 with empty capture. The two backends genuinely
+    // disagree here; aligning them is out of scope for M3.
+}
+
+#[test]
+fn xv_nested_groups() {
+    cross_check("((a)(b))c", b"abc");
+}
+
+#[test]
+fn xv_non_capturing_inside_capturing() {
+    cross_check("(a(?:bc)+d)", b"abcd");
+    cross_check("(a(?:bc)+d)", b"abcbcd");
+}
+
+#[test]
+fn finals_have_one_command_per_tag_when_accepting() {
+    let t = make_tdfa("(abc)");
+    let num_tags = t.num_tags();
+    for s in 0..t.accepting().len() {
+        if t.accepting()[s] {
+            assert_eq!(
+                t.finals()[s].len(),
+                num_tags,
+                "state {s} accepting but finals length != num_tags"
+            );
+        }
+    }
+}
+
+#[test]
+fn entry_commands_write_full_match_start() {
+    // The start closure writes FULL_MATCH_START via an eps op; the resulting
+    // entry_commands must be non-empty.
+    let t = make_tdfa("abc");
+    assert!(!t.entry_commands().is_empty());
 }

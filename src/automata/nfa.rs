@@ -17,20 +17,22 @@ use std::collections::HashMap;
 pub struct Nfa {
     pub(super) start: StateHandle,
     pub(super) states: Box<[State]>,
-    pub(super) num_registers: usize,
+    pub(super) num_tags: usize,
 }
 
 // A handle to a State in the NFA.
 // This is implemented as an index but is remapped to a dense vector later.
 pub type StateHandle = u32;
 
-// An index of a capture register. Each capture group has two registers, for open and close.
-// We reserve the first register pair for the entire match.
-// Thus, the first explicit capture group has index 2 for open and 3 for close.
-pub type RegisterIdx = u32;
+// A semantic capture-position index ("tag" in the TDFA literature). Each
+// capture group has two tags, for open and close. The first pair is reserved
+// for the full match, so the first explicit capture group has index 2 for
+// open and 3 for close. Physical scan-time slots ("registers") are introduced
+// later, after register allocation collapses many tags onto fewer slots.
+pub type TagIdx = u32;
 
-pub const FULL_MATCH_START: RegisterIdx = 0;
-pub const FULL_MATCH_END: RegisterIdx = 1;
+pub const FULL_MATCH_START: TagIdx = 0;
+pub const FULL_MATCH_END: TagIdx = 1;
 
 // A captured position in the text.
 pub type TextPos = usize;
@@ -77,17 +79,18 @@ impl Fragment {
     }
 }
 
-// An epsilon edge. Transitions on empty input, optionally writing to one or more registers.
+// An epsilon edge. Transitions on empty input, optionally writing the
+// current input position to one or more tags.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct EpsEdge {
     // Target of the transition.
     pub target: StateHandle,
-    // Registers to write to on transition.
-    pub ops: SmallVec<[RegisterIdx; 2]>,
+    // Tags to write on traversal.
+    pub ops: SmallVec<[TagIdx; 2]>,
 }
 
 impl EpsEdge {
-    // Create a new epsilon edge going to a target state, with no register writes.
+    // Create a new epsilon edge going to a target state, with no tag writes.
     fn to_target(target: StateHandle) -> Self {
         Self {
             target,
@@ -107,7 +110,7 @@ pub(super) struct State {
 }
 
 impl State {
-    // Add an epsilon transition to another state, with no register writes.
+    // Add an epsilon transition to another state, with no tag writes.
     pub fn add_eps(&mut self, target: StateHandle) {
         self.eps.push(EpsEdge {
             target,
@@ -115,11 +118,11 @@ impl State {
         });
     }
 
-    // Add an epsilon transition to another state, with one register write.
-    pub fn add_eps_with_write(&mut self, target: StateHandle, reg: RegisterIdx) {
+    // Add an epsilon transition to another state, with one tag write.
+    pub fn add_eps_with_write(&mut self, target: StateHandle, tag: TagIdx) {
         self.eps.push(EpsEdge {
             target,
-            ops: smallvec![reg],
+            ops: smallvec![tag],
         });
     }
 
@@ -196,7 +199,7 @@ pub(super) struct Builder {
     // States indexed by handle.
     pub(super) states: Vec<State>,
     pub(super) state_budget: usize,
-    pub(super) num_registers: usize,
+    pub(super) num_tags: usize,
     pub(super) unicode: bool,
 }
 
@@ -213,7 +216,7 @@ impl Builder {
         Builder {
             states: vec![State::goal()],
             state_budget,
-            num_registers: 2, // Initially two registers for full match start and end
+            num_tags: 2, // FULL_MATCH_START and FULL_MATCH_END
             unicode,
         }
     }
@@ -281,7 +284,7 @@ impl Builder {
         &mut self.states[idx as usize]
     }
 
-    /// Add epsilons from a handle to more handles, without register writes.
+    /// Add epsilons from a handle to more handles, without tag writes.
     fn connect_eps(&mut self, from: StateHandle, to: impl IntoIterator<Item = StateHandle>) {
         let edges = to.into_iter().map(EpsEdge::to_target);
         self.get(from).eps.extend(edges);
@@ -301,8 +304,8 @@ impl Builder {
         }
     }
 
-    /// Add a single register write on an epsilon transition from a list of handles, producing a new handle.
-    fn join_with_write(&mut self, from: &[StateHandle], reg: RegisterIdx) -> Result<StateHandle> {
+    /// Add a single tag write on an epsilon transition from a list of handles, producing a new handle.
+    fn join_with_write(&mut self, from: &[StateHandle], tag: TagIdx) -> Result<StateHandle> {
         assert!(!from.is_empty());
         let target = self.make()?;
         // Join the existing states into one first, if we have more than one.
@@ -313,7 +316,7 @@ impl Builder {
             self.join_eps(from, joined);
             joined
         };
-        self.get(joined).add_eps_with_write(target, reg);
+        self.get(joined).add_eps_with_write(target, tag);
         Ok(target)
     }
 
@@ -661,20 +664,21 @@ impl Builder {
         contents: &Node,
         group_id: CaptureGroupID,
     ) -> Result<Fragment> {
-        // The group ID is the capture group index - i.e. a value of 0 means the first capture group (NOT the entire match).
-        // Convert it to our register indexes. Here 0 and 1 correspond to the full match.
-        let open_reg = (group_id as RegisterIdx + 1) * 2;
-        let close_reg = open_reg + 1;
+        // The group ID is the capture group index — value 0 is the first capture
+        // group, NOT the entire match. Tags 0 and 1 are reserved for the full
+        // match, so group N occupies tags (N+1)*2 (open) and +1 (close).
+        let open_tag = (group_id as TagIdx + 1) * 2;
+        let close_tag = open_tag + 1;
 
-        // Record if we have a new largest number of registers.
-        self.num_registers = self.num_registers.max(close_reg as usize + 1);
+        // Record if we have a new largest number of tags.
+        self.num_tags = self.num_tags.max(close_tag as usize + 1);
 
         let open_group = self.make()?;
         let body = self.build(contents)?;
 
         self.get(open_group)
-            .add_eps_with_write(body.start, open_reg);
-        let close_group = self.join_with_write(&body.ends, close_reg)?;
+            .add_eps_with_write(body.start, open_tag);
+        let close_group = self.join_with_write(&body.ends, close_tag)?;
         Ok(Fragment::new(open_group, [close_group]))
     }
 }
@@ -701,7 +705,7 @@ impl Nfa {
         Ok(Nfa {
             start,
             states: b.states.into_boxed_slice(),
-            num_registers: b.num_registers,
+            num_tags: b.num_tags,
         })
     }
 
@@ -713,7 +717,7 @@ impl Nfa {
         self.start
     }
 
-    pub fn num_registers(&self) -> usize {
-        self.num_registers
+    pub fn num_tags(&self) -> usize {
+        self.num_tags
     }
 }
