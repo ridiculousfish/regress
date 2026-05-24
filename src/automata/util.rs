@@ -1,7 +1,6 @@
 //! Conversion of IR to non-deterministic finite automata.
 
 use crate::automata::nfa::{ByteRange, GOAL_STATE, Nfa, StateHandle};
-use crate::ir::Node;
 use core::fmt;
 
 /// Format a byte range in a human-readable way
@@ -29,86 +28,6 @@ pub(super) fn format_byte(byte: u8) -> String {
         b'\'' => "'\\''".to_string(),
         c if c.is_ascii_graphic() => format!("'{}'", byte as char),
         _ => format!("0x{:02X}", byte),
-    }
-}
-
-/// Get a descriptive name for a Node variant
-pub(super) fn node_description(node: &Node) -> String {
-    fn val_or_inf(v: Option<usize>) -> String {
-        match v {
-            Some(val) => val.to_string(),
-            None => "∞".to_string(),
-        }
-    }
-
-    match node {
-        Node::Empty => "Empty".to_string(),
-        Node::Goal => "Goal".to_string(),
-        Node::Char { c } => format!(
-            "Char({})",
-            match char::from_u32(*c) {
-                Some(ch) => format!("'{ch}'"),
-                None => format!("U+{c:04X}"),
-            }
-        ),
-        Node::ByteSequence(bytes) => format!("ByteSequence({:?})", bytes),
-        Node::ByteSet(bytes) => format!("ByteSet({} bytes)", bytes.len()),
-        Node::CharSet(chars) => format!("CharSet({} chars)", chars.len()),
-        Node::StringSet {
-            alternatives,
-            icase,
-        } => {
-            format!("StringSet count={}, icase={}", alternatives.len(), icase)
-        }
-        Node::Cat(nodes) => format!("Cat({} nodes)", nodes.len()),
-        Node::Alt(_, _) => "Alt".to_string(),
-        Node::MatchAny => "MatchAny".to_string(),
-        Node::MatchAnyExceptLineTerminator => "MatchAnyExceptLineTerminator".to_string(),
-        &Node::Anchor {
-            anchor_type,
-            multiline,
-        } => format!(
-            "Anchor({:?}{})",
-            anchor_type,
-            if multiline { ", multiline" } else { "" }
-        ),
-        Node::WordBoundary {
-            invert,
-            unicode_icase,
-        } => format!(
-            "WordBoundary(invert={}, unicode_icase={})",
-            invert, unicode_icase
-        ),
-        Node::CaptureGroup { id, name, .. } => {
-            if let Some(name) = name {
-                format!("CaptureGroup({}, {:?})", id, name)
-            } else {
-                format!("CaptureGroup({})", id)
-            }
-        }
-        Node::BackRef { group, icase } => format!("BackRef(group={}, icase={})", group, icase),
-        Node::Bracket(_) => "Bracket".to_string(),
-        Node::LookaroundAssertion {
-            negate, backwards, ..
-        } => format!(
-            "LookaroundAssertion({}{})",
-            if *negate { "negative " } else { "" },
-            if *backwards {
-                "lookbehind"
-            } else {
-                "lookahead"
-            }
-        ),
-        Node::Loop { quant, .. } => {
-            format!("Loop(min={}, max={})", quant.min, val_or_inf(quant.max))
-        }
-        Node::Loop1CharBody { quant, .. } => {
-            format!(
-                "Loop1CharBody(min={}, max={})",
-                quant.min,
-                val_or_inf(quant.max)
-            )
-        }
     }
 }
 

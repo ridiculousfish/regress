@@ -118,6 +118,17 @@ impl CodePointSet {
         CodePointSet { ivs: Vec::new() }
     }
 
+    /// Return a set containing every Unicode scalar value — i.e. every code
+    /// point except the surrogate range (U+D800..=U+DFFF).
+    pub fn all_unicode() -> CodePointSet {
+        CodePointSet {
+            ivs: vec![
+                Interval::new(0, '\u{D7FF}' as u32),
+                Interval::new('\u{E000}' as u32, char::MAX as u32),
+            ],
+        }
+    }
+
     pub(crate) fn clear(&mut self) {
         self.ivs.clear();
     }
