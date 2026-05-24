@@ -295,23 +295,46 @@ fn truncate_at_first_goal(mut s: TdfaState) -> TdfaState {
 
 #[derive(Debug)]
 pub struct Tdfa {
-    start: TdfaStateId,
-    num_classes: usize,
-    num_tags: usize,
+    start: TdfaStateId, // Start state ID.
+    num_classes: usize, // Number of byte equivalence classes.
+    num_tags: usize,    // Number of semantic tags (capture positions).
+
+    // Size of the executor's memory file. Each `InputMark(N)` that
+    // appears in any TagCommand or FinalCommand is an index into a flat array
+    // of this size. TODO: register allocation.
     num_marks: usize,
+
+    // 256-entry table mapping each byte to its class ID. The executor's hot
+    // loop does `class = byte_to_class[byte]` then `transitions[state *
+    // num_classes + class]` to step.
     byte_to_class: [u8; 256],
+
+    // Dense transition table. Indexed by `state * num_classes + class`. The
+    // value is the destination state ID. Cells with no real outgoing edge
+    // hold `TDFA_DEAD_STATE` so the executor's short-circuit check works
+    // without per-cell predicates.
     transitions: Box<[TdfaStateId]>,
+
+    // Per-state accepting flag. Indexed by state ID. True if the regex
+    // matches when scanning ends in that state.
     accepting: Box<[bool]>,
-    /// Same shape as `transitions`: indexed by `state * num_classes + class`.
-    /// Each entry is the sequence of `TagCommand`s to apply when that
-    /// transition fires (CurrentPos writes first, then Copy writes from
-    /// canonicalization).
+
+    // Tag commands to apply when a transition fires. Same shape as
+    // `transitions` (indexed by `state * num_classes + class`). Each entry
+    // is a list of `TagCommand`s — CurrentPos writes first, then Copy writes
+    // from canonicalization. May be empty when a transition has no tag effect.
     transition_commands: Box<[TagCommandList]>,
-    /// Per-state finalization. Indexed by state. For accepting states, this is
-    /// `num_tags` commands (one per tag); for non-accepting states, empty.
+
+    // Per-state finalization commands. Indexed by state ID. For accepting
+    // states this is `num_tags` commands (one per tag) describing how to read
+    // the final capture positions out of the mark file. For non-accepting
+    // states it's empty. Run once at scan end against the last-accepted
+    // state's mark snapshot.
     finals: Box<[SmallVec<[FinalCommand; 4]>]>,
-    /// Commands to apply once at scan start (before consuming any input). These
-    /// come from the start state's epsilon closure.
+
+    // Commands to apply once at scan start, before consuming any input. These
+    // arise from the start state's epsilon closure — e.g. the FULL_MATCH_START
+    // write that records position 0. Run by the executor before the byte loop.
     entry_commands: TagCommandList,
 }
 

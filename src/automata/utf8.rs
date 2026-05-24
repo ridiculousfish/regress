@@ -57,6 +57,8 @@ impl Utf8Bucket {
     }
 }
 
+// The collection of UTF8 buckets.
+// Within each bucket, byte sequences in the cartesian product of byte ranges exactly covers the code points.
 #[rustfmt::skip]
 const ALL_UTF8_BUCKETS: &[Utf8Bucket] = &[
     // 1-byte: U+0000..U+007F
@@ -81,80 +83,86 @@ const ALL_UTF8_BUCKETS: &[Utf8Bucket] = &[
 
 pub type ByteRangePath = SmallVec<[ByteRange; 4]>;
 
-// Decode a UTF-8 byte slice to a codepoint.
-fn decode_utf8_cp(bytes: &[u8]) -> u32 {
-    core::str::from_utf8(bytes).unwrap().chars().next().unwrap() as u32
-}
-
+// Given a closed interval of code points and a UTF8 bucket, segment the interval
+// into sub-intervals whose UTF-8 encodings are "rectangles": that is, the
+// cartesian product of all byte ranges covers the code points in the interval.
+// Add the corresponding paths to `paths`.
+#[allow(clippy::needless_range_loop)]
 fn segment_interval_for_utf8(
-    start: u32,
-    end: u32,
+    start: Utf8Buf,
+    end: Utf8Buf,
     bucket: &Utf8Bucket,
     paths: &mut Vec<ByteRangePath>,
 ) {
-    let start_bytes = Utf8Buf::from_cp(start);
-    let end_bytes = Utf8Buf::from_cp(end);
-    let n = start_bytes.len();
-    debug_assert_eq!(n, end_bytes.len());
+    debug_assert_eq!(
+        start.len, end.len,
+        "Start and end must have the same UTF-8 length"
+    );
+    let n = start.len as usize;
 
-    // Find the first byte position where start and end differ.
-    let split_level = match (0..n).find(|&i| start_bytes[i] != end_bytes[i]) {
-        None => {
-            // start == end: emit a single-codepoint path.
-            let path = start_bytes
-                .iter()
-                .map(|&b| ByteRange { start: b, end: b })
-                .collect();
-            paths.push(path);
-            return;
-        }
-        Some(level) => level,
-    };
+    // Find the first byte position where start and end differ, or the length if never.
+    let split_idx = (0..n).find(|&i| start[i] != end[i]).unwrap_or(n);
 
-    if split_level == n - 1 {
-        // Only the last byte varies; this is a valid rectangle, emit directly.
-        let path = start_bytes
+    // We expect start's split byte to be before end's split byte.
+    debug_assert!(
+        split_idx == n || start[split_idx] < end[split_idx],
+        "Expected start < end at split level"
+    );
+
+    // Pull out for convenience.
+    let bucket_ranges = bucket.byte_ranges;
+
+    // If the interval is already a rectangle, emit it directly. The interval
+    // is a rectangle iff for every byte after split_idx (possibly none),
+    // start has the bucket minimum and end has the bucket maximum
+    // (so start[i]..=end[i] equals the full bucket continuation range).
+    let is_rectangle = (split_idx + 1..n)
+        .all(|i| start[i] == bucket_ranges[i].start && end[i] == bucket_ranges[i].end);
+    if is_rectangle {
+        let path = start
             .iter()
-            .zip(end_bytes.iter())
+            .zip(end.iter())
             .map(|(&s, &e)| ByteRange { start: s, end: e })
             .collect();
         paths.push(path);
         return;
+    };
+
+    // start and end differ at split_level, with at least one more byte after it.
+    // We split [start, end] into sub-intervals "leading", "middle", and "trailing",
+    // where "leading" shares start's split-level byte, "trailing" shares end's split-level byte, and "middle"
+    // is any bytes in between (possibly none).
+    // Note leading and trailing may be "ragged" (possibly not rectangular) but "middle" is a rectangle.
+    // max_start - the largest byte sequence in the bucket that shares start's split-level byte.
+    // min_end - the smallest byte sequence in the bucket that shares end's split-level byte.
+    let mut max_start = start;
+    let mut min_end = end;
+    for i in (split_idx + 1)..n {
+        max_start.buf[i] = bucket_ranges[i].end;
+        min_end.buf[i] = bucket_ranges[i].start;
     }
 
-    // Split at split_level into three parts.
-    //
-    // max_start: same bytes as `start` through split_level, remaining bytes at bucket max.
-    // min_end:   same bytes as `end`   through split_level, remaining bytes at bucket min.
-    let mut max_start_buf = [0u8; 4];
-    let mut min_end_buf = [0u8; 4];
-    max_start_buf[..n].copy_from_slice(&start_bytes);
-    min_end_buf[..n].copy_from_slice(&end_bytes);
-    for i in (split_level + 1)..n {
-        max_start_buf[i] = bucket.byte_ranges[i].end;
-        min_end_buf[i] = bucket.byte_ranges[i].start;
-    }
-    let max_start = decode_utf8_cp(&max_start_buf[..n]);
-    let min_end = decode_utf8_cp(&min_end_buf[..n]);
-
-    // Part 1: [start .. max_start]
+    // Leading: [start, max_start]. Splitting must happen at some byte
+    // after split_idx since the split-level byte is now shared.
     segment_interval_for_utf8(start, max_start, bucket, paths);
 
-    // Part 2: [max_start+1 .. min_end-1]
-    // By construction, bytes after split_level are bucket-min on the left and bucket-max
-    // on the right, so this is always a valid rectangle — emit directly.
-    if max_start + 1 < min_end {
-        let p2_start = Utf8Buf::from_cp(max_start + 1);
-        let p2_end = Utf8Buf::from_cp(min_end - 1);
-        let path = p2_start
-            .iter()
-            .zip(p2_end.iter())
-            .map(|(&s, &e)| ByteRange { start: s, end: e })
-            .collect();
+    // Middle: [max_start+1, min_end-1]. May be empty.
+    if start[split_idx] < end[split_idx] - 1 {
+        let mut path = ByteRangePath::new();
+        // Before split_idx: bytes agree with both endpoints.
+        // At split_idx: strictly between the two endpoints' split-level bytes.
+        // After split_idx: full bucket continuation range.
+        for i in 0..split_idx {
+            path.push(ByteRange::new(start[i], end[i]));
+        }
+        path.push(ByteRange::new(start[split_idx] + 1, end[split_idx] - 1));
+        for i in (split_idx + 1)..n {
+            path.push(bucket_ranges[i]);
+        }
         paths.push(path);
     }
 
-    // Part 3: [min_end .. end]
+    // Trailing: [min_end, end]. Splitting must happen after split_level for the same reason as leading.
     segment_interval_for_utf8(min_end, end, bucket, paths);
 }
 
@@ -166,7 +174,12 @@ pub fn utf8_paths_from_code_point_set(cps: &CodePointSet) -> Vec<ByteRangePath> 
             let last = iv.last.min(bucket.ivs.last);
             debug_assert!(bucket.contains(&Utf8Buf::from_cp(first)));
             debug_assert!(bucket.contains(&Utf8Buf::from_cp(last)));
-            segment_interval_for_utf8(first, last, bucket, &mut paths);
+            segment_interval_for_utf8(
+                Utf8Buf::from_cp(first),
+                Utf8Buf::from_cp(last),
+                bucket,
+                &mut paths,
+            );
         }
     }
     paths
@@ -806,5 +819,64 @@ mod tests {
         }
 
         println!("Direct UTF-8 path construction test completed - no invalid ranges found");
+    }
+
+    #[test]
+    fn test_matches_all_code_points_trie() {
+        use crate::automata::nfa::{Builder, StateHandle};
+        use crate::codepointset::CODE_POINT_MAX;
+
+        let mut all = CodePointSet::new();
+        all.add(Interval::new(0, CODE_POINT_MAX));
+
+        let mut b_trie = Builder::new(usize::MAX, true);
+        let frag_trie = b_trie.build_from_code_point_set(&all).unwrap();
+
+        fn walk(
+            states: &[crate::automata::nfa::State],
+            start: StateHandle,
+            bytes: &[u8],
+        ) -> Option<StateHandle> {
+            let mut s = start;
+            for &byte in bytes {
+                s = states[s as usize].transition_for_byte(byte)?;
+            }
+            Some(s)
+        }
+
+        // All valid UTF-8 codepoints must land on the trie's end state.
+        for cp in 0u32..=0x10_FFFF {
+            let Some(c) = char::from_u32(cp) else {
+                continue;
+            };
+            let mut buf = [0u8; 4];
+            let bytes = c.encode_utf8(&mut buf).as_bytes();
+
+            assert_eq!(
+                walk(&b_trie.states, frag_trie.start, bytes),
+                Some(frag_trie.ends[0]),
+                "trie rejected valid U+{cp:04X}"
+            );
+        }
+
+        // Representative invalid byte sequences must not reach the end state.
+        let invalid: &[&[u8]] = &[
+            &[0xC0, 0x80],             // overlong 2-byte
+            &[0xE0, 0x80, 0x80],       // overlong 3-byte
+            &[0xF0, 0x80, 0x80, 0x80], // overlong 4-byte
+            &[0xED, 0xA0, 0x80],       // surrogate U+D800
+            &[0xF5, 0x80, 0x80, 0x80], // lead byte out of range
+            &[0xFF],                   // invalid lead
+            &[0x80],                   // lone continuation
+            &[0xC2],                   // truncated 2-byte
+            &[0xE0, 0xA0],             // truncated 3-byte
+        ];
+        for bytes in invalid {
+            assert_ne!(
+                walk(&b_trie.states, frag_trie.start, bytes),
+                Some(frag_trie.ends[0]),
+                "trie accepted invalid {bytes:02X?}"
+            );
+        }
     }
 }

@@ -7,6 +7,7 @@ pub mod nfa_backend;
 mod nfa_optimize;
 pub mod tdfa;
 pub mod tdfa_backend;
+mod trie;
 mod utf8;
 pub mod util;
 

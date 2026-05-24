@@ -40,7 +40,7 @@ pub(super) fn compute_byte_classes(nfa: &Nfa) -> ([u8; 256], usize) {
     let mut cut_bitmap = [false; 256];
     cut_bitmap[0] = true;
     for state in nfa.states.iter() {
-        for &(ref range, _) in &state.transitions {
+        for (range, _) in &state.transitions {
             cut_bitmap[range.start as usize] = true;
             if range.end < 255 {
                 cut_bitmap[range.end as usize + 1] = true;
@@ -213,4 +213,3 @@ impl Dfa {
         &self.accepting
     }
 }
-
