@@ -1,5 +1,8 @@
 //! Conversion of IR to non-deterministic finite automata.
 
+#[cfg(not(feature = "std"))]
+use alloc::{boxed::Box, vec::Vec};
+
 use crate::automata::nfa::{ByteRange, GOAL_STATE, Nfa, StateHandle};
 use core::fmt;
 
@@ -191,5 +194,91 @@ impl fmt::Display for Nfa {
             }
         }
         Ok(())
+    }
+}
+
+/// A fixed bitset.
+/// This doesn't separately track the size of the set: it rounds up to the nearest multiple of 64.
+pub struct BitSet(Box<[u64]>);
+
+impl BitSet {
+    // Construct a new zeroed bitset.
+    pub fn new(num_bits: usize) -> Self {
+        let words = num_bits.div_ceil(64);
+        // TODO: avoid potential double allocation.
+        Self(vec![0u64; words].into_boxed_slice())
+    }
+
+    // Test if the bit at the given index is set.
+    #[inline(always)]
+    pub fn test(&self, idx: usize) -> bool {
+        let word_idx = idx / 64;
+        let bit_idx = idx % 64;
+        (self.0[word_idx] & (1 << bit_idx)) != 0
+    }
+
+    // Set the bit at the given index.
+    #[inline(always)]
+    pub fn set(&mut self, idx: usize) {
+        let word_idx = idx / 64;
+        let bit_idx = idx % 64;
+        self.0[word_idx] |= 1 << bit_idx;
+    }
+
+    // Clear the bit at the given index.
+    #[inline(always)]
+    pub fn clear(&mut self, idx: usize) {
+        let word_idx = idx / 64;
+        let bit_idx = idx % 64;
+        self.0[word_idx] &= !(1 << bit_idx);
+    }
+
+    // Clear every bit.
+    #[inline(always)]
+    pub fn clear_all(&mut self) {
+        self.0.fill(0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bitset() {
+        let interesting = [0, 1, 32, 62, 63, 64, 65, 127, 128, 191];
+        let mut bs = BitSet::new(200);
+        for i in 0..200 {
+            assert!(!bs.test(i), "bit {} should start cleared", i);
+        }
+        for &i in &interesting {
+            bs.set(i);
+        }
+        for i in 0..200 {
+            assert_eq!(bs.test(i), interesting.contains(&i), "bit {}", i);
+        }
+
+        bs.set(63);
+        bs.clear(63);
+        assert!(!bs.test(63));
+        assert!(bs.test(62));
+        assert!(bs.test(64));
+        bs.clear(50);
+        assert!(!bs.test(50));
+
+        // Set all, then clear all.
+        let mut bs = BitSet::new(200);
+        for i in 0..200 {
+            bs.set(i);
+        }
+        for i in 0..200 {
+            assert!(bs.test(i));
+        }
+        for i in 0..200 {
+            bs.clear(i);
+        }
+        for i in 0..200 {
+            assert!(!bs.test(i));
+        }
     }
 }

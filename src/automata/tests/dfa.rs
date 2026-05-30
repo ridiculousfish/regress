@@ -1,7 +1,7 @@
 use crate::automata::dfa::Dfa;
 use crate::automata::dfa_backend::execute_anchored;
 use crate::automata::nfa::Nfa;
-use crate::automata::nfa_backend::execute_nfa;
+use crate::automata::nfa_backend::execute as execute_nfa;
 use crate::Flags;
 
 fn parse_ir(pattern: &str) -> crate::ir::Regex {

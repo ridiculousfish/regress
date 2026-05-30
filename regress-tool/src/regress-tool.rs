@@ -111,21 +111,25 @@ fn format_nfa_error(err: &backends::NfaError) -> String {
     }
 }
 
-fn format_match(r: &regress::Match, input: &str) -> String {
+fn format_match(
+    range: &core::ops::Range<usize>,
+    captures: &[Option<core::ops::Range<usize>>],
+    input: &str,
+) -> String {
     let mut result = String::new();
 
     // Show the full matched range
     result.push_str(&format!(
         "\"{}\" ({}..{})",
-        &input[r.range()],
-        r.range().start,
-        r.range().end
+        &input[range.clone()],
+        range.start,
+        range.end
     ));
 
     // Show capture groups if any exist
-    if !r.captures.is_empty() {
+    if !captures.is_empty() {
         result.push_str(", captures: [");
-        for (i, cg) in r.captures.iter().enumerate() {
+        for (i, cg) in captures.iter().enumerate() {
             if i > 0 {
                 result.push_str(", ");
             }
@@ -152,7 +156,7 @@ fn run_bt(re: &Regex, input: &str) {
         let count = 1 + matches.count();
         println!(
             "bt:    Match: {}, total: {}",
-            format_match(&res, input),
+            format_match(&res.range, &res.captures, input),
             count
         );
     } else {
@@ -168,7 +172,7 @@ fn run_pikevm(re: &Regex, input: &str) {
         let count = 1 + matches.count();
         println!(
             "pikevm: Match: {}, total: {}",
-            format_match(&res, input),
+            format_match(&res.range, &res.captures, input),
             count
         );
     } else {
@@ -178,12 +182,11 @@ fn run_pikevm(re: &Regex, input: &str) {
 
 #[cfg(feature = "nfa")]
 fn run_tnfa(nfa: &Nfa, input: &str) {
-    match nfa_backend::execute_nfa(nfa, input.as_bytes()) {
+    match nfa_backend::execute(nfa, input.as_bytes()) {
         Some(m) => {
-            let text = &input[m.range.clone()];
             println!(
-                "tnfa:  Match: \"{}\" ({}..{}), total: 1",
-                text, m.range.start, m.range.end
+                "tnfa:  Match: {}, total: 1",
+                format_match(&m.range, &m.captures, input)
             );
         }
         None => println!("tnfa:  No match"),
@@ -192,12 +195,11 @@ fn run_tnfa(nfa: &Nfa, input: &str) {
 
 #[cfg(feature = "nfa")]
 fn run_tdfa(tdfa: &Tdfa, input: &str) {
-    match tdfa_backend::execute_anchored_match(tdfa, input.as_bytes()) {
+    match tdfa_backend::execute(tdfa, input.as_bytes()) {
         Some(m) => {
-            let text = &input[m.range.clone()];
             println!(
-                "tdfa:  Match: \"{}\" ({}..{}), total: 1",
-                text, m.range.start, m.range.end
+                "tdfa:  Match: {}, total: 1",
+                format_match(&m.range, &m.captures, input)
             );
         }
         None => println!("tdfa:  No match"),
