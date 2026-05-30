@@ -171,10 +171,10 @@ fn group_modifier_backref_icase_tc(tc: TestConfig) {
     // Backreference outside the modifier group should NOT inherit icase.
     // (?i:(a))\1 — \1 is outside (?i:...), so it must match the captured text exactly.
     let re = tc.compile(r"(?i:(a))\1");
-    assert!(re.find("aa").is_some());  // captures 'a', backref matches 'a'
-    assert!(re.find("AA").is_some());  // captures 'A', backref matches 'A'
-    assert!(re.find("aA").is_none());  // captures 'a', backref needs 'a' but gets 'A'
-    assert!(re.find("Aa").is_none());  // captures 'A', backref needs 'A' but gets 'a'
+    assert!(re.find("aa").is_some()); // captures 'a', backref matches 'a'
+    assert!(re.find("AA").is_some()); // captures 'A', backref matches 'A'
+    assert!(re.find("aA").is_none()); // captures 'a', backref needs 'a' but gets 'A'
+    assert!(re.find("Aa").is_none()); // captures 'A', backref needs 'A' but gets 'a'
 
     // Verify that without modifier group, global icase flag works on backrefs.
     let re = tc.compilef(r"(a)\1", "i");

@@ -867,7 +867,10 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         next_or_bt!(true)
                     }
 
-                    &Insn::BackRef { group: cg_idx, icase } => {
+                    &Insn::BackRef {
+                        group: cg_idx,
+                        icase,
+                    } => {
                         let cg = self.s.groups.mat(cg_idx as usize);
                         // Backreferences to a capture group that did not match always succeed (ES5
                         // 15.10.2.9).

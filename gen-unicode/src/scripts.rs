@@ -242,7 +242,7 @@ impl GenUnicode {
             let test_name = script.long.to_lowercase();
 
             self.scope_tests
-                .new_fn(&format!("unicode_escape_property_script_{test_name}"))
+                .new_fn(format!("unicode_escape_property_script_{test_name}"))
                 .attr("test")
                 .line(format!(
                     "test_with_configs(unicode_escape_property_script_{test_name}_tc)"
@@ -250,7 +250,7 @@ impl GenUnicode {
 
             let f = self
                 .scope_tests
-                .new_fn(&format!("unicode_escape_property_script_{test_name}_tc"))
+                .new_fn(format!("unicode_escape_property_script_{test_name}_tc"))
                 .arg("tc", "TestConfig");
 
             // Exclude surrogate code points (U+D800..U+DFFF) — they are not valid

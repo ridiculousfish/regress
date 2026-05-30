@@ -17,15 +17,13 @@ use crate::{
 use crate::pikevm;
 use crate::util::to_char_sat;
 
-use core::{fmt, iter::FusedIterator, str::FromStr};
 #[cfg(not(feature = "std"))]
-use {
-    alloc::{
-        boxed::Box,
-        string::{String, ToString},
-        vec::Vec,
-    },
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    vec::Vec,
 };
+use core::{fmt, iter::FusedIterator, str::FromStr};
 
 pub use parse::Error;
 
