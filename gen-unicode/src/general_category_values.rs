@@ -46,7 +46,7 @@ impl GenUnicode {
             ));
 
             self.scope
-                .new_fn(&format!("{}_ranges", orig_name.to_lowercase()))
+                .new_fn(format!("{}_ranges", orig_name.to_lowercase()))
                 .vis("pub(crate)")
                 .ret("&'static [Interval]")
                 .line(format!("&{}", orig_name.to_uppercase()))
@@ -93,7 +93,7 @@ impl GenUnicode {
             ));
 
             self.scope
-                .new_fn(&format!("{}_ranges", orig_name.to_lowercase()))
+                .new_fn(format!("{}_ranges", orig_name.to_lowercase()))
                 .vis("pub(crate)")
                 .ret("&'static [Interval]")
                 .line(format!("&{}", orig_name.to_uppercase()))
@@ -151,7 +151,7 @@ impl GenUnicode {
             char_map.insert(orig_name, chars.clone());
 
             self.scope_tests
-                .new_fn(&format!(
+                .new_fn(format!(
                     "unicode_escape_property_gc_{}",
                     name.to_lowercase()
                 ))
@@ -161,7 +161,7 @@ impl GenUnicode {
                     name.to_lowercase()
                 ));
 
-            let f = self.scope_tests.new_fn(&format!(
+            let f = self.scope_tests.new_fn(format!(
                 "unicode_escape_property_gc_{}_tc",
                 name.to_lowercase()
             ));
@@ -225,7 +225,7 @@ impl GenUnicode {
             }
 
             self.scope_tests
-                .new_fn(&format!(
+                .new_fn(format!(
                     "unicode_escape_property_gc_{}",
                     name.to_lowercase()
                 ))
@@ -235,7 +235,7 @@ impl GenUnicode {
                     name.to_lowercase()
                 ));
 
-            let f = self.scope_tests.new_fn(&format!(
+            let f = self.scope_tests.new_fn(format!(
                 "unicode_escape_property_gc_{}_tc",
                 name.to_lowercase()
             ));

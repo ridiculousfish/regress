@@ -124,7 +124,7 @@ impl GenUnicode {
             ));
 
             self.scope
-                .new_fn(&format!("{}_sets", name.to_lowercase()))
+                .new_fn(format!("{}_sets", name.to_lowercase()))
                 .vis("pub(crate)")
                 .ret("&'static [&'static [u32]]")
                 .line(format!("{}.as_slice()", name.to_uppercase()))

@@ -1627,10 +1627,7 @@ where
                             } else {
                                 cps = unicode::add_icase_code_points(cps);
                             }
-                            Ok(ir::Node::Bracket(BracketContents {
-                                invert: false,
-                                cps,
-                            }))
+                            Ok(ir::Node::Bracket(BracketContents { invert: false, cps }))
                         } else {
                             Ok(ir::Node::Bracket(BracketContents {
                                 invert: negate,
@@ -1662,7 +1659,10 @@ where
             '1'..='9' if self.flags.unicode => {
                 let group = self.try_consume_decimal_integer_literal().unwrap();
                 if group <= self.group_count_max as usize {
-                    Ok(ir::Node::BackRef { group: group as u32, icase: self.flags.icase })
+                    Ok(ir::Node::BackRef {
+                        group: group as u32,
+                        icase: self.flags.icase,
+                    })
                 } else {
                     error("Invalid character escape")
                 }
@@ -1676,7 +1676,10 @@ where
                 let group = self.try_consume_decimal_integer_literal().unwrap();
 
                 if group <= self.group_count_max as usize {
-                    Ok(ir::Node::BackRef { group: group as u32, icase: self.flags.icase })
+                    Ok(ir::Node::BackRef {
+                        group: group as u32,
+                        icase: self.flags.icase,
+                    })
                 } else {
                     self.input = input;
                     let c = self.consume_character_escape()?;
@@ -1708,16 +1711,23 @@ where
                     0 => unreachable!("Should not have empty indices for group name"),
                     1 => {
                         // Common case of a backref matching a single group.
-                        ir::Node::BackRef { group: group_indices[0] + 1, icase: self.flags.icase }
+                        ir::Node::BackRef {
+                            group: group_indices[0] + 1,
+                            icase: self.flags.icase,
+                        }
                     }
                     _ => {
                         // Unusual case of multiple groups sharing a name: the backref should try each in turn.
                         // Lower to alternations of backreferences. Reverse to keep it right-associative: a | (b | (c | d))...
                         let icase = self.flags.icase;
-                        let backrefs = group_indices
-                            .iter()
-                            .rev()
-                            .map(|group_index| ir::Node::BackRef { group: *group_index + 1, icase });
+                        let backrefs =
+                            group_indices
+                                .iter()
+                                .rev()
+                                .map(|group_index| ir::Node::BackRef {
+                                    group: *group_index + 1,
+                                    icase,
+                                });
                         backrefs
                             .reduce(|right, left| ir::Node::Alt(Box::new(left), Box::new(right)))
                             .unwrap()

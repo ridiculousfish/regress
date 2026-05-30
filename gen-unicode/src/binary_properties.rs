@@ -38,7 +38,7 @@ impl GenUnicode {
             ));
 
             self.scope
-                .new_fn(&format!("{}_ranges", orig_name.to_lowercase()))
+                .new_fn(format!("{}_ranges", orig_name.to_lowercase()))
                 .vis("pub(crate)")
                 .ret("&'static [Interval]")
                 .line(format!("&{}", orig_name.to_uppercase()))
@@ -141,7 +141,7 @@ impl GenUnicode {
             let chars = ucd_file.chars(orig_name, self);
 
             self.scope_tests
-                .new_fn(&format!(
+                .new_fn(format!(
                     "unicode_escape_property_binary_{}",
                     name.to_lowercase()
                 ))
@@ -151,7 +151,7 @@ impl GenUnicode {
                     name.to_lowercase()
                 ));
 
-            let f = self.scope_tests.new_fn(&format!(
+            let f = self.scope_tests.new_fn(format!(
                 "unicode_escape_property_binary_{}_tc",
                 name.to_lowercase()
             ));

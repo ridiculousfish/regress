@@ -7,9 +7,9 @@ use crate::ir::Node;
 use crate::startpredicate;
 use crate::types::{BracketContents, CaptureGroupID, LoopID};
 use crate::unicode;
-use core::convert::TryInto;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
+use core::convert::TryInto;
 
 /// \return an anchor instruction for a given IR anchor.
 fn make_anchor(anchor_type: ir::AnchorType, multiline: bool) -> Insn {
@@ -327,7 +327,10 @@ impl Emitter {
                         });
                         stack.push(Emitter::Node(contents));
                     }
-                    &Node::WordBoundary { invert, unicode_icase } => {
+                    &Node::WordBoundary {
+                        invert,
+                        unicode_icase,
+                    } => {
                         if unicode_icase {
                             self.emit_insn(Insn::WordBoundaryUnicodeICase { invert })
                         } else {
@@ -337,7 +340,10 @@ impl Emitter {
                     &Node::BackRef { group, icase } => {
                         debug_assert!(group >= 1, "Group should not be zero");
                         // -1 because \1 matches the first capture group, which has index 0.
-                        self.emit_insn(Insn::BackRef { group: group - 1, icase })
+                        self.emit_insn(Insn::BackRef {
+                            group: group - 1,
+                            icase,
+                        })
                     }
 
                     Node::ByteSet(bytes) => self.emit_byte_set_insn(bytes),
