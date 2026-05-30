@@ -18,3 +18,7 @@ CaseFolding.txt
 emoji-data.txt
 PropList.txt
 Scripts.txt
+
+# Generated dot images
+*.png
+

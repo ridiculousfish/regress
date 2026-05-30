@@ -95,6 +95,68 @@ impl Nfa {
     }
 }
 
+impl Nfa {
+    /// Generate a Graphviz DOT representation of the NFA. Epsilon transitions
+    /// are shown as dashed edges; tag writes on epsilon edges are labeled
+    /// `ε [t0,t1,...]`. Byte transitions are solid edges labeled with their
+    /// byte range. Accepting (goal) state is a double circle; start state is
+    /// pointed to by a `start` marker.
+    pub fn to_dot_string(&self) -> String {
+        let mut out = String::new();
+        out.push_str("digraph NFA {\n");
+        out.push_str("    rankdir=LR;\n");
+        out.push_str("    node [shape=circle];\n\n");
+
+        out.push_str("    start [shape=point label=\"\"];\n");
+        out.push_str(&format!("    start -> {};\n\n", self.start()));
+
+        for (idx, _state) in self.states.iter().enumerate() {
+            let handle = idx as StateHandle;
+            let shape = if handle == GOAL_STATE {
+                "doublecircle"
+            } else {
+                "circle"
+            };
+            out.push_str(&format!(
+                "    {} [shape={} label=\"{}\"];\n",
+                handle, shape, handle
+            ));
+        }
+        out.push('\n');
+
+        for (idx, state) in self.states.iter().enumerate() {
+            let handle = idx as StateHandle;
+            for edge in &state.eps {
+                let label = if edge.ops.is_empty() {
+                    "ε".to_string()
+                } else {
+                    let ops = edge
+                        .ops
+                        .iter()
+                        .map(|&t| format!("t{}", t))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    format!("ε [{}]", ops)
+                };
+                out.push_str(&format!(
+                    "    {} -> {} [style=dashed label=\"{}\"];\n",
+                    handle, edge.target, label
+                ));
+            }
+            for &(range, target) in &state.transitions {
+                out.push_str(&format!(
+                    "    {} -> {} [label=\"{}\"];\n",
+                    handle,
+                    target,
+                    format_byte_range(range)
+                ));
+            }
+        }
+        out.push_str("}\n");
+        out
+    }
+}
+
 impl fmt::Display for ByteRange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", format_byte_range(*self))
