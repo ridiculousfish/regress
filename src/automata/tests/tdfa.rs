@@ -1,9 +1,9 @@
 //! TDFA construction and execution tests (Milestone 2).
 
 use crate::automata::nfa::Nfa;
-use crate::automata::nfa_backend::execute_nfa;
+use crate::automata::nfa_backend::execute as execute_nfa;
 use crate::automata::tdfa::Tdfa;
-use crate::automata::tdfa_backend::{execute_anchored, execute_anchored_match};
+use crate::automata::tdfa_backend::execute as execute_tdfa;
 use crate::Flags;
 
 fn parse_ir(pattern: &str) -> crate::ir::Regex {
@@ -24,7 +24,7 @@ fn make_tdfa(pattern: &str) -> Tdfa {
 }
 
 fn end(tdfa: &Tdfa, input: &[u8]) -> Option<usize> {
-    execute_anchored(tdfa, input).map(|r| r.end)
+    execute_tdfa(tdfa, input).map(|m| m.range.end)
 }
 
 #[test]
@@ -131,7 +131,7 @@ fn cross_check(pattern: &str, input: &[u8]) {
     let nfa = Nfa::try_from(&re).expect("nfa build");
     let tdfa = Tdfa::try_from(&nfa).expect("tdfa build");
     let nfa_result = execute_nfa(&nfa, input);
-    let tdfa_result = execute_anchored_match(&tdfa, input);
+    let tdfa_result = execute_tdfa(&tdfa, input);
     assert_eq!(
         nfa_result, tdfa_result,
         "mismatch on pattern {:?} input {:?}",

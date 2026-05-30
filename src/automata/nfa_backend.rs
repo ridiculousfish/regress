@@ -4,6 +4,7 @@ use crate::automata::nfa::{
     FULL_MATCH_END, FULL_MATCH_START, GOAL_STATE, Nfa, StateHandle, TEXT_POS_NO_MATCH, TagIdx,
     TextPos,
 };
+use crate::automata::util::BitSet;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::ops::Range;
@@ -79,95 +80,187 @@ pub struct NfaMatch {
     pub captures: Vec<Option<Range<usize>>>,
 }
 
+/// A priority-ordered set of `Thread`s, each at a distinct NFA state.
+///
+/// Push order encodes priority (earliest = highest). A push whose state is
+/// already present is silently dropped — this implements leftmost-first
+/// semantics. Membership checks use a bitset keyed by `StateHandle`.
+struct ThreadSet {
+    threads: Vec<Thread>,
+    present: BitSet,
+}
+
+impl ThreadSet {
+    fn new(num_states: usize) -> Self {
+        Self {
+            threads: Vec::new(),
+            present: BitSet::new(num_states),
+        }
+    }
+
+    /// Whether a thread for `state` is already in the set.
+    #[inline]
+    fn contains(&self, state: StateHandle) -> bool {
+        self.present.test(state as usize)
+    }
+
+    /// Try to add a thread. Returns true if added, false if a thread for that
+    /// state was already present.
+    #[inline]
+    fn push(&mut self, thread: Thread) -> bool {
+        let idx = thread.state as usize;
+        if self.present.test(idx) {
+            return false;
+        }
+        self.present.set(idx);
+        self.threads.push(thread);
+        true
+    }
+
+    fn clear(&mut self) {
+        self.threads.clear();
+        self.present.clear_all();
+    }
+
+    fn iter(&self) -> core::slice::Iter<'_, Thread> {
+        self.threads.iter()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.threads.is_empty()
+    }
+
+    /// Index of the first thread at `GOAL_STATE`, if any. Because the set
+    /// is priority-ordered, this is the highest-priority goal currently
+    /// reachable.
+    fn position_of_goal(&self) -> Option<usize> {
+        self.threads.iter().position(|t| t.state == GOAL_STATE)
+    }
+
+    /// Drop all threads from `idx` onward (lower-priority continuations).
+    /// Mirrors `tdfa::truncate_at_first_goal`'s pruning, applied
+    /// dynamically: once a goal is seen at priority `idx`, nothing at
+    /// `idx..` can win, so they're dead.
+    fn truncate_to(&mut self, idx: usize) {
+        for thread in &self.threads[idx..] {
+            self.present.clear(thread.state as usize);
+        }
+        self.threads.truncate(idx);
+    }
+}
+
+/// Build an `NfaMatch` snapshot from a thread that's reached `GOAL_STATE`.
+fn match_from_thread(thread: &Thread) -> NfaMatch {
+    NfaMatch {
+        range: thread.get_tag(FULL_MATCH_START)..thread.get_tag(FULL_MATCH_END),
+        captures: thread.tags_to_captures(),
+    }
+}
+
+/// If any thread is at `GOAL_STATE`, record its match in `best` and prune
+/// the set down to strictly higher-priority threads. Returns `true` if a
+/// goal was seen (caller may then check `is_empty()` to decide whether to
+/// stop). See `tdfa::truncate_at_first_goal` for the same idea applied
+/// statically during DFA construction.
+fn prune_and_record(threads: &mut ThreadSet, best: &mut Option<NfaMatch>) -> bool {
+    if let Some(idx) = threads.position_of_goal() {
+        *best = Some(match_from_thread(&threads.threads[idx]));
+        threads.truncate_to(idx);
+        true
+    } else {
+        false
+    }
+}
+
 /// Execute the NFA against a slice of bytes.
-/// Returns the first match found, or None if no match is found.
-pub fn execute_nfa(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
-    let mut current_threads = Vec::new();
-    let mut next_threads = Vec::new();
+///
+/// Leftmost-first semantics: at every step, after the eps closure, the
+/// first thread (in priority order) at `GOAL_STATE` defines the current
+/// best match; threads at lower priority are pruned (they can never win).
+/// Only strictly higher-priority threads continue stepping — if one of
+/// them later reaches `GOAL_STATE`, it overwrites the best (it's a
+/// higher-priority match). When all surviving threads die, the saved
+/// `best` is the answer.
+pub fn execute(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
+    let mut current_threads = ThreadSet::new(nfa.states.len());
+    let mut next_threads = ThreadSet::new(nfa.states.len());
     let num_tags = nfa.num_tags();
+    let mut best: Option<NfaMatch> = None;
 
     // Start at the start state.
     current_threads.push(Thread::new(nfa.start(), num_tags));
     epsilon_closure_with_tags(nfa, &mut current_threads, 0);
 
-    // Process each byte of input
+    // Initial closure may already reach GOAL (e.g. patterns that accept
+    // the empty input).
+    if prune_and_record(&mut current_threads, &mut best) && current_threads.is_empty() {
+        return best;
+    }
+
     for (pos, &byte) in input.iter().enumerate() {
-        next_threads.clear();
-
-        // For each current thread, find transitions on this byte
-        for thread in &current_threads {
+        for thread in current_threads.iter() {
             let state = nfa.at(thread.state);
-
-            // Check byte transitions
             if let Some(next_state) = state.transition_for_byte(byte) {
-                let next_thread = thread.clone_to_state(next_state);
-                next_threads.push(next_thread);
+                next_threads.push(thread.clone_to_state(next_state));
             }
         }
-
-        // If no threads can process this byte, check for matches in current set
         if next_threads.is_empty() {
-            for thread in &current_threads {
-                if thread.state == GOAL_STATE {
-                    let start_pos = thread.get_tag(FULL_MATCH_START);
-                    let end_pos = thread.get_tag(FULL_MATCH_END);
-                    let captures = thread.tags_to_captures();
-                    return Some(NfaMatch {
-                        range: start_pos..end_pos,
-                        captures,
-                    });
-                }
-            }
-            return None;
+            return best;
         }
 
         epsilon_closure_with_tags(nfa, &mut next_threads, pos + 1);
 
-        // Swap thread sets for next iteration
-        core::mem::swap(&mut current_threads, &mut next_threads);
-    }
-
-    // After processing all input, check for accepting states
-    for thread in &current_threads {
-        if thread.state == GOAL_STATE {
-            let start_pos = thread.get_tag(FULL_MATCH_START);
-            let end_pos = thread.get_tag(FULL_MATCH_END);
-            let captures = thread.tags_to_captures();
-            return Some(NfaMatch {
-                range: start_pos..end_pos,
-                captures,
-            });
+        // Goals seen at this step are higher priority than `best` only if
+        // they come from threads that were strictly higher in priority
+        // than the previously-recorded goal — which is exactly what the
+        // pruning maintains as an invariant on `current_threads`.
+        if prune_and_record(&mut next_threads, &mut best) && next_threads.is_empty() {
+            return best;
         }
+
+        core::mem::swap(&mut current_threads, &mut next_threads);
+        next_threads.clear();
     }
 
-    None
+    best
 }
 
 /// Add all epsilon-reachable states to the given thread set, updating tags.
-fn epsilon_closure_with_tags(nfa: &Nfa, threads: &mut Vec<Thread>, current_pos: TextPos) {
-    let mut i = 0;
-    while i < threads.len() {
-        let thread = threads[i].clone();
-        let state = nfa.at(thread.state);
+///
+/// Traversal is depth-first in eps-edge priority order: for each thread
+/// already in the set (in priority order), we recursively expand its eps
+/// subtree before moving to the next sibling. The push order into the set
+/// IS the priority order — leftmost-first execution depends on this. A
+/// breadth-first worklist would interleave high- and low-priority paths
+/// and produce wrong matches for non-greedy quantifiers (the higher-
+/// priority "exit non-greedy loop" path could land behind the lower-
+/// priority "keep looping" path in the set, defeating pruning).
+fn epsilon_closure_with_tags(nfa: &Nfa, threads: &mut ThreadSet, current_pos: TextPos) {
+    let initial_n = threads.threads.len();
+    for idx in 0..initial_n {
+        dfs_expand_eps(nfa, threads, idx, current_pos);
+    }
+}
 
-        // Process all epsilon transitions
-        for eps_edge in &state.eps {
-            // Check if we already have a thread in this target state
-            let target_exists = threads.iter().any(|t| t.state == eps_edge.target);
-
-            if !target_exists {
-                // Create new thread and update its tags
-                let mut new_thread = thread.clone_to_state(eps_edge.target);
-
-                // Apply tag operations from the epsilon edge
-                for &tag_idx in &eps_edge.ops {
-                    *new_thread.get_tag_mut(tag_idx) = current_pos;
-                }
-
-                threads.push(new_thread);
-            }
+// Depth-first expansion of `threads[idx]`'s eps subtree.
+fn dfs_expand_eps(nfa: &Nfa, threads: &mut ThreadSet, idx: usize, current_pos: TextPos) {
+    let parent_state = threads.threads[idx].state;
+    let state = nfa.at(parent_state);
+    for edge_idx in 0..state.eps.len() {
+        let (target, ops_len) = {
+            let e = &nfa.at(parent_state).eps[edge_idx];
+            (e.target, e.ops.len())
+        };
+        if threads.contains(target) {
+            continue;
         }
-
-        i += 1;
+        let mut new_thread = threads.threads[idx].clone_to_state(target);
+        for op_idx in 0..ops_len {
+            let tag = nfa.at(parent_state).eps[edge_idx].ops[op_idx];
+            *new_thread.get_tag_mut(tag) = current_pos;
+        }
+        threads.push(new_thread);
+        let new_idx = threads.threads.len() - 1;
+        dfs_expand_eps(nfa, threads, new_idx, current_pos);
     }
 }

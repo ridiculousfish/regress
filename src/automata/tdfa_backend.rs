@@ -1,20 +1,13 @@
-//! TDFA execution backend. M3: anchored match with full capture tracking.
+//! TDFA execution backend.
 
 use crate::automata::nfa::{FULL_MATCH_END, FULL_MATCH_START, TEXT_POS_NO_MATCH, TextPos};
 use crate::automata::nfa_backend::{NfaMatch, tags_to_captures};
 use crate::automata::tdfa::{InputMark, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
-use core::ops::Range;
 
-/// Anchored leftmost match. Returns the byte range of the match if any. Thin
-/// wrapper around `execute_anchored_match` for callers that don't need
-/// captures.
-pub fn execute_anchored(tdfa: &Tdfa, input: &[u8]) -> Option<Range<usize>> {
-    execute_anchored_match(tdfa, input).map(|m| m.range)
-}
-
-/// Anchored leftmost match returning a full `NfaMatch` (range + captures).
+/// Execute the TDFA against `input`. Returns the first match (range +
+/// captures) or `None`.
 ///
 /// Tracks marks in a flat `marks` array. Each transition applies its
 /// `transition_commands` to update marks. On every accepting state visit, the
@@ -22,11 +15,7 @@ pub fn execute_anchored(tdfa: &Tdfa, input: &[u8]) -> Option<Range<usize>> {
 /// *at* the accept (later transitions may overwrite them). On end-of-scan, the
 /// last accept's snapshot is fed through that state's `finals` to populate a
 /// per-tag value array, which then unpacks into captures.
-///
-/// The mark-snapshot clone per accept is the obviously-correct Phase A
-/// baseline; Phase B's register allocation will eliminate it by guaranteeing
-/// no two live marks share a slot.
-pub fn execute_anchored_match(tdfa: &Tdfa, input: &[u8]) -> Option<NfaMatch> {
+pub fn execute(tdfa: &Tdfa, input: &[u8]) -> Option<NfaMatch> {
     let num_tags = tdfa.num_tags();
     let mut marks: Vec<TextPos> = vec![TEXT_POS_NO_MATCH; tdfa.num_marks()];
     apply_commands(&mut marks, tdfa.entry_commands(), 0);
