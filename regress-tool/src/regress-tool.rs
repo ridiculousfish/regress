@@ -1,7 +1,7 @@
 #![allow(clippy::uninlined_format_args)]
 
 use regress::backends::Nfa;
-use regress::{backends, Error, Flags, Regex};
+use regress::{Error, Flags, Regex, backends};
 
 #[cfg(feature = "nfa")]
 use regress::automata::nfa_backend;
@@ -50,6 +50,10 @@ struct Opt {
     #[structopt(long)]
     dump_nfa: bool,
 
+    /// Dump the NFA as Graphviz DOT to stdout.
+    #[structopt(long)]
+    dump_nfa_dot: bool,
+
     /// Dump the DFA to stdout.
     #[structopt(long)]
     dump_dfa: bool,
@@ -97,15 +101,13 @@ impl Backend {
     }
 }
 
-fn format_nfa_error(err: &regress::backends::NfaError) -> String {
+fn format_nfa_error(err: &backends::NfaError) -> String {
     match err {
-        regress::backends::NfaError::UnsupportedInstruction(desc) => {
+        backends::NfaError::UnsupportedInstruction(desc) => {
             format!("Unsupported instruction: {}", desc)
         }
-        regress::backends::NfaError::BudgetExceeded => {
-            "Budget exceeded (too many states)".to_string()
-        }
-        regress::backends::NfaError::NotUTF8 => "Invalid UTF-8 character".to_string(),
+        backends::NfaError::BudgetExceeded => "Budget exceeded (too many states)".to_string(),
+        backends::NfaError::NotUTF8 => "Invalid UTF-8 character".to_string(),
     }
 }
 
@@ -142,16 +144,6 @@ fn format_match(r: &regress::Match, input: &str) -> String {
     }
 
     result
-}
-
-fn exec_re_on_string(re: &Regex, input: &str) {
-    let mut matches = re.find_iter(input);
-    if let Some(res) = matches.next() {
-        let count = 1 + matches.count();
-        println!("Match: {}, total: {}", format_match(&res, input), count);
-    } else {
-        println!("No match");
-    }
 }
 
 fn run_bt(re: &Regex, input: &str) {
@@ -241,23 +233,20 @@ mod tdfa_display;
 fn main() -> Result<(), Error> {
     let args = Opt::from_args();
 
-    // Parse and validate --exec up front; reject unknown names before doing any
-    // work so typos fail fast.
-    let mut backends_list: Vec<Backend> = Vec::with_capacity(args.exec.len());
-    for name in &args.exec {
-        match Backend::parse(name) {
-            Some(b) => backends_list.push(b),
-            None => {
-                println!("unknown executor: {}", name);
-                std::process::exit(1);
-            }
-        }
+    let mut backends_list: Vec<Backend> = args
+        .exec
+        .iter()
+        .map(|name| Backend::parse(name).unwrap_or_else(|| panic!("unknown executor: {}", name)))
+        .collect();
+    if backends_list.is_empty() {
+        backends_list.push(Backend::Bt);
     }
 
     let wants_nfa = backends_list
         .iter()
         .any(|b| matches!(b, Backend::Tnfa | Backend::Tdfa))
         || args.dump_nfa
+        || args.dump_nfa_dot
         || args.dump_dfa
         || args.dump_dfa_dot;
 
@@ -296,13 +285,26 @@ fn main() -> Result<(), Error> {
         #[cfg(not(feature = "nfa"))]
         println!("NFA backend not available. Compile with --features nfa");
     }
+    if args.dump_nfa_dot {
+        #[cfg(feature = "nfa")]
+        {
+            if nfa_cache.is_none() {
+                nfa_cache = Some(Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)));
+            }
+            match nfa_cache.as_ref().unwrap() {
+                Ok(nfa) => print!("{}", nfa.to_dot_string()),
+                Err(msg) => println!("Failed to generate NFA: {}", msg),
+            }
+        }
+        #[cfg(not(feature = "nfa"))]
+        println!("NFA backend not available. Compile with --features nfa");
+    }
     if args.dump_dfa {
         #[cfg(feature = "nfa")]
         {
             if tdfa_cache.is_none() {
                 if nfa_cache.is_none() {
-                    nfa_cache =
-                        Some(Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)));
+                    nfa_cache = Some(Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)));
                 }
                 tdfa_cache = Some(match nfa_cache.as_ref().unwrap() {
                     Ok(nfa) => Tdfa::try_from(nfa).map_err(|e| format!("{:?}", e)),
@@ -341,8 +343,18 @@ fn main() -> Result<(), Error> {
         println!("Bytecode:\n{:#?}", cr);
     }
 
+    // --bench is its own mode — always uses the classical regex, doesn't
+    // honor --exec selection.
+    if let Some(ref path) = args.bench {
+        if regex_cache.is_none() {
+            regex_cache = Some(backends::emit(&ire).into());
+        }
+        bench_re_on_path(regex_cache.as_ref().unwrap(), path);
+        return Ok(());
+    }
+
     // --exec dispatch path.
-    if !backends_list.is_empty() {
+    {
         let inputs: Vec<String> = if let Some(ref path) = args.file {
             match fs::read_to_string(path) {
                 Ok(contents) => vec![contents],
@@ -373,17 +385,14 @@ fn main() -> Result<(), Error> {
                             run_pikevm(regex_cache.as_ref().unwrap(), input);
                         }
                         #[cfg(not(feature = "backend-pikevm"))]
-                        println!(
-                            "pikevm: not available (compile with --features backend-pikevm)"
-                        );
+                        println!("pikevm: not available (compile with --features backend-pikevm)");
                     }
                     Backend::Tnfa => {
                         #[cfg(feature = "nfa")]
                         {
                             if nfa_cache.is_none() {
-                                nfa_cache = Some(
-                                    Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)),
-                                );
+                                nfa_cache =
+                                    Some(Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)));
                             }
                             match nfa_cache.as_ref().unwrap() {
                                 Ok(nfa) => run_tnfa(nfa, input),
@@ -398,14 +407,11 @@ fn main() -> Result<(), Error> {
                         {
                             if tdfa_cache.is_none() {
                                 if nfa_cache.is_none() {
-                                    nfa_cache = Some(
-                                        Nfa::try_from(&ire)
-                                            .map_err(|e| format_nfa_error(&e)),
-                                    );
+                                    nfa_cache =
+                                        Some(Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)));
                                 }
                                 tdfa_cache = Some(match nfa_cache.as_ref().unwrap() {
-                                    Ok(nfa) => Tdfa::try_from(nfa)
-                                        .map_err(|e| format!("{:?}", e)),
+                                    Ok(nfa) => Tdfa::try_from(nfa).map_err(|e| format!("{:?}", e)),
                                     Err(msg) => Err(format!("NFA build failed: {}", msg)),
                                 });
                             }
@@ -419,27 +425,6 @@ fn main() -> Result<(), Error> {
                     }
                 }
             }
-        }
-        return Ok(());
-    }
-
-    // No --exec: default classical-backtrack path with original output format.
-    let re: Regex = if let Some(r) = regex_cache.take() {
-        r
-    } else {
-        backends::emit(&ire).into()
-    };
-
-    if let Some(ref path) = args.file {
-        match fs::read_to_string(path) {
-            Ok(contents) => exec_re_on_string(&re, contents.as_str()),
-            Err(err) => println!("{}: {}", err, path.display()),
-        };
-    } else if let Some(ref path) = args.bench {
-        bench_re_on_path(&re, path);
-    } else {
-        for input in args.inputs {
-            exec_re_on_string(&re, &input);
         }
     }
     Ok(())
