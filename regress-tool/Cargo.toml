@@ -8,8 +8,9 @@ edition = "2024"
 default-run = "regress-tool"
 
 [features]
-default = ["nfa"]
+default = ["nfa", "backend-pikevm"]
 nfa = ["regress/nfa"]
+backend-pikevm = ["regress/backend-pikevm"]
 
 [dependencies]
 structopt = "0.3"
