@@ -5,6 +5,10 @@ use regress::{backends, Error, Flags, Regex};
 
 #[cfg(feature = "nfa")]
 use regress::automata::nfa_backend;
+#[cfg(feature = "nfa")]
+use regress::automata::tdfa::Tdfa;
+#[cfg(feature = "nfa")]
+use regress::automata::tdfa_backend;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -54,9 +58,11 @@ struct Opt {
     #[structopt(long)]
     dump_dfa_dot: bool,
 
-    /// Use NFA backend for execution.
-    #[structopt(long)]
-    nfa: bool,
+    /// Comma-separated list of executors to run, in order.
+    /// Names: bt, pikevm, tnfa, tdfa. If empty, defaults to the classical
+    /// backtrack engine with the original (untagged) output format.
+    #[structopt(long, value_delimiter = ",")]
+    exec: Vec<String>,
 
     /// The input values to match against.
     #[structopt(conflicts_with_all = &["bench", "file"])]
@@ -69,6 +75,26 @@ struct Opt {
     /// Benchmark the matches of the specified file.
     #[structopt(long, conflicts_with_all = &["file", "inputs"])]
     bench: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Backend {
+    Bt,
+    PikeVm,
+    Tnfa,
+    Tdfa,
+}
+
+impl Backend {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "bt" => Some(Backend::Bt),
+            "pikevm" => Some(Backend::PikeVm),
+            "tnfa" => Some(Backend::Tnfa),
+            "tdfa" => Some(Backend::Tdfa),
+            _ => None,
+        }
+    }
 }
 
 fn format_nfa_error(err: &regress::backends::NfaError) -> String {
@@ -128,19 +154,61 @@ fn exec_re_on_string(re: &Regex, input: &str) {
     }
 }
 
+fn run_bt(re: &Regex, input: &str) {
+    let mut matches = re.find_iter(input);
+    if let Some(res) = matches.next() {
+        let count = 1 + matches.count();
+        println!(
+            "bt:    Match: {}, total: {}",
+            format_match(&res, input),
+            count
+        );
+    } else {
+        println!("bt:    No match");
+    }
+}
+
+#[cfg(feature = "backend-pikevm")]
+fn run_pikevm(re: &Regex, input: &str) {
+    use regress::backends::PikeVMExecutor;
+    let mut matches = regress::backends::find::<PikeVMExecutor>(re, input, 0);
+    if let Some(res) = matches.next() {
+        let count = 1 + matches.count();
+        println!(
+            "pikevm: Match: {}, total: {}",
+            format_match(&res, input),
+            count
+        );
+    } else {
+        println!("pikevm: No match");
+    }
+}
+
 #[cfg(feature = "nfa")]
-fn exec_nfa_on_string(nfa: &Nfa, input: &str) {
+fn run_tnfa(nfa: &Nfa, input: &str) {
     match nfa_backend::execute_nfa(nfa, input.as_bytes()) {
-        Some(nfa_match) => {
-            let matched_text = &input[nfa_match.range.clone()];
+        Some(m) => {
+            let text = &input[m.range.clone()];
             println!(
-                "Match: \"{}\" ({}..{}), total: 1",
-                matched_text, nfa_match.range.start, nfa_match.range.end
+                "tnfa:  Match: \"{}\" ({}..{}), total: 1",
+                text, m.range.start, m.range.end
             );
         }
-        None => {
-            println!("No match");
+        None => println!("tnfa:  No match"),
+    }
+}
+
+#[cfg(feature = "nfa")]
+fn run_tdfa(tdfa: &Tdfa, input: &str) {
+    match tdfa_backend::execute_anchored_match(tdfa, input.as_bytes()) {
+        Some(m) => {
+            let text = &input[m.range.clone()];
+            println!(
+                "tdfa:  Match: \"{}\" ({}..{}), total: 1",
+                text, m.range.start, m.range.end
+            );
         }
+        None => println!("tdfa:  No match"),
     }
 }
 
@@ -153,7 +221,6 @@ fn bench_re_on_path(re: &Regex, path: &Path) {
         }
     };
     let input = contents.as_str();
-    // Warmup
     re.find_iter(input).count();
     let start = Instant::now();
     for _ in 0..25 {
@@ -174,67 +241,194 @@ mod tdfa_display;
 fn main() -> Result<(), Error> {
     let args = Opt::from_args();
 
+    // Parse and validate --exec up front; reject unknown names before doing any
+    // work so typos fail fast.
+    let mut backends_list: Vec<Backend> = Vec::with_capacity(args.exec.len());
+    for name in &args.exec {
+        match Backend::parse(name) {
+            Some(b) => backends_list.push(b),
+            None => {
+                println!("unknown executor: {}", name);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    let wants_nfa = backends_list
+        .iter()
+        .any(|b| matches!(b, Backend::Tnfa | Backend::Tdfa))
+        || args.dump_nfa
+        || args.dump_dfa
+        || args.dump_dfa_dot;
+
     let flags = args.flags.unwrap_or_default();
     let mut ire = backends::try_parse(args.pattern.chars().map(u32::from), flags)?;
     if args.dump_phases || args.dump_unoptimized_ir {
         println!("Unoptimized IR:\n{}", ire);
     }
 
-    if args.nfa || args.optimize {
+    if wants_nfa || args.optimize {
         backends::optimize(&mut ire);
         if args.dump_phases || args.dump_optimized_ir {
             println!("Optimized IR:\n{}", ire);
         }
     }
 
-    if args.nfa && !cfg!(feature = "nfa") {
+    // Lazy build caches. None = not attempted; Some(Err) = built but failed.
+    let mut regex_cache: Option<Regex> = None;
+    #[cfg(feature = "nfa")]
+    let mut nfa_cache: Option<Result<Nfa, String>> = None;
+    #[cfg(feature = "nfa")]
+    let mut tdfa_cache: Option<Result<Tdfa, String>> = None;
+
+    // Dumps. Each triggers its own build via the cache.
+    if args.dump_nfa {
+        #[cfg(feature = "nfa")]
+        {
+            if nfa_cache.is_none() {
+                nfa_cache = Some(Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)));
+            }
+            match nfa_cache.as_ref().unwrap() {
+                Ok(nfa) => println!("NFA:\n{}", nfa.to_readable_string()),
+                Err(msg) => println!("Failed to generate NFA: {}", msg),
+            }
+        }
+        #[cfg(not(feature = "nfa"))]
         println!("NFA backend not available. Compile with --features nfa");
-        std::process::exit(1);
+    }
+    if args.dump_dfa {
+        #[cfg(feature = "nfa")]
+        {
+            if tdfa_cache.is_none() {
+                if nfa_cache.is_none() {
+                    nfa_cache =
+                        Some(Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)));
+                }
+                tdfa_cache = Some(match nfa_cache.as_ref().unwrap() {
+                    Ok(nfa) => Tdfa::try_from(nfa).map_err(|e| format!("{:?}", e)),
+                    Err(msg) => Err(format!("NFA build failed: {}", msg)),
+                });
+            }
+            match tdfa_cache.as_ref().unwrap() {
+                Ok(tdfa) => println!("{}", tdfa_display::to_readable_string(tdfa)),
+                Err(msg) => println!("Failed to generate TDFA: {}", msg),
+            }
+        }
+        #[cfg(not(feature = "nfa"))]
+        println!("TDFA backend not available. Compile with --features nfa");
+    }
+    if args.dump_dfa_dot {
+        #[cfg(feature = "nfa")]
+        {
+            if nfa_cache.is_none() {
+                nfa_cache = Some(Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)));
+            }
+            match nfa_cache.as_ref().unwrap() {
+                Ok(nfa) => match regress::automata::dfa::Dfa::try_from(nfa) {
+                    Ok(dfa) => print!("{}", dfa_display::to_dot_string(&dfa)),
+                    Err(err) => println!("Failed to generate DFA: {:?}", err),
+                },
+                Err(msg) => println!("Failed to generate NFA (needed for DFA): {}", msg),
+            }
+        }
+        #[cfg(not(feature = "nfa"))]
+        println!("DFA backend not available. Compile with --features nfa");
     }
 
-    #[cfg(feature = "nfa")]
-    if args.nfa {
-        let nfa = Nfa::try_from(&ire);
-        let nfa = match nfa {
-            Ok(nfa) => nfa,
-            Err(err) => {
-                println!("Failed to generate NFA: {}", format_nfa_error(&err));
-                std::process::exit(1);
-            }
-        };
-        if args.dump_nfa {
-            println!("NFA:\n{}", nfa.to_readable_string());
-        }
-        if args.dump_dfa {
-            match regress::automata::tdfa::Tdfa::try_from(&nfa) {
-                Ok(tdfa) => println!("{}", tdfa_display::to_readable_string(&tdfa)),
-                Err(err) => println!("Failed to generate TDFA: {:?}", err),
-            }
-        }
-        if args.dump_dfa_dot {
-            match regress::automata::dfa::Dfa::try_from(&nfa) {
-                Ok(dfa) => print!("{}", dfa_display::to_dot_string(&dfa)),
-                Err(err) => println!("Failed to generate DFA: {:?}", err),
-            }
-        }
-        if let Some(ref path) = args.file {
+    // Bytecode dump (always available) — needs the Regex.
+    if args.dump_phases || args.dump_bytecode {
+        let cr = backends::emit(&ire);
+        println!("Bytecode:\n{:#?}", cr);
+    }
+
+    // --exec dispatch path.
+    if !backends_list.is_empty() {
+        let inputs: Vec<String> = if let Some(ref path) = args.file {
             match fs::read_to_string(path) {
-                Ok(contents) => exec_nfa_on_string(&nfa, contents.as_str()),
-                Err(err) => println!("{}: {}", err, path.display()),
-            };
+                Ok(contents) => vec![contents],
+                Err(err) => {
+                    println!("{}: {}", err, path.display());
+                    std::process::exit(1);
+                }
+            }
         } else {
-            for input in args.inputs {
-                exec_nfa_on_string(&nfa, &input);
+            args.inputs.clone()
+        };
+
+        for input in &inputs {
+            for &backend in &backends_list {
+                match backend {
+                    Backend::Bt => {
+                        if regex_cache.is_none() {
+                            regex_cache = Some(backends::emit(&ire).into());
+                        }
+                        run_bt(regex_cache.as_ref().unwrap(), input);
+                    }
+                    Backend::PikeVm => {
+                        #[cfg(feature = "backend-pikevm")]
+                        {
+                            if regex_cache.is_none() {
+                                regex_cache = Some(backends::emit(&ire).into());
+                            }
+                            run_pikevm(regex_cache.as_ref().unwrap(), input);
+                        }
+                        #[cfg(not(feature = "backend-pikevm"))]
+                        println!(
+                            "pikevm: not available (compile with --features backend-pikevm)"
+                        );
+                    }
+                    Backend::Tnfa => {
+                        #[cfg(feature = "nfa")]
+                        {
+                            if nfa_cache.is_none() {
+                                nfa_cache = Some(
+                                    Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)),
+                                );
+                            }
+                            match nfa_cache.as_ref().unwrap() {
+                                Ok(nfa) => run_tnfa(nfa, input),
+                                Err(msg) => println!("tnfa:  build failed: {}", msg),
+                            }
+                        }
+                        #[cfg(not(feature = "nfa"))]
+                        println!("tnfa:  not available (compile with --features nfa)");
+                    }
+                    Backend::Tdfa => {
+                        #[cfg(feature = "nfa")]
+                        {
+                            if tdfa_cache.is_none() {
+                                if nfa_cache.is_none() {
+                                    nfa_cache = Some(
+                                        Nfa::try_from(&ire)
+                                            .map_err(|e| format_nfa_error(&e)),
+                                    );
+                                }
+                                tdfa_cache = Some(match nfa_cache.as_ref().unwrap() {
+                                    Ok(nfa) => Tdfa::try_from(nfa)
+                                        .map_err(|e| format!("{:?}", e)),
+                                    Err(msg) => Err(format!("NFA build failed: {}", msg)),
+                                });
+                            }
+                            match tdfa_cache.as_ref().unwrap() {
+                                Ok(tdfa) => run_tdfa(tdfa, input),
+                                Err(msg) => println!("tdfa:  build failed: {}", msg),
+                            }
+                        }
+                        #[cfg(not(feature = "nfa"))]
+                        println!("tdfa:  not available (compile with --features nfa)");
+                    }
+                }
             }
         }
         return Ok(());
     }
 
-    let cr = backends::emit(&ire);
-    if args.dump_phases || args.dump_bytecode {
-        println!("Bytecode:\n{:#?}", cr);
-    }
-    let re = cr.into();
+    // No --exec: default classical-backtrack path with original output format.
+    let re: Regex = if let Some(r) = regex_cache.take() {
+        r
+    } else {
+        backends::emit(&ire).into()
+    };
 
     if let Some(ref path) = args.file {
         match fs::read_to_string(path) {
