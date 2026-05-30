@@ -576,11 +576,7 @@ impl Regex {
         let mut result = String::with_capacity(text.len());
         let mut last_end = 0;
 
-        result.push_str(&text[last_end..first_match.start()]);
-        self.expand_replacement(&first_match, text, replacement, &mut result);
-        last_end = first_match.end();
-
-        for m in matches {
+        for m in core::iter::once(first_match).chain(matches) {
             result.push_str(&text[last_end..m.start()]);
             self.expand_replacement(&m, text, replacement, &mut result);
             last_end = m.end();
@@ -658,11 +654,7 @@ impl Regex {
         let mut result = String::with_capacity(text.len());
         let mut last_end = 0;
 
-        result.push_str(&text[last_end..first_match.start()]);
-        result.push_str(&replacement(&first_match));
-        last_end = first_match.end();
-
-        for m in matches {
+        for m in core::iter::once(first_match).chain(matches) {
             result.push_str(&text[last_end..m.start()]);
             result.push_str(&replacement(&m));
             last_end = m.end();
