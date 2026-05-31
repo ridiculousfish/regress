@@ -6,7 +6,22 @@
 //! marks into the runtime register slots used by `NfaMatch`.
 
 use crate::automata::dfa::{compute_byte_classes, representative_bytes};
-use crate::automata::nfa::{GOAL_STATE, Nfa, StateHandle, TagIdx};
+use crate::automata::nfa::{EpsCondition, GOAL_STATE, Nfa, StateHandle, TagIdx};
+
+/// Whether any state in the NFA has an eps edge with a non-`Always`
+/// condition (e.g. `^`/`$` anchors). The TDFA construction can't yet
+/// represent predicate-conditional closures, so we refuse such NFAs at
+/// build time rather than silently producing a wrong-but-fast DFA.
+fn nfa_has_predicated_eps(nfa: &Nfa) -> bool {
+    for state in nfa.states.iter() {
+        for edge in &state.eps {
+            if edge.cond != EpsCondition::Always {
+                return true;
+            }
+        }
+    }
+    false
+}
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use smallvec::SmallVec;
@@ -31,6 +46,10 @@ const TDFA_STATE_BUDGET: usize = 4096;
 #[derive(Debug)]
 pub enum Error {
     BudgetExceeded,
+    /// The source NFA contains predicated eps edges (`^`/`$`/`\b`) that the
+    /// current TDFA construction doesn't yet handle. Use the NFA backend
+    /// directly until TDFA-side support lands.
+    PredicatedEpsNotSupported,
 }
 
 /// Source of a `FinalCommand`: copy a canonical mark into the runtime tag
@@ -298,6 +317,9 @@ pub struct Tdfa {
     start: TdfaStateId, // Start state ID.
     num_classes: usize, // Number of byte equivalence classes.
     num_tags: usize,    // Number of semantic tags (capture positions).
+    // Capture-group names cloned from the source NFA so callers can attach
+    // them to returned matches without keeping the NFA alive.
+    group_names: Box<[Box<str>]>,
 
     // Size of the executor's memory file. Each `InputMark(N)` that
     // appears in any TagCommand or FinalCommand is an index into a flat array
@@ -340,6 +362,14 @@ pub struct Tdfa {
 
 impl Tdfa {
     pub fn try_from(nfa: &Nfa) -> Result<Self, Error> {
+        // Until the TDFA construction is taught about `^`/`$` (the
+        // `anchor_alt` + `anchor_conditionals` work), bail out on any NFA
+        // containing predicated eps edges so we don't silently treat them
+        // as unconditional and match incorrectly.
+        if nfa_has_predicated_eps(nfa) {
+            return Err(Error::PredicatedEpsNotSupported);
+        }
+
         let (byte_to_class, num_classes) = compute_byte_classes(nfa);
         let rep_bytes = representative_bytes(&byte_to_class, num_classes);
         let num_tags = nfa.num_tags();
@@ -449,6 +479,7 @@ impl Tdfa {
             num_classes,
             num_tags,
             num_marks,
+            group_names: nfa.group_names().to_vec().into_boxed_slice(),
             byte_to_class,
             transitions: transitions.into_boxed_slice(),
             accepting: accepting.into_boxed_slice(),
@@ -460,6 +491,11 @@ impl Tdfa {
 
     pub fn num_tags(&self) -> usize {
         self.num_tags
+    }
+
+    /// Capture-group names indexed by group id (empty when no group is named).
+    pub fn group_names(&self) -> &[Box<str>] {
+        &self.group_names
     }
 
     pub fn num_marks(&self) -> usize {

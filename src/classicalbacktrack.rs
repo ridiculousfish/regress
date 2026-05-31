@@ -1132,6 +1132,7 @@ impl<Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'_, Input> {
 }
 
 impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, Utf8Input<'t>> {
+    type Source = CompiledRegex;
     type AsAscii = BacktrackExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
@@ -1144,6 +1145,7 @@ impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, Utf8Input<'t>> {
 }
 
 impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, AsciiInput<'t>> {
+    type Source = CompiledRegex;
     type AsAscii = BacktrackExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {

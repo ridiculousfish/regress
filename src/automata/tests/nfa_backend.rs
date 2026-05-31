@@ -3,6 +3,12 @@
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::{execute, NfaMatch};
 
+/// Test wrapper: run anchored at byte 0 of `input`. Tests that pre-date
+/// the `start` parameter pass simple byte slices.
+fn execute_nfa(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
+    execute(nfa, input, 0)
+}
+
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::ops::Range;
@@ -40,15 +46,15 @@ fn test_simple_match() {
     let nfa = create_nfa("abc");
 
     // Test matching
-    let result = execute(&nfa, b"abc");
+    let result = execute_nfa(&nfa, b"abc");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test non-matching
-    let result = execute(&nfa, b"def");
+    let result = execute_nfa(&nfa, b"def");
     assert_eq!(result, None);
 
     // Test partial match
-    let result = execute(&nfa, b"ab");
+    let result = execute_nfa(&nfa, b"ab");
     assert_eq!(result, None);
 }
 
@@ -58,15 +64,15 @@ fn test_alternation() {
     let nfa = create_nfa("abc|def");
 
     // Test first alternative
-    let result = execute(&nfa, b"abc");
+    let result = execute_nfa(&nfa, b"abc");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test second alternative
-    let result = execute(&nfa, b"def");
+    let result = execute_nfa(&nfa, b"def");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test non-matching
-    let result = execute(&nfa, b"ghi");
+    let result = execute_nfa(&nfa, b"ghi");
     assert_eq!(result, None);
 }
 
@@ -76,15 +82,15 @@ fn test_exact_quantifier() {
     let nfa = create_nfa("a{3}");
 
     // Test exact match
-    let result = execute(&nfa, b"aaa");
+    let result = execute_nfa(&nfa, b"aaa");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test too few
-    let result = execute(&nfa, b"aa");
+    let result = execute_nfa(&nfa, b"aa");
     assert_eq!(result, None);
 
     // Test too many - should match first 3
-    let result = execute(&nfa, b"aaaa");
+    let result = execute_nfa(&nfa, b"aaaa");
     assert_eq!(result, Some(simple_match(0, 3)));
 }
 
@@ -94,23 +100,23 @@ fn test_bounded_quantifier_greedy() {
     let nfa = create_nfa("a{2,4}");
 
     // Test minimum
-    let result = execute(&nfa, b"aa");
+    let result = execute_nfa(&nfa, b"aa");
     assert_eq!(result, Some(simple_match(0, 2)));
 
     // Test middle - should match all available (greedy)
-    let result = execute(&nfa, b"aaa");
+    let result = execute_nfa(&nfa, b"aaa");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test maximum - should match all (greedy)
-    let result = execute(&nfa, b"aaaa");
+    let result = execute_nfa(&nfa, b"aaaa");
     assert_eq!(result, Some(simple_match(0, 4)));
 
     // Test more than maximum - should match up to maximum (4)
-    let result = execute(&nfa, b"aaaaa");
+    let result = execute_nfa(&nfa, b"aaaaa");
     assert_eq!(result, Some(simple_match(0, 4)));
 
     // Test too few
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, None);
 }
 
@@ -121,18 +127,18 @@ fn test_bounded_quantifier_non_greedy() {
     let nfa = create_nfa("a{2,4}?");
 
     // Test minimum
-    let result = execute(&nfa, b"aa");
+    let result = execute_nfa(&nfa, b"aa");
     assert_eq!(result, Some(simple_match(0, 2)));
 
     // Beyond minimum: non-greedy takes the shortest match.
-    let result = execute(&nfa, b"aaa");
+    let result = execute_nfa(&nfa, b"aaa");
     assert_eq!(result, Some(simple_match(0, 2)));
 
-    let result = execute(&nfa, b"aaaa");
+    let result = execute_nfa(&nfa, b"aaaa");
     assert_eq!(result, Some(simple_match(0, 2)));
 
     // Test too few
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, None);
 }
 
@@ -142,23 +148,23 @@ fn test_star_quantifier_greedy() {
     let nfa = create_nfa("a*");
 
     // Test zero matches - should match empty string
-    let result = execute(&nfa, b"");
+    let result = execute_nfa(&nfa, b"");
     assert_eq!(result, Some(simple_match(0, 0)));
 
     // Test one match - should match the 'a' (greedy)
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Test multiple matches - should match all 'a's (greedy)
-    let result = execute(&nfa, b"aaaa");
+    let result = execute_nfa(&nfa, b"aaaa");
     assert_eq!(result, Some(simple_match(0, 4)));
 
     // Test with non-matching suffix - should match all 'a's before suffix
-    let result = execute(&nfa, b"aaab");
+    let result = execute_nfa(&nfa, b"aaab");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test non-matching at start - should match empty string
-    let result = execute(&nfa, b"baa");
+    let result = execute_nfa(&nfa, b"baa");
     assert_eq!(result, Some(simple_match(0, 0)));
 }
 
@@ -168,14 +174,14 @@ fn test_star_quantifier_non_greedy() {
     let nfa = create_nfa("a*?");
 
     // Test - should match empty string
-    let result = execute(&nfa, b"");
+    let result = execute_nfa(&nfa, b"");
     assert_eq!(result, Some(simple_match(0, 0)));
 
     // Non-greedy: zero matches preferred.
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, Some(simple_match(0, 0)));
 
-    let result = execute(&nfa, b"aaaa");
+    let result = execute_nfa(&nfa, b"aaaa");
     assert_eq!(result, Some(simple_match(0, 0)));
 }
 
@@ -185,23 +191,23 @@ fn test_plus_quantifier_greedy() {
     let nfa = create_nfa("a+");
 
     // Test zero matches - should fail
-    let result = execute(&nfa, b"");
+    let result = execute_nfa(&nfa, b"");
     assert_eq!(result, None);
 
     // Test one match
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Test multiple matches - should match all 'a's
-    let result = execute(&nfa, b"aaaa");
+    let result = execute_nfa(&nfa, b"aaaa");
     assert_eq!(result, Some(simple_match(0, 4)));
 
     // Test with non-matching suffix - should match all 'a's before suffix
-    let result = execute(&nfa, b"aaab");
+    let result = execute_nfa(&nfa, b"aaab");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test non-matching at start
-    let result = execute(&nfa, b"baa");
+    let result = execute_nfa(&nfa, b"baa");
     assert_eq!(result, None);
 }
 
@@ -211,19 +217,19 @@ fn test_plus_quantifier_non_greedy() {
     let nfa = create_nfa("a+?");
 
     // Test zero matches - should fail
-    let result = execute(&nfa, b"");
+    let result = execute_nfa(&nfa, b"");
     assert_eq!(result, None);
 
     // Test one match
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Non-greedy: one match suffices.
-    let result = execute(&nfa, b"aaaa");
+    let result = execute_nfa(&nfa, b"aaaa");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Test non-matching at start
-    let result = execute(&nfa, b"baa");
+    let result = execute_nfa(&nfa, b"baa");
     assert_eq!(result, None);
 }
 
@@ -233,19 +239,19 @@ fn test_question_quantifier() {
     let nfa = create_nfa("a?");
 
     // Test zero matches - should match empty string
-    let result = execute(&nfa, b"");
+    let result = execute_nfa(&nfa, b"");
     assert_eq!(result, Some(simple_match(0, 0)));
 
     // Test one match - should match the 'a' (greedy)
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Test more than one - should match first 'a'
-    let result = execute(&nfa, b"aa");
+    let result = execute_nfa(&nfa, b"aa");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Test non-matching - should match empty string
-    let result = execute(&nfa, b"b");
+    let result = execute_nfa(&nfa, b"b");
     assert_eq!(result, Some(simple_match(0, 0)));
 }
 
@@ -253,13 +259,13 @@ fn test_question_quantifier() {
 fn test_infinite_loops_actually_loop() {
     // Test a+ with multiple characters - should match all available input
     let nfa = create_nfa("a+");
-    let result = execute(&nfa, b"aaa");
+    let result = execute_nfa(&nfa, b"aaa");
     // Should match all three a's
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test a* with multiple characters - should match all available input
     let nfa = create_nfa("a*");
-    let result = execute(&nfa, b"aaa");
+    let result = execute_nfa(&nfa, b"aaa");
     // Should match all three a's
     assert_eq!(result, Some(simple_match(0, 3)));
 }
@@ -270,15 +276,15 @@ fn test_loop_with_following_pattern() {
     let nfa = create_nfa("a+b");
 
     // Should match "ab"
-    let result = execute(&nfa, b"ab");
+    let result = execute_nfa(&nfa, b"ab");
     assert_eq!(result, Some(simple_match(0, 2)));
 
     // Should match "aaab" - requires loop to consume multiple 'a's
-    let result = execute(&nfa, b"aaab");
+    let result = execute_nfa(&nfa, b"aaab");
     assert_eq!(result, Some(simple_match(0, 4)));
 
     // Should not match just "b"
-    let result = execute(&nfa, b"b");
+    let result = execute_nfa(&nfa, b"b");
     assert_eq!(result, None);
 }
 
@@ -288,15 +294,15 @@ fn test_star_with_following_pattern() {
     let nfa = create_nfa("a*b");
 
     // Should match "b" (zero 'a's)
-    let result = execute(&nfa, b"b");
+    let result = execute_nfa(&nfa, b"b");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Should match "ab"
-    let result = execute(&nfa, b"ab");
+    let result = execute_nfa(&nfa, b"ab");
     assert_eq!(result, Some(simple_match(0, 2)));
 
     // Should match "aaab" - requires loop to consume multiple 'a's
-    let result = execute(&nfa, b"aaab");
+    let result = execute_nfa(&nfa, b"aaab");
     assert_eq!(result, Some(simple_match(0, 4)));
 }
 
@@ -306,27 +312,27 @@ fn test_bounded_loop_greediness_matters() {
     let nfa = create_nfa("a{2,4}b");
 
     // Test "aab" - should match (2 a's + b)
-    let result = execute(&nfa, b"aab");
+    let result = execute_nfa(&nfa, b"aab");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test "aaab" - should match (3 a's + b)
-    let result = execute(&nfa, b"aaab");
+    let result = execute_nfa(&nfa, b"aaab");
     assert_eq!(result, Some(simple_match(0, 4)));
 
     // Test "aaaab" - should match (4 a's + b)
-    let result = execute(&nfa, b"aaaab");
+    let result = execute_nfa(&nfa, b"aaaab");
     assert_eq!(result, Some(simple_match(0, 5)));
 
     // Non-greedy a{2,4}?b should prefer shorter matches of 'a'
     let nfa = create_nfa("a{2,4}?b");
 
     // Test "aab" - should match (2 a's + b)
-    let result = execute(&nfa, b"aab");
+    let result = execute_nfa(&nfa, b"aab");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test "aaab" - non-greedy should still match (2 a's + b) if possible
     // But our current NFA execution will find the first complete match
-    let result = execute(&nfa, b"aaab");
+    let result = execute_nfa(&nfa, b"aaab");
     assert_eq!(result, Some(simple_match(0, 4)));
 }
 
@@ -338,25 +344,25 @@ fn test_bounded_loops_can_exit_at_minimum() {
     let nfa = create_nfa("a{2,4}b");
 
     // This should work: exactly minimum + required suffix
-    let result = execute(&nfa, b"aab");
+    let result = execute_nfa(&nfa, b"aab");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test a{1,3} followed by 'x' - should be able to exit after 1 'a'
     let nfa = create_nfa("a{1,3}x");
 
     // This should work: exactly minimum + required suffix
-    let result = execute(&nfa, b"ax");
+    let result = execute_nfa(&nfa, b"ax");
     assert_eq!(result, Some(simple_match(0, 2)));
 
     // Test a{3,5} alone - should be able to match exactly 3
     let nfa = create_nfa("a{3,5}");
 
     // This should work: exactly minimum iterations
-    let result = execute(&nfa, b"aaa");
+    let result = execute_nfa(&nfa, b"aaa");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // This will match all available (4) with greedy behavior
-    let result = execute(&nfa, b"aaaa");
+    let result = execute_nfa(&nfa, b"aaaa");
     assert_eq!(result, Some(simple_match(0, 4)));
 }
 
@@ -369,14 +375,14 @@ fn test_bounded_loops_must_allow_early_exit() {
     let nfa = create_nfa("a{2,100}b");
 
     // Should match with exactly minimum 'a's
-    let result = execute(&nfa, b"aab");
+    let result = execute_nfa(&nfa, b"aab");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Pattern: a{1,50}c - should be able to exit after just 1 'a' when 'c' follows
     let nfa = create_nfa("a{1,50}c");
 
     // Should match with exactly minimum 'a's
-    let result = execute(&nfa, b"ac");
+    let result = execute_nfa(&nfa, b"ac");
     assert_eq!(result, Some(simple_match(0, 2)));
 }
 
@@ -388,19 +394,19 @@ fn test_without_early_exit_these_should_fail() {
     // Test: a{4,10}b with input "aaaab" (exactly 4 'a's + 'b')
     // Without early exit capability, this would need to consume all 10 'a's or fail
     let nfa = create_nfa("a{4,10}b");
-    let result = execute(&nfa, b"aaaab");
+    let result = execute_nfa(&nfa, b"aaaab");
     assert_eq!(result, Some(simple_match(0, 5)));
 
     // Test: a{2,8}x with input "aax" (exactly 2 'a's + 'x')
     // Without early exit, this would try to consume up to 8 'a's
     let nfa = create_nfa("a{2,8}x");
-    let result = execute(&nfa, b"aax");
+    let result = execute_nfa(&nfa, b"aax");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Test: a{1,7}z with input "az" (exactly 1 'a' + 'z')
     // Without early exit, this would be impossible to match
     let nfa = create_nfa("a{1,7}z");
-    let result = execute(&nfa, b"az");
+    let result = execute_nfa(&nfa, b"az");
     assert_eq!(result, Some(simple_match(0, 2)));
 }
 
@@ -412,18 +418,18 @@ fn test_immediate_exit_after_minimum_required() {
     // Test a very specific case: pattern "a{3,3}$" with input "aaa"
     // This should match exactly - no optional iterations to complicate things
     let nfa = create_nfa("a{3,3}");
-    let result = execute(&nfa, b"aaa");
+    let result = execute_nfa(&nfa, b"aaa");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // The real test: a bounded quantifier where we need immediate exit
     // Pattern "a{2,4}" should be able to match just "aa"
     let nfa = create_nfa("a{2,4}");
-    let result = execute(&nfa, b"aa");
+    let result = execute_nfa(&nfa, b"aa");
     assert_eq!(result, Some(simple_match(0, 2)));
 
     // This should also work with exactly minimum iterations
     let nfa = create_nfa("a{1,5}");
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, Some(simple_match(0, 1)));
 }
 
@@ -433,11 +439,11 @@ fn test_question_mark_bug() {
     let nfa = create_nfa("ab?");
 
     // Should match full "ab"
-    let result = execute(&nfa, b"ab");
+    let result = execute_nfa(&nfa, b"ab");
     assert_eq!(result, Some(simple_match(0, 2)));
 
     // Should also match just "a" (since 'b' is optional)
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, Some(simple_match(0, 1)));
 }
 
@@ -446,11 +452,11 @@ fn test_single_capture_group() {
     // Test "(hello)" - single capture group
     let nfa = create_nfa("(hello)");
 
-    let result = execute(&nfa, b"hello");
+    let result = execute_nfa(&nfa, b"hello");
     assert_eq!(result, Some(match_with_captures(0, 5, vec![Some(0..5)])));
 
     // Test non-matching
-    let result = execute(&nfa, b"world");
+    let result = execute_nfa(&nfa, b"world");
     assert_eq!(result, None);
 }
 
@@ -459,14 +465,14 @@ fn test_multiple_capture_groups() {
     // Test "(hello) (world)" - two capture groups
     let nfa = create_nfa("(hello) (world)");
 
-    let result = execute(&nfa, b"hello world");
+    let result = execute_nfa(&nfa, b"hello world");
     assert_eq!(
         result,
         Some(match_with_captures(0, 11, vec![Some(0..5), Some(6..11)]))
     );
 
     // Test partial match - should not match
-    let result = execute(&nfa, b"hello");
+    let result = execute_nfa(&nfa, b"hello");
     assert_eq!(result, None);
 }
 
@@ -475,7 +481,7 @@ fn test_nested_capture_groups() {
     // Test "((he)llo)" - nested capture groups
     let nfa = create_nfa("((he)llo)");
 
-    let result = execute(&nfa, b"hello");
+    let result = execute_nfa(&nfa, b"hello");
     // Group 0: "hello" (0..5), Group 1: "he" (0..2)
     assert_eq!(
         result,
@@ -488,10 +494,10 @@ fn test_capture_group_with_quantifiers() {
     // Test "(a+)b" - capture group with quantifier
     let nfa = create_nfa("(a+)b");
 
-    let result = execute(&nfa, b"ab");
+    let result = execute_nfa(&nfa, b"ab");
     assert_eq!(result, Some(match_with_captures(0, 2, vec![Some(0..1)])));
 
-    let result = execute(&nfa, b"aaab");
+    let result = execute_nfa(&nfa, b"aaab");
     assert_eq!(result, Some(match_with_captures(0, 4, vec![Some(0..3)])));
 }
 
@@ -501,15 +507,15 @@ fn test_optional_capture_group() {
     let nfa = create_nfa("(hello)?");
 
     // When the group matches
-    let result = execute(&nfa, b"hello");
+    let result = execute_nfa(&nfa, b"hello");
     assert_eq!(result, Some(match_with_captures(0, 5, vec![Some(0..5)])));
 
     // When the group doesn't match (empty match)
-    let result = execute(&nfa, b"");
+    let result = execute_nfa(&nfa, b"");
     assert_eq!(result, Some(match_with_captures(0, 0, vec![None])));
 
     // Non-matching input
-    let result = execute(&nfa, b"world");
+    let result = execute_nfa(&nfa, b"world");
     assert_eq!(result, Some(match_with_captures(0, 0, vec![None])));
 }
 
@@ -521,14 +527,14 @@ fn test_alternation_with_capture_groups() {
     let nfa = create_nfa("(hello)|(world)");
 
     // First alternative - only writes group 0
-    let result = execute(&nfa, b"hello");
+    let result = execute_nfa(&nfa, b"hello");
     assert_eq!(
         result,
         Some(match_with_captures(0, 5, vec![Some(0..5), None]))
     );
 
     // Second alternative - only writes group 1
-    let result = execute(&nfa, b"world");
+    let result = execute_nfa(&nfa, b"world");
     assert_eq!(
         result,
         Some(match_with_captures(0, 5, vec![None, Some(0..5)]))
@@ -540,7 +546,7 @@ fn test_capture_groups_with_surrounding_text() {
     // Test "prefix(middle)suffix" - capture group with surrounding text
     let nfa = create_nfa("prefix(middle)suffix");
 
-    let result = execute(&nfa, b"prefixmiddlesuffix");
+    let result = execute_nfa(&nfa, b"prefixmiddlesuffix");
     assert_eq!(result, Some(match_with_captures(0, 18, vec![Some(6..12)])));
 }
 
@@ -549,13 +555,13 @@ fn test_multiple_capture_groups_with_quantifiers() {
     // Test "(a+)(b+)" - multiple groups with quantifiers
     let nfa = create_nfa("(a+)(b+)");
 
-    let result = execute(&nfa, b"ab");
+    let result = execute_nfa(&nfa, b"ab");
     assert_eq!(
         result,
         Some(match_with_captures(0, 2, vec![Some(0..1), Some(1..2)]))
     );
 
-    let result = execute(&nfa, b"aaabbb");
+    let result = execute_nfa(&nfa, b"aaabbb");
     assert_eq!(
         result,
         Some(match_with_captures(0, 6, vec![Some(0..3), Some(3..6)]))
@@ -568,19 +574,19 @@ fn test_simple_bracket_expressions() {
     let nfa = create_nfa("[abc]");
 
     // Should match 'a'
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Should match 'b'
-    let result = execute(&nfa, b"b");
+    let result = execute_nfa(&nfa, b"b");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Should match 'c'
-    let result = execute(&nfa, b"c");
+    let result = execute_nfa(&nfa, b"c");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Should not match 'd'
-    let result = execute(&nfa, b"d");
+    let result = execute_nfa(&nfa, b"d");
     assert_eq!(result, None);
 }
 
@@ -590,17 +596,17 @@ fn test_bracket_ranges() {
     let nfa = create_nfa("[a-z]");
 
     // Should match lowercase letters
-    let result = execute(&nfa, b"m");
+    let result = execute_nfa(&nfa, b"m");
     assert_eq!(result, Some(simple_match(0, 1)));
 
-    let result = execute(&nfa, b"z");
+    let result = execute_nfa(&nfa, b"z");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Should not match uppercase or numbers
-    let result = execute(&nfa, b"M");
+    let result = execute_nfa(&nfa, b"M");
     assert_eq!(result, None);
 
-    let result = execute(&nfa, b"5");
+    let result = execute_nfa(&nfa, b"5");
     assert_eq!(result, None);
 }
 
@@ -610,19 +616,19 @@ fn test_bracket_with_quantifiers() {
     let nfa = create_nfa("[0-9]+");
 
     // Should match single digit
-    let result = execute(&nfa, b"5");
+    let result = execute_nfa(&nfa, b"5");
     assert_eq!(result, Some(simple_match(0, 1)));
 
     // Should match multiple digits
-    let result = execute(&nfa, b"123");
+    let result = execute_nfa(&nfa, b"123");
     assert_eq!(result, Some(simple_match(0, 3)));
 
     // Should not match letters
-    let result = execute(&nfa, b"abc");
+    let result = execute_nfa(&nfa, b"abc");
     assert_eq!(result, None);
 
     // Should match only the numeric prefix
-    let result = execute(&nfa, b"123abc");
+    let result = execute_nfa(&nfa, b"123abc");
     assert_eq!(result, Some(simple_match(0, 3)));
 }
 
@@ -632,10 +638,10 @@ fn test_empty_brackets() {
     let nfa = create_nfa("a[]b");
 
     // Should not match anything because [] fails
-    let result = execute(&nfa, b"ab");
+    let result = execute_nfa(&nfa, b"ab");
     assert_eq!(result, None);
 
-    let result = execute(&nfa, b"axb");
+    let result = execute_nfa(&nfa, b"axb");
     assert_eq!(result, None);
 }
 
@@ -645,13 +651,13 @@ fn test_inverted_brackets_simple() {
     let nfa = create_nfa("[^\\s\\S]"); // This matches nothing (empty inverted set)
 
     // Should not match anything
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, None);
 
-    let result = execute(&nfa, b" ");
+    let result = execute_nfa(&nfa, b" ");
     assert_eq!(result, None);
 
-    let result = execute(&nfa, b"5");
+    let result = execute_nfa(&nfa, b"5");
     assert_eq!(result, None);
 }
 
@@ -660,10 +666,10 @@ fn test_bracket_edge_cases() {
     // Test bracket with single character [x]
     let nfa = create_nfa("[x]");
 
-    let result = execute(&nfa, b"x");
+    let result = execute_nfa(&nfa, b"x");
     assert_eq!(result, Some(simple_match(0, 1)));
 
-    let result = execute(&nfa, b"y");
+    let result = execute_nfa(&nfa, b"y");
     assert_eq!(result, None);
 }
 
@@ -672,22 +678,22 @@ fn test_bracket_in_complex_patterns() {
     // Test brackets as part of larger patterns
     let nfa = create_nfa("prefix[0-9]+suffix");
 
-    let result = execute(&nfa, b"prefix123suffix");
+    let result = execute_nfa(&nfa, b"prefix123suffix");
     assert_eq!(result, Some(simple_match(0, 15)));
 
-    let result = execute(&nfa, b"prefixabcsuffix");
+    let result = execute_nfa(&nfa, b"prefixabcsuffix");
     assert_eq!(result, None);
 
     // Test with alternation
     let nfa = create_nfa("[abc]|[xyz]");
 
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, Some(simple_match(0, 1)));
 
-    let result = execute(&nfa, b"x");
+    let result = execute_nfa(&nfa, b"x");
     assert_eq!(result, Some(simple_match(0, 1)));
 
-    let result = execute(&nfa, b"m");
+    let result = execute_nfa(&nfa, b"m");
     assert_eq!(result, None);
 }
 
@@ -700,22 +706,22 @@ fn test_bracket_all_codepoints() {
     let nfa = create_nfa("[\\s\\S]");
 
     // Should match any character
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, Some(simple_match(0, 1)));
 
-    let result = execute(&nfa, b"A");
+    let result = execute_nfa(&nfa, b"A");
     assert_eq!(result, Some(simple_match(0, 1)));
 
-    let result = execute(&nfa, b"0");
+    let result = execute_nfa(&nfa, b"0");
     assert_eq!(result, Some(simple_match(0, 1)));
 
-    let result = execute(&nfa, b" ");
+    let result = execute_nfa(&nfa, b" ");
     assert_eq!(result, Some(simple_match(0, 1)));
 
-    let result = execute(&nfa, b"\n");
+    let result = execute_nfa(&nfa, b"\n");
     assert_eq!(result, Some(simple_match(0, 1)));
 
-    let result = execute(&nfa, b"\t");
+    let result = execute_nfa(&nfa, b"\t");
     assert_eq!(result, Some(simple_match(0, 1)));
 }
 
@@ -727,29 +733,29 @@ fn test_inverted_bracket_all_codepoints() {
     let nfa = create_nfa("[^\\s\\S]");
 
     // Should not match any character
-    let result = execute(&nfa, b"a");
+    let result = execute_nfa(&nfa, b"a");
     assert_eq!(result, None);
 
-    let result = execute(&nfa, b"A");
+    let result = execute_nfa(&nfa, b"A");
     assert_eq!(result, None);
 
-    let result = execute(&nfa, b"0");
+    let result = execute_nfa(&nfa, b"0");
     assert_eq!(result, None);
 
-    let result = execute(&nfa, b" ");
+    let result = execute_nfa(&nfa, b" ");
     assert_eq!(result, None);
 
-    let result = execute(&nfa, b"\n");
+    let result = execute_nfa(&nfa, b"\n");
     assert_eq!(result, None);
 
-    let result = execute(&nfa, b"\t");
+    let result = execute_nfa(&nfa, b"\t");
     assert_eq!(result, None);
 
     // Should also not match Unicode characters
-    let result = execute(&nfa, "é".as_bytes());
+    let result = execute_nfa(&nfa, "é".as_bytes());
     assert_eq!(result, None);
 
-    let result = execute(&nfa, "🚀".as_bytes());
+    let result = execute_nfa(&nfa, "🚀".as_bytes());
     assert_eq!(result, None);
 }
 
@@ -761,28 +767,28 @@ fn test_bracket_rejects_invalid_utf8() {
     // Test overlong 2-byte sequence: should be encoded as 1-byte but encoded as 2-byte
     // 'A' (U+0041) as overlong 2-byte: [C1 81] instead of [41]
     let overlong_2byte = [0xC1, 0x81];
-    let result = execute(&nfa, &overlong_2byte);
+    let result = execute_nfa(&nfa, &overlong_2byte);
     assert_eq!(result, None, "Should reject overlong 2-byte sequence");
 
     // Test overlong 3-byte sequence: 'A' (U+0041) as overlong 3-byte: [E0 81 81]
     let overlong_3byte = [0xE0, 0x81, 0x81];
-    let result = execute(&nfa, &overlong_3byte);
+    let result = execute_nfa(&nfa, &overlong_3byte);
     assert_eq!(result, None, "Should reject overlong 3-byte sequence");
 
     // Test invalid start byte in 2-byte range: [C0 80] (overlong encoding of null)
     let invalid_2byte = [0xC0, 0x80];
-    let result = execute(&nfa, &invalid_2byte);
+    let result = execute_nfa(&nfa, &invalid_2byte);
     assert_eq!(result, None, "Should reject invalid 2-byte sequence");
 
     // Test valid UTF-8 still works
-    let result = execute(&nfa, "A".as_bytes()); // Valid 1-byte
+    let result = execute_nfa(&nfa, "A".as_bytes()); // Valid 1-byte
     assert_eq!(
         result,
         Some(simple_match(0, 1)),
         "Should accept valid 1-byte UTF-8"
     );
 
-    let result = execute(&nfa, "é".as_bytes()); // Valid 2-byte
+    let result = execute_nfa(&nfa, "é".as_bytes()); // Valid 2-byte
     assert_eq!(
         result,
         Some(simple_match(0, 2)),
@@ -797,7 +803,7 @@ fn test_large_character_set_should_not_match_everything() {
     let nfa = create_nfa("[一-龯]"); // CJK ideographs: ~20k codepoints
 
     // This should match Chinese characters
-    let result = execute(&nfa, "中".as_bytes()); // U+4E2D (Chinese "middle")
+    let result = execute_nfa(&nfa, "中".as_bytes()); // U+4E2D (Chinese "middle")
     assert_eq!(
         result,
         Some(simple_match(0, 3)),
@@ -805,15 +811,15 @@ fn test_large_character_set_should_not_match_everything() {
     );
 
     // But it should NOT match ASCII characters
-    let result = execute(&nfa, "A".as_bytes());
+    let result = execute_nfa(&nfa, "A".as_bytes());
     assert_eq!(result, None, "Should NOT match ASCII 'A'");
 
     // And it should NOT match emoji
-    let result = execute(&nfa, "🤠".as_bytes());
+    let result = execute_nfa(&nfa, "🤠".as_bytes());
     assert_eq!(result, None, "Should NOT match emoji");
 
     // And it should NOT match other Unicode characters outside the range
-    let result = execute(&nfa, "α".as_bytes()); // Greek alpha U+03B1
+    let result = execute_nfa(&nfa, "α".as_bytes()); // Greek alpha U+03B1
     assert_eq!(result, None, "Should NOT match Greek alpha");
 }
 
@@ -830,7 +836,7 @@ fn test_match_any_code_point() {
         };
         let s = ch.encode_utf8(&mut buf);
         let s = s.as_bytes();
-        let result = execute(&nfa, s);
+        let result = execute_nfa(&nfa, s);
         assert_eq!(
             result,
             Some(simple_match(0, s.len())),

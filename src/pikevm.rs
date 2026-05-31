@@ -469,6 +469,7 @@ pub struct PikeVMExecutor<'r, Input: InputIndexer> {
 }
 
 impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, Utf8Input<'t>> {
+    type Source = CompiledRegex;
     type AsAscii = PikeVMExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
@@ -481,6 +482,7 @@ impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, Utf8Input<'t>> {
 }
 
 impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, AsciiInput<'t>> {
+    type Source = CompiledRegex;
     type AsAscii = PikeVMExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {

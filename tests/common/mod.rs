@@ -66,10 +66,94 @@ impl VecTestHelpers for Vec<&str> {
     }
 }
 
+/// Skip protocol for "this backend can't handle this pattern":
+///
+/// - The FA backends (`Backend::Tnfa`, `Backend::Tdfa`) don't yet support
+///   every IR construct (anchors, lookarounds, backreferences, word
+///   boundaries, etc.). When `Nfa::try_from` or `Tdfa::try_from` returns
+///   `Err`, `build_test_artifacts` prints a `SKIP …` line to stderr and
+///   raises a panic carrying a `String` payload that starts with
+///   `SKIP_BACKEND_PREFIX` followed by the failure reason.
+/// - `run_tc` wraps each `func(tc)` call in `catch_unwind`. If the panic
+///   payload downcasts to a `String` starting with that prefix, it's
+///   silently swallowed and the harness moves on to the next TestConfig.
+///   Any other panic payload resumes — i.e. real test assertion failures
+///   propagate normally.
+/// - Bytecode backends (PikeVM, Backtracking) never raise this panic, so
+///   the catch_unwind is a no-op for them.
+///
+/// The payload is a `String` rather than a marker struct because the
+/// default panic hook only formats `&'static str` and `String` payloads —
+/// other types print as "Box<dyn Any>", which is noise in stderr when SKIPs
+/// fire. Embedding the reason in the panic message means each SKIP prints
+/// the full context (`<SKIP: backend=… pattern=… err=…>`) before being
+/// absorbed, so RUST_BACKTRACE=1 output is self-explanatory.
+///
+/// Why panic+catch rather than `Result` propagation: test functions are
+/// `Fn(TestConfig)` containing many independent assertions; non-locally
+/// exiting after one unsupported pattern would otherwise require threading
+/// `?` through every `compilef` call site across the test corpus. The
+/// catch is narrow (only this marker prefix) so other panics still surface.
+const SKIP_BACKEND_PREFIX: &str = "<SKIP: FA backend can't compile this pattern";
+
+fn skip_backend(backend: Backend, pattern: &str, reason: &str) -> ! {
+    eprintln!("SKIP {:?}: {} for pattern={:?}", backend, reason, pattern);
+    std::panic::panic_any(format!(
+        "{} backend={:?} pattern={:?} reason={}>",
+        SKIP_BACKEND_PREFIX, backend, pattern, reason
+    ))
+}
+
+/// Drive parse → optimize → emit ourselves so the harness can hold the
+/// `CompiledRegex` directly (for the bytecode executors) plus the parallel
+/// `Nfa`/`Tdfa` built from the same IR. Avoids the bytecode engines having
+/// to reach into `Regex` internals.
+///
+/// If the selected backend is Tnfa or Tdfa and the FA build fails, logs a
+/// SKIP line and raises the skip-marker panic — `test_with_configs`
+/// catches that and skips the rest of the test function for this TestConfig.
+fn build_test_artifacts(
+    pattern: &str,
+    flags: regress::Flags,
+    backend: Backend,
+) -> (
+    regress::backends::CompiledRegex,
+    Option<regress::backends::Nfa>,
+    Option<regress::backends::Tdfa>,
+) {
+    use regress::backends;
+    let mut ire = backends::try_parse(pattern.chars().map(u32::from), flags)
+        .expect("Pattern failed to parse (already validated)");
+    if !flags.no_opt {
+        backends::optimize(&mut ire);
+    }
+    let cr = backends::emit(&ire);
+
+    if !matches!(backend, Backend::Tnfa | Backend::Tdfa) {
+        return (cr, None, None);
+    }
+    let nfa = match backends::Nfa::try_from(&ire) {
+        Ok(n) => n,
+        Err(e) => skip_backend(backend, pattern, &format!("NFA build failed: {:?}", e)),
+    };
+    if matches!(backend, Backend::Tnfa) {
+        return (cr, Some(nfa), None);
+    }
+    // Backend::Tdfa
+    match backends::Tdfa::try_from(&nfa) {
+        Ok(t) => (cr, Some(nfa), Some(t)),
+        Err(e) => skip_backend(backend, pattern, &format!("TDFA build failed: {:?}", e)),
+    }
+}
+
 /// A compiled regex which remembers a TestConfig.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TestCompiledRegex {
+    #[allow(dead_code)] // only read by the utf16/ucs2 paths
     re: regress::Regex,
+    cr: regress::backends::CompiledRegex,
+    nfa: Option<regress::backends::Nfa>,
+    tdfa: Option<regress::backends::Tdfa>,
     tc: TestConfig,
 }
 
@@ -95,20 +179,30 @@ impl TestCompiledRegex {
         }
         match (self.tc.use_ascii(input), self.tc.backend) {
             (true, Backend::PikeVM) => {
-                rbe::find::<rbe::PikeVMExecutor>(&self.re, input, start).collect()
+                rbe::find::<rbe::PikeVMExecutor>(&self.cr, input, start).collect()
             }
 
             (false, Backend::PikeVM) => {
-                rbe::find::<rbe::PikeVMExecutor>(&self.re, input, start).collect()
+                rbe::find::<rbe::PikeVMExecutor>(&self.cr, input, start).collect()
             }
 
             (true, Backend::Backtracking) => {
-                rbe::find_ascii::<rbe::BacktrackExecutor>(&self.re, input, start).collect()
+                rbe::find_ascii::<rbe::BacktrackExecutor>(&self.cr, input, start).collect()
             }
 
             (false, Backend::Backtracking) => {
-                rbe::find::<rbe::BacktrackExecutor>(&self.re, input, start).collect()
+                rbe::find::<rbe::BacktrackExecutor>(&self.cr, input, start).collect()
             }
+
+            (_, Backend::Tnfa) => match &self.nfa {
+                Some(nfa) => rbe::find::<rbe::NfaExecutor>(nfa, input, start).collect(),
+                None => Vec::new(),
+            },
+
+            (_, Backend::Tdfa) => match &self.tdfa {
+                Some(tdfa) => rbe::find::<rbe::TdfaExecutor>(tdfa, input, start).collect(),
+                None => Vec::new(),
+            },
         }
     }
 
@@ -245,6 +339,8 @@ impl TestCompiledRegex {
 enum Backend {
     PikeVM,
     Backtracking,
+    Tnfa,
+    Tdfa,
 }
 
 /// Our encoding types.
@@ -289,16 +385,22 @@ impl TestConfig {
         let mut flags = regress::Flags::from(flags_str);
         flags.no_opt = !self.optimize;
 
-        let re = regress::Regex::with_flags(pattern, flags);
-        assert!(
-            re.is_ok(),
-            "Failed to parse! flags: {} pattern: {}, error: {}",
-            flags_str,
-            pattern,
-            re.unwrap_err()
-        );
+        // Validate parse via the public API so error reporting matches what
+        // users would see, then drive the pipeline ourselves to obtain a
+        // CompiledRegex we own (without reaching into Regex internals).
+        if let Err(e) = regress::Regex::with_flags(pattern, flags) {
+            panic!(
+                "Failed to parse! flags: {} pattern: {}, error: {}",
+                flags_str, pattern, e
+            );
+        }
+        let (cr, nfa, tdfa) = build_test_artifacts(pattern, flags, self.backend);
+        let re = regress::Regex::from(cr.clone());
         TestCompiledRegex {
-            re: re.unwrap(),
+            re,
+            cr,
+            nfa,
+            tdfa,
             tc: *self,
         }
     }
@@ -319,6 +421,22 @@ impl TestConfig {
     }
 }
 
+/// Invoke `func` with `tc`, catching the skip-marker panic that the
+/// harness raises when an FA backend can't compile some pattern in the
+/// test body. Bytecode backends (PikeVM, Backtracking) never raise it,
+/// so the catch is effectively a no-op for them.
+fn run_tc<F: Fn(TestConfig)>(func: &F, tc: TestConfig) {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| func(tc)));
+    if let Err(payload) = result {
+        if let Some(s) = payload.downcast_ref::<String>() {
+            if s.starts_with(SKIP_BACKEND_PREFIX) {
+                return;
+            }
+        }
+        std::panic::resume_unwind(payload);
+    }
+}
+
 /// Invoke \p F with each test config, in turn.
 pub fn test_with_configs<F>(func: F)
 where
@@ -326,24 +444,35 @@ where
 {
     let encoding = Encoding::Utf8;
     // Note we wish to be able to determine the TestConfig from the line number.
-    func(TestConfig {
-        ascii: true,
-        optimize: false,
-        backend: Backend::PikeVM,
-        encoding,
-    });
-    func(TestConfig {
-        ascii: false,
-        optimize: false,
-        backend: Backend::PikeVM,
-        encoding,
-    });
-    func(TestConfig {
-        ascii: true,
-        optimize: true,
-        backend: Backend::PikeVM,
-        encoding,
-    });
+    // Also note that optimizations are not supported for PikeVM backend, as it
+    // doesn't implement Loop1CharBody.
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: true,
+            optimize: false,
+            backend: Backend::PikeVM,
+            encoding,
+        },
+    );
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: false,
+            optimize: false,
+            backend: Backend::PikeVM,
+            encoding,
+        },
+    );
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: true,
+            optimize: true,
+            backend: Backend::PikeVM,
+            encoding,
+        },
+    );
     func(TestConfig {
         ascii: false,
         optimize: true,
@@ -356,54 +485,95 @@ where
         backend: Backend::Backtracking,
         encoding,
     });
-    func(TestConfig {
-        ascii: false,
-        optimize: false,
-        backend: Backend::Backtracking,
-        encoding,
-    });
-    func(TestConfig {
-        ascii: true,
-        optimize: true,
-        backend: Backend::Backtracking,
-        encoding,
-    });
-    func(TestConfig {
-        ascii: false,
-        optimize: true,
-        backend: Backend::Backtracking,
-        encoding,
-    });
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: false,
+            optimize: false,
+            backend: Backend::Backtracking,
+            encoding,
+        },
+    );
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: true,
+            optimize: true,
+            backend: Backend::Backtracking,
+            encoding,
+        },
+    );
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: false,
+            optimize: true,
+            backend: Backend::Backtracking,
+            encoding,
+        },
+    );
+
+    // NFA/TDFA backends: byte-based, no ascii/utf16/ucs2 variants needed.
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: false,
+            optimize: false,
+            backend: Backend::Tnfa,
+            encoding: Encoding::Utf8,
+        },
+    );
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: false,
+            optimize: false,
+            backend: Backend::Tdfa,
+            encoding: Encoding::Utf8,
+        },
+    );
 
     // UTF16 and UCS2.
     if cfg!(feature = "utf16") {
-        func(TestConfig {
-            ascii: false,
-            optimize: false,
-            backend: Backend::Backtracking,
-            encoding: Encoding::Utf16,
-        });
+        run_tc(
+            &func,
+            TestConfig {
+                ascii: false,
+                optimize: false,
+                backend: Backend::Backtracking,
+                encoding: Encoding::Utf16,
+            },
+        );
 
-        func(TestConfig {
-            ascii: false,
-            optimize: true,
-            backend: Backend::Backtracking,
-            encoding: Encoding::Utf16,
-        });
+        run_tc(
+            &func,
+            TestConfig {
+                ascii: false,
+                optimize: true,
+                backend: Backend::Backtracking,
+                encoding: Encoding::Utf16,
+            },
+        );
 
-        func(TestConfig {
-            ascii: false,
-            optimize: false,
-            backend: Backend::Backtracking,
-            encoding: Encoding::Ucs2,
-        });
+        run_tc(
+            &func,
+            TestConfig {
+                ascii: false,
+                optimize: false,
+                backend: Backend::Backtracking,
+                encoding: Encoding::Ucs2,
+            },
+        );
 
-        func(TestConfig {
-            ascii: false,
-            optimize: true,
-            backend: Backend::Backtracking,
-            encoding: Encoding::Ucs2,
-        });
+        run_tc(
+            &func,
+            TestConfig {
+                ascii: false,
+                optimize: true,
+                backend: Backend::Backtracking,
+                encoding: Encoding::Ucs2,
+            },
+        );
     }
 }
 
@@ -414,59 +584,102 @@ where
     F: Fn(TestConfig),
 {
     // Note we wish to be able to determine the TestConfig from the line number.
-    func(TestConfig {
-        ascii: false,
-        optimize: false,
-        backend: Backend::PikeVM,
-        encoding: Encoding::Utf8,
-    });
-    func(TestConfig {
-        ascii: false,
-        optimize: true,
-        backend: Backend::PikeVM,
-        encoding: Encoding::Utf8,
-    });
+    // Also note that optimizations are not supported for PikeVM backend, as it
+    // doesn't implement Loop1CharBody.
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: false,
+            optimize: false,
+            backend: Backend::PikeVM,
+            encoding: Encoding::Utf8,
+        },
+    );
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: false,
+            optimize: true,
+            backend: Backend::PikeVM,
+            encoding: Encoding::Utf8,
+        },
+    );
     func(TestConfig {
         ascii: false,
         optimize: false,
         backend: Backend::Backtracking,
         encoding: Encoding::Utf8,
     });
-    func(TestConfig {
-        ascii: false,
-        optimize: true,
-        backend: Backend::Backtracking,
-        encoding: Encoding::Utf8,
-    });
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: false,
+            optimize: true,
+            backend: Backend::Backtracking,
+            encoding: Encoding::Utf8,
+        },
+    );
+
+    // NFA/TDFA backends: byte-based, no ascii/utf16/ucs2 variants needed.
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: false,
+            optimize: false,
+            backend: Backend::Tnfa,
+            encoding: Encoding::Utf8,
+        },
+    );
+    run_tc(
+        &func,
+        TestConfig {
+            ascii: false,
+            optimize: false,
+            backend: Backend::Tdfa,
+            encoding: Encoding::Utf8,
+        },
+    );
 
     // UTF16 and UCS2.
     if cfg!(feature = "utf16") {
-        func(TestConfig {
-            ascii: false,
-            optimize: false,
-            backend: Backend::Backtracking,
-            encoding: Encoding::Utf16,
-        });
+        run_tc(
+            &func,
+            TestConfig {
+                ascii: false,
+                optimize: false,
+                backend: Backend::Backtracking,
+                encoding: Encoding::Utf16,
+            },
+        );
 
-        func(TestConfig {
-            ascii: false,
-            optimize: true,
-            backend: Backend::Backtracking,
-            encoding: Encoding::Utf16,
-        });
+        run_tc(
+            &func,
+            TestConfig {
+                ascii: false,
+                optimize: true,
+                backend: Backend::Backtracking,
+                encoding: Encoding::Utf16,
+            },
+        );
 
-        func(TestConfig {
-            ascii: false,
-            optimize: false,
-            backend: Backend::Backtracking,
-            encoding: Encoding::Ucs2,
-        });
+        run_tc(
+            &func,
+            TestConfig {
+                ascii: false,
+                optimize: false,
+                backend: Backend::Backtracking,
+                encoding: Encoding::Ucs2,
+            },
+        );
 
-        func(TestConfig {
-            ascii: false,
-            optimize: true,
-            backend: Backend::Backtracking,
-            encoding: Encoding::Ucs2,
-        });
+        run_tc(
+            &func,
+            TestConfig {
+                ascii: false,
+                optimize: true,
+                backend: Backend::Backtracking,
+                encoding: Encoding::Ucs2,
+            },
+        );
     }
 }

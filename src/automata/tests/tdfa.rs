@@ -1,10 +1,19 @@
 //! TDFA construction and execution tests (Milestone 2).
 
 use crate::automata::nfa::Nfa;
-use crate::automata::nfa_backend::execute as execute_nfa;
+use crate::automata::nfa_backend::execute as execute_nfa_inner;
+use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::Tdfa;
-use crate::automata::tdfa_backend::execute as execute_tdfa;
+use crate::automata::tdfa_backend::execute as execute_tdfa_inner;
 use crate::Flags;
+
+fn execute_nfa(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
+    execute_nfa_inner(nfa, input, 0)
+}
+
+fn execute_tdfa(tdfa: &Tdfa, input: &[u8]) -> Option<NfaMatch> {
+    execute_tdfa_inner(tdfa, input, 0)
+}
 
 fn parse_ir(pattern: &str) -> crate::ir::Regex {
     let flags = Flags {
