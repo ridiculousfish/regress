@@ -183,7 +183,7 @@ pub struct Utf8Input<'a> {
 
 impl<'a> Utf8Input<'a> {
     #[inline(always)]
-    fn contents(&self) -> &[u8] {
+    pub(crate) fn contents(&self) -> &'a [u8] {
         self.input.as_bytes()
     }
 

@@ -15,6 +15,11 @@ pub struct Nfa {
     pub(super) start: StateHandle,
     pub(super) states: Box<[State]>,
     pub(super) num_tags: usize,
+    /// Capture-group names, indexed by group id (the same order used by
+    /// `regress::Match::captures`). Groups without a name carry an empty
+    /// string. Empty when the regex has no named groups (matches the
+    /// convention used by `CompiledRegex::group_names`).
+    pub(super) group_names: Box<[Box<str>]>,
 }
 
 // A handle to a State in the NFA.
@@ -85,14 +90,32 @@ impl Fragment {
     }
 }
 
-// An epsilon edge. Transitions on empty input, optionally writing the
-// current input position to one or more tags.
+/// A predicate gating traversal of an epsilon edge. `Always` is the common
+/// case (zero-width writes for capture groups, alternation branches, loop
+/// structure, etc.). The `StartOfLine` / `EndOfLine` variants encode `^` and
+/// `$` anchors; their `holds` evaluation is in `super::anchors`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub enum EpsCondition {
+    #[default]
+    Always,
+    StartOfLine {
+        multiline: bool,
+    },
+    EndOfLine {
+        multiline: bool,
+    },
+}
+
+// An epsilon edge. Transitions on empty input (subject to `cond`),
+// optionally writing the current input position to one or more tags.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct EpsEdge {
     // Target of the transition.
     pub target: StateHandle,
     // Tags to write on traversal.
     pub ops: SmallVec<[TagIdx; 2]>,
+    // Predicate gating traversal; defaults to `Always`.
+    pub cond: EpsCondition,
 }
 
 impl EpsEdge {
@@ -101,6 +124,7 @@ impl EpsEdge {
         Self {
             target,
             ops: smallvec![],
+            cond: EpsCondition::Always,
         }
     }
 }
@@ -121,6 +145,7 @@ impl State {
         self.eps.push(EpsEdge {
             target,
             ops: smallvec![],
+            cond: EpsCondition::Always,
         });
     }
 
@@ -129,6 +154,18 @@ impl State {
         self.eps.push(EpsEdge {
             target,
             ops: smallvec![tag],
+            cond: EpsCondition::Always,
+        });
+    }
+
+    // Add a predicated epsilon transition (for `^` / `$`). The predicate is
+    // evaluated against the input slice at the current position when the
+    // executor reaches this edge during eps closure.
+    pub fn add_eps_anchor(&mut self, target: StateHandle, cond: EpsCondition) {
+        self.eps.push(EpsEdge {
+            target,
+            ops: smallvec![],
+            cond,
         });
     }
 
@@ -275,9 +312,10 @@ impl Builder {
             )),
             Node::Loop1CharBody { loopee, quant } => self.build_loop(loopee, quant),
             Node::Loop { loopee, quant, .. } => self.build_loop(loopee, quant),
-            Node::Anchor { .. } => Err(Error::UnsupportedInstruction(
-                "Anchors not supported by NFAs".to_string(),
-            )),
+            Node::Anchor {
+                anchor_type,
+                multiline,
+            } => self.build_anchor(*anchor_type, *multiline),
             Node::WordBoundary { .. } => Err(Error::UnsupportedInstruction(
                 "Word boundaries not supported by NFAs".to_string(),
             )),
@@ -356,6 +394,20 @@ impl Builder {
     fn build_empty(&mut self) -> Result<Fragment> {
         let start = self.make()?;
         Ok(Fragment::new(start, [start]))
+    }
+
+    /// Build a `^` or `$` anchor as a single predicated epsilon edge.
+    /// The predicate is evaluated at runtime against the input slice; see
+    /// `super::anchors`.
+    fn build_anchor(&mut self, anchor_type: ir::AnchorType, multiline: bool) -> Result<Fragment> {
+        let start = self.make()?;
+        let end = self.make()?;
+        let cond = match anchor_type {
+            ir::AnchorType::StartOfLine => EpsCondition::StartOfLine { multiline },
+            ir::AnchorType::EndOfLine => EpsCondition::EndOfLine { multiline },
+        };
+        self.get(start).add_eps_anchor(end, cond);
+        Ok(Fragment::new(start, [end]))
     }
 
     /// Build a sequence of nodes.
@@ -568,6 +620,28 @@ impl Builder {
     }
 }
 
+/// Collect capture-group names from the IR in id order. Mirrors what
+/// `emit::emit` does when populating `CompiledRegex::group_names`: visit
+/// every `CaptureGroup` node and push its (possibly-empty) name. Returns an
+/// empty slice if no group is named — same convention as `CompiledRegex`.
+fn collect_group_names(node: &Node) -> Box<[Box<str>]> {
+    let mut names: Vec<Box<str>> = Vec::new();
+    ir::walk(/* postorder */ false, /* unicode */ false, node, &mut |n, _| {
+        if let Node::CaptureGroup { id, name, .. } = n {
+            let idx = *id as usize;
+            if names.len() <= idx {
+                names.resize(idx + 1, Box::<str>::from(""));
+            }
+            names[idx] = name.as_deref().unwrap_or("").into();
+        }
+    });
+    if names.iter().any(|s| !s.is_empty()) {
+        names.into_boxed_slice()
+    } else {
+        Box::new([])
+    }
+}
+
 /// Try converting a regular expression to a NFA.
 /// \return the NFA on success, or none if the IR has unsupported instructions,
 /// or we would exceed a budget.
@@ -591,6 +665,7 @@ impl Nfa {
             start,
             states: b.states.into_boxed_slice(),
             num_tags: b.num_tags,
+            group_names: collect_group_names(&re.node),
         })
     }
 
@@ -604,5 +679,12 @@ impl Nfa {
 
     pub fn num_tags(&self) -> usize {
         self.num_tags
+    }
+
+    /// Capture-group names indexed by capture-group id (groups without a
+    /// name have an empty string). Empty when no groups are named, matching
+    /// the convention used by `CompiledRegex`.
+    pub fn group_names(&self) -> &[Box<str>] {
+        &self.group_names
     }
 }

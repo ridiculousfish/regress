@@ -181,7 +181,12 @@ fn prune_and_record(threads: &mut ThreadSet, best: &mut Option<NfaMatch>) -> boo
 /// them later reaches `GOAL_STATE`, it overwrites the best (it's a
 /// higher-priority match). When all surviving threads die, the saved
 /// `best` is the answer.
-pub fn execute(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
+/// Attempt to match the NFA against `input` anchored at byte offset
+/// `start`. Predicate evaluation (`^`, `$`) operates against the FULL
+/// `input` at the actual byte position (`start + i`), so `^` non-multiline
+/// fires only when `start == 0` — not when the harness happens to be
+/// trying a non-zero start position via slice indexing.
+pub fn execute(nfa: &Nfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     let mut current_threads = ThreadSet::new(nfa.states.len());
     let mut next_threads = ThreadSet::new(nfa.states.len());
     let num_tags = nfa.num_tags();
@@ -189,7 +194,7 @@ pub fn execute(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
 
     // Start at the start state.
     current_threads.push(Thread::new(nfa.start(), num_tags));
-    epsilon_closure_with_tags(nfa, &mut current_threads, 0);
+    epsilon_closure_with_tags(nfa, &mut current_threads, input, start);
 
     // Initial closure may already reach GOAL (e.g. patterns that accept
     // the empty input).
@@ -197,7 +202,8 @@ pub fn execute(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
         return best;
     }
 
-    for (pos, &byte) in input.iter().enumerate() {
+    for (i, &byte) in input[start..].iter().enumerate() {
+        let pos = start + i;
         for thread in current_threads.iter() {
             let state = nfa.at(thread.state);
             if let Some(next_state) = state.transition_for_byte(byte) {
@@ -208,7 +214,7 @@ pub fn execute(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
             return best;
         }
 
-        epsilon_closure_with_tags(nfa, &mut next_threads, pos + 1);
+        epsilon_closure_with_tags(nfa, &mut next_threads, input, pos + 1);
 
         // Goals seen at this step are higher priority than `best` only if
         // they come from threads that were strictly higher in priority
@@ -235,22 +241,42 @@ pub fn execute(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
 /// and produce wrong matches for non-greedy quantifiers (the higher-
 /// priority "exit non-greedy loop" path could land behind the lower-
 /// priority "keep looping" path in the set, defeating pruning).
-fn epsilon_closure_with_tags(nfa: &Nfa, threads: &mut ThreadSet, current_pos: TextPos) {
+fn epsilon_closure_with_tags(
+    nfa: &Nfa,
+    threads: &mut ThreadSet,
+    input: &[u8],
+    current_pos: TextPos,
+) {
     let initial_n = threads.threads.len();
     for idx in 0..initial_n {
-        dfs_expand_eps(nfa, threads, idx, current_pos);
+        dfs_expand_eps(nfa, threads, idx, input, current_pos);
     }
 }
 
-// Depth-first expansion of `threads[idx]`'s eps subtree.
-fn dfs_expand_eps(nfa: &Nfa, threads: &mut ThreadSet, idx: usize, current_pos: TextPos) {
+/// Depth-first expansion of `threads[idx]`'s eps subtree. Pushes new
+/// threads at the end of the set in DFS order, then recurses into each
+/// newly-pushed thread before processing the next sibling eps edge.
+/// Predicated eps edges (`^`, `$`) are skipped when their predicate
+/// doesn't hold at `current_pos`.
+fn dfs_expand_eps(
+    nfa: &Nfa,
+    threads: &mut ThreadSet,
+    idx: usize,
+    input: &[u8],
+    current_pos: TextPos,
+) {
     let parent_state = threads.threads[idx].state;
     let state = nfa.at(parent_state);
     for edge_idx in 0..state.eps.len() {
-        let (target, ops_len) = {
+        // Re-read each iteration to dodge the &state borrow held across the
+        // recursive call (which also borrows nfa).
+        let (target, ops_len, cond_holds) = {
             let e = &nfa.at(parent_state).eps[edge_idx];
-            (e.target, e.ops.len())
+            (e.target, e.ops.len(), e.cond.holds(input, current_pos))
         };
+        if !cond_holds {
+            continue;
+        }
         if threads.contains(target) {
             continue;
         }
@@ -261,6 +287,6 @@ fn dfs_expand_eps(nfa: &Nfa, threads: &mut ThreadSet, idx: usize, current_pos: T
         }
         threads.push(new_thread);
         let new_idx = threads.threads.len() - 1;
-        dfs_expand_eps(nfa, threads, new_idx, current_pos);
+        dfs_expand_eps(nfa, threads, new_idx, input, current_pos);
     }
 }

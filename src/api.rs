@@ -452,7 +452,7 @@ impl Regex {
     ///   ```
     #[inline]
     pub fn find_from<'r, 't>(&'r self, text: &'t str, start: usize) -> Matches<'r, 't> {
-        backends::find(self, text, start)
+        backends::find(&self.cr, text, start)
     }
 
     /// Searches `text` to find the first match.
@@ -475,7 +475,7 @@ impl Regex {
     /// `start`.
     #[inline]
     pub fn find_from_ascii<'r, 't>(&'r self, text: &'t str, start: usize) -> AsciiMatches<'r, 't> {
-        backends::find(self, text, start)
+        backends::find(&self.cr, text, start)
     }
 
     /// Returns an iterator for matches found in 'text' starting at index `start`.
@@ -907,14 +907,18 @@ pub use pattern_impl::*;
 // Currently there is only the classical backtracking, and PikeVM.
 #[doc(hidden)]
 pub mod backends {
-    use super::Regex;
     use super::exec;
     use super::indexing;
     #[cfg(feature = "nfa")]
     pub use crate::automata::dfa::Dfa;
     #[cfg(feature = "nfa")]
+    pub use crate::automata::executors::{NfaExecutor, TdfaExecutor};
+    #[cfg(feature = "nfa")]
     pub use crate::automata::nfa::{Error as NfaError, Nfa};
+    #[cfg(feature = "nfa")]
+    pub use crate::automata::tdfa::Tdfa;
     pub use crate::emit::emit;
+    pub use crate::insn::CompiledRegex;
     pub use crate::optimizer::optimize;
     pub use crate::parse::try_parse;
 
@@ -934,22 +938,24 @@ pub mod backends {
         <DefaultExecutor<'r, 't> as exec::Executor<'r, 't>>::AsAscii;
 
     /// Searches `text`, returning an iterator over non-overlapping matches.
+    /// Takes the compiled artifact the executor expects (e.g. `CompiledRegex`
+    /// for the bytecode engines, `Nfa`/`Tdfa` for the automata engines).
     pub fn find<'r, 't, Executor: exec::Executor<'r, 't>>(
-        re: &'r Regex,
+        source: &'r Executor::Source,
         text: &'t str,
         start: usize,
     ) -> exec::Matches<Executor> {
-        exec::Matches::new(Executor::new(&re.cr, text), start)
+        exec::Matches::new(Executor::new(source, text), start)
     }
 
     /// Searches `text`, returning an iterator over non-overlapping matches.
     /// This is a convenience method to avoid E0223.
     pub fn find_ascii<'r, 't, Executor: exec::Executor<'r, 't>>(
-        re: &'r Regex,
+        source: &'r <Executor::AsAscii as exec::Executor<'r, 't>>::Source,
         text: &'t str,
         start: usize,
     ) -> exec::Matches<Executor::AsAscii> {
-        find::<Executor::AsAscii>(re, text, start)
+        find::<Executor::AsAscii>(source, text, start)
     }
 }
 

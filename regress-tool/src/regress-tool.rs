@@ -165,9 +165,9 @@ fn run_bt(re: &Regex, input: &str) {
 }
 
 #[cfg(feature = "backend-pikevm")]
-fn run_pikevm(re: &Regex, input: &str) {
+fn run_pikevm(cr: &regress::backends::CompiledRegex, input: &str) {
     use regress::backends::PikeVMExecutor;
-    let mut matches = regress::backends::find::<PikeVMExecutor>(re, input, 0);
+    let mut matches = regress::backends::find::<PikeVMExecutor>(cr, input, 0);
     if let Some(res) = matches.next() {
         let count = 1 + matches.count();
         println!(
@@ -182,7 +182,7 @@ fn run_pikevm(re: &Regex, input: &str) {
 
 #[cfg(feature = "nfa")]
 fn run_tnfa(nfa: &Nfa, input: &str) {
-    match nfa_backend::execute(nfa, input.as_bytes()) {
+    match nfa_backend::execute(nfa, input.as_bytes(), 0) {
         Some(m) => {
             println!(
                 "tnfa:  Match: {}, total: 1",
@@ -195,7 +195,7 @@ fn run_tnfa(nfa: &Nfa, input: &str) {
 
 #[cfg(feature = "nfa")]
 fn run_tdfa(tdfa: &Tdfa, input: &str) {
-    match tdfa_backend::execute(tdfa, input.as_bytes()) {
+    match tdfa_backend::execute(tdfa, input.as_bytes(), 0) {
         Some(m) => {
             println!(
                 "tdfa:  Match: {}, total: 1",
@@ -381,10 +381,8 @@ fn main() -> Result<(), Error> {
                     Backend::PikeVm => {
                         #[cfg(feature = "backend-pikevm")]
                         {
-                            if regex_cache.is_none() {
-                                regex_cache = Some(backends::emit(&ire).into());
-                            }
-                            run_pikevm(regex_cache.as_ref().unwrap(), input);
+                            let cr = backends::emit(&ire);
+                            run_pikevm(&cr, input);
                         }
                         #[cfg(not(feature = "backend-pikevm"))]
                         println!("pikevm: not available (compile with --features backend-pikevm)");

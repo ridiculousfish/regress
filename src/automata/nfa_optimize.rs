@@ -1,6 +1,6 @@
 //! Optimize states in an NFA builder
 
-use crate::automata::nfa::{State, StateHandle};
+use crate::automata::nfa::{EpsCondition, State, StateHandle};
 use std::collections::HashSet;
 
 // Optimize epsilons within states.
@@ -37,9 +37,16 @@ fn forward_to_dense(states: &mut [State], forwarder: impl Fn(StateHandle) -> Sta
 }
 
 // A state is collapsible if it has no byte transitions and a single outgoing
-// epsilon transition  with no operations. In that case, "collapse" the state into its target.
+// unconditional epsilon transition with no operations. In that case, "collapse"
+// the state into its target. Predicated eps edges (`^`, `$`) cannot be
+// collapsed without losing the predicate, so the `cond == Always` check is
+// load-bearing.
 fn get_collapse_target(s: &State) -> Option<StateHandle> {
-    if s.eps.len() == 1 && s.eps[0].ops.is_empty() && s.transitions.is_empty() {
+    if s.eps.len() == 1
+        && s.eps[0].ops.is_empty()
+        && s.eps[0].cond == EpsCondition::Always
+        && s.transitions.is_empty()
+    {
         Some(s.eps[0].target)
     } else {
         None
