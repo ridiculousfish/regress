@@ -4,8 +4,9 @@ use crate::automata::dfa::{DEAD_STATE, Dfa};
 use crate::automata::nfa::{FULL_MATCH_END, FULL_MATCH_START, TEXT_POS_NO_MATCH, TextPos};
 use crate::automata::nfa_backend::{NfaMatch, tags_to_captures};
 use crate::automata::tdfa::{
-    InputMark, MarkValue, TDFA_DEAD_STATE, TagCommand, TagCommandList, Tdfa,
+    FinalCommand, InputMark, MarkValue, TDFA_DEAD_STATE, TagCommand, TagCommandList, Tdfa,
 };
+use smallvec::SmallVec;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
@@ -43,14 +44,18 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     apply_commands(&mut marks, tdfa.entry_commands(), start);
 
     let mut state = tdfa.start();
-    let mut last_accept: Option<(usize, u32, Vec<TextPos>)> = None;
+    // The finals row to use at scan end. Cloned at each new accept so the
+    // values that were live *at the accept* drive finalization (later
+    // transitions / conditionals may overwrite them).
+    let mut last_accept: Option<(usize, Vec<TextPos>, SmallVec<[FinalCommand; 4]>)> = None;
 
     if state == TDFA_DEAD_STATE {
         return None;
     }
     if tdfa.accepting()[state as usize] {
-        last_accept = Some((start, state, marks.clone()));
+        last_accept = Some((start, marks.clone(), tdfa.finals()[state as usize].clone()));
     }
+    record_conditionals(tdfa, state, input, start, &marks, &mut last_accept);
 
     let byte_to_class = tdfa.byte_to_class();
     let transitions = tdfa.transitions();
@@ -69,11 +74,49 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
         apply_commands(&mut marks, &trans_cmds[idx], pos + 1);
         state = next;
         if accepting[state as usize] {
-            last_accept = Some((pos + 1, state, marks.clone()));
+            last_accept = Some((
+                pos + 1,
+                marks.clone(),
+                tdfa.finals()[state as usize].clone(),
+            ));
         }
+        record_conditionals(tdfa, state, input, pos + 1, &marks, &mut last_accept);
     }
 
-    last_accept.map(|(end, accept_state, snap)| finalize(tdfa, accept_state, &snap, end, num_tags))
+    // EOI pass — `$` non-multiline naturally fires here; multiline `$` fires
+    // here too if the previous-byte side of the predicate is satisfied.
+    record_conditionals(tdfa, state, input, input.len(), &marks, &mut last_accept);
+
+    last_accept.map(|(end, snap, finals)| finalize(&finals, &snap, end, num_tags))
+}
+
+/// For each `$`-style conditional attached to `state`, evaluate its
+/// predicate at `pos`; on hit, snapshot the marks, apply the conditional's
+/// commands, and treat it as a new `last_accept` candidate. Priority order
+/// within the conditional list mirrors the eps source order from
+/// construction; later updates here intentionally overwrite earlier ones
+/// at the same step, matching the existing "latest accept wins" semantics
+/// of the regular accept path.
+fn record_conditionals(
+    tdfa: &Tdfa,
+    state: u32,
+    input: &[u8],
+    pos: usize,
+    marks: &[TextPos],
+    last_accept: &mut Option<(usize, Vec<TextPos>, SmallVec<[FinalCommand; 4]>)>,
+) {
+    let conds = tdfa.anchor_conditionals(state);
+    if conds.is_empty() {
+        return;
+    }
+    for ac in conds {
+        if !ac.cond.holds(input, pos) {
+            continue;
+        }
+        let mut snap: Vec<TextPos> = marks.to_vec();
+        apply_commands(&mut snap, &ac.commands, pos);
+        *last_accept = Some((pos, snap, ac.finals.clone()));
+    }
 }
 
 /// Apply a sequence of `TagCommand`s to the marks array. CurrentPos and Nil
@@ -104,13 +147,13 @@ fn apply_commands(marks: &mut [TextPos], cmds: &[TagCommand], current_pos: TextP
     }
 }
 
-/// Build an `NfaMatch` from a finalization snapshot. `state` is the accepting
-/// state whose `finals` map marks → tags; `marks` is the snapshot taken at
+/// Build an `NfaMatch` from a finalization snapshot. `finals` is the
+/// row of finalize-time commands (per-state for regular accepts, per-
+/// conditional for `$`-fired accepts); `marks` is the snapshot taken at
 /// the accept; `end` is the byte offset where the match ended.
-fn finalize(tdfa: &Tdfa, state: u32, marks: &[TextPos], end: usize, num_tags: usize) -> NfaMatch {
+fn finalize(finals: &[FinalCommand], marks: &[TextPos], end: usize, num_tags: usize) -> NfaMatch {
     let mut tag_values = vec![TEXT_POS_NO_MATCH; num_tags];
-    let row = &tdfa.finals()[state as usize];
-    for cmd in row {
+    for cmd in finals {
         let val = match cmd.src {
             MarkValue::Copy(src) => marks[src.0 as usize],
             MarkValue::CurrentPos => unreachable!("finals never use CurrentPos"),

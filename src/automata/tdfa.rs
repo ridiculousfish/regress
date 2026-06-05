@@ -8,14 +8,14 @@
 use crate::automata::dfa::{compute_byte_classes, representative_bytes};
 use crate::automata::nfa::{EpsCondition, GOAL_STATE, Nfa, StateHandle, TagIdx};
 
-/// Whether any state in the NFA has an eps edge with a non-`Always`
-/// condition (e.g. `^`/`$` anchors). The TDFA construction can't yet
-/// represent predicate-conditional closures, so we refuse such NFAs at
-/// build time rather than silently producing a wrong-but-fast DFA.
-fn nfa_has_predicated_eps(nfa: &Nfa) -> bool {
+/// Whether any state in the NFA has an eps edge gated by `^`. The TDFA
+/// construction can't yet represent the `^`-fired variant subset (task 13),
+/// so we refuse such NFAs at build time rather than silently producing a
+/// wrong-but-fast DFA. `$` IS supported via `anchor_conditionals`.
+fn nfa_has_start_of_line(nfa: &Nfa) -> bool {
     for state in nfa.states.iter() {
         for edge in &state.eps {
-            if edge.cond != EpsCondition::Always {
+            if matches!(edge.cond, EpsCondition::StartOfLine { .. }) {
                 return true;
             }
         }
@@ -108,6 +108,21 @@ pub struct TagCommand {
 /// An ordered list of tag commands, applied in sequence on a transition or at
 /// scan start.
 pub type TagCommandList = SmallVec<[TagCommand; 4]>;
+
+/// A conditional-accept hook attached to a TDFA state. Records what happens
+/// if a `$`-style predicate fires at this state (the eps target's mini-
+/// closure runs entirely via epsilon, terminating at `GOAL_STATE`).
+///
+/// At runtime the executor evaluates `cond` against the current input
+/// position; if it holds, it snapshots the current marks, applies
+/// `commands` (CurrentPos writes from the eps walk), and uses `finals` to
+/// extract per-tag values for a match candidate.
+#[derive(Clone, Debug)]
+pub struct AnchorConditional {
+    pub cond: crate::automata::nfa::EpsCondition,
+    pub commands: TagCommandList,
+    pub finals: SmallVec<[FinalCommand; 4]>,
+}
 
 /// One member of a TDFA configuration: an NFA state plus the per-tag version
 /// map recording which `InputMark` currently holds each tag's value in this
@@ -222,7 +237,9 @@ fn close_priority(
     alloc: &mut MarkAlloc,
     nfa: &Nfa,
     seeds: &[TaggedNfaState],
-) -> (TdfaState, TagCommandList) {
+    num_tags: usize,
+    conditionals: &mut SmallVec<[AnchorConditional; 1]>,
+) -> Result<(TdfaState, TagCommandList), Error> {
     let mut threads: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
     let mut commands = TagCommandList::new();
     let mut seen = vec![false; nfa.states.len()];
@@ -233,7 +250,7 @@ fn close_priority(
     // a child that will later be dropped by dedup — and so that lower-priority
     // siblings correctly see "already reached" once a higher-priority path has
     // claimed an NFA state.
-    let mut stack: Vec<TaggedNfaState> = seeds.iter().rev().cloned().collect();
+    let mut stack: Vec<TaggedNfaState> = Vec::new();
     for seed in seeds.iter().rev() {
         if seen[seed.state as usize] {
             continue;
@@ -247,6 +264,61 @@ fn close_priority(
         threads.push(thread);
         let eps = &nfa.states[state as usize].eps;
         for edge in eps.iter().rev() {
+            match &edge.cond {
+                EpsCondition::Always => {
+                    // Falls through to normal traversal below.
+                }
+                EpsCondition::StartOfLine { .. } => {
+                    // `^` handling lives in the `anchor_alt` path (task 13).
+                    // Until that lands, bail rather than silently miscompile.
+                    return Err(Error::PredicatedEpsNotSupported);
+                }
+                EpsCondition::EndOfLine { .. } => {
+                    // Don't expand `$` into the determinized subset — record a
+                    // conditional accept hook instead. Mini-closure must
+                    // terminate at `GOAL_STATE` via only-eps; otherwise the
+                    // path can't be captured by a per-position accept and
+                    // we have to bail.
+                    let mut sub_tag_map = parent_tag_map.clone();
+                    let mut pre_cmds = TagCommandList::new();
+                    for &reg in &edge.ops {
+                        let m = alloc.next();
+                        sub_tag_map[reg as usize] = Some(m);
+                        pre_cmds.push(TagCommand {
+                            dst: m,
+                            src: MarkValue::CurrentPos,
+                        });
+                    }
+                    let seed = TaggedNfaState {
+                        state: edge.target,
+                        tag_map: sub_tag_map,
+                    };
+                    let mut sub_conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
+                    let (sub_closure, sub_cmds) =
+                        close_priority(alloc, nfa, &[seed], num_tags, &mut sub_conds)?;
+                    let sub_closure = truncate_at_first_goal(sub_closure);
+                    if !sub_closure.0.iter().all(|t| t.state == GOAL_STATE) {
+                        // Non-GOAL threads survive the mini-closure: the `$`
+                        // is followed by more byte matching. We don't yet
+                        // know how to represent that in the TDFA — caller
+                        // falls back to the NFA backend.
+                        return Err(Error::PredicatedEpsNotSupported);
+                    }
+                    if sub_closure.0.is_empty() {
+                        continue; // Mini-closure didn't reach GOAL — no accept.
+                    }
+                    let mut all_cmds = TagCommandList::new();
+                    all_cmds.extend(pre_cmds);
+                    all_cmds.extend(sub_cmds);
+                    let finals = synthesize_finals(&sub_closure, num_tags);
+                    conditionals.push(AnchorConditional {
+                        cond: edge.cond.clone(),
+                        commands: all_cmds,
+                        finals,
+                    });
+                    continue;
+                }
+            }
             if seen[edge.target as usize] {
                 continue;
             }
@@ -267,7 +339,7 @@ fn close_priority(
         }
     }
 
-    (TdfaState(threads), commands)
+    Ok((TdfaState(threads), commands))
 }
 
 /// Build an all-`None` tag map of length `num_tags` for seeding a new entry.
@@ -358,15 +430,19 @@ pub struct Tdfa {
     // arise from the start state's epsilon closure — e.g. the FULL_MATCH_START
     // write that records position 0. Run by the executor before the byte loop.
     entry_commands: TagCommandList,
+
+    // Per-state list of `$`-style accept conditionals. Indexed by state ID.
+    // The executor evaluates `cond` per step + at EOI; if true, applies the
+    // entry's commands and uses its finals to produce a match candidate.
+    anchor_conditionals: Box<[SmallVec<[AnchorConditional; 1]>]>,
 }
 
 impl Tdfa {
     pub fn try_from(nfa: &Nfa) -> Result<Self, Error> {
-        // Until the TDFA construction is taught about `^`/`$` (the
-        // `anchor_alt` + `anchor_conditionals` work), bail out on any NFA
-        // containing predicated eps edges so we don't silently treat them
-        // as unconditional and match incorrectly.
-        if nfa_has_predicated_eps(nfa) {
+        // Bail eagerly on `^`-bearing NFAs (`StartOfLine` eps edges). The
+        // `$`-handling below records conditionals via close_priority; `^`
+        // requires state-splitting (anchor_alt) that's still pending.
+        if nfa_has_start_of_line(nfa) {
             return Err(Error::PredicatedEpsNotSupported);
         }
 
@@ -381,6 +457,7 @@ impl Tdfa {
         let mut accepting: Vec<bool> = Vec::new();
         let mut transition_commands: Vec<TagCommandList> = Vec::new();
         let mut finals: Vec<SmallVec<[FinalCommand; 4]>> = Vec::new();
+        let mut anchor_conditionals: Vec<SmallVec<[AnchorConditional; 1]>> = Vec::new();
         let mut worklist: Vec<TdfaState> = Vec::new();
 
         // State 0 = dead state (self-loops, not accepting). Represented as
@@ -390,6 +467,7 @@ impl Tdfa {
         transition_commands.resize(num_classes, SmallVec::new());
         accepting.push(false);
         finals.push(SmallVec::new());
+        anchor_conditionals.push(SmallVec::new());
 
         // Start state = priority-ordered closure of {nfa.start}, canonicalized.
         // The initial closure may emit CurrentPos commands (e.g. the
@@ -399,7 +477,9 @@ impl Tdfa {
             state: nfa.start(),
             tag_map: empty_tag_map(num_tags),
         };
-        let (start_closure, start_current_cmds) = close_priority(&mut alloc, nfa, &[start_seed]);
+        let mut start_conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
+        let (start_closure, start_current_cmds) =
+            close_priority(&mut alloc, nfa, &[start_seed], num_tags, &mut start_conds)?;
         let start_closure = truncate_at_first_goal(start_closure);
         let (canon_start, start_copy_cmds) = canonicalize(start_closure);
         let mut entry_commands = TagCommandList::new();
@@ -414,6 +494,7 @@ impl Tdfa {
         transition_commands.resize(transition_commands.len() + num_classes, SmallVec::new());
         accepting.push(start_accepting);
         finals.push(start_finals);
+        anchor_conditionals.push(start_conds);
         worklist.push(canon_start);
 
         while let Some(state) = worklist.pop() {
@@ -440,7 +521,9 @@ impl Tdfa {
                     continue; // Already TDFA_DEAD_STATE.
                 }
 
-                let (next, current_cmds) = close_priority(&mut alloc, nfa, &seeds);
+                let mut next_conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
+                let (next, current_cmds) =
+                    close_priority(&mut alloc, nfa, &seeds, num_tags, &mut next_conds)?;
                 let next = truncate_at_first_goal(next);
                 let (canon_next, copy_cmds) = canonicalize(next);
 
@@ -459,6 +542,7 @@ impl Tdfa {
                         let state_finals = synthesize_finals(&canon_next, num_tags);
                         accepting.push(is_accepting);
                         finals.push(state_finals);
+                        anchor_conditionals.push(next_conds);
                         transitions.resize(transitions.len() + num_classes, TDFA_DEAD_STATE);
                         transition_commands
                             .resize(transition_commands.len() + num_classes, SmallVec::new());
@@ -486,7 +570,13 @@ impl Tdfa {
             transition_commands: transition_commands.into_boxed_slice(),
             finals: finals.into_boxed_slice(),
             entry_commands,
+            anchor_conditionals: anchor_conditionals.into_boxed_slice(),
         })
+    }
+
+    /// `$`-style accept conditionals for `state`. Empty for most states.
+    pub fn anchor_conditionals(&self, state: TdfaStateId) -> &[AnchorConditional] {
+        &self.anchor_conditionals[state as usize]
     }
 
     pub fn num_tags(&self) -> usize {
