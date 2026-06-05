@@ -8,10 +8,24 @@
 use crate::automata::dfa::{compute_byte_classes, representative_bytes};
 use crate::automata::nfa::{EpsCondition, GOAL_STATE, Nfa, StateHandle, TagIdx};
 
-/// Whether any state in the NFA has an eps edge gated by `^`. The TDFA
-/// construction can't yet represent the `^`-fired variant subset (task 13),
-/// so we refuse such NFAs at build time rather than silently producing a
-/// wrong-but-fast DFA. `$` IS supported via `anchor_conditionals`.
+/// Whether any state in the NFA has an eps edge gated by `^`.
+///
+/// We bail on ANY `^` for now, even though the `seed_initial_state` /
+/// `at_start_of_input` machinery handles non-multiline `^` correctly
+/// in principle.
+///
+/// The reason is unrelated to anchors: capture-heavy patterns
+/// (e.g. `run_regexp_capture_test`'s `^(((N({)?)|(R)|...)+` with 58
+/// capture groups / 116 tags) blow past the 4096-state TDFA budget on
+/// the regex BODY alone — stripping `^` from that pattern still hits
+/// BudgetExceeded after ~14s in release mode. The `^` bail was
+/// incidentally masking this pre-existing TDFA scaling issue; lifting
+/// it without addressing the budget would regress
+/// `run_regexp_capture_test` to a multi-minute hang in debug builds.
+///
+/// Re-enabling `^` should land alongside either a smaller state budget
+/// or a per-step work cap. Multiline `^` additionally needs the
+/// alt-state mechanism.
 fn nfa_has_start_of_line(nfa: &Nfa) -> bool {
     for state in nfa.states.iter() {
         for edge in &state.eps {
@@ -238,6 +252,7 @@ fn close_priority(
     nfa: &Nfa,
     seeds: &[TaggedNfaState],
     num_tags: usize,
+    at_start_of_input: bool,
     conditionals: &mut SmallVec<[AnchorConditional; 1]>,
 ) -> Result<(TdfaState, TagCommandList), Error> {
     let mut threads: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
@@ -268,9 +283,21 @@ fn close_priority(
                 EpsCondition::Always => {
                     // Falls through to normal traversal below.
                 }
-                EpsCondition::StartOfLine { .. } => {
-                    // `^` handling lives in the `anchor_alt` path (task 13).
-                    // Until that lands, bail rather than silently miscompile.
+                EpsCondition::StartOfLine { multiline: false } => {
+                    // Non-multiline `^` only fires at start of input. We
+                    // build two initial closures (anchored vs unanchored);
+                    // this flag distinguishes them.
+                    if !at_start_of_input {
+                        continue;
+                    }
+                    // Fall through to normal traversal below.
+                }
+                EpsCondition::StartOfLine { multiline: true } => {
+                    // Multiline `^` requires the `anchor_alt` mechanism
+                    // (alt-state per state where ^ might fire mid-input);
+                    // bail until that lands. We pre-screen at try_from to
+                    // make this unreachable in practice, but keep the arm
+                    // here for soundness.
                     return Err(Error::PredicatedEpsNotSupported);
                 }
                 EpsCondition::EndOfLine { .. } => {
@@ -294,8 +321,14 @@ fn close_priority(
                         tag_map: sub_tag_map,
                     };
                     let mut sub_conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
-                    let (sub_closure, sub_cmds) =
-                        close_priority(alloc, nfa, &[seed], num_tags, &mut sub_conds)?;
+                    let (sub_closure, sub_cmds) = close_priority(
+                        alloc,
+                        nfa,
+                        &[seed],
+                        num_tags,
+                        at_start_of_input,
+                        &mut sub_conds,
+                    )?;
                     let sub_closure = truncate_at_first_goal(sub_closure);
                     if !sub_closure.0.iter().all(|t| t.state == GOAL_STATE) {
                         // Non-GOAL threads survive the mini-closure: the `$`
@@ -349,6 +382,58 @@ fn empty_tag_map(num_tags: usize) -> SmallVec<[Option<InputMark>; 4]> {
     v
 }
 
+/// Build an initial TDFA state's closure under the given `at_start_of_input`
+/// flag and register it in `state_map`. Returns `(id, entry_commands)`.
+/// If the resulting canonical subset is already in `state_map`, the existing
+/// id is reused (e.g. when anchored and unanchored closures coincide because
+/// the pattern has no `^`).
+#[allow(clippy::too_many_arguments)]
+fn seed_initial_state(
+    nfa: &Nfa,
+    alloc: &mut MarkAlloc,
+    num_tags: usize,
+    at_start_of_input: bool,
+    state_map: &mut HashMap<TdfaState, TdfaStateId>,
+    transitions: &mut Vec<TdfaStateId>,
+    accepting: &mut Vec<bool>,
+    transition_commands: &mut Vec<TagCommandList>,
+    finals: &mut Vec<SmallVec<[FinalCommand; 4]>>,
+    anchor_conditionals: &mut Vec<SmallVec<[AnchorConditional; 1]>>,
+    worklist: &mut Vec<TdfaState>,
+    num_classes: usize,
+) -> Result<(TdfaStateId, TagCommandList), Error> {
+    let seed = TaggedNfaState {
+        state: nfa.start(),
+        tag_map: empty_tag_map(num_tags),
+    };
+    let mut conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
+    let (closure, current_cmds) =
+        close_priority(alloc, nfa, &[seed], num_tags, at_start_of_input, &mut conds)?;
+    let closure = truncate_at_first_goal(closure);
+    let (canon, copy_cmds) = canonicalize(closure);
+    let mut entry_commands = TagCommandList::new();
+    entry_commands.extend(current_cmds);
+    entry_commands.extend(copy_cmds);
+
+    if let Some(&id) = state_map.get(&canon) {
+        return Ok((id, entry_commands));
+    }
+    let id = accepting.len() as TdfaStateId;
+    if id as usize >= TDFA_STATE_BUDGET {
+        return Err(Error::BudgetExceeded);
+    }
+    let is_accepting = canon.0.iter().any(|t| t.state == GOAL_STATE);
+    let state_finals = synthesize_finals(&canon, num_tags);
+    accepting.push(is_accepting);
+    finals.push(state_finals);
+    anchor_conditionals.push(conds);
+    transitions.resize(transitions.len() + num_classes, TDFA_DEAD_STATE);
+    transition_commands.resize(transition_commands.len() + num_classes, SmallVec::new());
+    state_map.insert(canon.clone(), id);
+    worklist.push(canon);
+    Ok((id, entry_commands))
+}
+
 /// Synthesize the `finals` row for a (canonicalized) configuration. Reads the
 /// first GOAL thread's `tag_map` — leftmost-greedy / leftmost-first semantics
 /// already baked in by truncate-at-first-GOAL. Non-accepting states get an
@@ -386,7 +471,18 @@ fn truncate_at_first_goal(mut s: TdfaState) -> TdfaState {
 
 #[derive(Debug)]
 pub struct Tdfa {
-    start: TdfaStateId, // Start state ID.
+    /// Initial state when matching is being attempted at byte offset 0 of
+    /// the input — `^` non-multiline fires here.
+    start_anchored: TdfaStateId,
+    /// Initial state for non-zero start offsets — `^` doesn't fire.
+    /// Equals `start_anchored` for patterns without `^`.
+    start_unanchored: TdfaStateId,
+    /// Entry commands paired with `start_anchored`. Run by the executor
+    /// before the byte loop when `start == 0`.
+    entry_commands_anchored: TagCommandList,
+    /// Entry commands paired with `start_unanchored`. Run by the executor
+    /// before the byte loop when `start > 0`.
+    entry_commands_unanchored: TagCommandList,
     num_classes: usize, // Number of byte equivalence classes.
     num_tags: usize,    // Number of semantic tags (capture positions).
     // Capture-group names cloned from the source NFA so callers can attach
@@ -426,11 +522,6 @@ pub struct Tdfa {
     // state's mark snapshot.
     finals: Box<[SmallVec<[FinalCommand; 4]>]>,
 
-    // Commands to apply once at scan start, before consuming any input. These
-    // arise from the start state's epsilon closure — e.g. the FULL_MATCH_START
-    // write that records position 0. Run by the executor before the byte loop.
-    entry_commands: TagCommandList,
-
     // Per-state list of `$`-style accept conditionals. Indexed by state ID.
     // The executor evaluates `cond` per step + at EOI; if true, applies the
     // entry's commands and uses its finals to produce a match candidate.
@@ -439,9 +530,6 @@ pub struct Tdfa {
 
 impl Tdfa {
     pub fn try_from(nfa: &Nfa) -> Result<Self, Error> {
-        // Bail eagerly on `^`-bearing NFAs (`StartOfLine` eps edges). The
-        // `$`-handling below records conditionals via close_priority; `^`
-        // requires state-splitting (anchor_alt) that's still pending.
         if nfa_has_start_of_line(nfa) {
             return Err(Error::PredicatedEpsNotSupported);
         }
@@ -469,33 +557,40 @@ impl Tdfa {
         finals.push(SmallVec::new());
         anchor_conditionals.push(SmallVec::new());
 
-        // Start state = priority-ordered closure of {nfa.start}, canonicalized.
-        // The initial closure may emit CurrentPos commands (e.g. the
-        // FULL_MATCH_START write); we capture them as `entry_commands` to fire
-        // once at scan start before any input is consumed.
-        let start_seed = TaggedNfaState {
-            state: nfa.start(),
-            tag_map: empty_tag_map(num_tags),
-        };
-        let mut start_conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
-        let (start_closure, start_current_cmds) =
-            close_priority(&mut alloc, nfa, &[start_seed], num_tags, &mut start_conds)?;
-        let start_closure = truncate_at_first_goal(start_closure);
-        let (canon_start, start_copy_cmds) = canonicalize(start_closure);
-        let mut entry_commands = TagCommandList::new();
-        entry_commands.extend(start_current_cmds);
-        entry_commands.extend(start_copy_cmds);
-
-        let start_id: TdfaStateId = 1;
-        let start_accepting = canon_start.0.iter().any(|t| t.state == GOAL_STATE);
-        let start_finals = synthesize_finals(&canon_start, num_tags);
-        state_map.insert(canon_start.clone(), start_id);
-        transitions.resize(transitions.len() + num_classes, TDFA_DEAD_STATE);
-        transition_commands.resize(transition_commands.len() + num_classes, SmallVec::new());
-        accepting.push(start_accepting);
-        finals.push(start_finals);
-        anchor_conditionals.push(start_conds);
-        worklist.push(canon_start);
+        // Build both initial states. `start_anchored` is the closure under
+        // `at_start_of_input = true`, i.e. with non-multiline `^` eps edges
+        // traversable. `start_unanchored` is the closure with them skipped;
+        // it's the right starting subset when the executor calls in with a
+        // non-zero start offset. They may dedup to the same id if the regex
+        // has no `^`.
+        let (start_anchored, entry_commands_anchored) = seed_initial_state(
+            nfa,
+            &mut alloc,
+            num_tags,
+            /* at_start_of_input */ true,
+            &mut state_map,
+            &mut transitions,
+            &mut accepting,
+            &mut transition_commands,
+            &mut finals,
+            &mut anchor_conditionals,
+            &mut worklist,
+            num_classes,
+        )?;
+        let (start_unanchored, entry_commands_unanchored) = seed_initial_state(
+            nfa,
+            &mut alloc,
+            num_tags,
+            /* at_start_of_input */ false,
+            &mut state_map,
+            &mut transitions,
+            &mut accepting,
+            &mut transition_commands,
+            &mut finals,
+            &mut anchor_conditionals,
+            &mut worklist,
+            num_classes,
+        )?;
 
         while let Some(state) = worklist.pop() {
             let dfa_state = state_map[&state];
@@ -522,8 +617,14 @@ impl Tdfa {
                 }
 
                 let mut next_conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
-                let (next, current_cmds) =
-                    close_priority(&mut alloc, nfa, &seeds, num_tags, &mut next_conds)?;
+                let (next, current_cmds) = close_priority(
+                    &mut alloc,
+                    nfa,
+                    &seeds,
+                    num_tags,
+                    /* at_start_of_input */ false,
+                    &mut next_conds,
+                )?;
                 let next = truncate_at_first_goal(next);
                 let (canon_next, copy_cmds) = canonicalize(next);
 
@@ -559,7 +660,10 @@ impl Tdfa {
         let num_marks = alloc.count() as usize;
 
         Ok(Tdfa {
-            start: start_id,
+            start_anchored,
+            start_unanchored,
+            entry_commands_anchored,
+            entry_commands_unanchored,
             num_classes,
             num_tags,
             num_marks,
@@ -569,7 +673,6 @@ impl Tdfa {
             accepting: accepting.into_boxed_slice(),
             transition_commands: transition_commands.into_boxed_slice(),
             finals: finals.into_boxed_slice(),
-            entry_commands,
             anchor_conditionals: anchor_conditionals.into_boxed_slice(),
         })
     }
@@ -600,8 +703,14 @@ impl Tdfa {
         &self.finals
     }
 
-    pub fn entry_commands(&self) -> &[TagCommand] {
-        &self.entry_commands
+    /// Entry commands paired with the chosen initial state for the given
+    /// `start` byte offset.
+    pub fn entry_commands(&self, start: usize) -> &[TagCommand] {
+        if start == 0 {
+            &self.entry_commands_anchored
+        } else {
+            &self.entry_commands_unanchored
+        }
     }
 
     pub fn num_states(&self) -> usize {
@@ -612,8 +721,15 @@ impl Tdfa {
         self.num_classes
     }
 
-    pub fn start(&self) -> TdfaStateId {
-        self.start
+    /// Initial state for the given byte offset. `start == 0` picks the
+    /// anchored start (where `^` non-multiline fires); any non-zero offset
+    /// picks the unanchored start.
+    pub fn start(&self, start: usize) -> TdfaStateId {
+        if start == 0 {
+            self.start_anchored
+        } else {
+            self.start_unanchored
+        }
     }
 
     pub fn byte_to_class(&self) -> &[u8; 256] {
