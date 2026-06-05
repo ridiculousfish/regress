@@ -121,15 +121,15 @@ fn greedy_loop_correct() {
     // the scan path finds length 3.
     let t = make_tdfa("a*");
     assert_eq!(end(&t, b"aaab"), Some(3));
-    assert!(t.start() != crate::automata::tdfa::TDFA_DEAD_STATE);
+    assert!(t.start(0) != crate::automata::tdfa::TDFA_DEAD_STATE);
 }
 
 #[test]
 fn lazy_start_is_accepting() {
     // `a*?` start accepts but transitions to dead on 'a'.
     let t = make_tdfa("a*?");
-    assert!(t.start() != crate::automata::tdfa::TDFA_DEAD_STATE);
-    assert!(t.accepting()[t.start() as usize]);
+    assert!(t.start(0) != crate::automata::tdfa::TDFA_DEAD_STATE);
+    assert!(t.accepting()[t.start(0) as usize]);
     assert_eq!(end(&t, b"aaa"), Some(0));
 }
 
@@ -227,5 +227,5 @@ fn entry_commands_write_full_match_start() {
     // The start closure writes FULL_MATCH_START via an eps op; the resulting
     // entry_commands must be non-empty.
     let t = make_tdfa("abc");
-    assert!(!t.entry_commands().is_empty());
+    assert!(!t.entry_commands(0).is_empty());
 }

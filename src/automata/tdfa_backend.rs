@@ -41,9 +41,9 @@ pub fn execute_dfa(dfa: &Dfa, input: &[u8]) -> bool {
 pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     let num_tags = tdfa.num_tags();
     let mut marks: Vec<TextPos> = vec![TEXT_POS_NO_MATCH; tdfa.num_marks()];
-    apply_commands(&mut marks, tdfa.entry_commands(), start);
+    apply_commands(&mut marks, tdfa.entry_commands(start), start);
 
-    let mut state = tdfa.start();
+    let mut state = tdfa.start(start);
     // The finals row to use at scan end. Cloned at each new accept so the
     // values that were live *at the accept* drive finalization (later
     // transitions / conditionals may overwrite them).

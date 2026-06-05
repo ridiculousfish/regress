@@ -62,7 +62,7 @@ pub fn to_readable_string(tdfa: &Tdfa) -> String {
     let trans_cmds = tdfa.transition_commands();
     let accepting = tdfa.accepting();
     let finals = tdfa.finals();
-    let start = tdfa.start();
+    let start = tdfa.start(0);
 
     out.push_str(&format!(
         "TDFA ({} states, {} byte classes, {} tags, {} marks):\n",
@@ -74,10 +74,10 @@ pub fn to_readable_string(tdfa: &Tdfa) -> String {
     out.push_str(&"=".repeat(40));
     out.push('\n');
 
-    if !tdfa.entry_commands().is_empty() {
+    if !tdfa.entry_commands(0).is_empty() {
         out.push_str(&format!(
             "Entry commands: [{}]\n",
-            format_tag_cmds(tdfa.entry_commands())
+            format_tag_cmds(tdfa.entry_commands(0))
         ));
     }
     out.push('\n');
