@@ -65,6 +65,24 @@ const PATTERNS: &[Pattern] = &[
         label: "$-only: (a*)$",
         regex: r"(a*)$",
     },
+    // Nullable-body loops (rust-lang/regex#779). Compiled via the
+    // `x* → (x+)?` rewrite in build_loop.
+    Pattern {
+        label: "nullable: (a*)*",
+        regex: r"(a*)*",
+    },
+    Pattern {
+        label: "nullable: (a?)+",
+        regex: r"(a?)+",
+    },
+    Pattern {
+        label: "nullable: (a*){2,5}",
+        regex: r"(a*){2,5}",
+    },
+    Pattern {
+        label: "nullable: (|x)*",
+        regex: r"(|x)*",
+    },
     // :slow: capture-heavy patterns — currently hit BudgetExceeded.
     // Adding capture groups to the alternation explodes state count
     // because every (NFA subset × tag_map) pair becomes a distinct
@@ -148,6 +166,14 @@ fn main() {
         (r"(a*)^(a*)$", "aa\raaa"),
         (r"(a*)^(a*)$", ""),
         (r"(a*)$", "aaa"),
+        // Nullable-body cases. Compare captures vs `node -e 'JSON.stringify("...".match(/.../))'`.
+        (r"(a?)+", ""),
+        (r"(a?)+", "a"),
+        (r"(a?)+", "aa"),
+        (r"(a*)*", ""),
+        (r"(a*)*", "aaa"),
+        (r"(|x)*", "x"),
+        (r"(a*){2,5}", "aa"),
     ];
     for (pat, input) in exec_cases {
         execute_once(pat, input);
