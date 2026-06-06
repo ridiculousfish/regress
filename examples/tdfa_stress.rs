@@ -51,6 +51,20 @@ const PATTERNS: &[Pattern] = &[
         label: "fast: many literals in alt",
         regex: r"a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z",
     },
+    // multiline ^ in the middle of a pattern (exercises the
+    // anchor_alt / mid-input switch).
+    Pattern {
+        label: "mline ^: (a*)^(a*)$",
+        regex: r"(a*)^(a*)$",
+    },
+    Pattern {
+        label: "$-only: bar$",
+        regex: r"bar$",
+    },
+    Pattern {
+        label: "$-only: (a*)$",
+        regex: r"(a*)$",
+    },
     // :slow: capture-heavy patterns — currently hit BudgetExceeded.
     // Adding capture groups to the alternation explodes state count
     // because every (NFA subset × tag_map) pair becomes a distinct
