@@ -254,6 +254,12 @@ fn close_priority(
     let mut threads: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
     let mut commands = TagCommandList::new();
     let mut seen = vec![false; nfa.states.len()];
+    // Marks allocated below this id existed before this closure started.
+    // Any mark with id >= closure_start_mark was created within this
+    // closure — used by `ProgressSince` to detect "sentinel was written
+    // in this same eps closure" (which means no input was consumed between
+    // sentinel-write and the gated check, i.e. the body matched empty).
+    let closure_start_mark = alloc.count();
 
     // DFS with an explicit stack: push in reverse so the first seed / first
     // eps edge comes off the stack first, preserving source order in output.
@@ -299,11 +305,24 @@ fn close_priority(
                     }
                     // Fall through to normal traversal below.
                 }
-                EpsCondition::ProgressSince(_) => {
-                    // Runtime per-thread tag comparison — not representable in
-                    // the determinized subset. Construction bails so the test
-                    // harness reports SKIP rather than producing wrong matches.
-                    return Err(Error::PredicatedEpsNotSupported);
+                EpsCondition::ProgressSince(sentinel) => {
+                    // Runtime check `marks[sentinel] < current_pos` resolves
+                    // statically here as provenance: the sentinel's value at
+                    // the time of this check is whatever is in `parent_tag_map`.
+                    // If that mark was allocated within this same eps closure,
+                    // no input has been consumed since the write, so
+                    // `marks[sentinel] == current_pos` → predicate FAILS.
+                    // Otherwise (mark was inherited from a prior closure, or
+                    // the slot is empty) → predicate HOLDS.
+                    let sentinel_idx = *sentinel as usize;
+                    let written_in_this_closure = match parent_tag_map.get(sentinel_idx) {
+                        Some(Some(m)) => m.0 >= closure_start_mark,
+                        _ => false,
+                    };
+                    if written_in_this_closure {
+                        continue;
+                    }
+                    // Fall through to normal traversal.
                 }
                 EpsCondition::EndOfLine { .. } => {
                     // Don't expand `$` into the determinized subset — record a
