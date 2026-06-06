@@ -562,16 +562,46 @@ impl Builder {
     }
 
     /// Build a Loop node (handles both Loop and Loop1CharBody).
+    ///
+    /// For nullable bodies with `min == 0` (i.e. `x*`, `x{0,n}`), apply
+    /// rust-regex's structural rewrite: compile as `(x{1,n})?`. This
+    /// preserves leftmost-first preference order over a nullable body
+    /// (see rust-lang/regex#779). Per-thread capture forking in the eps
+    /// closure handles the "no empty iteration after min" semantics
+    /// without an explicit predicate.
     fn build_loop(&mut self, loopee: &Node, quant: &crate::ir::Quantifier) -> Result<Fragment> {
-        // Thompson/subset-construction engines produce wrong captures for
-        // loops whose body can match empty (rust-lang/regex#779). Rather than
-        // rewrite the IR, reject the pattern here — the NFA backend and any
-        // future TDFA built from it are then safe by construction.
-        if loopee.can_match_empty() {
-            return Err(Error::UnsupportedInstruction(
-                "Loop over empty-matching body not supported by NFAs".to_string(),
-            ));
+        if loopee.can_match_empty() && quant.min == 0 {
+            let inner_quant = ir::Quantifier {
+                min: 1,
+                max: quant.max,
+                greedy: quant.greedy,
+            };
+            let inner = self.build_loop_inner(loopee, &inner_quant)?;
+            return self.build_optional_around(inner, quant.greedy);
         }
+        self.build_loop_inner(loopee, quant)
+    }
+
+    /// Wrap an existing fragment in an "optional" (`?`) without rebuilding
+    /// the body. Used by `build_loop` after the `x* → (x+)?` rewrite.
+    fn build_optional_around(&mut self, frag: Fragment, greedy: bool) -> Result<Fragment> {
+        let exit = self.make()?;
+        self.join_eps(&frag.ends, exit);
+        let start = self.make()?;
+        if greedy {
+            self.get(start).add_eps(frag.start);
+            self.get(start).add_eps(exit);
+        } else {
+            self.get(start).add_eps(exit);
+            self.get(start).add_eps(frag.start);
+        }
+        Ok(Fragment::new(start, [exit]))
+    }
+
+    /// Loop construction without the nullable-body rewrite. `build_loop`
+    /// calls this directly when `quant.min >= 1`, or after applying the
+    /// `x* → (x+)?` rewrite for the inner `+` body.
+    fn build_loop_inner(&mut self, loopee: &Node, quant: &crate::ir::Quantifier) -> Result<Fragment> {
         // ES2015 §22.2.2.5: at every iteration entry, capture groups *inside*
         // the loop body reset to "undefined". Pre-compute the Nil-write ops
         // and attach them to every eps edge that enters the body (whether
@@ -583,12 +613,18 @@ impl Builder {
         let start = self.make()?;
         let greedy = quant.greedy;
         let mut current_ends = smallvec![start];
+        // The start handle of the most-recently-built body. For min >= 1
+        // we'll reuse it as the back-edge target rather than building a
+        // fresh body copy — matches rust-regex's `c_at_least(1)` shape
+        // and keeps the eps-closure dedup effective across iterations.
+        let mut last_body_start: Option<StateHandle> = None;
 
         // Unroll minimum iterations. Finite automata can't count.
         for _i in 0..quant.min {
             let mut next_ends: SmallVec<[StateHandle; 2]> = smallvec![];
             for current_end in current_ends {
                 let body = self.build(loopee)?;
+                last_body_start = Some(body.start);
                 self.get(current_end)
                     .add_eps_with_writes(body.start, reset_ops.iter().copied());
                 next_ends.extend(body.ends);
@@ -598,18 +634,21 @@ impl Builder {
 
         match quant.max {
             None => {
-                // Unbounded. Ends can continue looping or exit.
-                let body = self.build(loopee)?; // loopee
-                let exit: u32 = self.make()?; // way out of the loop
-                let recur = body.start; // return to the loop
+                // Unbounded. Reuse the last-unrolled body for the back-edge
+                // when possible; only build a fresh copy if min == 0 (no
+                // body has been built yet).
+                let exit: u32 = self.make()?;
+                let recur = if let Some(s) = last_body_start {
+                    s
+                } else {
+                    let body = self.build(loopee)?;
+                    add_loop_iter_eps(self, &current_ends, body.start, exit, greedy, &reset_ops);
+                    current_ends = body.ends;
+                    body.start
+                };
 
-                // Iteration-entry eps from the pre-body ends. Recur carries
-                // resets; exit doesn't (we want the LAST iteration's captures
-                // visible after exit).
+                // Body back-edge from the last body's ends.
                 add_loop_iter_eps(self, &current_ends, recur, exit, greedy, &reset_ops);
-
-                // Body back-edge: same shape.
-                add_loop_iter_eps(self, &body.ends, recur, exit, greedy, &reset_ops);
 
                 Ok(Fragment::new(start, [exit]))
             }
