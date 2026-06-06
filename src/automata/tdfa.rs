@@ -140,10 +140,12 @@ pub struct TdfaState(pub SmallVec<[TaggedNfaState; 4]>);
 /// priority order (entries in order, within each entry `tag_map` in index
 /// order).
 ///
-/// Returns the canonical configuration and the command sequence that moves
-/// each raw `InputMark`'s value into its canonical destination. The command
-/// list is empty when the input is already canonical.
-pub fn canonicalize(cfg: TdfaState) -> (TdfaState, TagCommandList) {
+/// Returns the canonical configuration, the command sequence that moves
+/// each raw `InputMark`'s value into its canonical destination, and the
+/// raw→canonical mapping (used by callers to retroactively renumber
+/// per-state conditionals' tag references — see
+/// `rewrite_conditional_finals`).
+pub fn canonicalize(cfg: TdfaState) -> (TdfaState, TagCommandList, HashMap<InputMark, InputMark>) {
     // `mapping[raw] = canon` records which canonical id each raw mark was
     // assigned. A single raw mark may appear in multiple entries / tag slots;
     // all occurrences must rewrite to the same canonical id, so we memoize.
@@ -155,7 +157,7 @@ pub fn canonicalize(cfg: TdfaState) -> (TdfaState, TagCommandList) {
     // that differ only in raw numbering end up byte-identical after this,
     // which is what makes the determinization loop's dedup map work.
     let mut next_canonical_mark = InputMark(0);
-    let mut next_canonical = move || -> InputMark {
+    let mut next_canonical = || -> InputMark {
         let res = next_canonical_mark;
         next_canonical_mark.0 += 1;
         res
@@ -190,8 +192,8 @@ pub fn canonicalize(cfg: TdfaState) -> (TdfaState, TagCommandList) {
     // order — important for testability and for downstream Eq/Hash of
     // transition tables.
     let mut pairs: Vec<(InputMark, InputMark)> = mapping
-        .into_iter()
-        .map(|(raw, canon)| (canon, raw))
+        .iter()
+        .map(|(&raw, &canon)| (canon, raw))
         .collect();
     pairs.sort();
 
@@ -207,7 +209,28 @@ pub fn canonicalize(cfg: TdfaState) -> (TdfaState, TagCommandList) {
         })
         .collect();
 
-    (TdfaState(entries), commands)
+    (TdfaState(entries), commands, mapping)
+}
+
+/// Rewrite each conditional's `finals` Copy sources from raw marks to
+/// canonical ones, using the main subset's canonicalize mapping. Marks
+/// that aren't in the mapping (e.g. the mini-closure's own
+/// `FULL_MATCH_END` write) are left as raw — those slots are written by
+/// the conditional's own `commands` at fire time, not by the standard
+/// transition's `Copy(raw → canon)` pass.
+fn rewrite_conditional_finals(
+    conditionals: &mut [AnchorConditional],
+    mapping: &HashMap<InputMark, InputMark>,
+) {
+    for ac in conditionals {
+        for cmd in &mut ac.finals {
+            if let MarkValue::Copy(raw) = &mut cmd.src {
+                if let Some(&canon) = mapping.get(raw) {
+                    *raw = canon;
+                }
+            }
+        }
+    }
 }
 
 /// Priority-ordered epsilon closure. Pre-order DFS: first visit to an NFA
@@ -300,14 +323,21 @@ fn close_priority(
                         &mut sub_conds,
                     )?;
                     let sub_closure = truncate_at_first_goal(sub_closure);
-                    if !sub_closure.0.iter().all(|t| t.state == GOAL_STATE) {
-                        // Non-GOAL threads survive the mini-closure: the `$`
-                        // is followed by more byte matching. We don't yet
-                        // know how to represent that in the TDFA — caller
-                        // falls back to the NFA backend.
+                    // Bail iff the mini-closure could continue consuming
+                    // bytes — that means `$` is followed by more byte
+                    // matching, which the per-position accept hook can't
+                    // represent. Pure-eps relay states on the path to GOAL
+                    // (e.g. the synthetic `goal_start` build_goal creates
+                    // to write FULL_MATCH_END) have no byte transitions
+                    // and are harmless.
+                    let has_byte_continuation = sub_closure.0.iter().any(|t| {
+                        t.state != GOAL_STATE
+                            && !nfa.states[t.state as usize].transitions.is_empty()
+                    });
+                    if has_byte_continuation {
                         return Err(Error::PredicatedEpsNotSupported);
                     }
-                    if sub_closure.0.is_empty() {
+                    if !sub_closure.0.iter().any(|t| t.state == GOAL_STATE) {
                         continue; // Mini-closure didn't reach GOAL — no accept.
                     }
                     let mut all_cmds = TagCommandList::new();
@@ -448,7 +478,17 @@ impl Build<'_> {
             &mut conds,
         )?;
         let closure = truncate_at_first_goal(closure);
-        let (canon, copy_cmds) = canonicalize(closure);
+        let (canon, copy_cmds, canon_mapping) = canonicalize(closure);
+        // Conditionals were built during close_priority using *raw* mark
+        // ids; the standard transition's `Copy(raw → canon)` commands
+        // move values into canonical slots, but a self-loop into the same
+        // state on subsequent bytes only overwrites the canonical slots,
+        // leaving raw slots stale. Rewriting the finals to read canonical
+        // slots fixes this. (Marks introduced by the mini-closure itself
+        // — e.g. FULL_MATCH_END — aren't in the main mapping and stay raw,
+        // since they're written by the conditional's own commands at
+        // fire time.)
+        rewrite_conditional_finals(&mut conds, &canon_mapping);
         let mut entry = TagCommandList::new();
         entry.extend(current_cmds);
         entry.extend(copy_cmds);
@@ -893,15 +933,15 @@ mod tests {
     fn canonicalize_first_appearance_order() {
         // Raw versions 7, 3, 7, 9 canonicalize to 0, 1, 0, 2.
         let c = cfg(&[entry(0, &[7, 3]), entry(1, &[7, 9])]);
-        let (canon, _) = canonicalize(c);
+        let (canon, _, _) = canonicalize(c);
         assert_eq!(canon, cfg(&[entry(0, &[0, 1]), entry(1, &[0, 2])]));
     }
 
     #[test]
     fn canonicalize_is_idempotent() {
         let c = cfg(&[entry(0, &[7, 3]), entry(1, &[7, 9])]);
-        let (once, _) = canonicalize(c.clone());
-        let (twice, cmds) = canonicalize(once.clone());
+        let (once, _, _) = canonicalize(c.clone());
+        let (twice, cmds, _) = canonicalize(once.clone());
         assert_eq!(once, twice);
         assert!(cmds.is_empty());
     }
@@ -917,7 +957,7 @@ mod tests {
     fn canonicalize_emits_copy_commands_in_canonical_order() {
         // Raw 7 -> canonical 0, raw 3 -> canonical 1.
         let c = cfg(&[entry(0, &[7, 3])]);
-        let (_, cmds) = canonicalize(c);
+        let (_, cmds, _) = canonicalize(c);
         assert_eq!(
             cmds.as_slice(),
             &[
@@ -936,7 +976,7 @@ mod tests {
     #[test]
     fn canonicalize_already_canonical_emits_no_commands() {
         let c = cfg(&[entry(0, &[0, 1]), entry(1, &[0, 2])]);
-        let (canon, cmds) = canonicalize(c.clone());
+        let (canon, cmds, _) = canonicalize(c.clone());
         assert_eq!(canon, c);
         assert!(cmds.is_empty());
     }
@@ -944,7 +984,7 @@ mod tests {
     #[test]
     fn empty_configuration_canonicalizes_to_empty() {
         let empty = TdfaState::default();
-        let (canon, cmds) = canonicalize(empty.clone());
+        let (canon, cmds, _) = canonicalize(empty.clone());
         assert_eq!(canon, empty);
         assert!(cmds.is_empty());
     }

@@ -66,6 +66,15 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     let accepting = tdfa.accepting();
     let num_classes = tdfa.num_classes();
 
+    // Position where `state` was last actually entered. Advances on each
+    // successful byte transition. After breaking out of the loop on DEAD
+    // this stays at the position we last advanced TO — *not* at the
+    // failed-transition position. The EOI `record_conditionals` evaluates
+    // its predicate against `live_position`, so a state abandoned mid-
+    // input doesn't falsely accept just because `pos == input.len()`
+    // happens to satisfy `$`.
+    let mut live_position = start;
+
     for (i, &byte) in input[start..].iter().enumerate() {
         let pos = start + i;
         let class = byte_to_class[byte as usize] as usize;
@@ -76,6 +85,7 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
         }
         apply_commands(&mut marks, &trans_cmds[idx], pos + 1);
         state = next;
+        live_position = pos + 1;
         // Forward-branching anchor switch: if `state` has a multiline-^
         // alt and the predicate holds at the new position, swap to it.
         maybe_switch_anchor_alt(tdfa, &mut state, &mut marks, input, pos + 1);
@@ -91,7 +101,8 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
 
     // EOI pass — `$` non-multiline naturally fires here; multiline `$` fires
     // here too if the previous-byte side of the predicate is satisfied.
-    record_conditionals(tdfa, state, input, input.len(), &marks, &mut last_accept);
+    // We use `live_position` (see above) rather than `input.len()`.
+    record_conditionals(tdfa, state, input, live_position, &marks, &mut last_accept);
 
     last_accept.map(|(end, snap, finals)| finalize(&finals, &snap, end, num_tags))
 }
