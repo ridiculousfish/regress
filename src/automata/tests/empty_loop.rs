@@ -7,6 +7,8 @@
 
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::execute;
+use crate::automata::tdfa::Tdfa;
+use crate::automata::tdfa_backend::execute as tdfa_execute;
 use crate::Flags;
 
 fn build(pattern: &str) -> Nfa {
@@ -72,4 +74,38 @@ fn captures_match_v8_for_nullable_loops() {
     // Non-greedy nullable loops: prefer the empty / skipped path.
     check("(a?)*?", "a", &[None]);
     check("(a*)*?", "aaa", &[None]);
+}
+
+/// TDFA construction-time `ProgressSince` resolution: build a TDFA for
+/// each nullable-loop case and verify execution captures match V8 too.
+/// Coverage parallels the NFA test above to catch divergences between
+/// backends.
+fn check_tdfa(pattern: &str, input: &str, expected_caps: &[Option<(usize, usize)>]) {
+    let nfa = build(pattern);
+    let tdfa = Tdfa::try_from(&nfa)
+        .unwrap_or_else(|e| panic!("expected TDFA build for {pattern:?}, got {e:?}"));
+    let m = tdfa_execute(&tdfa, input.as_bytes(), 0)
+        .unwrap_or_else(|| panic!("expected {pattern:?} to match {input:?} on TDFA"));
+    let actual: Vec<Option<(usize, usize)>> = m
+        .captures
+        .iter()
+        .map(|c| c.as_ref().map(|r| (r.start, r.end)))
+        .collect();
+    assert_eq!(
+        actual, expected_caps,
+        "TDFA: pattern={pattern:?} input={input:?} captures mismatch"
+    );
+}
+
+#[test]
+fn tdfa_captures_match_v8_for_nullable_loops() {
+    check_tdfa("(a?)+", "", &[Some((0, 0))]);
+    check_tdfa("(a?)+", "a", &[Some((0, 1))]);
+    check_tdfa("(a?)+", "aa", &[Some((1, 2))]);
+    check_tdfa("(a*)*", "", &[None]);
+    check_tdfa("(a*)*", "aaa", &[Some((0, 3))]);
+    check_tdfa("(|x)*", "x", &[Some((0, 1))]);
+    check_tdfa("(a*){2,5}", "aa", &[Some((2, 2))]);
+    check_tdfa("(a*)+", "", &[Some((0, 0))]);
+    check_tdfa("(a*)+", "aaa", &[Some((0, 3))]);
 }
