@@ -8,7 +8,7 @@
 //! Line terminators per ES9 11.3 (matching `crate::matchers::is_line_terminator`):
 //! `\n` (0x0A), `\r` (0x0D), U+2028 (0xE2 0x80 0xA8), U+2029 (0xE2 0x80 0xA9).
 
-use crate::automata::nfa::EpsCondition;
+use crate::automata::nfa::{EpsCondition, TEXT_POS_NO_MATCH, TextPos};
 
 /// True iff the codepoint ending at byte position `pos` is a line terminator.
 /// "Ending at" means `input[..pos]`'s last codepoint. Returns false at
@@ -50,9 +50,10 @@ pub fn next_byte_is_line_terminator(input: &[u8], pos: usize) -> bool {
 }
 
 impl EpsCondition {
-    /// Whether this predicate is satisfied at byte position `pos` in `input`.
+    /// Whether this predicate is satisfied at byte position `pos` in `input`,
+    /// with the per-thread `tags` array (used by `ProgressSince`).
     #[inline]
-    pub fn holds(&self, input: &[u8], pos: usize) -> bool {
+    pub fn holds(&self, input: &[u8], pos: usize, tags: &[TextPos]) -> bool {
         match self {
             EpsCondition::Always => true,
             EpsCondition::StartOfLine { multiline: false } => pos == 0,
@@ -62,6 +63,10 @@ impl EpsCondition {
             EpsCondition::EndOfLine { multiline: false } => pos == input.len(),
             EpsCondition::EndOfLine { multiline: true } => {
                 pos == input.len() || next_byte_is_line_terminator(input, pos)
+            }
+            EpsCondition::ProgressSince(idx) => {
+                let v = tags[*idx as usize];
+                v == TEXT_POS_NO_MATCH || v < pos
             }
         }
     }

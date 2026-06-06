@@ -43,8 +43,8 @@ impl Thread {
         &mut self.tags[idx as usize]
     }
 
-    fn tags_to_captures(&self) -> Vec<Option<Range<usize>>> {
-        tags_to_captures(&self.tags)
+    fn tags_to_captures(&self, num_capture_tags: usize) -> Vec<Option<Range<usize>>> {
+        tags_to_captures(&self.tags[..num_capture_tags])
     }
 }
 
@@ -150,10 +150,10 @@ impl ThreadSet {
 }
 
 /// Build an `NfaMatch` snapshot from a thread that's reached `GOAL_STATE`.
-fn match_from_thread(thread: &Thread) -> NfaMatch {
+fn match_from_thread(thread: &Thread, num_capture_tags: usize) -> NfaMatch {
     NfaMatch {
         range: thread.get_tag(FULL_MATCH_START)..thread.get_tag(FULL_MATCH_END),
-        captures: thread.tags_to_captures(),
+        captures: thread.tags_to_captures(num_capture_tags),
     }
 }
 
@@ -162,9 +162,13 @@ fn match_from_thread(thread: &Thread) -> NfaMatch {
 /// goal was seen (caller may then check `is_empty()` to decide whether to
 /// stop). See `tdfa::truncate_at_first_goal` for the same idea applied
 /// statically during DFA construction.
-fn prune_and_record(threads: &mut ThreadSet, best: &mut Option<NfaMatch>) -> bool {
+fn prune_and_record(
+    threads: &mut ThreadSet,
+    best: &mut Option<NfaMatch>,
+    num_capture_tags: usize,
+) -> bool {
     if let Some(idx) = threads.position_of_goal() {
-        *best = Some(match_from_thread(&threads.threads[idx]));
+        *best = Some(match_from_thread(&threads.threads[idx], num_capture_tags));
         threads.truncate_to(idx);
         true
     } else {
@@ -198,7 +202,9 @@ pub fn execute(nfa: &Nfa, input: &[u8], start: usize) -> Option<NfaMatch> {
 
     // Initial closure may already reach GOAL (e.g. patterns that accept
     // the empty input).
-    if prune_and_record(&mut current_threads, &mut best) && current_threads.is_empty() {
+    if prune_and_record(&mut current_threads, &mut best, nfa.num_capture_tags())
+        && current_threads.is_empty()
+    {
         return best;
     }
 
@@ -220,7 +226,9 @@ pub fn execute(nfa: &Nfa, input: &[u8], start: usize) -> Option<NfaMatch> {
         // they come from threads that were strictly higher in priority
         // than the previously-recorded goal — which is exactly what the
         // pruning maintains as an invariant on `current_threads`.
-        if prune_and_record(&mut next_threads, &mut best) && next_threads.is_empty() {
+        if prune_and_record(&mut next_threads, &mut best, nfa.num_capture_tags())
+            && next_threads.is_empty()
+        {
             return best;
         }
 
@@ -272,7 +280,11 @@ fn dfs_expand_eps(
         // recursive call (which also borrows nfa).
         let (target, ops_len, cond_holds) = {
             let e = &nfa.at(parent_state).eps[edge_idx];
-            (e.target, e.ops.len(), e.cond.holds(input, current_pos))
+            (
+                e.target,
+                e.ops.len(),
+                e.cond.holds(input, current_pos, &threads.threads[idx].tags),
+            )
         };
         if !cond_holds {
             continue;

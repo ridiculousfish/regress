@@ -1,8 +1,9 @@
 //! Tests that loops over empty-matching bodies build and execute with
-//! V8-matching captures. The `x* → (x+)?` rewrite in `build_loop` plus
-//! per-thread capture forking in the eps closure gives spec-correct
-//! captures without an explicit "no empty iteration" rule.
-//! See `Node::can_match_empty`, rust-lang/regex#779.
+//! V8-matching captures. Implementation uses `EpsCondition::ProgressSince`
+//! to gate iteration-exit and back-edge eps once `min` iterations are
+//! satisfied — encoding ES2015 RepeatMatcher's "if min == 0 and
+//! y.endIndex == x.endIndex, return failure" rule.
+//! See `build_loop_nullable`, `Node::can_match_empty`, rust-lang/regex#779.
 
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::execute;
@@ -39,12 +40,8 @@ fn accepts_loops_over_nonempty_bodies() {
     assert_accepted("(ab|cd)+");
 }
 
-/// Capture expectations cross-checked against V8 and rust-regex.
-/// Most cases agree. `(a*)*` against `""` is the one case where the
-/// Thompson NFA's natural behavior (matching rust-regex's PikeVM)
-/// diverges from V8's strict ES spec — V8 returns `None` for group 1,
-/// we and rust-regex both return `Some((0, 0))`. Documented here as
-/// the intended Thompson-NFA behavior.
+/// Capture expectations cross-checked against V8:
+/// `node -e 'JSON.stringify("...".match(/.../))'`.
 fn check(pattern: &str, input: &str, expected_caps: &[Option<(usize, usize)>]) {
     let nfa = build(pattern);
     let m = execute(&nfa, input.as_bytes(), 0)
@@ -65,13 +62,14 @@ fn captures_match_v8_for_nullable_loops() {
     check("(a?)+", "", &[Some((0, 0))]);
     check("(a?)+", "a", &[Some((0, 1))]);
     check("(a?)+", "aa", &[Some((1, 2))]);
-    // V8 gives [None]; our NFA + rust-regex both give [Some((0,0))].
-    check("(a*)*", "", &[Some((0, 0))]);
+    check("(a*)*", "", &[None]);
     check("(a*)*", "aaa", &[Some((0, 3))]);
-    // V8 backtracks past the empty alt match to try "x", giving
-    // [Some((0, 1))]. Thompson NFAs (us + rust-regex) can't naturally
-    // backtrack past a successful match — leftmost-first picks the
-    // empty branch and never tries `x`.
-    check("(|x)*", "x", &[Some((0, 0))]);
+    check("(|x)*", "x", &[Some((0, 1))]);
     check("(a*){2,5}", "aa", &[Some((2, 2))]);
+    check("(a*)+", "", &[Some((0, 0))]);
+    check("(a*)+", "aaa", &[Some((0, 3))]);
+    check("(.{0,2})*", "abc", &[Some((2, 3))]);
+    // Non-greedy nullable loops: prefer the empty / skipped path.
+    check("(a?)*?", "a", &[None]);
+    check("(a*)*?", "aaa", &[None]);
 }

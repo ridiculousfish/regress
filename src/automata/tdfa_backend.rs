@@ -120,7 +120,7 @@ fn maybe_switch_anchor_alt(
     pos: usize,
 ) {
     if let Some(alt) = tdfa.anchor_alt(*state) {
-        if alt.cond.holds(input, pos) {
+        if alt.cond.holds(input, pos, &[]) {
             apply_commands(marks, &alt.commands, pos);
             *state = alt.alt;
         }
@@ -147,7 +147,7 @@ fn record_conditionals(
         return;
     }
     for ac in conds {
-        if !ac.cond.holds(input, pos) {
+        if !ac.cond.holds(input, pos, &[]) {
             continue;
         }
         let mut snap: Vec<TextPos> = marks.to_vec();

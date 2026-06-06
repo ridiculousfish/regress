@@ -15,6 +15,10 @@ pub struct Nfa {
     pub(super) start: StateHandle,
     pub(super) states: Box<[State]>,
     pub(super) num_tags: usize,
+    /// Number of tags reserved for user-visible captures. Tags `0..num_capture_tags`
+    /// participate in `tags_to_captures`; tags `num_capture_tags..num_tags`
+    /// are sentinel tags used by `ProgressSince` predicates.
+    pub(super) num_capture_tags: usize,
     /// Capture-group names, indexed by group id (the same order used by
     /// `regress::Match::captures`). Groups without a name carry an empty
     /// string. Empty when the regex has no named groups (matches the
@@ -104,6 +108,15 @@ pub enum EpsCondition {
     EndOfLine {
         multiline: bool,
     },
+    /// Iteration progressed: `thread.tags[idx] == NoMatch || thread.tags[idx] < current_pos`.
+    /// Used to gate iteration-exit and back-edge eps on loops whose body
+    /// can match empty — implements ES2015 RepeatMatcher's "if min == 0
+    /// and y.endIndex == x.endIndex, return failure" rule by suppressing
+    /// the eps when the iteration didn't advance position. The sentinel
+    /// tag is written at iteration entry via a CurrentPos `TagOp` and
+    /// is internal to the NFA (excluded from user-visible captures).
+    /// TDFA can't evaluate this predicate statically; construction bails.
+    ProgressSince(TagIdx),
 }
 
 /// What value an eps-edge traversal writes into a tag slot.
@@ -296,6 +309,11 @@ pub(super) struct Builder {
     pub(super) states: Vec<State>,
     pub(super) state_budget: usize,
     pub(super) num_tags: usize,
+    /// Capture tags occupy indices `0..num_capture_tags`; sentinel tags
+    /// (used for `ProgressSince` predicates on nullable-body loops) live
+    /// at `num_capture_tags..num_tags`. The user-visible captures live
+    /// only in the capture range.
+    pub(super) num_capture_tags: usize,
     pub(super) unicode: bool,
 }
 
@@ -308,13 +326,23 @@ pub enum Error {
 pub type Result<T> = core::result::Result<T, Error>;
 
 impl Builder {
-    pub(super) fn new(state_budget: usize, unicode: bool) -> Self {
+    pub(super) fn new(state_budget: usize, unicode: bool, num_capture_tags: usize) -> Self {
         Builder {
             states: vec![State::goal()],
             state_budget,
-            num_tags: 2, // FULL_MATCH_START and FULL_MATCH_END
+            num_tags: num_capture_tags,
+            num_capture_tags,
             unicode,
         }
+    }
+
+    /// Allocate a fresh sentinel tag for use in a `ProgressSince` predicate.
+    /// Returns the tag index, which sits above the capture-tag range so
+    /// `tags_to_captures` ignores it.
+    pub(super) fn make_sentinel(&mut self) -> TagIdx {
+        let idx = self.num_tags as TagIdx;
+        self.num_tags += 1;
+        idx
     }
 
     // Build a start state, that captures the beginning.
@@ -563,44 +591,124 @@ impl Builder {
 
     /// Build a Loop node (handles both Loop and Loop1CharBody).
     ///
-    /// For nullable bodies with `min == 0` (i.e. `x*`, `x{0,n}`), apply
-    /// rust-regex's structural rewrite: compile as `(x{1,n})?`. This
-    /// preserves leftmost-first preference order over a nullable body
-    /// (see rust-lang/regex#779). Per-thread capture forking in the eps
-    /// closure handles the "no empty iteration after min" semantics
-    /// without an explicit predicate.
+    /// Dispatches on whether the body can match empty. Non-nullable bodies
+    /// take the straightforward construction. Nullable bodies need to
+    /// implement ES2015 RepeatMatcher's "if min == 0 and y.endIndex ==
+    /// x.endIndex, return failure" rule — encoded as `ProgressSince(sentinel)`
+    /// predicates on iteration-exit and back-edge eps. See `build_loop_nullable`.
     fn build_loop(&mut self, loopee: &Node, quant: &crate::ir::Quantifier) -> Result<Fragment> {
-        if loopee.can_match_empty() && quant.min == 0 {
-            let inner_quant = ir::Quantifier {
-                min: 1,
-                max: quant.max,
-                greedy: quant.greedy,
-            };
-            let inner = self.build_loop_inner(loopee, &inner_quant)?;
-            return self.build_optional_around(inner, quant.greedy);
-        }
-        self.build_loop_inner(loopee, quant)
-    }
-
-    /// Wrap an existing fragment in an "optional" (`?`) without rebuilding
-    /// the body. Used by `build_loop` after the `x* → (x+)?` rewrite.
-    fn build_optional_around(&mut self, frag: Fragment, greedy: bool) -> Result<Fragment> {
-        let exit = self.make()?;
-        self.join_eps(&frag.ends, exit);
-        let start = self.make()?;
-        if greedy {
-            self.get(start).add_eps(frag.start);
-            self.get(start).add_eps(exit);
+        if loopee.can_match_empty() {
+            self.build_loop_nullable(loopee, quant)
         } else {
-            self.get(start).add_eps(exit);
-            self.get(start).add_eps(frag.start);
+            self.build_loop_inner(loopee, quant)
         }
-        Ok(Fragment::new(start, [exit]))
     }
 
-    /// Loop construction without the nullable-body rewrite. `build_loop`
-    /// calls this directly when `quant.min >= 1`, or after applying the
-    /// `x* → (x+)?` rewrite for the inner `+` body.
+    /// Build a loop whose body can match empty. Implements ES2015's
+    /// "reject empty iteration once min satisfied" rule:
+    ///
+    /// - First `quant.min` iterations are unrolled and ungated (d's
+    ///   `min` is > 0 for these, so the spec doesn't reject empty here).
+    /// - Iterations `min..max` (or unbounded) form a "gated section":
+    ///   the iteration-entry eps writes `current_pos` to a sentinel tag;
+    ///   iteration-exit and back-edge eps are gated on
+    ///   `ProgressSince(sentinel)` so a thread whose body matched empty
+    ///   can't exit the gated section. That thread dies, the leftmost-
+    ///   first ordering then yields to a thread that took fewer
+    ///   iterations (or skipped entry altogether).
+    fn build_loop_nullable(
+        &mut self,
+        loopee: &Node,
+        quant: &crate::ir::Quantifier,
+    ) -> Result<Fragment> {
+        let reset_ops = collect_loop_reset_ops(loopee);
+        let start = self.make()?;
+        let greedy = quant.greedy;
+        let mut current_ends: SmallVec<[StateHandle; 2]> = smallvec![start];
+
+        // Unroll minimum iterations. Ungated — d's min > 0 here.
+        for _ in 0..quant.min {
+            let mut next_ends: SmallVec<[StateHandle; 2]> = smallvec![];
+            for current_end in current_ends {
+                let body = self.build(loopee)?;
+                self.get(current_end)
+                    .add_eps_with_writes(body.start, reset_ops.iter().copied());
+                next_ends.extend(body.ends);
+            }
+            current_ends = next_ends;
+        }
+
+        match quant.max {
+            Some(max) if max == quant.min => {
+                // Exact count — no optional iterations.
+                Ok(Fragment {
+                    start,
+                    ends: current_ends,
+                })
+            }
+            None => {
+                // Unbounded gated section. Build one body; back-edge to itself.
+                let sentinel = self.make_sentinel();
+                let body = self.build(loopee)?;
+                let exit = self.make()?;
+                // First gated entry from current_ends → body.start (ungated, writes sentinel) | exit (ungated skip).
+                add_gated_entry_eps(
+                    self,
+                    &current_ends,
+                    body.start,
+                    exit,
+                    greedy,
+                    &reset_ops,
+                    sentinel,
+                    /* gated = */ false,
+                );
+                // Back-edge from body.ends → body.start (gated, re-writes sentinel) | exit (gated).
+                add_gated_entry_eps(
+                    self,
+                    &body.ends,
+                    body.start,
+                    exit,
+                    greedy,
+                    &reset_ops,
+                    sentinel,
+                    /* gated = */ true,
+                );
+                Ok(Fragment::new(start, [exit]))
+            }
+            Some(max) => {
+                debug_assert!(max > quant.min);
+                // Bounded gated section. Iters quant.min..max each get their
+                // own body. The first gated entry (from the post-unroll ends,
+                // or from `start` if min == 0) is ungated; subsequent entries
+                // and the final exit are gated.
+                let sentinel = self.make_sentinel();
+                let exit = self.make()?;
+                for i in quant.min..max {
+                    let body = self.build(loopee)?;
+                    let gated = i != quant.min;
+                    add_gated_entry_eps(
+                        self,
+                        &current_ends,
+                        body.start,
+                        exit,
+                        greedy,
+                        &reset_ops,
+                        sentinel,
+                        gated,
+                    );
+                    current_ends = body.ends;
+                }
+                // Final exit from the last body's ends — gated.
+                for &src in &current_ends {
+                    self.get(src)
+                        .add_eps_anchor(exit, EpsCondition::ProgressSince(sentinel));
+                }
+                Ok(Fragment::new(start, [exit]))
+            }
+        }
+    }
+
+    /// Loop construction for non-nullable bodies — no sentinel needed.
     fn build_loop_inner(&mut self, loopee: &Node, quant: &crate::ir::Quantifier) -> Result<Fragment> {
         // ES2015 §22.2.2.5: at every iteration entry, capture groups *inside*
         // the loop body reset to "undefined". Pre-compute the Nil-write ops
@@ -739,6 +847,52 @@ fn collect_loop_reset_ops(loopee: &Node) -> SmallVec<[TagOp; 8]> {
 /// to `exit` (no resets, since exiting the loop preserves the last
 /// iteration's captures). Greedy quantifiers want `recur` higher
 /// priority; non-greedy want `exit` higher.
+/// Emit a pair of "continue / exit" eps edges for a nullable-body loop's
+/// gated section. Each source state gets two eps in priority order
+/// (greedy: continue preferred). The continue eps carries iteration
+/// resets plus a `CurrentPos` write to `sentinel`. When `gated`, both
+/// eps are guarded by `ProgressSince(sentinel)` — encoding the spec
+/// rule that iters past `min` may not match empty.
+fn add_gated_entry_eps(
+    builder: &mut Builder,
+    sources: &[StateHandle],
+    recur: StateHandle,
+    exit: StateHandle,
+    greedy: bool,
+    reset_ops: &[TagOp],
+    sentinel: TagIdx,
+    gated: bool,
+) {
+    let mut continue_ops: SmallVec<[TagOp; 2]> = SmallVec::new();
+    continue_ops.extend(reset_ops.iter().copied());
+    continue_ops.push(TagOp::current_pos(sentinel));
+    let cond = if gated {
+        EpsCondition::ProgressSince(sentinel)
+    } else {
+        EpsCondition::Always
+    };
+    for &src in sources {
+        let state = builder.get(src);
+        let continue_edge = EpsEdge {
+            target: recur,
+            ops: continue_ops.clone(),
+            cond: cond.clone(),
+        };
+        let exit_edge = EpsEdge {
+            target: exit,
+            ops: smallvec![],
+            cond: cond.clone(),
+        };
+        if greedy {
+            state.eps.push(continue_edge);
+            state.eps.push(exit_edge);
+        } else {
+            state.eps.push(exit_edge);
+            state.eps.push(continue_edge);
+        }
+    }
+}
+
 fn add_loop_iter_eps(
     builder: &mut Builder,
     sources: &[StateHandle],
@@ -757,6 +911,19 @@ fn add_loop_iter_eps(
             state.add_eps_with_writes(recur, reset_ops.iter().copied());
         }
     }
+}
+
+/// Count the highest capture-group id + 1 in `node`. Used by `Nfa::try_from`
+/// to size the capture-tag range *before* construction so sentinel tags
+/// can be allocated above it.
+fn count_capture_groups(node: &Node) -> usize {
+    let mut max_id: i64 = -1;
+    ir::walk(/* postorder */ false, /* unicode */ false, node, &mut |n, _| {
+        if let Node::CaptureGroup { id, .. } = n {
+            max_id = max_id.max(*id as i64);
+        }
+    });
+    (max_id + 1) as usize
 }
 
 /// Collect capture-group names from the IR in id order. Mirrors what
@@ -786,7 +953,10 @@ fn collect_group_names(node: &Node) -> Box<[Box<str>]> {
 /// or we would exceed a budget.
 impl Nfa {
     pub fn try_from(re: &ir::Regex) -> Result<Self> {
-        let mut b: Builder = Builder::new(2048, re.flags.unicode);
+        // Pre-compute the capture-tag count so any sentinel tags allocated
+        // during construction land *above* the capture range.
+        let num_capture_tags = 2 + 2 * count_capture_groups(&re.node);
+        let mut b: Builder = Builder::new(2048, re.flags.unicode, num_capture_tags);
 
         // Create the start, capturing it.
         let Fragment { start, ends } = b.build_start()?;
@@ -804,6 +974,7 @@ impl Nfa {
             start,
             states: b.states.into_boxed_slice(),
             num_tags: b.num_tags,
+            num_capture_tags: b.num_capture_tags,
             group_names: collect_group_names(&re.node),
         })
     }
@@ -818,6 +989,10 @@ impl Nfa {
 
     pub fn num_tags(&self) -> usize {
         self.num_tags
+    }
+
+    pub fn num_capture_tags(&self) -> usize {
+        self.num_capture_tags
     }
 
     /// Capture-group names indexed by capture-group id (groups without a
