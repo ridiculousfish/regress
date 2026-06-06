@@ -119,10 +119,11 @@ fn maybe_switch_anchor_alt(
     input: &[u8],
     pos: usize,
 ) {
-    if let Some(alt) = tdfa.anchor_alt(*state) {
+    for alt in tdfa.anchor_alts(*state) {
         if alt.cond.holds(input, pos, &[]) {
             apply_commands(marks, &alt.commands, pos);
             *state = alt.alt;
+            return;
         }
     }
 }

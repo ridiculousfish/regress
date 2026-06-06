@@ -108,6 +108,12 @@ pub enum EpsCondition {
     EndOfLine {
         multiline: bool,
     },
+    /// Word boundary `\b` (`invert == false`) or `\B` (`invert == true`).
+    /// True iff "previous codepoint is a word char" XOR "next codepoint is
+    /// a word char" — possibly inverted. `unicode_icase` widens the
+    /// word-char set with U+017F and U+212A (the only non-ASCII codepoints
+    /// that fold to ASCII word chars). Implementation in `super::anchors`.
+    WordBoundary { invert: bool, unicode_icase: bool },
     /// Iteration progressed: `thread.tags[idx] == NoMatch || thread.tags[idx] < current_pos`.
     /// Used to gate iteration-exit and back-edge eps on loops whose body
     /// can match empty — implements ES2015 RepeatMatcher's "if min == 0
@@ -397,9 +403,10 @@ impl Builder {
                 anchor_type,
                 multiline,
             } => self.build_anchor(*anchor_type, *multiline),
-            Node::WordBoundary { .. } => Err(Error::UnsupportedInstruction(
-                "Word boundaries not supported by NFAs".to_string(),
-            )),
+            &Node::WordBoundary {
+                invert,
+                unicode_icase,
+            } => self.build_word_boundary(invert, unicode_icase),
         }
     }
 
@@ -476,6 +483,22 @@ impl Builder {
     fn build_empty(&mut self) -> Result<Fragment> {
         let start = self.make()?;
         Ok(Fragment::new(start, [start]))
+    }
+
+    /// Build a `\b` or `\B` word-boundary as a single predicated eps edge.
+    /// Predicate evaluated against the input slice at runtime — same shape
+    /// as `build_anchor`.
+    fn build_word_boundary(&mut self, invert: bool, unicode_icase: bool) -> Result<Fragment> {
+        let start = self.make()?;
+        let end = self.make()?;
+        self.get(start).add_eps_anchor(
+            end,
+            EpsCondition::WordBoundary {
+                invert,
+                unicode_icase,
+            },
+        );
+        Ok(Fragment::new(start, [end]))
     }
 
     /// Build a `^` or `$` anchor as a single predicated epsilon edge.

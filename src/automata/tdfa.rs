@@ -11,7 +11,7 @@ use crate::automata::nfa::{EpsCondition, GOAL_STATE, Nfa, OpKind, StateHandle, T
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use smallvec::SmallVec;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub type TdfaStateId = u32;
 
@@ -249,6 +249,12 @@ fn close_priority(
     num_tags: usize,
     at_start_of_input: bool,
     multiline_start_fires: bool,
+    // List of `(invert, unicode_icase)` WordBoundary predicates that
+    // should be traversed in this closure (i.e., "assume `\b`/`\B` fires").
+    // Used by `compute_anchor_alt_for` to build the alt closures. The
+    // primary closure passes an empty slice — WordBoundary edges are
+    // skipped, leaving the predicate to fire at runtime via anchor_alt.
+    wb_fires: &[(bool, bool)],
     conditionals: &mut SmallVec<[AnchorConditional; 1]>,
 ) -> Result<(TdfaState, TagCommandList), Error> {
     let mut threads: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
@@ -305,6 +311,20 @@ fn close_priority(
                     }
                     // Fall through to normal traversal below.
                 }
+                EpsCondition::WordBoundary {
+                    invert,
+                    unicode_icase,
+                } => {
+                    // Treat as firing only if the caller passed this exact
+                    // (invert, unicode_icase) tuple in `wb_fires`. The primary
+                    // closure passes none — alt closures (computed by
+                    // `compute_anchor_alt_for`) pass the specific tuple they
+                    // represent. Mirrors the multiline-^ scheme.
+                    if !wb_fires.contains(&(*invert, *unicode_icase)) {
+                        continue;
+                    }
+                    // Fall through to normal traversal below.
+                }
                 EpsCondition::ProgressSince(sentinel) => {
                     // Runtime check `marks[sentinel] < current_pos` resolves
                     // statically here as provenance: the sentinel's value at
@@ -345,6 +365,7 @@ fn close_priority(
                         num_tags,
                         at_start_of_input,
                         multiline_start_fires,
+                        wb_fires,
                         &mut sub_conds,
                     )?;
                     let sub_closure = truncate_at_first_goal(sub_closure);
@@ -441,7 +462,7 @@ struct Build<'a> {
     transition_commands: Vec<TagCommandList>,
     finals: Vec<SmallVec<[FinalCommand; 4]>>,
     anchor_conditionals: Vec<SmallVec<[AnchorConditional; 1]>>,
-    anchor_alt: Vec<Option<AnchorAlt>>,
+    anchor_alts: Vec<SmallVec<[AnchorAlt; 1]>>,
     worklist: Vec<TdfaState>,
 }
 
@@ -466,7 +487,7 @@ impl Build<'_> {
         self.accepting.push(is_accepting);
         self.finals.push(state_finals);
         self.anchor_conditionals.push(conds);
-        self.anchor_alt.push(None);
+        self.anchor_alts.push(SmallVec::new());
         self.transitions
             .resize(self.transitions.len() + self.num_classes, TDFA_DEAD_STATE);
         self.transition_commands
@@ -484,6 +505,7 @@ impl Build<'_> {
         seeds: &[TaggedNfaState],
         at_start_of_input: bool,
         multiline_start_fires: bool,
+        wb_fires: &[(bool, bool)],
     ) -> Result<
         (
             TdfaState,
@@ -500,6 +522,7 @@ impl Build<'_> {
             self.num_tags,
             at_start_of_input,
             multiline_start_fires,
+            wb_fires,
             &mut conds,
         )?;
         let closure = truncate_at_first_goal(closure);
@@ -520,11 +543,11 @@ impl Build<'_> {
         Ok((canon, entry, conds))
     }
 
-    /// If `canon`'s threads can be enlarged by a multiline `^` firing,
-    /// compute the alt closure (via a re-close of the seeds with
-    /// `multiline_start_fires = true`) and register it. Sets
-    /// `self.anchor_alt[id]` to the resulting `AnchorAlt` if the alt
-    /// differs from `canon`.
+    /// If `canon` could be enlarged by a predicated eps firing — multiline
+    /// `^` or one of the `\b`/`\B` flavors — compute each alt closure and
+    /// push it onto `self.anchor_alts[id]`. Each alt is independent; the
+    /// executor evaluates predicates in registration order and switches
+    /// to the first matching alt.
     fn compute_anchor_alt_for(
         &mut self,
         canon: &TdfaState,
@@ -532,28 +555,84 @@ impl Build<'_> {
         at_start_of_input: bool,
         id: TdfaStateId,
     ) -> Result<(), Error> {
-        // Skip the closure work entirely when no thread can fire a
-        // multiline `^` from this state.
-        if !canon.0.iter().any(|t| {
-            self.nfa.states[t.state as usize]
-                .eps
-                .iter()
-                .any(|e| matches!(e.cond, EpsCondition::StartOfLine { multiline: true }))
-        }) {
-            return Ok(());
+        // Collect the distinct predicate kinds reachable from this state's
+        // threads. Each becomes a candidate alt.
+        let mut has_multiline_caret = false;
+        let mut wb_predicates: SmallVec<[(bool, bool); 2]> = SmallVec::new();
+        for thread in &canon.0 {
+            for edge in &self.nfa.states[thread.state as usize].eps {
+                match &edge.cond {
+                    EpsCondition::StartOfLine { multiline: true } => {
+                        has_multiline_caret = true;
+                    }
+                    EpsCondition::WordBoundary {
+                        invert,
+                        unicode_icase,
+                    } => {
+                        let key = (*invert, *unicode_icase);
+                        if !wb_predicates.contains(&key) {
+                            wb_predicates.push(key);
+                        }
+                    }
+                    _ => {}
+                }
+            }
         }
+        if has_multiline_caret {
+            self.register_alt(
+                canon,
+                seeds,
+                at_start_of_input,
+                /* multiline_start_fires */ true,
+                &[],
+                EpsCondition::StartOfLine { multiline: true },
+                id,
+            )?;
+        }
+        for (invert, unicode_icase) in wb_predicates {
+            self.register_alt(
+                canon,
+                seeds,
+                at_start_of_input,
+                /* multiline_start_fires */ false,
+                &[(invert, unicode_icase)],
+                EpsCondition::WordBoundary {
+                    invert,
+                    unicode_icase,
+                },
+                id,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Compute and register one alt closure. If the resulting subset
+    /// differs from `canon`, register it as a state and append an
+    /// `AnchorAlt` entry on the source state's `anchor_alts` list.
+    #[allow(clippy::too_many_arguments)]
+    fn register_alt(
+        &mut self,
+        canon: &TdfaState,
+        seeds: &[TaggedNfaState],
+        at_start_of_input: bool,
+        multiline_start_fires: bool,
+        wb_fires: &[(bool, bool)],
+        cond: EpsCondition,
+        id: TdfaStateId,
+    ) -> Result<(), Error> {
         let (canon_alt, _entry_alt, conds_alt) = self.closure_from_seeds(
             seeds,
             at_start_of_input,
-            /* multiline_start_fires */ true,
+            multiline_start_fires,
+            wb_fires,
         )?;
         if canon_alt == *canon {
             return Ok(());
         }
         let switch_commands = compute_alt_switch_commands(canon, &canon_alt);
         let (alt_id, _is_new) = self.register_or_get_state(canon_alt, conds_alt)?;
-        self.anchor_alt[id as usize] = Some(AnchorAlt {
-            cond: EpsCondition::StartOfLine { multiline: true },
+        self.anchor_alts[id as usize].push(AnchorAlt {
+            cond,
             alt: alt_id,
             commands: switch_commands,
         });
@@ -577,19 +656,37 @@ fn compute_alt_switch_commands(canon_next: &TdfaState, canon_alt: &TdfaState) ->
         }
     }
     let mut commands = TagCommandList::new();
+    // A single alt-canonical mark can appear in multiple (state, tag)
+    // slots when threads inherited it via eps without rewriting (the
+    // common case for `\b` traversal, which has no ops). Track which
+    // alt marks we've already emitted a write for so a later "this
+    // (state, tag) isn't in primary" path doesn't clobber an earlier
+    // correct Copy with a CurrentPos.
+    let mut written: HashSet<InputMark> = HashSet::new();
     for thread in &canon_alt.0 {
         for (idx, slot) in thread.tag_map.iter().enumerate() {
             let Some(alt_mark) = slot else { continue };
+            if written.contains(alt_mark) {
+                continue;
+            }
             match next_map.get(&(thread.state, idx)) {
-                Some(&std_mark) if std_mark == *alt_mark => {} // already in place
-                Some(&std_mark) => commands.push(TagCommand {
-                    dst: *alt_mark,
-                    src: MarkValue::Copy(std_mark),
-                }),
-                None => commands.push(TagCommand {
-                    dst: *alt_mark,
-                    src: MarkValue::CurrentPos,
-                }),
+                Some(&std_mark) if std_mark == *alt_mark => {
+                    written.insert(*alt_mark);
+                }
+                Some(&std_mark) => {
+                    commands.push(TagCommand {
+                        dst: *alt_mark,
+                        src: MarkValue::Copy(std_mark),
+                    });
+                    written.insert(*alt_mark);
+                }
+                None => {
+                    commands.push(TagCommand {
+                        dst: *alt_mark,
+                        src: MarkValue::CurrentPos,
+                    });
+                    written.insert(*alt_mark);
+                }
             }
         }
     }
@@ -613,6 +710,7 @@ fn seed_initial_state(
         &seeds,
         at_start_of_input,
         /* multiline_start_fires */ false,
+        /* wb_fires */ &[],
     )?;
     let canon_for_alt = canon.clone();
     let (id, is_new) = build.register_or_get_state(canon, conds)?;
@@ -721,7 +819,7 @@ pub struct Tdfa {
     // when it holds, applies `commands` (a mix of Copy and CurrentPos
     // writes that rearranges the marks array from this state's layout to
     // the alt's) and switches to `alt`.
-    anchor_alt: Box<[Option<AnchorAlt>]>,
+    anchor_alts: Box<[SmallVec<[AnchorAlt; 1]>]>,
 }
 
 #[derive(Debug, Clone)]
@@ -749,7 +847,7 @@ impl Tdfa {
             transition_commands: Vec::new(),
             finals: Vec::new(),
             anchor_conditionals: Vec::new(),
-            anchor_alt: Vec::new(),
+            anchor_alts: Vec::new(),
             worklist: Vec::new(),
         };
 
@@ -763,7 +861,7 @@ impl Tdfa {
         build.accepting.push(false);
         build.finals.push(SmallVec::new());
         build.anchor_conditionals.push(SmallVec::new());
-        build.anchor_alt.push(None);
+        build.anchor_alts.push(SmallVec::new());
 
         // Build both initial states. `start_anchored` is the closure under
         // `at_start_of_input = true`, i.e. with non-multiline `^` eps edges
@@ -804,6 +902,7 @@ impl Tdfa {
                     &seeds,
                     /* at_start_of_input */ false,
                     /* multiline_start_fires */ false,
+                    /* wb_fires */ &[],
                 )?;
                 let canon_for_alt = canon_next.clone();
                 let (target_id, is_new) = build.register_or_get_state(canon_next, next_conds)?;
@@ -837,7 +936,7 @@ impl Tdfa {
             transition_commands: build.transition_commands.into_boxed_slice(),
             finals: build.finals.into_boxed_slice(),
             anchor_conditionals: build.anchor_conditionals.into_boxed_slice(),
-            anchor_alt: build.anchor_alt.into_boxed_slice(),
+            anchor_alts: build.anchor_alts.into_boxed_slice(),
         })
     }
 
@@ -850,8 +949,8 @@ impl Tdfa {
     /// for most states. The executor evaluates the predicate after each
     /// byte step; on a hit, applies the carried `commands` to rearrange
     /// the marks array to the alt's layout and switches to the alt id.
-    pub(crate) fn anchor_alt(&self, state: TdfaStateId) -> Option<&AnchorAlt> {
-        self.anchor_alt[state as usize].as_ref()
+    pub(crate) fn anchor_alts(&self, state: TdfaStateId) -> &[AnchorAlt] {
+        &self.anchor_alts[state as usize]
     }
 
     pub fn num_tags(&self) -> usize {
