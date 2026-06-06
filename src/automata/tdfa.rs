@@ -6,7 +6,7 @@
 //! marks into the runtime register slots used by `NfaMatch`.
 
 use crate::automata::dfa::{compute_byte_classes, representative_bytes};
-use crate::automata::nfa::{EpsCondition, GOAL_STATE, Nfa, StateHandle, TagIdx};
+use crate::automata::nfa::{EpsCondition, GOAL_STATE, Nfa, OpKind, StateHandle, TagIdx, TagOp};
 
 /// Whether any state in the NFA has an eps edge gated by `^`.
 ///
@@ -133,7 +133,7 @@ pub type TagCommandList = SmallVec<[TagCommand; 4]>;
 /// extract per-tag values for a match candidate.
 #[derive(Clone, Debug)]
 pub struct AnchorConditional {
-    pub cond: crate::automata::nfa::EpsCondition,
+    pub cond: EpsCondition,
     pub commands: TagCommandList,
     pub finals: SmallVec<[FinalCommand; 4]>,
 }
@@ -308,14 +308,7 @@ fn close_priority(
                     // we have to bail.
                     let mut sub_tag_map = parent_tag_map.clone();
                     let mut pre_cmds = TagCommandList::new();
-                    for &reg in &edge.ops {
-                        let m = alloc.next();
-                        sub_tag_map[reg as usize] = Some(m);
-                        pre_cmds.push(TagCommand {
-                            dst: m,
-                            src: MarkValue::CurrentPos,
-                        });
-                    }
+                    apply_eps_ops(&edge.ops, alloc, &mut sub_tag_map, &mut pre_cmds);
                     let seed = TaggedNfaState {
                         state: edge.target,
                         tag_map: sub_tag_map,
@@ -357,14 +350,7 @@ fn close_priority(
             }
             seen[edge.target as usize] = true;
             let mut child_tag_map = parent_tag_map.clone();
-            for &reg in &edge.ops {
-                let m = alloc.next();
-                child_tag_map[reg as usize] = Some(m);
-                commands.push(TagCommand {
-                    dst: m,
-                    src: MarkValue::CurrentPos,
-                });
-            }
+            apply_eps_ops(&edge.ops, alloc, &mut child_tag_map, &mut commands);
             stack.push(TaggedNfaState {
                 state: edge.target,
                 tag_map: child_tag_map,
@@ -380,6 +366,33 @@ fn empty_tag_map(num_tags: usize) -> SmallVec<[Option<InputMark>; 4]> {
     let mut v = SmallVec::with_capacity(num_tags);
     v.resize(num_tags, None);
     v
+}
+
+/// Apply an eps edge's tag-write ops to the child tag_map.
+/// `CurrentPos` mints a fresh mark and emits a `TagCommand` so the
+/// executor writes the input position at runtime. `Nil` clears the
+/// slot to `None` directly — no mark, no command.
+fn apply_eps_ops(
+    ops: &[TagOp],
+    alloc: &mut MarkAlloc,
+    child_tag_map: &mut SmallVec<[Option<InputMark>; 4]>,
+    commands: &mut TagCommandList,
+) {
+    for op in ops {
+        match op.kind {
+            OpKind::CurrentPos => {
+                let m = alloc.next();
+                child_tag_map[op.tag as usize] = Some(m);
+                commands.push(TagCommand {
+                    dst: m,
+                    src: MarkValue::CurrentPos,
+                });
+            }
+            OpKind::Nil => {
+                child_tag_map[op.tag as usize] = None;
+            }
+        }
+    }
 }
 
 /// Build an initial TDFA state's closure under the given `at_start_of_input`

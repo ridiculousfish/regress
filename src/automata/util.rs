@@ -3,8 +3,17 @@
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
 
-use crate::automata::nfa::{ByteRange, GOAL_STATE, Nfa, StateHandle};
+use crate::automata::nfa::{ByteRange, GOAL_STATE, Nfa, OpKind, StateHandle, TagOp};
 use core::fmt;
+
+/// Render an eps-edge tag op for debug formatters: `t3` for CurrentPos,
+/// `t3=Nil` for Nil.
+fn format_tag_op(op: &TagOp) -> String {
+    match op.kind {
+        OpKind::CurrentPos => format!("t{}", op.tag),
+        OpKind::Nil => format!("t{}=Nil", op.tag),
+    }
+}
 
 /// Format a byte range in a human-readable way
 pub fn format_byte_range(range: ByteRange) -> String {
@@ -69,7 +78,7 @@ impl Nfa {
                         let ops_str = edge
                             .ops
                             .iter()
-                            .map(|&tag| format!("t{}", tag))
+                            .map(format_tag_op)
                             .collect::<Vec<_>>()
                             .join(",");
                         result.push_str(&format!("    ε [{}] ──> {}\n", ops_str, dest));
@@ -136,7 +145,7 @@ impl Nfa {
                     let ops = edge
                         .ops
                         .iter()
-                        .map(|&t| format!("t{}", t))
+                        .map(format_tag_op)
                         .collect::<Vec<_>>()
                         .join(",");
                     format!("ε [{}]", ops)
