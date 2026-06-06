@@ -37,7 +37,7 @@ impl Builder {
     fn build_trie(&mut self, paths: &[ByteRangePath]) -> Result<Fragment> {
         // Our recursive implementation constructs a lot of orphan nodes (todo: avoid this),
         // so build into scratch and then renumber.
-        let mut scratch = Builder::new(self.state_budget, self.unicode);
+        let mut scratch = Builder::new(self.state_budget, self.unicode, self.num_capture_tags);
         let scratch_from = scratch.make()?;
         let scratch_to = scratch.make()?;
         let indices: Vec<usize> = (0..paths.len()).collect();

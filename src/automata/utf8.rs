@@ -829,7 +829,7 @@ mod tests {
         let mut all = CodePointSet::new();
         all.add(Interval::new(0, CODE_POINT_MAX));
 
-        let mut b_trie = Builder::new(usize::MAX, true);
+        let mut b_trie = Builder::new(usize::MAX, true, 2);
         let frag_trie = b_trie.build_from_code_point_set(&all).unwrap();
 
         fn walk(

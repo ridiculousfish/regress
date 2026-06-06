@@ -299,6 +299,12 @@ fn close_priority(
                     }
                     // Fall through to normal traversal below.
                 }
+                EpsCondition::ProgressSince(_) => {
+                    // Runtime per-thread tag comparison — not representable in
+                    // the determinized subset. Construction bails so the test
+                    // harness reports SKIP rather than producing wrong matches.
+                    return Err(Error::PredicatedEpsNotSupported);
+                }
                 EpsCondition::EndOfLine { .. } => {
                     // Don't expand `$` into the determinized subset — record a
                     // conditional accept hook instead. Mini-closure must
