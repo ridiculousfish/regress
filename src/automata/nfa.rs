@@ -105,14 +105,51 @@ pub enum EpsCondition {
     },
 }
 
+/// What value an eps-edge traversal writes into a tag slot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum OpKind {
+    /// Write the current input position.
+    #[default]
+    CurrentPos,
+    /// Reset to "unset": `TEXT_POS_NO_MATCH` in the NFA executor's thread
+    /// tags, `None` in the TDFA's tag_map. Used at loop-iteration entries
+    /// to clear inner-loop capture groups per ES2015 RepeatMatcher
+    /// semantics.
+    Nil,
+}
+
+/// A single tag-write operation attached to an eps edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TagOp {
+    pub tag: TagIdx,
+    pub kind: OpKind,
+}
+
+impl TagOp {
+    #[inline]
+    pub const fn current_pos(tag: TagIdx) -> Self {
+        Self {
+            tag,
+            kind: OpKind::CurrentPos,
+        }
+    }
+    #[inline]
+    pub const fn nil(tag: TagIdx) -> Self {
+        Self {
+            tag,
+            kind: OpKind::Nil,
+        }
+    }
+}
+
 // An epsilon edge. Transitions on empty input (subject to `cond`),
-// optionally writing the current input position to one or more tags.
+// optionally writing tag values on traversal.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct EpsEdge {
     // Target of the transition.
     pub target: StateHandle,
-    // Tags to write on traversal.
-    pub ops: SmallVec<[TagIdx; 2]>,
+    // Tag writes performed on traversal, in source order.
+    pub ops: SmallVec<[TagOp; 2]>,
     // Predicate gating traversal; defaults to `Always`.
     pub cond: EpsCondition,
 }
@@ -148,11 +185,27 @@ impl State {
         });
     }
 
-    // Add an epsilon transition to another state, with one tag write.
+    // Add an epsilon transition to another state, with one CurrentPos
+    // tag write.
     pub fn add_eps_with_write(&mut self, target: StateHandle, tag: TagIdx) {
         self.eps.push(EpsEdge {
             target,
-            ops: smallvec![tag],
+            ops: smallvec![TagOp::current_pos(tag)],
+            cond: EpsCondition::Always,
+        });
+    }
+
+    // Add an epsilon transition with a list of tag-write ops, in source
+    // (priority) order. Used by `build_loop` to attach Nil resets to
+    // iteration-entry eps edges.
+    pub fn add_eps_with_writes(
+        &mut self,
+        target: StateHandle,
+        ops: impl IntoIterator<Item = TagOp>,
+    ) {
+        self.eps.push(EpsEdge {
+            target,
+            ops: ops.into_iter().collect(),
             cond: EpsCondition::Always,
         });
     }
@@ -345,6 +398,7 @@ impl Builder {
     }
 
     /// Add epsilons from a list of handles to a list of handles.
+    #[allow(dead_code)]
     fn join_many_eps(&mut self, from: &[StateHandle], to: impl IntoIterator<Item = StateHandle>) {
         for dst in to {
             self.join_eps(from, dst);
@@ -502,6 +556,14 @@ impl Builder {
                 "Loop over empty-matching body not supported by NFAs".to_string(),
             ));
         }
+        // ES2015 §22.2.2.5: at every iteration entry, capture groups *inside*
+        // the loop body reset to "undefined". Pre-compute the Nil-write ops
+        // and attach them to every eps edge that enters the body (whether
+        // first entry, optional iteration entry, or back-edge from a body
+        // end). This is also what lets canonicalize collapse subsets that
+        // differ only in stale-but-soon-reset marks — see the discussion
+        // in `apply_eps_ops` in tdfa.rs.
+        let reset_ops = collect_loop_reset_ops(loopee);
         let start = self.make()?;
         let greedy = quant.greedy;
         let mut current_ends = smallvec![start];
@@ -511,7 +573,8 @@ impl Builder {
             let mut next_ends: SmallVec<[StateHandle; 2]> = smallvec![];
             for current_end in current_ends {
                 let body = self.build(loopee)?;
-                self.get(current_end).add_eps(body.start);
+                self.get(current_end)
+                    .add_eps_with_writes(body.start, reset_ops.iter().copied());
                 next_ends.extend(body.ends);
             }
             current_ends = next_ends;
@@ -524,19 +587,13 @@ impl Builder {
                 let exit: u32 = self.make()?; // way out of the loop
                 let recur = body.start; // return to the loop
 
-                // Add eps to the loop body and end. Prefer the body if we are greedy,
-                // the end if non-greedy.
-                self.join_many_eps(
-                    &current_ends,
-                    if greedy { [recur, exit] } else { [exit, recur] },
-                );
+                // Iteration-entry eps from the pre-body ends. Recur carries
+                // resets; exit doesn't (we want the LAST iteration's captures
+                // visible after exit).
+                add_loop_iter_eps(self, &current_ends, recur, exit, greedy, &reset_ops);
 
-                // Add eps from the end of the loop body back to the start,
-                // or to exit.
-                self.join_many_eps(
-                    &body.ends,
-                    if greedy { [recur, exit] } else { [exit, recur] },
-                );
+                // Body back-edge: same shape.
+                add_loop_iter_eps(self, &body.ends, recur, exit, greedy, &reset_ops);
 
                 Ok(Fragment::new(start, [exit]))
             }
@@ -550,16 +607,12 @@ impl Builder {
                     let body = self.build(loopee)?;
                     let recur = body.start;
 
-                    // Add eps to the loop body and end. Prefer the body if we are greedy,
-                    // the end if non-greedy.
-                    self.join_many_eps(
-                        &current_ends,
-                        if greedy { [recur, exit] } else { [exit, recur] },
-                    );
+                    add_loop_iter_eps(self, &current_ends, recur, exit, greedy, &reset_ops);
                     current_ends = body.ends;
                 }
 
-                // Last iteration goes to exit.
+                // Last iteration goes to exit (no further iteration entry,
+                // so no resets).
                 self.join_eps(&current_ends, exit);
 
                 Ok(Fragment::new(start, [exit]))
@@ -579,11 +632,7 @@ impl Builder {
         contents: &Node,
         group_id: CaptureGroupID,
     ) -> Result<Fragment> {
-        // The group ID is the capture group index — value 0 is the first capture
-        // group, NOT the entire match. Tags 0 and 1 are reserved for the full
-        // match, so group N occupies tags (N+1)*2 (open) and +1 (close).
-        let open_tag = (group_id as TagIdx + 1) * 2;
-        let close_tag = open_tag + 1;
+        let (open_tag, close_tag) = capture_tags(group_id);
 
         // Record if we have a new largest number of tags.
         self.num_tags = self.num_tags.max(close_tag as usize + 1);
@@ -601,6 +650,57 @@ impl Builder {
         }
         let close_group = self.join_with_write(&body.ends, close_tag)?;
         Ok(Fragment::new(open_group, [close_group]))
+    }
+}
+
+/// Tags reserved for capture group `id`'s open/close positions. Tags 0
+/// and 1 are reserved for the full match, so group N occupies
+/// `((N+1)*2, (N+1)*2 + 1)`.
+#[inline]
+fn capture_tags(id: CaptureGroupID) -> (TagIdx, TagIdx) {
+    let open = (id as TagIdx + 1) * 2;
+    (open, open + 1)
+}
+
+/// Enumerate Nil-write ops for every capture group inside `loopee`.
+/// Used by `build_loop` to attach iteration-entry resets. Nested loops
+/// contribute their captures transitively because `ir::walk` recurses;
+/// the inner loop's own resets will fire redundantly on top, which is
+/// harmless.
+fn collect_loop_reset_ops(loopee: &Node) -> SmallVec<[TagOp; 8]> {
+    let mut ops: SmallVec<[TagOp; 8]> = SmallVec::new();
+    ir::walk(/* postorder */ false, /* unicode */ false, loopee, &mut |n, _| {
+        if let Node::CaptureGroup { id, .. } = n {
+            let (open, close) = capture_tags(*id);
+            ops.push(TagOp::nil(open));
+            ops.push(TagOp::nil(close));
+        }
+    });
+    ops
+}
+
+/// Wire up an iteration-entry split: from each source state, add two eps
+/// edges — one to `recur` (carrying the loop body's reset ops) and one
+/// to `exit` (no resets, since exiting the loop preserves the last
+/// iteration's captures). Greedy quantifiers want `recur` higher
+/// priority; non-greedy want `exit` higher.
+fn add_loop_iter_eps(
+    builder: &mut Builder,
+    sources: &[StateHandle],
+    recur: StateHandle,
+    exit: StateHandle,
+    greedy: bool,
+    reset_ops: &[TagOp],
+) {
+    for &src in sources {
+        let state = builder.get(src);
+        if greedy {
+            state.add_eps_with_writes(recur, reset_ops.iter().copied());
+            state.add_eps(exit);
+        } else {
+            state.add_eps(exit);
+            state.add_eps_with_writes(recur, reset_ops.iter().copied());
+        }
     }
 }
 

@@ -282,8 +282,11 @@ fn dfs_expand_eps(
         }
         let mut new_thread = threads.threads[idx].clone_to_state(target);
         for op_idx in 0..ops_len {
-            let tag = nfa.at(parent_state).eps[edge_idx].ops[op_idx];
-            *new_thread.get_tag_mut(tag) = current_pos;
+            let op = nfa.at(parent_state).eps[edge_idx].ops[op_idx];
+            *new_thread.get_tag_mut(op.tag) = match op.kind {
+                crate::automata::nfa::OpKind::CurrentPos => current_pos,
+                crate::automata::nfa::OpKind::Nil => TEXT_POS_NO_MATCH,
+            };
         }
         threads.push(new_thread);
         let new_idx = threads.threads.len() - 1;
