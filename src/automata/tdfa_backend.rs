@@ -52,6 +52,9 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     if state == TDFA_DEAD_STATE {
         return None;
     }
+    // Initial multiline-^ check: if `start > 0` and the previous byte is a
+    // line terminator, switch to the alt right at the start of execution.
+    maybe_switch_anchor_alt(tdfa, &mut state, &mut marks, input, start);
     if tdfa.accepting()[state as usize] {
         last_accept = Some((start, marks.clone(), tdfa.finals()[state as usize].clone()));
     }
@@ -73,6 +76,9 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
         }
         apply_commands(&mut marks, &trans_cmds[idx], pos + 1);
         state = next;
+        // Forward-branching anchor switch: if `state` has a multiline-^
+        // alt and the predicate holds at the new position, swap to it.
+        maybe_switch_anchor_alt(tdfa, &mut state, &mut marks, input, pos + 1);
         if accepting[state as usize] {
             last_accept = Some((
                 pos + 1,
@@ -88,6 +94,26 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     record_conditionals(tdfa, state, input, input.len(), &marks, &mut last_accept);
 
     last_accept.map(|(end, snap, finals)| finalize(&finals, &snap, end, num_tags))
+}
+
+/// If `state` has an anchor alt and its predicate holds at `pos`, apply
+/// the alt's switch commands to `marks` and swap `state` to the alt id.
+/// Used both at the start of execution (catches multiline `^` firing
+/// at a non-zero start offset whose preceding byte is a line terminator)
+/// and after every byte transition (catches mid-input firings).
+fn maybe_switch_anchor_alt(
+    tdfa: &Tdfa,
+    state: &mut u32,
+    marks: &mut [TextPos],
+    input: &[u8],
+    pos: usize,
+) {
+    if let Some(alt) = tdfa.anchor_alt(*state) {
+        if alt.cond.holds(input, pos) {
+            apply_commands(marks, &alt.commands, pos);
+            *state = alt.alt;
+        }
+    }
 }
 
 /// For each `$`-style conditional attached to `state`, evaluate its

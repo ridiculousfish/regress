@@ -8,22 +8,6 @@
 use crate::automata::dfa::{compute_byte_classes, representative_bytes};
 use crate::automata::nfa::{EpsCondition, GOAL_STATE, Nfa, OpKind, StateHandle, TagIdx, TagOp};
 
-/// Whether any state in the NFA has an eps edge gated by **multiline** `^`.
-/// Multiline `^` requires per-state alt variants (the `anchor_alt`
-/// mechanism is scaffolded but not yet wired into construction); bail so
-/// the NFA backend handles those patterns. Non-multiline `^` is supported
-/// via the two-initial-states mechanism (`seed_initial_state` with
-/// `at_start_of_input = true / false`).
-fn nfa_has_multiline_start_of_line(nfa: &Nfa) -> bool {
-    for state in nfa.states.iter() {
-        for edge in &state.eps {
-            if matches!(edge.cond, EpsCondition::StartOfLine { multiline: true }) {
-                return true;
-            }
-        }
-    }
-    false
-}
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use smallvec::SmallVec;
@@ -241,6 +225,7 @@ fn close_priority(
     seeds: &[TaggedNfaState],
     num_tags: usize,
     at_start_of_input: bool,
+    multiline_start_fires: bool,
     conditionals: &mut SmallVec<[AnchorConditional; 1]>,
 ) -> Result<(TdfaState, TagCommandList), Error> {
     let mut threads: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
@@ -281,12 +266,15 @@ fn close_priority(
                     // Fall through to normal traversal below.
                 }
                 EpsCondition::StartOfLine { multiline: true } => {
-                    // Multiline `^` requires the `anchor_alt` mechanism
-                    // (alt-state per state where ^ might fire mid-input);
-                    // bail until that lands. We pre-screen at try_from to
-                    // make this unreachable in practice, but keep the arm
-                    // here for soundness.
-                    return Err(Error::PredicatedEpsNotSupported);
+                    // Multiline `^` fires at pos 0 or right after a line
+                    // terminator. `at_start_of_input` covers pos 0; the
+                    // `multiline_start_fires` flag is used by the alt
+                    // closure computed for `anchor_alt`, where the caller
+                    // asserts "assume ^ fired here."
+                    if !(at_start_of_input || multiline_start_fires) {
+                        continue;
+                    }
+                    // Fall through to normal traversal below.
                 }
                 EpsCondition::EndOfLine { .. } => {
                     // Don't expand `$` into the determinized subset — record a
@@ -308,6 +296,7 @@ fn close_priority(
                         &[seed],
                         num_tags,
                         at_start_of_input,
+                        multiline_start_fires,
                         &mut sub_conds,
                     )?;
                     let sub_closure = truncate_at_first_goal(sub_closure);
@@ -383,55 +372,188 @@ fn apply_eps_ops(
     }
 }
 
-/// Build an initial TDFA state's closure under the given `at_start_of_input`
-/// flag and register it in `state_map`. Returns `(id, entry_commands)`.
-/// If the resulting canonical subset is already in `state_map`, the existing
-/// id is reused (e.g. when anchored and unanchored closures coincide because
-/// the pattern has no `^`).
-#[allow(clippy::too_many_arguments)]
-fn seed_initial_state(
-    nfa: &Nfa,
-    alloc: &mut MarkAlloc,
+/// Working state for the TDFA construction. Bundles every per-state Vec
+/// so `register_or_get_state` and friends don't need a dozen
+/// out-parameters.
+struct Build<'a> {
+    nfa: &'a Nfa,
+    alloc: &'a mut MarkAlloc,
     num_tags: usize,
-    at_start_of_input: bool,
-    state_map: &mut HashMap<TdfaState, TdfaStateId>,
-    transitions: &mut Vec<TdfaStateId>,
-    accepting: &mut Vec<bool>,
-    transition_commands: &mut Vec<TagCommandList>,
-    finals: &mut Vec<SmallVec<[FinalCommand; 4]>>,
-    anchor_conditionals: &mut Vec<SmallVec<[AnchorConditional; 1]>>,
-    worklist: &mut Vec<TdfaState>,
     num_classes: usize,
+    state_map: HashMap<TdfaState, TdfaStateId>,
+    transitions: Vec<TdfaStateId>,
+    accepting: Vec<bool>,
+    transition_commands: Vec<TagCommandList>,
+    finals: Vec<SmallVec<[FinalCommand; 4]>>,
+    anchor_conditionals: Vec<SmallVec<[AnchorConditional; 1]>>,
+    anchor_alt: Vec<Option<AnchorAlt>>,
+    worklist: Vec<TdfaState>,
+}
+
+impl Build<'_> {
+    /// Look up or register a canonical state. Returns `(id, true)` if a
+    /// brand-new state was added (caller may want to compute its
+    /// `anchor_alt`); `(id, false)` if it was already in the map.
+    fn register_or_get_state(
+        &mut self,
+        canon: TdfaState,
+        conds: SmallVec<[AnchorConditional; 1]>,
+    ) -> Result<(TdfaStateId, bool), Error> {
+        if let Some(&id) = self.state_map.get(&canon) {
+            return Ok((id, false));
+        }
+        let id = self.accepting.len() as TdfaStateId;
+        if id as usize >= TDFA_STATE_BUDGET {
+            return Err(Error::BudgetExceeded);
+        }
+        let is_accepting = canon.0.iter().any(|t| t.state == GOAL_STATE);
+        let state_finals = synthesize_finals(&canon, self.num_tags);
+        self.accepting.push(is_accepting);
+        self.finals.push(state_finals);
+        self.anchor_conditionals.push(conds);
+        self.anchor_alt.push(None);
+        self.transitions
+            .resize(self.transitions.len() + self.num_classes, TDFA_DEAD_STATE);
+        self.transition_commands
+            .resize(self.transition_commands.len() + self.num_classes, SmallVec::new());
+        self.state_map.insert(canon.clone(), id);
+        self.worklist.push(canon);
+        Ok((id, true))
+    }
+
+    /// Run the priority-ordered closure on the given seeds. The returned
+    /// `(canon, current_cmds + copy_cmds, conditionals)` is what
+    /// `register_or_get_state` consumes.
+    fn closure_from_seeds(
+        &mut self,
+        seeds: &[TaggedNfaState],
+        at_start_of_input: bool,
+        multiline_start_fires: bool,
+    ) -> Result<
+        (
+            TdfaState,
+            TagCommandList,
+            SmallVec<[AnchorConditional; 1]>,
+        ),
+        Error,
+    > {
+        let mut conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
+        let (closure, current_cmds) = close_priority(
+            self.alloc,
+            self.nfa,
+            seeds,
+            self.num_tags,
+            at_start_of_input,
+            multiline_start_fires,
+            &mut conds,
+        )?;
+        let closure = truncate_at_first_goal(closure);
+        let (canon, copy_cmds) = canonicalize(closure);
+        let mut entry = TagCommandList::new();
+        entry.extend(current_cmds);
+        entry.extend(copy_cmds);
+        Ok((canon, entry, conds))
+    }
+
+    /// If `canon`'s threads can be enlarged by a multiline `^` firing,
+    /// compute the alt closure (via a re-close of the seeds with
+    /// `multiline_start_fires = true`) and register it. Sets
+    /// `self.anchor_alt[id]` to the resulting `AnchorAlt` if the alt
+    /// differs from `canon`.
+    fn compute_anchor_alt_for(
+        &mut self,
+        canon: &TdfaState,
+        seeds: &[TaggedNfaState],
+        at_start_of_input: bool,
+        id: TdfaStateId,
+    ) -> Result<(), Error> {
+        // Skip the closure work entirely when no thread can fire a
+        // multiline `^` from this state.
+        if !canon.0.iter().any(|t| {
+            self.nfa.states[t.state as usize]
+                .eps
+                .iter()
+                .any(|e| matches!(e.cond, EpsCondition::StartOfLine { multiline: true }))
+        }) {
+            return Ok(());
+        }
+        let (canon_alt, _entry_alt, conds_alt) = self.closure_from_seeds(
+            seeds,
+            at_start_of_input,
+            /* multiline_start_fires */ true,
+        )?;
+        if canon_alt == *canon {
+            return Ok(());
+        }
+        let switch_commands = compute_alt_switch_commands(canon, &canon_alt);
+        let (alt_id, _is_new) = self.register_or_get_state(canon_alt, conds_alt)?;
+        self.anchor_alt[id as usize] = Some(AnchorAlt {
+            cond: EpsCondition::StartOfLine { multiline: true },
+            alt: alt_id,
+            commands: switch_commands,
+        });
+        Ok(())
+    }
+}
+
+/// Translate the marks array's layout from `canon_next` to `canon_alt`.
+/// For each `(NFA_state, tag_idx)` entry present in both, emit a `Copy`
+/// from the next-state's canonical slot to the alt-state's (when they
+/// differ). For entries only in the alt — added by the ^-extension —
+/// emit a `CurrentPos`, since their values are the position at which
+/// ^ just fired.
+fn compute_alt_switch_commands(canon_next: &TdfaState, canon_alt: &TdfaState) -> TagCommandList {
+    let mut next_map: HashMap<(StateHandle, usize), InputMark> = HashMap::new();
+    for thread in &canon_next.0 {
+        for (idx, slot) in thread.tag_map.iter().enumerate() {
+            if let Some(mark) = slot {
+                next_map.insert((thread.state, idx), *mark);
+            }
+        }
+    }
+    let mut commands = TagCommandList::new();
+    for thread in &canon_alt.0 {
+        for (idx, slot) in thread.tag_map.iter().enumerate() {
+            let Some(alt_mark) = slot else { continue };
+            match next_map.get(&(thread.state, idx)) {
+                Some(&std_mark) if std_mark == *alt_mark => {} // already in place
+                Some(&std_mark) => commands.push(TagCommand {
+                    dst: *alt_mark,
+                    src: MarkValue::Copy(std_mark),
+                }),
+                None => commands.push(TagCommand {
+                    dst: *alt_mark,
+                    src: MarkValue::CurrentPos,
+                }),
+            }
+        }
+    }
+    commands
+}
+
+/// Build an initial TDFA state's closure under the given `at_start_of_input`
+/// flag, register it, and compute its `anchor_alt`. Returns
+/// `(id, entry_commands)`. If the canonical subset already exists in the
+/// state map, the existing id is reused.
+fn seed_initial_state(
+    build: &mut Build<'_>,
+    at_start_of_input: bool,
 ) -> Result<(TdfaStateId, TagCommandList), Error> {
     let seed = TaggedNfaState {
-        state: nfa.start(),
-        tag_map: empty_tag_map(num_tags),
+        state: build.nfa.start(),
+        tag_map: empty_tag_map(build.num_tags),
     };
-    let mut conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
-    let (closure, current_cmds) =
-        close_priority(alloc, nfa, &[seed], num_tags, at_start_of_input, &mut conds)?;
-    let closure = truncate_at_first_goal(closure);
-    let (canon, copy_cmds) = canonicalize(closure);
-    let mut entry_commands = TagCommandList::new();
-    entry_commands.extend(current_cmds);
-    entry_commands.extend(copy_cmds);
-
-    if let Some(&id) = state_map.get(&canon) {
-        return Ok((id, entry_commands));
+    let seeds = [seed];
+    let (canon, entry_commands, conds) = build.closure_from_seeds(
+        &seeds,
+        at_start_of_input,
+        /* multiline_start_fires */ false,
+    )?;
+    let canon_for_alt = canon.clone();
+    let (id, is_new) = build.register_or_get_state(canon, conds)?;
+    if is_new {
+        build.compute_anchor_alt_for(&canon_for_alt, &seeds, at_start_of_input, id)?;
     }
-    let id = accepting.len() as TdfaStateId;
-    if id as usize >= TDFA_STATE_BUDGET {
-        return Err(Error::BudgetExceeded);
-    }
-    let is_accepting = canon.0.iter().any(|t| t.state == GOAL_STATE);
-    let state_finals = synthesize_finals(&canon, num_tags);
-    accepting.push(is_accepting);
-    finals.push(state_finals);
-    anchor_conditionals.push(conds);
-    transitions.resize(transitions.len() + num_classes, TDFA_DEAD_STATE);
-    transition_commands.resize(transition_commands.len() + num_classes, SmallVec::new());
-    state_map.insert(canon.clone(), id);
-    worklist.push(canon);
     Ok((id, entry_commands))
 }
 
@@ -527,36 +649,56 @@ pub struct Tdfa {
     // The executor evaluates `cond` per step + at EOI; if true, applies the
     // entry's commands and uses its finals to produce a match candidate.
     anchor_conditionals: Box<[SmallVec<[AnchorConditional; 1]>]>,
+
+    // Per-state forward-branching anchor alt. Indexed by state ID. `Some`
+    // only when the state's subset can be enlarged by a multiline `^`
+    // firing — the executor checks the predicate after each byte step;
+    // when it holds, applies `commands` (a mix of Copy and CurrentPos
+    // writes that rearranges the marks array from this state's layout to
+    // the alt's) and switches to `alt`.
+    anchor_alt: Box<[Option<AnchorAlt>]>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnchorAlt {
+    pub cond: EpsCondition,
+    pub alt: TdfaStateId,
+    pub commands: TagCommandList,
 }
 
 impl Tdfa {
     pub fn try_from(nfa: &Nfa) -> Result<Self, Error> {
-        if nfa_has_multiline_start_of_line(nfa) {
-            return Err(Error::PredicatedEpsNotSupported);
-        }
-
         let (byte_to_class, num_classes) = compute_byte_classes(nfa);
         let rep_bytes = representative_bytes(&byte_to_class, num_classes);
         let num_tags = nfa.num_tags();
 
         let mut alloc = MarkAlloc::new();
-
-        let mut state_map: HashMap<TdfaState, TdfaStateId> = HashMap::new();
-        let mut transitions: Vec<TdfaStateId> = Vec::new();
-        let mut accepting: Vec<bool> = Vec::new();
-        let mut transition_commands: Vec<TagCommandList> = Vec::new();
-        let mut finals: Vec<SmallVec<[FinalCommand; 4]>> = Vec::new();
-        let mut anchor_conditionals: Vec<SmallVec<[AnchorConditional; 1]>> = Vec::new();
-        let mut worklist: Vec<TdfaState> = Vec::new();
+        let mut build = Build {
+            nfa,
+            alloc: &mut alloc,
+            num_tags,
+            num_classes,
+            state_map: HashMap::new(),
+            transitions: Vec::new(),
+            accepting: Vec::new(),
+            transition_commands: Vec::new(),
+            finals: Vec::new(),
+            anchor_conditionals: Vec::new(),
+            anchor_alt: Vec::new(),
+            worklist: Vec::new(),
+        };
 
         // State 0 = dead state (self-loops, not accepting). Represented as
         // the empty TdfaState so that an exhausted step() lands here.
-        state_map.insert(TdfaState::default(), TDFA_DEAD_STATE);
-        transitions.resize(num_classes, TDFA_DEAD_STATE);
-        transition_commands.resize(num_classes, SmallVec::new());
-        accepting.push(false);
-        finals.push(SmallVec::new());
-        anchor_conditionals.push(SmallVec::new());
+        build.state_map.insert(TdfaState::default(), TDFA_DEAD_STATE);
+        build.transitions.resize(num_classes, TDFA_DEAD_STATE);
+        build
+            .transition_commands
+            .resize(num_classes, SmallVec::new());
+        build.accepting.push(false);
+        build.finals.push(SmallVec::new());
+        build.anchor_conditionals.push(SmallVec::new());
+        build.anchor_alt.push(None);
 
         // Build both initial states. `start_anchored` is the closure under
         // `at_start_of_input = true`, i.e. with non-multiline `^` eps edges
@@ -564,37 +706,13 @@ impl Tdfa {
         // it's the right starting subset when the executor calls in with a
         // non-zero start offset. They may dedup to the same id if the regex
         // has no `^`.
-        let (start_anchored, entry_commands_anchored) = seed_initial_state(
-            nfa,
-            &mut alloc,
-            num_tags,
-            /* at_start_of_input */ true,
-            &mut state_map,
-            &mut transitions,
-            &mut accepting,
-            &mut transition_commands,
-            &mut finals,
-            &mut anchor_conditionals,
-            &mut worklist,
-            num_classes,
-        )?;
-        let (start_unanchored, entry_commands_unanchored) = seed_initial_state(
-            nfa,
-            &mut alloc,
-            num_tags,
-            /* at_start_of_input */ false,
-            &mut state_map,
-            &mut transitions,
-            &mut accepting,
-            &mut transition_commands,
-            &mut finals,
-            &mut anchor_conditionals,
-            &mut worklist,
-            num_classes,
-        )?;
+        let (start_anchored, entry_commands_anchored) =
+            seed_initial_state(&mut build, /* at_start_of_input */ true)?;
+        let (start_unanchored, entry_commands_unanchored) =
+            seed_initial_state(&mut build, /* at_start_of_input */ false)?;
 
-        while let Some(state) = worklist.pop() {
-            let dfa_state = state_map[&state];
+        while let Some(state) = build.worklist.pop() {
+            let dfa_state = build.state_map[&state];
             let row_offset = dfa_state as usize * num_classes;
 
             for class in 0..num_classes {
@@ -617,48 +735,27 @@ impl Tdfa {
                     continue; // Already TDFA_DEAD_STATE.
                 }
 
-                let mut next_conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
-                let (next, current_cmds) = close_priority(
-                    &mut alloc,
-                    nfa,
+                let (canon_next, combined, next_conds) = build.closure_from_seeds(
                     &seeds,
-                    num_tags,
                     /* at_start_of_input */ false,
-                    &mut next_conds,
+                    /* multiline_start_fires */ false,
                 )?;
-                let next = truncate_at_first_goal(next);
-                let (canon_next, copy_cmds) = canonicalize(next);
-
-                let mut combined = TagCommandList::new();
-                combined.extend(current_cmds);
-                combined.extend(copy_cmds);
-
-                let target_id = match state_map.get(&canon_next) {
-                    Some(&id) => id,
-                    None => {
-                        let id = accepting.len() as TdfaStateId;
-                        if id as usize >= TDFA_STATE_BUDGET {
-                            return Err(Error::BudgetExceeded);
-                        }
-                        let is_accepting = canon_next.0.iter().any(|t| t.state == GOAL_STATE);
-                        let state_finals = synthesize_finals(&canon_next, num_tags);
-                        accepting.push(is_accepting);
-                        finals.push(state_finals);
-                        anchor_conditionals.push(next_conds);
-                        transitions.resize(transitions.len() + num_classes, TDFA_DEAD_STATE);
-                        transition_commands
-                            .resize(transition_commands.len() + num_classes, SmallVec::new());
-                        state_map.insert(canon_next.clone(), id);
-                        worklist.push(canon_next);
-                        id
-                    }
-                };
-                transitions[row_offset + class] = target_id;
-                transition_commands[row_offset + class] = combined;
+                let canon_for_alt = canon_next.clone();
+                let (target_id, is_new) = build.register_or_get_state(canon_next, next_conds)?;
+                build.transitions[row_offset + class] = target_id;
+                build.transition_commands[row_offset + class] = combined;
+                if is_new {
+                    build.compute_anchor_alt_for(
+                        &canon_for_alt,
+                        &seeds,
+                        /* at_start_of_input */ false,
+                        target_id,
+                    )?;
+                }
             }
         }
 
-        let num_marks = alloc.count() as usize;
+        let num_marks = build.alloc.count() as usize;
 
         Ok(Tdfa {
             start_anchored,
@@ -670,17 +767,26 @@ impl Tdfa {
             num_marks,
             group_names: nfa.group_names().to_vec().into_boxed_slice(),
             byte_to_class,
-            transitions: transitions.into_boxed_slice(),
-            accepting: accepting.into_boxed_slice(),
-            transition_commands: transition_commands.into_boxed_slice(),
-            finals: finals.into_boxed_slice(),
-            anchor_conditionals: anchor_conditionals.into_boxed_slice(),
+            transitions: build.transitions.into_boxed_slice(),
+            accepting: build.accepting.into_boxed_slice(),
+            transition_commands: build.transition_commands.into_boxed_slice(),
+            finals: build.finals.into_boxed_slice(),
+            anchor_conditionals: build.anchor_conditionals.into_boxed_slice(),
+            anchor_alt: build.anchor_alt.into_boxed_slice(),
         })
     }
 
     /// `$`-style accept conditionals for `state`. Empty for most states.
     pub fn anchor_conditionals(&self, state: TdfaStateId) -> &[AnchorConditional] {
         &self.anchor_conditionals[state as usize]
+    }
+
+    /// Forward-branching anchor alt for `state` (multiline `^`). `None`
+    /// for most states. The executor evaluates the predicate after each
+    /// byte step; on a hit, applies the carried `commands` to rearrange
+    /// the marks array to the alt's layout and switches to the alt id.
+    pub(crate) fn anchor_alt(&self, state: TdfaStateId) -> Option<&AnchorAlt> {
+        self.anchor_alt[state as usize].as_ref()
     }
 
     pub fn num_tags(&self) -> usize {
