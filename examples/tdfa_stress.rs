@@ -139,6 +139,48 @@ fn main() {
             row.label, row.pattern_len, row.num_tags, row.nfa_ms, row.tdfa_ms, row.outcome,
         );
     }
+
+    println!("\nExecution tests:");
+    let exec_cases: &[(&str, &str)] = &[
+        (r"bar$", "bar"),
+        (r"bar$", "barX"),
+        (r"bar$", "bar\nfoo"),
+        (r"(a*)^(a*)$", "aa\raaa"),
+        (r"(a*)^(a*)$", ""),
+        (r"(a*)$", "aaa"),
+    ];
+    for (pat, input) in exec_cases {
+        execute_once(pat, input);
+    }
+}
+
+#[cfg(feature = "nfa")]
+fn execute_once(pat: &str, input: &str) {
+    let flags = Flags::default();
+    let mut ir = backends::try_parse(pat.chars().map(u32::from), flags).expect("parse");
+    backends::optimize(&mut ir);
+    let nfa = match Nfa::try_from(&ir) {
+        Ok(n) => n,
+        Err(e) => {
+            println!("  pat={:?} input={:?}: nfa-err {:?}", pat, input, e);
+            return;
+        }
+    };
+    let tdfa = match Tdfa::try_from(&nfa) {
+        Ok(t) => t,
+        Err(e) => {
+            println!("  pat={:?} input={:?}: tdfa-err {:?}", pat, input, e);
+            return;
+        }
+    };
+    let m = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        regress::automata::tdfa_backend::execute(&tdfa, input.as_bytes(), 0)
+    }));
+    match m {
+        Ok(Some(m)) => println!("  pat={:?} input={:?}: tdfa-match {:?}", pat, input, m),
+        Ok(None) => println!("  pat={:?} input={:?}: tdfa-no-match", pat, input),
+        Err(_) => println!("  pat={:?} input={:?}: tdfa-panic", pat, input),
+    }
 }
 
 #[cfg(not(feature = "nfa"))]
