@@ -8,28 +8,16 @@
 use crate::automata::dfa::{compute_byte_classes, representative_bytes};
 use crate::automata::nfa::{EpsCondition, GOAL_STATE, Nfa, OpKind, StateHandle, TagIdx, TagOp};
 
-/// Whether any state in the NFA has an eps edge gated by `^`.
-///
-/// We bail on ANY `^` for now, even though the `seed_initial_state` /
-/// `at_start_of_input` machinery handles non-multiline `^` correctly
-/// in principle.
-///
-/// The reason is unrelated to anchors: capture-heavy patterns
-/// (e.g. `run_regexp_capture_test`'s `^(((N({)?)|(R)|...)+` with 58
-/// capture groups / 116 tags) blow past the 4096-state TDFA budget on
-/// the regex BODY alone — stripping `^` from that pattern still hits
-/// BudgetExceeded after ~14s in release mode. The `^` bail was
-/// incidentally masking this pre-existing TDFA scaling issue; lifting
-/// it without addressing the budget would regress
-/// `run_regexp_capture_test` to a multi-minute hang in debug builds.
-///
-/// Re-enabling `^` should land alongside either a smaller state budget
-/// or a per-step work cap. Multiline `^` additionally needs the
-/// alt-state mechanism.
-fn nfa_has_start_of_line(nfa: &Nfa) -> bool {
+/// Whether any state in the NFA has an eps edge gated by **multiline** `^`.
+/// Multiline `^` requires per-state alt variants (the `anchor_alt`
+/// mechanism is scaffolded but not yet wired into construction); bail so
+/// the NFA backend handles those patterns. Non-multiline `^` is supported
+/// via the two-initial-states mechanism (`seed_initial_state` with
+/// `at_start_of_input = true / false`).
+fn nfa_has_multiline_start_of_line(nfa: &Nfa) -> bool {
     for state in nfa.states.iter() {
         for edge in &state.eps {
-            if matches!(edge.cond, EpsCondition::StartOfLine { .. }) {
+            if matches!(edge.cond, EpsCondition::StartOfLine { multiline: true }) {
                 return true;
             }
         }
@@ -543,7 +531,7 @@ pub struct Tdfa {
 
 impl Tdfa {
     pub fn try_from(nfa: &Nfa) -> Result<Self, Error> {
-        if nfa_has_start_of_line(nfa) {
+        if nfa_has_multiline_start_of_line(nfa) {
             return Err(Error::PredicatedEpsNotSupported);
         }
 
