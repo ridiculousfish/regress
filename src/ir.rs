@@ -498,8 +498,12 @@ pub struct Regex {
 impl Regex {}
 
 fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Result {
-    for _ in 0..depth {
+    const MAX_DEPTH_DOTS: usize = 120;
+    for _ in 0..depth.min(MAX_DEPTH_DOTS) {
         write!(f, "..")?;
+    }
+    if depth > MAX_DEPTH_DOTS {
+        write!(f, "(+{}).. ", depth - MAX_DEPTH_DOTS)?;
     }
     match node {
         Node::Empty => {
