@@ -138,7 +138,7 @@ impl ClassSet {
                 }
                 self.alternatives.0.clear();
                 if found_alternative {
-                    self.alternatives.0.push(Vec::from([c]));
+                    self.alternatives.0.push(Box::from([c]));
                 }
             }
             ClassSetOperand::CharacterClassEscape(cps) => {
@@ -166,7 +166,7 @@ impl ClassSet {
                 }
                 self.codepoints.intersect(class.codepoints.intervals());
                 self.codepoints.add_set(retained_codepoints);
-                self.alternatives.intersect(class.alternatives);
+                self.alternatives.intersect(&class.alternatives);
                 self.alternatives.extend(retained_alternatives);
             }
             ClassSetOperand::ClassStringDisjunction(s) => {
@@ -177,7 +177,7 @@ impl ClassSet {
                     }
                 }
                 self.codepoints = retained;
-                self.alternatives.intersect(s);
+                self.alternatives.intersect(&s);
             }
         }
     }
@@ -186,8 +186,7 @@ impl ClassSet {
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
                 self.codepoints.remove(&[Interval { first: c, last: c }]);
-                self.alternatives
-                    .remove(ClassSetAlternativeStrings(Vec::from([Vec::from([c])])));
+                self.alternatives.remove(&[Box::from([c])]);
             }
             ClassSetOperand::CharacterClassEscape(cps) => {
                 self.codepoints.remove(cps.intervals());
@@ -197,7 +196,7 @@ impl ClassSet {
                         to_remove.0.push(alternative.clone());
                     }
                 }
-                self.alternatives.remove(to_remove);
+                self.alternatives.remove(&to_remove);
             }
             ClassSetOperand::Class(class) => {
                 let mut codepoints_removed = CodePointSet::new();
@@ -214,8 +213,8 @@ impl ClassSet {
                 }
                 self.codepoints.remove(codepoints_removed.intervals());
                 self.codepoints.remove(class.codepoints.intervals());
-                self.alternatives.remove(alternatives_removed);
-                self.alternatives.remove(class.alternatives);
+                self.alternatives.remove(&alternatives_removed);
+                self.alternatives.remove(&class.alternatives);
             }
             ClassSetOperand::ClassStringDisjunction(s) => {
                 let mut to_remove = CodePointSet::new();
@@ -225,7 +224,7 @@ impl ClassSet {
                     }
                 }
                 self.codepoints.remove(to_remove.intervals());
-                self.alternatives.remove(s);
+                self.alternatives.remove(&s);
             }
         }
     }
@@ -240,46 +239,56 @@ enum ClassSetOperand {
     ClassStringDisjunction(ClassSetAlternativeStrings),
 }
 
+/// A list of strings matching some property, for use in 'v' regular expressions.
 #[derive(Debug, Clone)]
-struct ClassSetAlternativeStrings(Vec<Vec<CodePoint>>);
+struct ClassSetAlternativeStrings(Vec<Box<[CodePoint]>>);
 
 impl ClassSetAlternativeStrings {
     fn new() -> Self {
         ClassSetAlternativeStrings(Vec::new())
     }
 
-    fn extend(&mut self, other: Self) {
-        self.0.extend(other.0);
+    fn extend(&mut self, other: impl IntoIterator<Item = Box<[CodePoint]>>) {
+        self.0.extend(other);
     }
 
-    fn intersect(&mut self, other: Self) {
-        let mut retained = Vec::new();
-        for string in &self.0 {
-            for other_string in &other.0 {
-                if string == other_string {
-                    retained.push(string.clone());
-                    break;
-                }
-            }
-        }
-        self.0 = retained;
+    fn intersect(&mut self, other: &[Box<[CodePoint]>]) {
+        self.0.retain(|string| other.contains(string));
     }
 
-    fn remove(&mut self, other: Self) {
-        self.0.retain(|string| !other.0.contains(string));
+    fn remove(&mut self, other: &[Box<[CodePoint]>]) {
+        self.0.retain(|string| !other.contains(string));
     }
 
     fn to_nodes(&self, icase: bool) -> Vec<ir::Node> {
-        let mut nodes = Vec::new();
-        for string in &self.0 {
-            nodes.push(ir::Node::Cat(
-                string
-                    .iter()
-                    .map(|cp| ir::Node::Char { c: *cp, icase })
-                    .collect::<Vec<_>>(),
-            ));
-        }
-        nodes
+        // TODO: rationalize if per-char icase is the correct way
+        // to do case-insensitivity for 'v' string alternatives.
+        self.0
+            .iter()
+            .map(|string| {
+                ir::Node::Cat(
+                    string
+                        .iter()
+                        .map(|cp| ir::Node::Char { c: *cp, icase })
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+}
+
+impl core::ops::Deref for ClassSetAlternativeStrings {
+    type Target = [Box<[CodePoint]>];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl IntoIterator for ClassSetAlternativeStrings {
+    type Item = Box<[CodePoint]>;
+    type IntoIter = <Vec<Box<[CodePoint]>> as IntoIterator>::IntoIter;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -1207,16 +1216,16 @@ where
                                 Some(0x7D /* } */) => {
                                     self.consume('}');
                                     if !alternative.is_empty() {
-                                        alternatives.push(alternative.clone());
-                                        alternative.clear();
+                                        alternatives.push(alternative.into_boxed_slice());
                                     }
                                     break;
                                 }
                                 Some(0x7C /* | */) => {
                                     self.consume('|');
                                     if !alternative.is_empty() {
-                                        alternatives.push(alternative.clone());
-                                        alternative.clear();
+                                        let alternative = std::mem::take(&mut alternative).into_boxed_slice();
+                                        alternatives.push(alternative);
+
                                     }
                                 }
                                 Some(_) => {
@@ -1270,7 +1279,7 @@ where
                             }
                             PropertyEscapeKind::StringSet(_) if negate_set => error("Invalid character escape"),
                             PropertyEscapeKind::StringSet(strings) => {
-                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| s.to_vec()).collect())))
+                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| Box::from(*s)).collect())))
                             }
                         }
                     }
