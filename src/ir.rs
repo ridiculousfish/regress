@@ -463,6 +463,32 @@ where
     walker.process(n);
 }
 
+/// Build an alternation over a finite set of "strings" (u32 slices)
+/// as `Alt(Cat(Char,...), Alt(Cat(Char,...), ...))`, such
+/// that the first string in the list has the highest priority.
+/// An empty string list returns the always-fails node.
+/// This doesn't take advantage of prefix sharing, etc.
+pub fn strings_to_node<S: AsRef<[u32]>>(strings: &[S], icase: bool) -> Node {
+    // Helper to build a Node from a string. May return Empty, a single Char, or a Cat.
+    let emit_string = |s: &S| -> Node {
+        let s = s.as_ref();
+        match s.len() {
+            0 => Node::Empty,
+            1 => Node::Char { c: s[0], icase },
+            _ => Node::Cat(s.iter().map(|&c| Node::Char { c, icase }).collect()),
+        }
+    };
+
+    // Retain priority (try the first string first) but push the alts to the right.
+    // i.e. Alt(s1, Alt(s2, Alt(s3, ...))) instead of Alt(Alt(Alt(s1, s2), s3), ...).
+    strings
+        .iter()
+        .rev()
+        .map(emit_string)
+        .reduce(|acc, s| Node::Alt(Box::new(s), Box::new(acc)))
+        .unwrap_or_else(Node::make_always_fails)
+}
+
 /// A regex in IR form.
 pub struct Regex {
     pub node: Node,
@@ -592,5 +618,128 @@ impl fmt::Display for Regex {
             },
         );
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Node, strings_to_node};
+
+    #[test]
+    fn strings_to_node_structure() {
+        // Codepoint shorthands.
+        let a = b'a' as u32;
+        let b = b'b' as u32;
+        let c = b'c' as u32;
+        let d = b'd' as u32;
+        let e = b'e' as u32;
+
+        #[track_caller]
+        fn check_cat(n: &Node, cps: &[u32], icase: bool) {
+            let Node::Cat(children) = n else {
+                panic!("not Cat: {:?}", n)
+            };
+            assert_eq!(children.len(), cps.len());
+            for (child, &cp) in children.iter().zip(cps) {
+                assert!(matches!(child, &Node::Char { c, icase: i } if c == cp && i == icase));
+            }
+        }
+
+        // 1. Empty list -> always-fails (defined as CharSet(empty)).
+        match strings_to_node::<&[u32]>(&[], false) {
+            Node::CharSet(v) => assert!(v.is_empty()),
+            n => panic!("expected empty CharSet, got {:?}", n),
+        }
+
+        // 2. Single empty string -> Node::Empty.
+        let empty: &[u32] = &[];
+        assert!(matches!(strings_to_node(&[empty], false), Node::Empty));
+
+        // 3. Single one-char string -> bare Char.
+        assert!(matches!(
+            strings_to_node(&[&[a][..]], false),
+            Node::Char { c, icase: false } if c == a
+        ));
+
+        // 4. Single multi-char string -> Cat over the chars.
+        check_cat(
+            &strings_to_node(&[&[a, b, c][..]], false),
+            &[a, b, c],
+            false,
+        );
+
+        // 5. Two strings -> single Alt, leftmost wins priority.
+        let n = strings_to_node(&[&[a][..], &[b][..]], false);
+        let Node::Alt(l, r) = n else {
+            panic!("expected Alt, got {:?}", n)
+        };
+        assert!(matches!(*l, Node::Char { c, .. } if c == a));
+        assert!(matches!(*r, Node::Char { c, .. } if c == b));
+
+        // 6. Mixed-length two strings -> per-string shape preserved.
+        let n = strings_to_node(&[&[a, b, c][..], &[d][..]], false);
+        let Node::Alt(l, r) = n else {
+            panic!("expected Alt")
+        };
+        check_cat(&l, &[a, b, c], false);
+        assert!(matches!(*r, Node::Char { c, .. } if c == d));
+
+        // 7. Empty string in first position.
+        let n = strings_to_node(&[empty, &[a][..]], false);
+        let Node::Alt(l, r) = n else {
+            panic!("expected Alt")
+        };
+        assert!(matches!(*l, Node::Empty));
+        assert!(matches!(*r, Node::Char { c, .. } if c == a));
+
+        // 8. Empty string in last position.
+        let n = strings_to_node(&[&[a][..], empty], false);
+        let Node::Alt(l, r) = n else {
+            panic!("expected Alt")
+        };
+        assert!(matches!(*l, Node::Char { c, .. } if c == a));
+        assert!(matches!(*r, Node::Empty));
+
+        // 9. Two empty strings -> Alt(Empty, Empty).
+        let n = strings_to_node(&[empty, empty], false);
+        let Node::Alt(l, r) = n else {
+            panic!("expected Alt")
+        };
+        assert!(matches!(*l, Node::Empty));
+        assert!(matches!(*r, Node::Empty));
+
+        // 10. icase propagates to every Char (in both Cat-wrapped and bare positions).
+        let n = strings_to_node(&[&[a, b][..], &[c][..]], true);
+        let Node::Alt(l, r) = n else {
+            panic!("expected Alt")
+        };
+        check_cat(&l, &[a, b], true);
+        assert!(matches!(*r, Node::Char { c, icase: true } if c == c));
+
+        // 11. Five strings form a chain of four right-leaning Alts. Leftmost-first
+        //     priority means walking down the right spine yields a, b, c, d, then e.
+        let strings: Vec<Box<[u32]>> = (0..5).map(|i| Box::from([a + i])).collect();
+        let mut current = &strings_to_node(&strings, false);
+        for &expected in &[a, b, c, d] {
+            let Node::Alt(l, r) = current else {
+                panic!("expected Alt for {:#x}, got {:?}", expected, current);
+            };
+            assert!(matches!(**l, Node::Char { c, .. } if c == expected));
+            current = r;
+        }
+        assert!(matches!(*current, Node::Char { c, .. } if c == e));
+
+        // 12. Generic bound: both &[&[u32]] and &[Box<[u32]>] callsites work and
+        //     produce identical structure.
+        let from_refs = strings_to_node(&[&[a][..], &[b][..]], false);
+        let owned: Vec<Box<[u32]>> = vec![Box::from([a]), Box::from([b])];
+        let from_boxes = strings_to_node(&owned, false);
+        for n in [from_refs, from_boxes] {
+            let Node::Alt(l, r) = n else {
+                panic!("expected Alt")
+            };
+            assert!(matches!(*l, Node::Char { c, .. } if c == a));
+            assert!(matches!(*r, Node::Char { c, .. } if c == b));
+        }
     }
 }

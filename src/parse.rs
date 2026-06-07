@@ -77,25 +77,17 @@ impl ClassSet {
         } else {
             self.codepoints
         };
-        if codepoints.is_empty() && self.alternatives.0.is_empty() {
-            ir::Node::Bracket(BracketContents {
-                invert: negate_set,
-                cps: codepoints,
-            })
-        } else if codepoints.is_empty() {
-            make_alt(self.alternatives.to_nodes(icase))
-        } else if self.alternatives.0.is_empty() {
-            ir::Node::Bracket(BracketContents {
-                invert: negate_set,
-                cps: codepoints,
-            })
+        let codepoints_empty = codepoints.is_empty();
+        let bracket = ir::Node::Bracket(BracketContents {
+            invert: negate_set,
+            cps: codepoints,
+        });
+        if self.alternatives.0.is_empty() {
+            bracket
+        } else if codepoints_empty {
+            self.alternatives.into_node(icase)
         } else {
-            let mut nodes = self.alternatives.to_nodes(icase);
-            nodes.push(ir::Node::Bracket(BracketContents {
-                invert: negate_set,
-                cps: codepoints,
-            }));
-            make_alt(nodes)
+            make_alt(Vec::from([self.alternatives.into_node(icase), bracket]))
         }
     }
 
@@ -260,20 +252,8 @@ impl ClassSetAlternativeStrings {
         self.0.retain(|string| !other.contains(string));
     }
 
-    fn to_nodes(&self, icase: bool) -> Vec<ir::Node> {
-        // TODO: rationalize if per-char icase is the correct way
-        // to do case-insensitivity for 'v' string alternatives.
-        self.0
-            .iter()
-            .map(|string| {
-                ir::Node::Cat(
-                    string
-                        .iter()
-                        .map(|cp| ir::Node::Char { c: *cp, icase })
-                        .collect(),
-                )
-            })
-            .collect()
+    fn into_node(self, icase: bool) -> ir::Node {
+        ir::strings_to_node(&self.0, icase)
     }
 }
 
@@ -1645,21 +1625,9 @@ where
                         }
                     }
                     PropertyEscapeKind::StringSet(_) if negate => error("Invalid character escape"),
-                    PropertyEscapeKind::StringSet(strings) => Ok(make_alt(
-                        strings
-                            .iter()
-                            .map(|s| {
-                                ir::Node::Cat(
-                                    s.iter()
-                                        .map(|c| ir::Node::Char {
-                                            c: *c,
-                                            icase: self.flags.icase,
-                                        })
-                                        .collect(),
-                                )
-                            })
-                            .collect(),
-                    )),
+                    PropertyEscapeKind::StringSet(strings) => {
+                        Ok(ir::strings_to_node(strings, self.flags.icase))
+                    }
                 }
             }
 
