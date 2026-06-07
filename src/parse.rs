@@ -1680,7 +1680,7 @@ where
                 let Some(group_indices) = self.named_group_indices.get(&group_name) else {
                     return error(format!(
                         "Backreference to invalid named capture group: {}",
-                        &group_name
+                        group_name
                     ));
                 };
                 // Note backreferences are 1-based.

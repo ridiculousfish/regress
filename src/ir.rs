@@ -513,7 +513,7 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
             writeln!(f, "Goal")?;
         }
         Node::Char { c, icase: _ } => {
-            writeln!(f, "'{}'", &c.to_string())?;
+            writeln!(f, "'{}'", c)?;
         }
         Node::ByteSequence(bytes) => {
             write!(f, "ByteSeq{} 0x", bytes.len())?;
