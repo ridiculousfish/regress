@@ -2,7 +2,7 @@
 
 use crate::{
     api, charclasses,
-    codepointset::{CodePointSet, Interval, interval_contains},
+    codepointset::{CodePoint, CodePointSet, Interval, interval_contains},
     ir,
     types::{
         BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
@@ -45,7 +45,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 enum ClassAtom {
-    CodePoint(u32),
+    CodePoint(CodePoint),
     CharacterClass {
         class_type: CharacterClassType,
         positive: bool,
@@ -234,14 +234,14 @@ impl ClassSet {
 /// Represents all different types of class set operands.
 #[derive(Debug, Clone)]
 enum ClassSetOperand {
-    ClassSetCharacter(u32),
+    ClassSetCharacter(CodePoint),
     CharacterClassEscape(CodePointSet),
     Class(ClassSet),
     ClassStringDisjunction(ClassSetAlternativeStrings),
 }
 
 #[derive(Debug, Clone)]
-struct ClassSetAlternativeStrings(Vec<Vec<u32>>);
+struct ClassSetAlternativeStrings(Vec<Vec<CodePoint>>);
 
 impl ClassSetAlternativeStrings {
     fn new() -> Self {
