@@ -3156,3 +3156,17 @@ fn test_stuff_tc(tc: TestConfig) {
     let r = tc.compilef("c|abc", "i").match1f("\u{83}x0abcdef");
     assert_eq!(r, "abc");
 }
+
+/// Case-insensitive `\q{}` string sets match every case variant.
+#[test]
+fn unicode_sets_qstring_icase() {
+    test_with_configs(|tc| {
+        for input in ["ab", "aB", "Ab", "AB"] {
+            tc.test_match_succeeds(r"^[\q{aB}]$", "vi", input);
+        }
+        tc.test_match_fails(r"^[\q{aB}]$", "vi", "ax");
+        // A longer icase alternative (\q{} is only valid inside a class).
+        tc.test_match_succeeds(r"^[\q{abc}]$", "vi", "ABC");
+        tc.test_match_succeeds(r"^[\q{abc}]$", "vi", "aBc");
+    });
+}

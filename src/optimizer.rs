@@ -113,7 +113,7 @@ fn remove_empties(n: &mut Node, _w: &Walk) -> PassAction {
 
         // Note: do not remove empty sets. These always match against one character; an empty set
         // should just fail.
-        Node::ByteSet(..) | Node::CharSet(..) => PassAction::Keep,
+        Node::ByteSet(..) | Node::CharSet(..) | Node::StringSet { .. } => PassAction::Keep,
         Node::Cat(nodes) => {
             let blen = nodes.len();
             nodes.retain(|nn| !nn.is_empty());
@@ -295,7 +295,7 @@ fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
                     // Character does not fold or unfold at all.
                     PassAction::Replace(Node::Char { c, icase: false })
                 }
-                2..=MAX_BYTE_SET_LENGTH => {
+                2..=MAX_CHAR_SET_LENGTH => {
                     // We unfolded to 2+ characters.
                     PassAction::Replace(Node::CharSet(unfolded))
                 }

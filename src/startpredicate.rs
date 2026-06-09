@@ -136,6 +136,9 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
             ))))
         }
 
+        // StringSets come from TC39 "sequence properties" and are very rare - not worth optimizing.
+        Node::StringSet { .. } => arbitrary,
+
         // We assume that most char nodes have been optimized to ByteSeq or AnyBytes2, so skip
         // these.
         // TODO: we could support icase through bitmap of de-folded first bytes.

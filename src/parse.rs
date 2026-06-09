@@ -253,7 +253,10 @@ impl ClassSetAlternativeStrings {
     }
 
     fn into_node(self, icase: bool) -> ir::Node {
-        ir::strings_to_node(&self.0, icase)
+        ir::Node::StringSet {
+            alternatives: self.0,
+            icase,
+        }
     }
 }
 
@@ -1625,9 +1628,10 @@ where
                         }
                     }
                     PropertyEscapeKind::StringSet(_) if negate => error("Invalid character escape"),
-                    PropertyEscapeKind::StringSet(strings) => {
-                        Ok(ir::strings_to_node(strings, self.flags.icase))
-                    }
+                    PropertyEscapeKind::StringSet(strings) => Ok(ir::Node::StringSet {
+                        alternatives: strings.iter().map(|s| Box::from(*s)).collect(),
+                        icase: self.flags.icase,
+                    }),
                 }
             }
 

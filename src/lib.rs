@@ -178,6 +178,10 @@ mod exec;
 mod indexing;
 mod insn;
 mod ir;
+// UTF-16 never matches against bytes, so the byte-oriented literal lowering is
+// UTF-8 only. See `emit_code_point_sequence` for the UTF-16 path.
+#[cfg(not(feature = "utf16"))]
+mod literal;
 mod matchers;
 mod optimizer;
 mod parse;
