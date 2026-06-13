@@ -253,8 +253,13 @@ impl ClassSetAlternativeStrings {
     }
 
     fn into_node(self, icase: bool) -> ir::Node {
+        // ClassSetAlternativeStrings are matched longest first.
+        // "iterating in descending order of length" per ES2027
+        let mut alternatives = self.0;
+        #[allow(clippy::unnecessary_sort_by)]
+        alternatives.sort_by(|a, b| b.len().cmp(&a.len()));
         ir::Node::StringSet {
-            alternatives: self.0,
+            alternatives,
             icase,
         }
     }

@@ -3170,3 +3170,16 @@ fn unicode_sets_qstring_icase() {
         tc.test_match_succeeds(r"^[\q{abc}]$", "vi", "aBc");
     });
 }
+
+/// `v`-mode string-set alternatives are matched longest-first,
+/// regardless of the order in which they are written. So both `[\q{a|abc}]` and
+/// `[\q{abc|a}]` must match the full "abc", not just the leading "a".
+#[test]
+fn unicode_sets_qstring_longest_first() {
+    test_with_configs(|tc| {
+        assert_eq!(tc.compilef(r"[\q{a|abc}]", "v").match1f("abc"), "abc");
+        assert_eq!(tc.compilef(r"[\q{abc|a}]", "v").match1f("abc"), "abc");
+        // Equal-length alternatives keep source-order priority.
+        assert_eq!(tc.compilef(r"[\q{ab|ba}]", "v").match1f("ab"), "ab");
+    });
+}
