@@ -117,12 +117,6 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             Some(c2) => nextinsn_or_fail!(c == c2.as_u32()),
             _ => StateMatch::Fail,
         },
-        &Insn::CharICase(c) => match cursor::next(input, dir, &mut s.pos) {
-            Some(c2) => {
-                nextinsn_or_fail!(c == c2.as_u32() || input.fold(c2).as_u32() == c)
-            }
-            _ => StateMatch::Fail,
-        },
 
         Insn::CharSet(v) => match cursor::next(input, dir, &mut s.pos) {
             Some(c) => nextinsn_or_fail!(charset_contains(v, c.as_u32())),

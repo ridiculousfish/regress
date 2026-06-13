@@ -3,7 +3,6 @@
 use crate::insn::MAX_CHAR_SET_LENGTH;
 use crate::ir::*;
 use crate::types::BracketContents;
-use crate::unicode;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
 
@@ -277,35 +276,6 @@ fn decat(n: &mut Node, _w: &Walk) -> PassAction {
     }
 }
 
-/// Unfold icase chars.
-/// That means for case-insensitive characters, figure out everything that they
-/// could match.
-/// TODO: evaluate unfolding performance and consider a cache within the optimizer.
-fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
-    match *n {
-        Node::Char { c, icase } if icase => {
-            let unfolded = unicode::expand_code_point(c, icase, w.unicode);
-            debug_assert!(
-                unfolded.contains(&c),
-                "Char should always unfold to at least itself"
-            );
-            match unfolded.len() {
-                0 => panic!("Char should always unfold to at least itself"),
-                1 => {
-                    // Character does not fold or unfold at all.
-                    PassAction::Replace(Node::Char { c, icase: false })
-                }
-                2..=MAX_CHAR_SET_LENGTH => {
-                    // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet(unfolded))
-                }
-                _ => panic!("Unfolded to more characters than we believed possible"),
-            }
-        }
-        _ => PassAction::Keep,
-    }
-}
-
 // Perform simple unrolling of loops that have a minimum.
 fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
     match n {
@@ -398,7 +368,7 @@ fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
         }
     }
     match n {
-        Node::Char { c, icase } if !*icase => {
+        Node::Char { c } => {
             if let Some(c) = char::from_u32(*c) {
                 let mut buff = [0; 4];
                 PassAction::Replace(Node::ByteSequence(
@@ -507,7 +477,6 @@ pub fn optimize(r: &mut Regex) {
     loop {
         let mut changed = false;
         changed |= run_pass(r, &mut decat);
-        changed |= run_pass(r, &mut unfold_icase_chars);
         changed |= run_pass(r, &mut unroll_loops);
         changed |= run_pass(r, &mut promote_1char_loops);
         #[cfg(not(feature = "utf16"))]

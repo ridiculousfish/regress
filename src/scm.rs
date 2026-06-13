@@ -27,20 +27,6 @@ impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Char
     }
 }
 
-/// Insn::CharICase
-pub struct CharICase<Input: InputIndexer> {
-    pub c: Input::Element,
-}
-impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for CharICase<Input> {
-    #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
-        match cursor::next(input, dir, pos) {
-            Some(c2) => c2 == self.c || input.fold(c2) == self.c,
-            _ => false,
-        }
-    }
-}
-
 /// Insn::CharSet
 pub struct CharSet<'a> {
     pub chars: &'a [u32; MAX_CHAR_SET_LENGTH],

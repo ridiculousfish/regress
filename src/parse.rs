@@ -3,6 +3,7 @@
 use crate::{
     api, charclasses,
     codepointset::{CodePoint, CodePointSet, Interval, interval_contains},
+    insn::MAX_CHAR_SET_LENGTH,
     ir,
     types::{
         BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
@@ -457,12 +458,16 @@ where
         true
     }
 
-    /// Fold a character if icase.
-    fn fold_if_icase(&self, c: u32) -> u32 {
-        if self.flags.icase {
-            unicode::fold_code_point(c, self.flags.unicode)
-        } else {
-            c
+    /// Build a node matching a code point `c`, optionally with case-insensitivity.
+    fn char_node(&self, c: u32) -> ir::Node {
+        if !self.flags.icase {
+            return ir::Node::Char { c };
+        }
+        let class = unicode::expand_code_point(c, self.flags.icase, self.flags.unicode);
+        match class.len() {
+            1 => ir::Node::Char { c: class[0] },
+            2..=MAX_CHAR_SET_LENGTH => ir::Node::CharSet(class),
+            _ => panic!("Unicode case fold exceeded maximum expansion"),
         }
     }
 
@@ -573,20 +578,12 @@ where
                                 .map(|c| c.is_ascii_alphabetic())
                                 == Some(true)
                             {
-                                result.push(ir::Node::Char {
-                                    c: self.next().expect("char was not next") % 32,
-                                    icase: self.flags.icase,
-                                });
+                                let cp = self.next().expect("char was not next") % 32;
+                                result.push(self.char_node(cp));
                             } else {
                                 start_offset += 1;
-                                result.push(ir::Node::Char {
-                                    c: u32::from('\\'),
-                                    icase: self.flags.icase,
-                                });
-                                result.push(ir::Node::Char {
-                                    c: u32::from('c'),
-                                    icase: self.flags.icase,
-                                });
+                                result.push(self.char_node(u32::from('\\')));
+                                result.push(self.char_node(u32::from('c')));
                             }
                         }
                         // Term :: Atom :: \ AtomEscape
@@ -692,10 +689,8 @@ where
                     }
 
                     // Term :: ExtendedAtom :: ExtendedPatternCharacter
-                    result.push(ir::Node::Char {
-                        c: self.consume(c),
-                        icase: self.flags.icase,
-                    })
+                    let cp = self.consume(c);
+                    result.push(self.char_node(cp))
                 }
 
                 // Term :: Atom :: PatternCharacter :: SourceCharacter but not ^ $ \ . * + ? ( ) [ ] { } |
@@ -712,10 +707,7 @@ where
                 // Term :: ExtendedAtom :: ExtendedPatternCharacter
                 _ => {
                     self.consume(c);
-                    result.push(ir::Node::Char {
-                        c: self.fold_if_icase(c),
-                        icase: self.flags.icase,
-                    })
+                    result.push(self.char_node(c))
                 }
             }
 
@@ -1669,10 +1661,7 @@ where
                 } else {
                     self.input = input;
                     let c = self.consume_character_escape()?;
-                    Ok(ir::Node::Char {
-                        c: self.fold_if_icase(c),
-                        icase: self.flags.icase,
-                    })
+                    Ok(self.char_node(c))
                 }
             }
 
@@ -1725,18 +1714,12 @@ where
             // [~NamedCaptureGroups] k GroupName
             'k' => {
                 self.consume('k');
-                Ok(ir::Node::Char {
-                    c: self.fold_if_icase(c),
-                    icase: self.flags.icase,
-                })
+                Ok(self.char_node(c))
             }
 
             _ => {
                 let c = self.consume_character_escape()?;
-                Ok(ir::Node::Char {
-                    c: self.fold_if_icase(c),
-                    icase: self.flags.icase,
-                })
+                Ok(self.char_node(c))
             }
         }
     }

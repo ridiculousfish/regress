@@ -28,7 +28,7 @@ impl From<Piece> for Node {
     fn from(piece: Piece) -> Self {
         match piece {
             // Chars that could not be lowered are surorgates, which don't participate in case-insensitivity.
-            Piece::Char(c) => Node::Char { c, icase: false },
+            Piece::Char(c) => Node::Char { c },
             Piece::ByteSequence(bytes) => Node::ByteSequence(bytes),
             Piece::ByteSet(bytes) => Node::ByteSet(bytes),
             Piece::CharSet(chars) => Node::CharSet(chars),
@@ -71,7 +71,7 @@ pub fn lower_code_point_sequence(cps: &[u32], icase: bool, unicode: bool) -> Vec
                 };
                 pieces.push(piece);
             }
-            _ => panic!("Unfolded to more characters than we believed possible"),
+            _ => panic!("Unicode case fold exceeded maximum expansion"),
         }
     }
     pieces

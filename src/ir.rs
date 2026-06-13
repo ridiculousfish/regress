@@ -36,8 +36,7 @@ pub enum Node {
     Goal,
 
     /// Match a literal character.
-    /// If icase is true, then `c` MUST be already folded.
-    Char { c: u32, icase: bool },
+    Char { c: u32 },
 
     /// Match a literal sequence of bytes.
     ByteSequence(Vec<u8>),
@@ -46,7 +45,7 @@ pub enum Node {
     /// This may not exceed length MAX_CHAR_SET_LENGTH.
     ByteSet(Vec<u8>),
 
-    /// Match any of a set of *chars*, case-insensitive.
+    /// Match any of a set of *chars*.
     /// This may not exceed length MAX_CHAR_SET_LENGTH.
     CharSet(Vec<u32>),
 
@@ -188,7 +187,7 @@ impl Node {
         Some(match self {
             Node::Empty => Node::Empty,
             Node::Goal => Node::Goal,
-            &Node::Char { c, icase } => Node::Char { c, icase },
+            &Node::Char { c } => Node::Char { c },
             Node::ByteSequence(bytes) => Node::ByteSequence(bytes.clone()),
             Node::ByteSet(bytes) => Node::ByteSet(bytes.clone()),
             Node::CharSet(chars) => Node::CharSet(chars.clone()),
@@ -497,7 +496,7 @@ fn display_node(node: &Node, depth: usize, f: &mut fmt::Formatter) -> fmt::Resul
         Node::Goal => {
             writeln!(f, "Goal")?;
         }
-        Node::Char { c, icase: _ } => {
+        Node::Char { c } => {
             writeln!(f, "'{}'", c)?;
         }
         Node::ByteSequence(bytes) => {
@@ -615,4 +614,3 @@ impl fmt::Display for Regex {
         result
     }
 }
-

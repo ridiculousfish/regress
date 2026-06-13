@@ -8,6 +8,7 @@ use crate::ir::Node;
 use crate::literal::lower_code_point_sequence;
 use crate::startpredicate;
 use crate::types::{BracketContents, CaptureGroupID, LoopID};
+#[cfg(feature = "utf16")]
 use crate::unicode;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
@@ -118,12 +119,9 @@ impl Emitter {
             let chars = unicode::expand_code_point(cp, icase, unicode);
             let node = match chars.len() {
                 0 => panic!("Char should always unfold to at least itself"),
-                1 => Node::Char {
-                    c: chars[0],
-                    icase: false,
-                },
+                1 => Node::Char { c: chars[0] },
                 2..=MAX_CHAR_SET_LENGTH => Node::CharSet(chars),
-                _ => panic!("Unfolded to more characters than we believed possible"),
+                _ => panic!("Unicode case fold exceeded maximum expansion"),
             };
             self.emit_node(&node);
         }
@@ -277,19 +275,7 @@ impl Emitter {
                 Emitter::Node(node) => match node {
                     Node::Empty => {}
                     Node::Goal => self.emit_insn(Insn::Goal),
-                    Node::Char { c, icase } => {
-                        let c = *c;
-                        if !*icase {
-                            self.emit_insn(Insn::Char(c))
-                        } else {
-                            core::debug_assert!(
-                                unicode::fold_code_point(c, self.result.flags.unicode) == c,
-                                "Char {:x} should be folded",
-                                c
-                            );
-                            self.emit_insn(Insn::CharICase(c))
-                        }
-                    }
+                    Node::Char { c } => self.emit_insn(Insn::Char(*c)),
                     Node::Cat(children) => {
                         for nn in children.iter().rev() {
                             stack.push(Emitter::Node(nn));
