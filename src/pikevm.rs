@@ -35,10 +35,10 @@ struct State<Position: PositionType> {
     loop1_iters: usize,
 
     /// Loop datas.
-    loops: Vec<LoopData<Position>>,
+    loops: Box<[LoopData<Position>]>,
 
     /// Group datas.
-    groups: Vec<GroupData<Position>>,
+    groups: Box<[GroupData<Position>]>,
 }
 
 enum StateMatch<Position: PositionType> {
@@ -512,8 +512,8 @@ impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
                 pos,
                 ip: 0,
                 loop1_iters: 0,
-                loops: vec![LoopData::new(pos); re.loops as usize],
-                groups: vec![GroupData::new(); re.groups as usize],
+                loops: vec![LoopData::new(pos); re.loops as usize].into(),
+                groups: vec![GroupData::new(); re.groups as usize].into(),
             };
             if self
                 .matcher
@@ -542,8 +542,8 @@ impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
             pos,
             ip: 0,
             loop1_iters: 0,
-            loops: vec![LoopData::new(pos); re.loops as usize],
-            groups: vec![GroupData::new(); re.groups as usize],
+            loops: vec![LoopData::new(pos); re.loops as usize].into(),
+            groups: vec![GroupData::new(); re.groups as usize].into(),
         };
         loop {
             let start = state.pos;
