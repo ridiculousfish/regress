@@ -326,8 +326,6 @@ where
 {
     let encoding = Encoding::Utf8;
     // Note we wish to be able to determine the TestConfig from the line number.
-    // Also note that optimizations are not supported for PikeVM backend, as it
-    // doesn't implement Loop1CharBody.
     func(TestConfig {
         ascii: true,
         optimize: false,
@@ -337,6 +335,18 @@ where
     func(TestConfig {
         ascii: false,
         optimize: false,
+        backend: Backend::PikeVM,
+        encoding,
+    });
+    func(TestConfig {
+        ascii: true,
+        optimize: true,
+        backend: Backend::PikeVM,
+        encoding,
+    });
+    func(TestConfig {
+        ascii: false,
+        optimize: true,
         backend: Backend::PikeVM,
         encoding,
     });
@@ -404,11 +414,15 @@ where
     F: Fn(TestConfig),
 {
     // Note we wish to be able to determine the TestConfig from the line number.
-    // Also note that optimizations are not supported for PikeVM backend, as it
-    // doesn't implement Loop1CharBody.
     func(TestConfig {
         ascii: false,
         optimize: false,
+        backend: Backend::PikeVM,
+        encoding: Encoding::Utf8,
+    });
+    func(TestConfig {
+        ascii: false,
+        optimize: true,
         backend: Backend::PikeVM,
         encoding: Encoding::Utf8,
     });

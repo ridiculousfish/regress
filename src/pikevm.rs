@@ -26,6 +26,14 @@ struct State<Position: PositionType> {
     /// Offset in the bytecode.
     ip: usize,
 
+    /// Iteration count of the `Loop1CharBody` currently being executed.
+    /// This is 0 except while actively iterating such a loop: the loop's exit
+    /// branch resets it to 0, so a fresh loop entry always observes 0.
+    /// This is basically as hack to support the Loop1CharBody optimization
+    /// used by the classical backtracker.
+    /// Only the `Insn::Loop1CharBody` arm reads or writes this field.
+    loop1_iters: usize,
+
     /// Loop datas.
     loops: Vec<LoopData<Position>>,
 
@@ -283,7 +291,73 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
                 _ => panic!("LoopAgain does not point at EnterLoop"),
             }
         }
-        Insn::Loop1CharBody { .. } => panic!("Loop1CharBody unimplemented for pikevm"),
+        &Insn::Loop1CharBody {
+            min_iters,
+            max_iters,
+            greedy,
+        } => {
+            let loop_ip = s.ip;
+            let continuation = loop_ip + 2;
+
+            // Try to iterate on the loop. We may "fail" if we're already at the max, or if
+            // the loop body fails to match.
+            let iters = s.loop1_iters;
+            let mut taken_pos = None;
+            if iters < max_iters {
+                // Try matching the next instruction, which matches exactly one character,
+                // and does not modify loops or groups.
+                let saved_pos = s.pos;
+                s.ip = loop_ip + 1;
+                taken_pos = match try_match_state(re, input, s, dir) {
+                    StateMatch::Continue => Some(s.pos),
+                    StateMatch::Fail => None,
+                    _ => unreachable!("Loop1CharBody body must match exactly one character"),
+                };
+                s.ip = loop_ip;
+                s.pos = saved_pos;
+            };
+
+            match (taken_pos, iters >= min_iters) {
+                // Cannot not iterate and the minimum isn't met: dead end.
+                (None, false) => StateMatch::Fail,
+
+                // Cannot (or did not) iterate but the minimum is met: exit the loop.
+                (None, true) => {
+                    s.ip = continuation;
+                    s.loop1_iters = 0;
+                    StateMatch::Continue
+                }
+
+                // Below the minimum: another iteration is mandatory.
+                (Some(taken_pos), false) => {
+                    s.pos = taken_pos;
+                    s.loop1_iters = iters + 1;
+                    StateMatch::Continue
+                }
+
+                // Both iterating and exiting are viable: split, ordered by greed.
+                // Split(new) explores `new` first, so push the preferred branch.
+                (Some(taken_pos), true) => {
+                    if greedy {
+                        // Prefer iterating. The clone keeps ip == loop_ip.
+                        let mut iterate = s.clone();
+                        iterate.pos = taken_pos;
+                        iterate.loop1_iters = iters + 1;
+                        s.ip = continuation;
+                        s.loop1_iters = 0;
+                        StateMatch::Split(iterate)
+                    } else {
+                        // Prefer exiting.
+                        let mut exit = s.clone();
+                        exit.ip = continuation;
+                        exit.loop1_iters = 0;
+                        s.pos = taken_pos;
+                        s.loop1_iters = iters + 1;
+                        StateMatch::Split(exit)
+                    }
+                }
+            }
+        }
         &Insn::Bracket(idx) => match cursor::next(input, dir, &mut s.pos) {
             Some(c) => nextinsn_or_fail!(Input::CharProps::bracket(&re.brackets[idx], c)),
             _ => StateMatch::Fail,
@@ -437,6 +511,7 @@ impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
             let mut state = State {
                 pos,
                 ip: 0,
+                loop1_iters: 0,
                 loops: vec![LoopData::new(pos); re.loops as usize],
                 groups: vec![GroupData::new(); re.groups as usize],
             };
@@ -466,6 +541,7 @@ impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
         let mut state = State {
             pos,
             ip: 0,
+            loop1_iters: 0,
             loops: vec![LoopData::new(pos); re.loops as usize],
             groups: vec![GroupData::new(); re.groups as usize],
         };
