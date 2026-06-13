@@ -526,9 +526,7 @@ pub fn optimize(r: &mut Regex) {
     loop {
         let mut changed = false;
         changed |= run_pass(r, &mut decat);
-        if r.flags.icase {
-            changed |= run_pass(r, &mut unfold_icase_chars);
-        }
+        changed |= run_pass(r, &mut unfold_icase_chars);
         changed |= run_pass(r, &mut unroll_loops);
         changed |= run_pass(r, &mut promote_1char_loops);
         #[cfg(not(feature = "utf16"))]
