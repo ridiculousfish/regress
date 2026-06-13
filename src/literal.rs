@@ -44,13 +44,7 @@ pub fn lower_code_point_sequence(cps: &[u32], icase: bool, unicode: bool) -> Vec
     let mut pieces = Vec::new();
     for &cp in cps {
         // If we're icase, we may need to unfold this.
-        let chars = if !icase {
-            vec![cp]
-        } else if unicode {
-            unicode::unfold_char(cp)
-        } else {
-            unicode::unfold_uppercase_char(cp)
-        };
+        let chars = unicode::expand_code_point(cp, icase, unicode);
         match chars.len() {
             0 => panic!("Char should always unfold to at least itself"),
             1 => {

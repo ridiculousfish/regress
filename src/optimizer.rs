@@ -1,6 +1,6 @@
 //! Optimizations on regex IR
 
-use crate::insn::{MAX_BYTE_SET_LENGTH, MAX_CHAR_SET_LENGTH};
+use crate::insn::MAX_CHAR_SET_LENGTH;
 use crate::ir::*;
 use crate::types::BracketContents;
 use crate::unicode;
@@ -283,8 +283,8 @@ fn decat(n: &mut Node, _w: &Walk) -> PassAction {
 /// TODO: evaluate unfolding performance and consider a cache within the optimizer.
 fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
     match *n {
-        Node::Char { c, icase } if icase && !w.unicode => {
-            let unfolded = unicode::unfold_uppercase_char(c);
+        Node::Char { c, icase } if icase => {
+            let unfolded = unicode::expand_code_point(c, icase, w.unicode);
             debug_assert!(
                 unfolded.contains(&c),
                 "Char should always unfold to at least itself"
@@ -296,25 +296,6 @@ fn unfold_icase_chars(n: &mut Node, w: &Walk) -> PassAction {
                     PassAction::Replace(Node::Char { c, icase: false })
                 }
                 2..=MAX_CHAR_SET_LENGTH => {
-                    // We unfolded to 2+ characters.
-                    PassAction::Replace(Node::CharSet(unfolded))
-                }
-                _ => panic!("Unfolded to more characters than we believed possible"),
-            }
-        }
-        Node::Char { c, icase } if icase => {
-            let unfolded = unicode::unfold_char(c);
-            debug_assert!(
-                unfolded.contains(&c),
-                "Char should always unfold to at least itself"
-            );
-            match unfolded.len() {
-                0 => panic!("Char should always unfold to at least itself"),
-                1 => {
-                    // Character does not fold or unfold at all.
-                    PassAction::Replace(Node::Char { c, icase: false })
-                }
-                2..=MAX_BYTE_SET_LENGTH => {
                     // We unfolded to 2+ characters.
                     PassAction::Replace(Node::CharSet(unfolded))
                 }

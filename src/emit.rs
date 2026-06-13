@@ -115,13 +115,7 @@ impl Emitter {
     fn emit_code_point_sequence(&mut self, cps: &[u32], icase: bool) {
         let unicode = self.result.flags.unicode;
         for &cp in cps {
-            let chars = if !icase {
-                Vec::from([cp])
-            } else if unicode {
-                unicode::unfold_char(cp)
-            } else {
-                unicode::unfold_uppercase_char(cp)
-            };
+            let chars = unicode::expand_code_point(cp, icase, unicode);
             let node = match chars.len() {
                 0 => panic!("Char should always unfold to at least itself"),
                 1 => Node::Char {

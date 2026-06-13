@@ -322,6 +322,18 @@ pub(crate) fn unfold_uppercase_char(c: u32) -> Vec<u32> {
     res
 }
 
+/// Expand `c` into the code points a literal `c` matches: just `c` itself when
+/// `!icase`, otherwise the unicode (full) or legacy (uppercase) unfold set.
+pub(crate) fn expand_code_point(c: u32, icase: bool, unicode: bool) -> Vec<u32> {
+    if !icase {
+        vec![c]
+    } else if unicode {
+        unfold_char(c)
+    } else {
+        unfold_uppercase_char(c)
+    }
+}
+
 // Fold every character in \p input, then find all the prefolds.
 pub fn add_icase_code_points(mut input: CodePointSet) -> CodePointSet {
     let mut folded = input.clone();

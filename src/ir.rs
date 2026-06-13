@@ -43,7 +43,7 @@ pub enum Node {
     ByteSequence(Vec<u8>),
 
     /// Match any of a set of *bytes*.
-    /// This may not exceed length MAX_BYTE_SET_LENGTH.
+    /// This may not exceed length MAX_CHAR_SET_LENGTH.
     ByteSet(Vec<u8>),
 
     /// Match any of a set of *chars*, case-insensitive.
