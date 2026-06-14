@@ -387,6 +387,10 @@ impl Builder {
                 "Backreferences not supported by NFAs".to_string(),
             )),
             Node::Bracket(contents) => self.build_bracket(contents),
+            Node::StringSet {
+                alternatives,
+                icase,
+            } => self.build_string_set(alternatives, *icase),
             Node::LookaroundAssertion { .. } => Err(Error::UnsupportedInstruction(
                 "Lookaround assertions not supported by NFAs".to_string(),
             )),
