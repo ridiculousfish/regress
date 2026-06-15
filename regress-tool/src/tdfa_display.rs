@@ -53,6 +53,34 @@ fn format_finals(finals: &[FinalCommand]) -> String {
         .join(", ")
 }
 
+/// Generate a compact summary of the TDFA's size and shape, instead of the
+/// full state-by-state dump.
+pub fn to_stats_string(tdfa: &Tdfa) -> String {
+    let num_states = tdfa.num_states();
+    let num_classes = tdfa.num_classes();
+    let accepting = tdfa.accepting().iter().filter(|&&a| a).count();
+    let transitions = tdfa.transitions();
+    let live_transitions = transitions
+        .iter()
+        .filter(|&&t| t != TDFA_DEAD_STATE)
+        .count();
+
+    let mut out = String::new();
+    out.push_str("TDFA stats:\n");
+    out.push_str("===========\n");
+    out.push_str(&format!("  states:           {}\n", num_states));
+    out.push_str(&format!("  accepting states: {}\n", accepting));
+    out.push_str(&format!("  byte classes:     {}\n", num_classes));
+    out.push_str(&format!(
+        "  transitions:      {} live / {} total\n",
+        live_transitions,
+        transitions.len()
+    ));
+    out.push_str(&format!("  tags:             {}\n", tdfa.num_tags()));
+    out.push_str(&format!("  marks:            {}\n", tdfa.num_marks()));
+    out
+}
+
 pub fn to_readable_string(tdfa: &Tdfa) -> String {
     let mut out = String::new();
     let class_ranges = class_ranges(tdfa);

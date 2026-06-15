@@ -62,6 +62,10 @@ struct Opt {
     #[structopt(long)]
     dump_dfa_dot: bool,
 
+    /// Print summary stats instead of the full automaton dump (modifies --dump-nfa/--dump-dfa).
+    #[structopt(long)]
+    stats_only: bool,
+
     /// Comma-separated list of executors to run, in order.
     /// Names: bt, pikevm, tnfa, tdfa. If empty, defaults to the classical
     /// backtrack engine with the original (untagged) output format.
@@ -280,6 +284,7 @@ fn main() -> Result<(), Error> {
                 nfa_cache = Some(Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)));
             }
             match nfa_cache.as_ref().unwrap() {
+                Ok(nfa) if args.stats_only => println!("{}", nfa.to_stats_string()),
                 Ok(nfa) => println!("NFA:\n{}", nfa.to_readable_string()),
                 Err(msg) => println!("Failed to generate NFA: {}", msg),
             }
@@ -314,6 +319,7 @@ fn main() -> Result<(), Error> {
                 });
             }
             match tdfa_cache.as_ref().unwrap() {
+                Ok(tdfa) if args.stats_only => println!("{}", tdfa_display::to_stats_string(tdfa)),
                 Ok(tdfa) => println!("{}", tdfa_display::to_readable_string(tdfa)),
                 Err(msg) => println!("Failed to generate TDFA: {}", msg),
             }

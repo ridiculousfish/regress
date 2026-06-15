@@ -112,7 +112,10 @@ pub enum EpsCondition {
     /// a word char" — possibly inverted. `unicode_icase` widens the
     /// word-char set with U+017F and U+212A (the only non-ASCII codepoints
     /// that fold to ASCII word chars). Implementation in `super::anchors`.
-    WordBoundary { invert: bool, unicode_icase: bool },
+    WordBoundary {
+        invert: bool,
+        unicode_icase: bool,
+    },
     /// Iteration progressed: `thread.tags[idx] == NoMatch || thread.tags[idx] < current_pos`.
     /// Used to gate iteration-exit and back-edge eps on loops whose body
     /// can match empty — implements ES2015 RepeatMatcher's "if min == 0
@@ -675,13 +678,7 @@ impl Builder {
                 );
                 // Back-edge from body.ends → body.start (gated, re-writes sentinel) | exit (gated).
                 add_gated_entry_eps(
-                    self,
-                    &body.ends,
-                    body.start,
-                    exit,
-                    greedy,
-                    &reset_ops,
-                    sentinel,
+                    self, &body.ends, body.start, exit, greedy, &reset_ops, sentinel,
                     /* gated = */ true,
                 );
                 Ok(Fragment::new(start, [exit]))
@@ -720,7 +717,11 @@ impl Builder {
     }
 
     /// Loop construction for non-nullable bodies — no sentinel needed.
-    fn build_loop_inner(&mut self, loopee: &Node, quant: &crate::ir::Quantifier) -> Result<Fragment> {
+    fn build_loop_inner(
+        &mut self,
+        loopee: &Node,
+        quant: &crate::ir::Quantifier,
+    ) -> Result<Fragment> {
         // ES2015 §22.2.2.5: at every iteration entry, capture groups *inside*
         // the loop body reset to "undefined". Pre-compute the Nil-write ops
         // and attach them to every eps edge that enters the body (whether
@@ -843,13 +844,18 @@ fn capture_tags(id: CaptureGroupID) -> (TagIdx, TagIdx) {
 /// harmless.
 fn collect_loop_reset_ops(loopee: &Node) -> SmallVec<[TagOp; 8]> {
     let mut ops: SmallVec<[TagOp; 8]> = SmallVec::new();
-    ir::walk(/* postorder */ false, /* unicode */ false, loopee, &mut |n, _| {
-        if let Node::CaptureGroup { id, .. } = n {
-            let (open, close) = capture_tags(*id);
-            ops.push(TagOp::nil(open));
-            ops.push(TagOp::nil(close));
-        }
-    });
+    ir::walk(
+        /* postorder */ false,
+        /* unicode */ false,
+        loopee,
+        &mut |n, _| {
+            if let Node::CaptureGroup { id, .. } = n {
+                let (open, close) = capture_tags(*id);
+                ops.push(TagOp::nil(open));
+                ops.push(TagOp::nil(close));
+            }
+        },
+    );
     ops
 }
 
@@ -929,11 +935,16 @@ fn add_loop_iter_eps(
 /// can be allocated above it.
 fn count_capture_groups(node: &Node) -> usize {
     let mut max_id: i64 = -1;
-    ir::walk(/* postorder */ false, /* unicode */ false, node, &mut |n, _| {
-        if let Node::CaptureGroup { id, .. } = n {
-            max_id = max_id.max(*id as i64);
-        }
-    });
+    ir::walk(
+        /* postorder */ false,
+        /* unicode */ false,
+        node,
+        &mut |n, _| {
+            if let Node::CaptureGroup { id, .. } = n {
+                max_id = max_id.max(*id as i64);
+            }
+        },
+    );
     (max_id + 1) as usize
 }
 
@@ -943,15 +954,20 @@ fn count_capture_groups(node: &Node) -> usize {
 /// empty slice if no group is named — same convention as `CompiledRegex`.
 fn collect_group_names(node: &Node) -> Box<[Box<str>]> {
     let mut names: Vec<Box<str>> = Vec::new();
-    ir::walk(/* postorder */ false, /* unicode */ false, node, &mut |n, _| {
-        if let Node::CaptureGroup { id, name, .. } = n {
-            let idx = *id as usize;
-            if names.len() <= idx {
-                names.resize(idx + 1, Box::<str>::from(""));
+    ir::walk(
+        /* postorder */ false,
+        /* unicode */ false,
+        node,
+        &mut |n, _| {
+            if let Node::CaptureGroup { id, name, .. } = n {
+                let idx = *id as usize;
+                if names.len() <= idx {
+                    names.resize(idx + 1, Box::<str>::from(""));
+                }
+                names[idx] = name.as_deref().unwrap_or("").into();
             }
-            names[idx] = name.as_deref().unwrap_or("").into();
-        }
-    });
+        },
+    );
     if names.iter().any(|s| !s.is_empty()) {
         names.into_boxed_slice()
     } else {
@@ -967,7 +983,7 @@ impl Nfa {
         // Pre-compute the capture-tag count so any sentinel tags allocated
         // during construction land *above* the capture range.
         let num_capture_tags = 2 + 2 * count_capture_groups(&re.node);
-        let mut b: Builder = Builder::new(2048, re.flags.unicode, num_capture_tags);
+        let mut b: Builder = Builder::new(2048 * 16, re.flags.unicode, num_capture_tags);
 
         // Create the start, capturing it.
         let Fragment { start, ends } = b.build_start()?;

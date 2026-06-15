@@ -3,7 +3,7 @@
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
 
-use crate::automata::nfa::{ByteRange, GOAL_STATE, Nfa, OpKind, StateHandle, TagOp};
+use crate::automata::nfa::{ByteRange, EpsCondition, GOAL_STATE, Nfa, OpKind, StateHandle, TagOp};
 use core::fmt;
 
 /// Render an eps-edge tag op for debug formatters: `t3` for CurrentPos,
@@ -103,6 +103,48 @@ impl Nfa {
             result.push('\n');
         }
 
+        result
+    }
+
+    /// Generate a compact summary of the NFA's size and shape, instead of the
+    /// full state-by-state dump.
+    pub fn to_stats_string(&self) -> String {
+        let mut byte_transitions = 0usize;
+        let mut eps_transitions = 0usize;
+        let mut eps_with_writes = 0usize;
+        let mut eps_predicated = 0usize;
+        let mut dead_states = 0usize;
+
+        for (idx, state) in self.states.iter().enumerate() {
+            byte_transitions += state.transitions.len();
+            eps_transitions += state.eps.len();
+            for edge in &state.eps {
+                if !edge.ops.is_empty() {
+                    eps_with_writes += 1;
+                }
+                if !matches!(edge.cond, EpsCondition::Always) {
+                    eps_predicated += 1;
+                }
+            }
+            if state.eps.is_empty()
+                && state.transitions.is_empty()
+                && idx as StateHandle != GOAL_STATE
+            {
+                dead_states += 1;
+            }
+        }
+
+        let mut result = String::new();
+        result.push_str("NFA stats:\n");
+        result.push_str("==========\n");
+        result.push_str(&format!("  states:            {}\n", self.states.len()));
+        result.push_str(&format!("  dead states:       {}\n", dead_states));
+        result.push_str(&format!("  byte transitions:  {}\n", byte_transitions));
+        result.push_str(&format!("  eps transitions:   {}\n", eps_transitions));
+        result.push_str(&format!("    with tag writes: {}\n", eps_with_writes));
+        result.push_str(&format!("    predicated:      {}\n", eps_predicated));
+        result.push_str(&format!("  tags:              {}\n", self.num_tags()));
+        result.push_str(&format!("  capture tags:      {}\n", self.num_capture_tags()));
         result
     }
 }
