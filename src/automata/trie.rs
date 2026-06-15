@@ -18,7 +18,7 @@ use crate::literal::{Piece, lower_code_point_sequence};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use smallvec::{SmallVec, smallvec};
-use std::collections::{HashMap, hash_map::Entry};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 /// Push `state` onto `set` unless already present (small linear scan; the
 /// insertion frontier is tiny in practice).
@@ -40,35 +40,109 @@ impl Builder {
         self.build_trie(&paths)
     }
 
-    /// Build a minimal prefix trie over a `Node::StringSet`'s alternatives.
+    /// Build the minimal acyclic DFA over a `Node::StringSet`'s alternatives.
     ///
     /// A `StringSet` is a prioritized alternation of literal code-point
-    /// sequences. The trie shares common prefixes between alternatives; each
-    /// alternative's terminal state becomes a loose end of the fragment, so a
-    /// node may be both internal and accepting (e.g. `©` is a prefix of `©️`).
-    /// Byte transitions stay deterministic and no epsilons are introduced.
+    /// sequences. We share common prefixes *and* suffixes, so the result is the
+    /// unique minimal deterministic automaton for the set: byte transitions stay
+    /// deterministic, no epsilons are introduced, and each accepting state
+    /// becomes a loose end of the fragment (a node may be both internal and
+    /// accepting, e.g. `©` is a prefix of `©️`). Suffix sharing in particular
+    /// collapses all the maximal sequences into one shared accept-leaf, which
+    /// keeps the `ends` set — and any surrounding loop's epsilon wiring — small.
     ///
+    /// Built in a scratch builder (like `build_trie`) so the prefix-trie phase's
+    /// transient states don't pollute the real NFA; only the minimized, reachable
+    /// states are copied over.
     pub(super) fn build_string_set(
         &mut self,
         alternatives: &[Box<[u32]>],
         icase: bool,
     ) -> Result<Fragment> {
-        let start = self.make()?;
-        let mut ends: SmallVec<[StateHandle; 2]> = SmallVec::new();
+        // Phase 1: build a prefix trie in scratch, recording accepting states.
+        let mut scratch = Builder::new(self.state_budget, self.unicode, self.num_capture_tags);
+        let scratch_start = scratch.make()?;
+        let mut accept: HashSet<StateHandle> = HashSet::new();
         for alt in alternatives {
             // The frontier holds every trie state reachable after consuming the
             // pieces lowered so far; folds (sets) can make it branch.
-            let mut frontier: SmallVec<[StateHandle; 4]> = smallvec![start];
+            let mut frontier: SmallVec<[StateHandle; 4]> = smallvec![scratch_start];
             for piece in lower_code_point_sequence(alt, icase, self.unicode) {
-                frontier = self.step_piece(&frontier, &piece)?;
+                frontier = scratch.step_piece(&frontier, &piece)?;
             }
-            for state in frontier {
-                if !ends.contains(&state) {
-                    ends.push(state);
+            accept.extend(frontier);
+        }
+
+        // Phase 2: minimize by merging states with identical (accept, outgoing)
+        // signatures, bottom-up.
+        let mut memo: HashMap<StateHandle, StateHandle> = HashMap::new();
+        let mut dedup: HashMap<(bool, Vec<(ByteRange, StateHandle)>), StateHandle> = HashMap::new();
+        let canon_start = scratch.minimize_trie(scratch_start, &accept, &mut memo, &mut dedup);
+
+        // Phase 3: copy the minimized, reachable states into `self`.
+        let mut state_map: HashMap<StateHandle, StateHandle> = HashMap::new();
+        let self_start = self.take_from_scratch(&mut scratch, canon_start, &mut state_map)?;
+
+        // The fragment's ends are the (canonical, then renumbered) accept states.
+        // Sorted for deterministic state numbering; order doesn't affect runtime
+        // priority since the automaton is deterministic.
+        let mut ends: SmallVec<[StateHandle; 2]> = accept
+            .iter()
+            .map(|t| state_map[&memo[t]])
+            .collect();
+        ends.sort_unstable();
+        ends.dedup();
+        Ok(Fragment::new(self_start, ends))
+    }
+
+    /// Minimize the acyclic trie rooted at `state`: merge any two states with the
+    /// same accept-status and the same outgoing transitions (to already-merged
+    /// targets). Returns the canonical handle for `state`; `memo` maps every
+    /// visited state to its canonical representative. The representative keeps its
+    /// transitions rewired to canonical targets; collapsed states are left
+    /// orphaned (dropped by the later reachable-only copy).
+    fn minimize_trie(
+        &mut self,
+        state: StateHandle,
+        accept: &HashSet<StateHandle>,
+        memo: &mut HashMap<StateHandle, StateHandle>,
+        dedup: &mut HashMap<(bool, Vec<(ByteRange, StateHandle)>), StateHandle>,
+    ) -> StateHandle {
+        if let Some(&canon) = memo.get(&state) {
+            return canon;
+        }
+        // Canonicalize children first (post-order). Transitions are already
+        // sorted by byte range, and canonicalization preserves that order.
+        let transitions = self.get(state).transitions.clone();
+        let mut canon_transitions: Vec<(ByteRange, StateHandle)> = Vec::with_capacity(transitions.len());
+        for (range, child) in transitions {
+            let target = self.minimize_trie(child, accept, memo, dedup);
+            // Coalesce with the previous edge when it shares this target and its
+            // range is contiguous — neighbouring bytes only converge once
+            // minimization has merged their (formerly distinct) targets, so this
+            // is the first point where it can happen. `checked_add` guards 0xFF.
+            match canon_transitions.last_mut() {
+                Some((prev, prev_target))
+                    if *prev_target == target
+                        && prev.end.checked_add(1) == Some(range.start) =>
+                {
+                    prev.end = range.end;
                 }
+                _ => canon_transitions.push((range, target)),
             }
         }
-        Ok(Fragment::new(start, ends))
+
+        let key = (accept.contains(&state), canon_transitions.clone());
+        let canon = match dedup.entry(key) {
+            Entry::Occupied(e) => *e.get(),
+            Entry::Vacant(e) => {
+                // First state with this signature: make it the representative.
+                self.get(state).transitions = canon_transitions;
+                *e.insert(state)
+            }
+        };
+        memo.insert(state, canon);
+        canon
     }
 
     /// Advance every state in `frontier` by one lowered `Piece`, returning the
@@ -317,7 +391,9 @@ mod tests {
         }
     }
 
-    /// "ab" and "ac" share the "a" prefix, then branch.
+    /// "ab" and "ac" share the "a" prefix, then branch. Their terminal leaves
+    /// are equivalent (accepting, no transitions), so minimization merges them
+    /// into a single shared accept-leaf.
     #[test]
     fn shared_prefix_then_branch() {
         let mut b = Builder::new(usize::MAX, true, 2);
@@ -325,10 +401,15 @@ mod tests {
 
         let s_a = walk(&b.states, frag.start, b"a").unwrap();
         assert_eq!(b.states[frag.start as usize].transitions.len(), 1);
-        assert_eq!(b.states[s_a as usize].transitions.len(), 2);
-        assert_eq!(frag.ends.len(), 2);
-        assert!(frag.ends.contains(&walk(&b.states, frag.start, b"ab").unwrap()));
-        assert!(frag.ends.contains(&walk(&b.states, frag.start, b"ac").unwrap()));
+        // 'b' and 'c' both lead to the merged leaf and are adjacent bytes, so
+        // they coalesce into a single 'b'-'c' range edge.
+        assert_eq!(b.states[s_a as usize].transitions.len(), 1);
+        // Both branches land on the same merged leaf → a single end.
+        assert_eq!(frag.ends.len(), 1);
+        let s_ab = walk(&b.states, frag.start, b"ab").unwrap();
+        let s_ac = walk(&b.states, frag.start, b"ac").unwrap();
+        assert_eq!(s_ab, s_ac);
+        assert!(frag.ends.contains(&s_ab));
     }
 
     /// © (U+00A9) is a prefix of ©️ (U+00A9 U+FE0F): the © terminal must both
@@ -349,20 +430,63 @@ mod tests {
         assert!(!b.states[s_c as usize].transitions.is_empty());
     }
 
-    /// icase folds "a" into {A, a}: two single-byte branches from start, both
-    /// accepting — and no cartesian blowup.
+    /// icase folds "a" into {A, a}: two single-byte branches from start, no
+    /// cartesian blowup. Both land on the same merged accept-leaf.
     #[test]
     fn icase_fold_branches() {
         let mut b = Builder::new(usize::MAX, true, 2);
         let frag = b.build_string_set(&[seq("a")], true).unwrap();
 
         assert_eq!(b.states[frag.start as usize].transitions.len(), 2);
-        assert_eq!(frag.ends.len(), 2);
         let upper = walk(&b.states, frag.start, b"A").unwrap();
         let lower = walk(&b.states, frag.start, b"a").unwrap();
+        assert_eq!(upper, lower);
+        assert_eq!(frag.ends.len(), 1);
         assert!(frag.ends.contains(&upper));
-        assert!(frag.ends.contains(&lower));
-        assert_ne!(upper, lower);
+    }
+
+    /// Suffix sharing: "ax" and "bx" share no prefix but a common "x" tail.
+    /// Minimization merges the trailing leaf *and* the two "middle" states
+    /// (both non-accepting with an identical `x`→leaf edge), collapsing to
+    /// `start —a,b→ M —x→ X`. Total states: GOAL + start + M + X = 4.
+    #[test]
+    fn suffix_sharing() {
+        let mut b = Builder::new(usize::MAX, true, 2);
+        let frag = b.build_string_set(&[seq("ax"), seq("bx")], false).unwrap();
+
+        let s_ax = walk(&b.states, frag.start, b"ax").unwrap();
+        let s_bx = walk(&b.states, frag.start, b"bx").unwrap();
+        assert_eq!(s_ax, s_bx);
+        assert!(b.states[s_ax as usize].transitions.is_empty());
+        // 'a' and 'b' lead to the same merged middle state, and are adjacent
+        // bytes, so they coalesce into a single 'a'-'b' range edge.
+        assert_eq!(walk(&b.states, frag.start, b"a"), walk(&b.states, frag.start, b"b"));
+        assert_eq!(b.states[frag.start as usize].transitions.len(), 1);
+        assert_eq!(frag.ends.len(), 1);
+        assert_eq!(b.states.len(), 4);
+    }
+
+    /// Adjacent single-byte alternatives that share a suffix (here the empty
+    /// suffix: all three are single chars) collapse to one accept-leaf, and the
+    /// `a`/`b`/`c` edges out of start coalesce into a single `a`-`c` range edge.
+    #[test]
+    fn coalesce_adjacent_transitions() {
+        let mut b = Builder::new(usize::MAX, true, 2);
+        let frag = b
+            .build_string_set(&[seq("a"), seq("b"), seq("c")], false)
+            .unwrap();
+
+        let start_trans = &b.states[frag.start as usize].transitions;
+        assert_eq!(start_trans.len(), 1);
+        assert_eq!(start_trans[0].0.start, b'a');
+        assert_eq!(start_trans[0].0.end, b'c');
+
+        let leaf = walk(&b.states, frag.start, b"a").unwrap();
+        assert_eq!(walk(&b.states, frag.start, b"b"), Some(leaf));
+        assert_eq!(walk(&b.states, frag.start, b"c"), Some(leaf));
+        assert_eq!(frag.ends.len(), 1);
+        // GOAL + start + shared leaf.
+        assert_eq!(b.states.len(), 3);
     }
 
     /// An empty alternative makes the start state itself accept.
