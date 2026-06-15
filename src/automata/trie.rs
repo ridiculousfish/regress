@@ -11,7 +11,7 @@
 //! states from eager allocation don't pollute the real NFA; only reachable
 //! states get copied over.
 
-use crate::automata::nfa::{Builder, ByteRange, Error, Fragment, Result, StateHandle};
+use crate::automata::nfa::{Builder, ByteRange, Fragment, Result, StateHandle};
 use crate::automata::utf8::{ByteRangePath, utf8_paths_from_code_point_set};
 use crate::codepointset::CodePointSet;
 use crate::literal::{Piece, lower_code_point_sequence};
@@ -30,13 +30,14 @@ fn push_unique(set: &mut SmallVec<[StateHandle; 4]>, state: StateHandle) {
 
 impl Builder {
     pub(super) fn build_from_code_point_set(&mut self, cps: &CodePointSet) -> Result<Fragment> {
-        if cps.is_empty() {
-            // Can't match anything - a state with no exits.
+        let paths = utf8_paths_from_code_point_set(cps);
+        // No paths means nothing is matchable: either the set is empty, or it
+        // contained only surrogates (which fall in the gap between UTF-8 buckets
+        // and so produce no paths). Either way, a state with no exits.
+        if paths.is_empty() {
             let fail = self.make()?;
             return Ok(Fragment::new(fail, []));
         }
-
-        let paths = utf8_paths_from_code_point_set(cps);
         self.build_trie(&paths)
     }
 
@@ -172,7 +173,11 @@ impl Builder {
                 // A folded non-ASCII position: each variant walks its UTF-8.
                 Piece::CharSet(chars) => {
                     for &c in chars {
-                        let ch = char::from_u32(c).ok_or(Error::NotUTF8)?;
+                        // A surrogate variant can't occur in UTF-8 input; skip it
+                        // (that fold variant simply never matches).
+                        let Some(ch) = char::from_u32(c) else {
+                            continue;
+                        };
                         let mut buf = [0; 4];
                         let mut state = from;
                         for &b in ch.encode_utf8(&mut buf).as_bytes() {
@@ -181,9 +186,10 @@ impl Builder {
                         push_unique(&mut next, state);
                     }
                 }
-                // A code point with no UTF-8 encoding (surrogate): unmatchable
-                // here, so bail and let the caller fall back to the backtracker.
-                Piece::Char(_) => return Err(Error::NotUTF8),
+                // A code point with no UTF-8 encoding (surrogate): unmatchable in
+                // UTF-8, so this position kills the alternative — contribute
+                // nothing, collapsing its frontier to empty (never matches).
+                Piece::Char(_) => {}
             }
         }
         Ok(next)
@@ -505,5 +511,45 @@ mod tests {
         let frag = b.build_string_set(&[], false).unwrap();
         assert!(frag.ends.is_empty());
         assert!(b.states[frag.start as usize].transitions.is_empty());
+    }
+
+    /// A code-point set of only surrogates is unmatchable (no UTF-8 encoding):
+    /// the fragment has no exits, and building it must not panic.
+    #[test]
+    fn surrogate_only_set_unmatchable() {
+        use crate::codepointset::{CodePointSet, Interval};
+        let mut b = Builder::new(usize::MAX, true, 2);
+        let mut cps = CodePointSet::new();
+        cps.add(Interval::new(0xD800, 0xDFFF));
+        let frag = b.build_from_code_point_set(&cps).unwrap();
+        assert!(frag.ends.is_empty());
+        assert!(b.states[frag.start as usize].transitions.is_empty());
+    }
+
+    /// A set mixing a valid char with surrogates drops the surrogates and keeps
+    /// the valid path.
+    #[test]
+    fn set_with_surrogate_keeps_valid() {
+        use crate::codepointset::{CodePointSet, Interval};
+        let mut b = Builder::new(usize::MAX, true, 2);
+        let mut cps = CodePointSet::new();
+        cps.add_one(b'a' as u32);
+        cps.add(Interval::new(0xD800, 0xDFFF));
+        let frag = b.build_from_code_point_set(&cps).unwrap();
+        assert_eq!(frag.ends.len(), 1);
+        assert_eq!(walk(&b.states, frag.start, b"a"), Some(frag.ends[0]));
+        assert_eq!(b.states[frag.start as usize].transitions.len(), 1);
+    }
+
+    /// A StringSet alternative that is a lone surrogate never matches; the other
+    /// alternatives are unaffected.
+    #[test]
+    fn string_set_surrogate_alternative_is_dead() {
+        let mut b = Builder::new(usize::MAX, true, 2);
+        let alts: [Box<[u32]>; 2] = [Box::from([b'a' as u32]), Box::from([0xD800u32])];
+        let frag = b.build_string_set(&alts, false).unwrap();
+        assert_eq!(frag.ends.len(), 1);
+        assert_eq!(walk(&b.states, frag.start, b"a"), Some(frag.ends[0]));
+        assert_eq!(b.states[frag.start as usize].transitions.len(), 1);
     }
 }

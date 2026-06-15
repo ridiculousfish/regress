@@ -539,7 +539,12 @@ impl Builder {
         // Convert u32 to char
         let ch = match char::from_u32(c) {
             Some(ch) => ch,
-            None => return Err(Error::NotUTF8),
+            // A surrogate (or otherwise non-scalar) code point cannot occur in
+            // UTF-8 input, so it never matches — a state with no exits.
+            None => {
+                let fail = self.make()?;
+                return Ok(Fragment::new(fail, []));
+            }
         };
 
         let mut buff = [0; 4];
