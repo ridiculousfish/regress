@@ -230,3 +230,37 @@ fn entry_commands_write_full_match_start() {
     let t = make_tdfa("abc");
     assert!(!t.entry_commands(0).is_empty());
 }
+
+#[test]
+fn compact_marks_preserves_matches_and_shrinks() {
+    // For each capture-heavy pattern, the optimized build (`try_from`, which
+    // runs `compact_marks`) must produce byte-identical matches to the
+    // unoptimized build while using strictly fewer marks.
+    let cases: &[(&str, &[&str])] = &[
+        ("(a*)(a{3,4})", &["aaaaa", "aaa", "aaaaaaa"]),
+        ("((a)(b)){1,16}", &["abab", "ababab", "ab"]),
+        ("(?:(a)|(b)|(c))*", &["abcabc", "aaa", ""]),
+        ("(a*?)*", &["aaaa", "", "a"]),
+        ("(?:([^,]*),?)*", &["a,bb,ccc", ",,", "x"]),
+        (r"(?:(\d)(\d)(\d))*", &["123456", "12", "123"]),
+    ];
+    for (pattern, inputs) in cases {
+        let re = parse_ir(pattern);
+        let nfa = Nfa::try_from(&re).expect("nfa build failed");
+        let unopt = Tdfa::try_from_unoptimized(&nfa).expect("unoptimized tdfa build failed");
+        let opt = Tdfa::try_from(&nfa).expect("optimized tdfa build failed");
+        assert!(
+            opt.num_marks() < unopt.num_marks(),
+            "{pattern}: expected fewer marks, {} -> {}",
+            unopt.num_marks(),
+            opt.num_marks(),
+        );
+        for input in *inputs {
+            assert_eq!(
+                execute_tdfa(&unopt, input.as_bytes()),
+                execute_tdfa(&opt, input.as_bytes()),
+                "pattern {pattern:?} input {input:?}: optimization changed the match",
+            );
+        }
+    }
+}

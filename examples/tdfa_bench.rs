@@ -13,13 +13,12 @@ use regress::backends::{self, Nfa, Tdfa, TdfaExecutor};
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
-/// Build a TDFA from a pattern, surfacing the first failing stage as a string.
-fn build(pattern: &str) -> Result<Tdfa, String> {
+/// Build the NFA for a pattern, surfacing the first failing stage as a string.
+fn build_nfa(pattern: &str) -> Result<Nfa, String> {
     let flags = regress::Flags::from("");
     let ire = backends::try_parse(pattern.chars().map(u32::from), flags)
         .map_err(|e| format!("parse: {:?}", e))?;
-    let nfa = Nfa::try_from(&ire).map_err(|e| format!("nfa: {:?}", e))?;
-    Tdfa::try_from(&nfa).map_err(|e| format!("tdfa: {:?}", e))
+    Nfa::try_from(&ire).map_err(|e| format!("nfa: {:?}", e))
 }
 
 /// Repeat `base` until at least `target` bytes long.
@@ -63,46 +62,59 @@ fn main() {
     const ITERS: usize = 10;
     const RUNS: usize = 5;
 
+    // Columns show unoptimized -> optimized (try_from_unoptimized vs try_from).
+    println!("unoptimized -> optimized:\n");
     println!(
-        "{:<10} {:>6} {:>7} {:>7} {:>7} {:>9}  {:>9}",
-        "case", "states", "marks", "cmds", "copies", "currpos", "MB/s"
+        "{:<10} {:>14} {:>14} {:>14} {:>16}",
+        "case", "marks", "cmds", "copies", "MB/s"
     );
-    println!("{}", "-".repeat(64));
+    println!("{}", "-".repeat(72));
+
+    // Median MB/s of `find().count()` over `input`, or None for short inputs.
+    let throughput = |tdfa: &Tdfa, input: &str| -> Option<f64> {
+        if input.len() <= 4096 {
+            return None;
+        }
+        let dt = median_time(RUNS, || {
+            let mut n = 0usize;
+            for _ in 0..ITERS {
+                n += backends::find::<TdfaExecutor>(tdfa, input, 0).count();
+            }
+            black_box(n);
+        });
+        Some((input.len() * ITERS) as f64 / dt.as_secs_f64() / 1e6)
+    };
 
     for &(name, pattern, input) in suite {
-        let tdfa = match build(pattern) {
-            Ok(t) => t,
+        let nfa = match build_nfa(pattern) {
+            Ok(n) => n,
             Err(e) => {
                 println!("{:<10} BUILD FAILED ({})", name, e);
                 continue;
             }
         };
-        let s = tdfa.stats();
+        let un = match Tdfa::try_from_unoptimized(&nfa) {
+            Ok(t) => t,
+            Err(e) => {
+                println!("{:<10} tdfa: {:?}", name, e);
+                continue;
+            }
+        };
+        let opt = Tdfa::try_from(&nfa).expect("optimized build matches unoptimized");
+        let (su, so) = (un.stats(), opt.stats());
 
-        // Only time meaningfully-long inputs; short ones are timing noise.
-        let mbps = if input.len() > 4096 {
-            let dt = median_time(RUNS, || {
-                let mut n = 0usize;
-                for _ in 0..ITERS {
-                    n += backends::find::<TdfaExecutor>(&tdfa, input, 0).count();
-                }
-                black_box(n);
-            });
-            let bytes = (input.len() * ITERS) as f64;
-            format!("{:.0}", bytes / dt.as_secs_f64() / 1e6)
-        } else {
-            "-".to_string()
+        let speed = match (throughput(&un, input), throughput(&opt, input)) {
+            (Some(a), Some(b)) => format!("{:.0}->{:.0}", a, b),
+            _ => "-".to_string(),
         };
 
         println!(
-            "{:<10} {:>6} {:>7} {:>7} {:>7} {:>9}  {:>9}",
+            "{:<10} {:>14} {:>14} {:>14} {:>16}",
             name,
-            s.num_states,
-            s.num_marks,
-            s.total_commands,
-            s.copy_commands,
-            s.currentpos_commands,
-            mbps,
+            format!("{}->{}", su.num_marks, so.num_marks),
+            format!("{}->{}", su.total_commands, so.total_commands),
+            format!("{}->{}", su.copy_commands, so.copy_commands),
+            speed,
         );
     }
 }
