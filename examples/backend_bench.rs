@@ -69,8 +69,9 @@ fn main() {
         ("csv", r"(?:([^,]*),?)*", &csv),
     ];
 
+    println!("throughput (MB/s), higher is better:\n");
     println!(
-        "{:<10} {:>10} {:>10} {:>10} {:>10}   (MB/s)",
+        "{:<10} {:>12} {:>12} {:>12} {:>12}",
         "case", "backtrack", "pikevm", "nfa", "tdfa"
     );
     println!("{}", "-".repeat(62));
@@ -120,7 +121,7 @@ fn main() {
         });
 
         println!(
-            "{:<10} {:>10} {:>10} {:>10} {:>10}{}",
+            "{:<10} {:>12} {:>12} {:>12} {:>12}{}",
             name,
             cell(Some(bt)),
             cell(Some(pike)),
