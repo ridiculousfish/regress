@@ -210,17 +210,29 @@ pub fn execute(nfa: &Nfa, input: &[u8], start: usize) -> Option<NfaMatch> {
 
     for (i, &byte) in input[start..].iter().enumerate() {
         let pos = start + i;
+        // Step each current thread in priority order, expanding the eps
+        // closure of its byte-transition target *immediately* before moving
+        // to the next thread. Doing the closure inline (rather than pushing
+        // all transitions first and closing over the whole set afterwards)
+        // is what preserves priority: a thread that steps onto an eps-only
+        // state — e.g. a greedy loop's body end — must have its high-priority
+        // continuation (keep looping) ordered ahead of a lower-priority
+        // sibling that happened to step directly onto a consuming state. A
+        // bulk closure would append those continuations at the tail, behind
+        // the sibling, inverting greedy priority and pruning the wrong
+        // threads at a goal.
         for thread in current_threads.iter() {
-            let state = nfa.at(thread.state);
-            if let Some(next_state) = state.transition_for_byte(byte) {
-                next_threads.push(thread.clone_to_state(next_state));
+            let transition = nfa.at(thread.state).transition_for_byte(byte);
+            if let Some(next_state) = transition {
+                if next_threads.push(thread.clone_to_state(next_state)) {
+                    let idx = next_threads.threads.len() - 1;
+                    dfs_expand_eps(nfa, &mut next_threads, idx, input, pos + 1);
+                }
             }
         }
         if next_threads.is_empty() {
             return best;
         }
-
-        epsilon_closure_with_tags(nfa, &mut next_threads, input, pos + 1);
 
         // Goals seen at this step are higher priority than `best` only if
         // they come from threads that were strictly higher in priority
