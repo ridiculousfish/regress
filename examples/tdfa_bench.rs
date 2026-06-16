@@ -93,14 +93,15 @@ fn main() {
                 continue;
             }
         };
-        let un = match Tdfa::try_from_unoptimized(&nfa) {
+        let un = match Tdfa::try_from(&nfa) {
             Ok(t) => t,
             Err(e) => {
                 println!("{:<10} tdfa: {:?}", name, e);
                 continue;
             }
         };
-        let opt = Tdfa::try_from(&nfa).expect("optimized build matches unoptimized");
+        let mut opt = un.clone();
+        opt.optimize();
         let (su, so) = (un.stats(), opt.stats());
 
         let speed = match (throughput(&un, input), throughput(&opt, input)) {

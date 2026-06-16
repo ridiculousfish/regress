@@ -5,6 +5,8 @@
 //! a runtime `marks` array. On accept, per-state `finals` copy canonical
 //! marks into the runtime register slots used by `NfaMatch`.
 
+mod opt;
+
 use crate::automata::dfa::{compute_byte_classes, representative_bytes};
 use crate::automata::nfa::{EpsCondition, GOAL_STATE, Nfa, OpKind, StateHandle, TagIdx, TagOp};
 
@@ -429,71 +431,6 @@ fn close_priority(
     Ok((TdfaState(threads), commands))
 }
 
-/// Fold `c := Copy(r)` into `c := CurrentPos` within one command list when
-/// `r` is a once-read mark stamped by a `CurrentPos` in this list and `c` is
-/// not itself a `Copy` source here. See `fold_currentpos_copies` for why.
-fn fold_list(cmds: &mut TagCommandList, src_count: &HashMap<InputMark, usize>) {
-    let mut stamped_here: HashSet<InputMark> = HashSet::new();
-    let mut copy_src_here: HashSet<InputMark> = HashSet::new();
-    for c in cmds.iter() {
-        match c.src {
-            MarkValue::CurrentPos => {
-                stamped_here.insert(c.dst);
-            }
-            MarkValue::Copy(s) => {
-                copy_src_here.insert(s);
-            }
-        }
-    }
-    for c in cmds.iter_mut() {
-        if let MarkValue::Copy(r) = c.src {
-            if stamped_here.contains(&r)
-                && src_count.get(&r).copied().unwrap_or(0) == 1
-                && !copy_src_here.contains(&c.dst)
-            {
-                c.src = MarkValue::CurrentPos;
-            }
-        }
-    }
-}
-
-/// Add every `Copy` source in `cmds` to `used`.
-fn collect_cmd_srcs(cmds: &[TagCommand], used: &mut HashSet<InputMark>) {
-    for c in cmds {
-        if let MarkValue::Copy(m) = c.src {
-            used.insert(m);
-        }
-    }
-}
-
-/// Add every `Copy` source in `finals` to `used`.
-fn collect_final_srcs(finals: &[FinalCommand], used: &mut HashSet<InputMark>) {
-    for fc in finals {
-        if let MarkValue::Copy(m) = fc.src {
-            used.insert(m);
-        }
-    }
-}
-
-/// Visit each command's `dst` mark and `Copy` source mark.
-fn visit_cmd_marks(cmds: &mut [TagCommand], f: &mut impl FnMut(&mut InputMark)) {
-    for c in cmds {
-        f(&mut c.dst);
-        if let MarkValue::Copy(m) = &mut c.src {
-            f(m);
-        }
-    }
-}
-
-/// Visit each final's `Copy` source mark.
-fn visit_final_marks(finals: &mut [FinalCommand], f: &mut impl FnMut(&mut InputMark)) {
-    for fc in finals {
-        if let MarkValue::Copy(m) = &mut fc.src {
-            f(m);
-        }
-    }
-}
-
 /// Build an all-`None` tag map of length `num_tags` for seeding a new entry.
 fn empty_tag_map(num_tags: usize) -> SmallVec<[Option<InputMark>; 4]> {
     let mut v = SmallVec::with_capacity(num_tags);
@@ -826,7 +763,7 @@ fn truncate_at_first_goal(mut s: TdfaState) -> TdfaState {
     s
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Tdfa {
     /// Initial state when matching is being attempted at byte offset 0 of
     /// the input — `^` non-multiline fires here.
@@ -916,17 +853,11 @@ pub struct TdfaStats {
 }
 
 impl Tdfa {
-    /// Build the TDFA and run `compact_marks` (cheap register cleanup).
+    /// Build the TDFA. The result is correct but **unoptimized** — every
+    /// `CurrentPos` write keeps its own freshly-minted `InputMark` and no
+    /// states are merged. Call [`Tdfa::optimize`] to apply the optional
+    /// optimization passes.
     pub fn try_from(nfa: &Nfa) -> Result<Self, Error> {
-        let mut t = Self::try_from_unoptimized(nfa)?;
-        t.compact_marks();
-        Ok(t)
-    }
-
-    /// Build the TDFA without the mark-compaction pass. Every `CurrentPos`
-    /// write keeps its own freshly-minted `InputMark`. Exposed so tests and
-    /// benchmarks can diff against the un-optimized baseline.
-    pub fn try_from_unoptimized(nfa: &Nfa) -> Result<Self, Error> {
         let (byte_to_class, num_classes) = compute_byte_classes(nfa);
         let rep_bytes = representative_bytes(&byte_to_class, num_classes);
         let num_tags = nfa.num_tags();
@@ -1038,194 +969,11 @@ impl Tdfa {
         })
     }
 
-    /// Cheap register cleanup: copy folding + dead-mark elimination + dense
-    /// renumbering. Value-preserving — see the module's `apply_commands` for
-    /// the two-phase (simultaneous) semantics this must respect. Shrinks
-    /// `num_marks` (the per-search marks Vec) and the per-transition command
-    /// lists.
-    fn compact_marks(&mut self) {
-        self.fold_currentpos_copies();
-        self.eliminate_dead_marks();
-        self.renumber_marks();
-    }
-
-    /// Fold `r := CurrentPos` (phase 1) + `c := Copy(r)` (phase 2) into
-    /// `c := CurrentPos`, collapsing the raw→canonical indirection for a
-    /// freshly-stamped position. The freed `r` becomes dead (cleaned up by
-    /// `eliminate_dead_marks`). Guarded to stay correct under the simultaneous
-    /// command semantics:
-    ///
-    /// - `r` must be read globally exactly once (this copy) and written by a
-    ///   `CurrentPos` in this same list (so moving the stamp is value-equal);
-    /// - `c` must not be a `Copy` source within this same list — otherwise
-    ///   moving `c`'s write from phase 2 to phase 1 would change what a sibling
-    ///   copy reads from `c` (the parallel-shift case; those marks stay).
-    fn fold_currentpos_copies(&mut self) {
-        let src_count = self.global_src_counts();
-        fold_list(&mut self.entry_commands_anchored, &src_count);
-        fold_list(&mut self.entry_commands_unanchored, &src_count);
-        for cmds in self.transition_commands.iter_mut() {
-            fold_list(cmds, &src_count);
-        }
-        for conds in self.anchor_conditionals.iter_mut() {
-            for ac in conds.iter_mut() {
-                fold_list(&mut ac.commands, &src_count);
-            }
-        }
-        for alts in self.anchor_alts.iter_mut() {
-            for alt in alts.iter_mut() {
-                fold_list(&mut alt.commands, &src_count);
-            }
-        }
-    }
-
-    /// Per-mark count of reads (`Copy` sources in commands + `FinalCommand`
-    /// sources) across the whole automaton.
-    fn global_src_counts(&self) -> HashMap<InputMark, usize> {
-        let mut counts: HashMap<InputMark, usize> = HashMap::new();
-        let mut bump_cmds = |cmds: &[TagCommand]| {
-            for c in cmds {
-                if let MarkValue::Copy(m) = c.src {
-                    *counts.entry(m).or_insert(0) += 1;
-                }
-            }
-        };
-        bump_cmds(&self.entry_commands_anchored);
-        bump_cmds(&self.entry_commands_unanchored);
-        for cmds in self.transition_commands.iter() {
-            bump_cmds(cmds);
-        }
-        for conds in self.anchor_conditionals.iter() {
-            for ac in conds {
-                bump_cmds(&ac.commands);
-            }
-        }
-        for alts in self.anchor_alts.iter() {
-            for alt in alts {
-                bump_cmds(&alt.commands);
-            }
-        }
-        // Final sources count as reads too.
-        let mut bump_finals = |finals: &[FinalCommand]| {
-            for fc in finals {
-                if let MarkValue::Copy(m) = fc.src {
-                    *counts.entry(m).or_insert(0) += 1;
-                }
-            }
-        };
-        for fs in self.finals.iter() {
-            bump_finals(fs);
-        }
-        for conds in self.anchor_conditionals.iter() {
-            for ac in conds {
-                bump_finals(&ac.finals);
-            }
-        }
-        counts
-    }
-
-    /// Dead-mark elimination to a fixpoint: a command whose destination is
-    /// read nowhere is dead; removing a `Copy` can make its source dead too.
-    fn eliminate_dead_marks(&mut self) {
-        loop {
-            let used = self.read_marks();
-            let mut changed = false;
-            let mut prune = |cmds: &mut TagCommandList| {
-                let before = cmds.len();
-                cmds.retain(|c| used.contains(&c.dst));
-                changed |= cmds.len() != before;
-            };
-            prune(&mut self.entry_commands_anchored);
-            prune(&mut self.entry_commands_unanchored);
-            for cmds in self.transition_commands.iter_mut() {
-                prune(cmds);
-            }
-            for conds in self.anchor_conditionals.iter_mut() {
-                for ac in conds.iter_mut() {
-                    prune(&mut ac.commands);
-                }
-            }
-            for alts in self.anchor_alts.iter_mut() {
-                for alt in alts.iter_mut() {
-                    prune(&mut alt.commands);
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-    }
-
-    /// Set of marks read anywhere — as a `Copy` source in any command or as a
-    /// `FinalCommand` source. A conservative (never per-path) global use-set,
-    /// so a mark absent here is read on no path and its writes are dead.
-    fn read_marks(&self) -> HashSet<InputMark> {
-        let mut used = HashSet::new();
-        collect_cmd_srcs(&self.entry_commands_anchored, &mut used);
-        collect_cmd_srcs(&self.entry_commands_unanchored, &mut used);
-        for cmds in self.transition_commands.iter() {
-            collect_cmd_srcs(cmds, &mut used);
-        }
-        for fs in self.finals.iter() {
-            collect_final_srcs(fs, &mut used);
-        }
-        for conds in self.anchor_conditionals.iter() {
-            for ac in conds {
-                collect_cmd_srcs(&ac.commands, &mut used);
-                collect_final_srcs(&ac.finals, &mut used);
-            }
-        }
-        for alts in self.anchor_alts.iter() {
-            for alt in alts {
-                collect_cmd_srcs(&alt.commands, &mut used);
-            }
-        }
-        used
-    }
-
-    /// Visit every `InputMark` slot (each command `dst`, and each `Copy`
-    /// source in commands and finals) across all command-bearing structures.
-    fn for_each_mark_mut(&mut self, mut f: impl FnMut(&mut InputMark)) {
-        visit_cmd_marks(&mut self.entry_commands_anchored, &mut f);
-        visit_cmd_marks(&mut self.entry_commands_unanchored, &mut f);
-        for cmds in self.transition_commands.iter_mut() {
-            visit_cmd_marks(cmds, &mut f);
-        }
-        for fs in self.finals.iter_mut() {
-            visit_final_marks(fs, &mut f);
-        }
-        for conds in self.anchor_conditionals.iter_mut() {
-            for ac in conds.iter_mut() {
-                visit_cmd_marks(&mut ac.commands, &mut f);
-                visit_final_marks(&mut ac.finals, &mut f);
-            }
-        }
-        for alts in self.anchor_alts.iter_mut() {
-            for alt in alts.iter_mut() {
-                visit_cmd_marks(&mut alt.commands, &mut f);
-            }
-        }
-    }
-
-    /// Renumber surviving marks densely (`0..k`) by first appearance in a
-    /// fixed walk, rewriting every reference, and set `num_marks = k`.
-    fn renumber_marks(&mut self) {
-        let mut remap: HashMap<InputMark, InputMark> = HashMap::new();
-        let mut next = 0u32;
-        self.for_each_mark_mut(|m| {
-            let old = *m;
-            let id = match remap.get(&old) {
-                Some(&id) => id,
-                None => {
-                    let id = InputMark(next);
-                    next += 1;
-                    remap.insert(old, id);
-                    id
-                }
-            };
-            *m = id;
-        });
-        self.num_marks = next as usize;
+    /// Apply the optional optimization passes (state minimization + register
+    /// cleanup) in place. Skippable — a freshly `try_from`'d automaton matches
+    /// correctly without it; this only shrinks the automaton.
+    pub fn optimize(&mut self) {
+        opt::optimize(self);
     }
 
     /// `$`-style accept conditionals for `state`. Empty for most states.

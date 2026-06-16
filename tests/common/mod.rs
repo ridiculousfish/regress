@@ -103,9 +103,14 @@ fn build_test_artifacts(
     if matches!(backend, Backend::Tnfa) {
         return (cr, Some(nfa), None);
     }
-    // Backend::Tdfa
+    // Backend::Tdfa. Run the optional optimization passes so the whole corpus
+    // exercises the optimized automaton (the riskier path); a freshly built
+    // TDFA matches identically without them.
     match backends::Tdfa::try_from(&nfa) {
-        Ok(t) => (cr, Some(nfa), Some(t)),
+        Ok(mut t) => {
+            t.optimize();
+            (cr, Some(nfa), Some(t))
+        }
         Err(_) => (cr, None, None),
     }
 }
