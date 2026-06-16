@@ -47,11 +47,7 @@ pub fn prev_byte_is_word_char(input: &[u8], pos: usize, unicode_icase: bool) -> 
     match input[pos - 1] {
         b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' => true,
         0xBF if unicode_icase && pos >= 2 && input[pos - 2] == 0xC5 => true,
-        0xAA if unicode_icase
-            && pos >= 3
-            && input[pos - 3] == 0xE2
-            && input[pos - 2] == 0x84 =>
-        {
+        0xAA if unicode_icase && pos >= 3 && input[pos - 3] == 0xE2 && input[pos - 2] == 0x84 => {
             true
         }
         _ => false,

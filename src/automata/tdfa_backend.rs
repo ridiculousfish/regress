@@ -6,9 +6,9 @@ use crate::automata::nfa_backend::{NfaMatch, tags_to_captures};
 use crate::automata::tdfa::{
     FinalCommand, InputMark, MarkValue, TDFA_DEAD_STATE, TagCommand, TagCommandList, Tdfa,
 };
-use smallvec::SmallVec;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+use smallvec::SmallVec;
 
 /// Anchored match against a (non-tagged) DFA: returns true if `input` matches
 /// from the start. Used by DFA correctness tests; production paths go through

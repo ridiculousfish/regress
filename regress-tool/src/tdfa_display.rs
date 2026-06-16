@@ -1,7 +1,6 @@
 use regress::automata::nfa::ByteRange;
 use regress::automata::tdfa::{
-    FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
-    TdfaStateId,
+    FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa, TdfaStateId,
 };
 use regress::automata::util::format_byte_range;
 

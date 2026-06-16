@@ -87,10 +87,8 @@ impl Builder {
         // The fragment's ends are the (canonical, then renumbered) accept states.
         // Sorted for deterministic state numbering; order doesn't affect runtime
         // priority since the automaton is deterministic.
-        let mut ends: SmallVec<[StateHandle; 2]> = accept
-            .iter()
-            .map(|t| state_map[&memo[t]])
-            .collect();
+        let mut ends: SmallVec<[StateHandle; 2]> =
+            accept.iter().map(|t| state_map[&memo[t]]).collect();
         ends.sort_unstable();
         ends.dedup();
         Ok(Fragment::new(self_start, ends))
@@ -115,7 +113,8 @@ impl Builder {
         // Canonicalize children first (post-order). Transitions are already
         // sorted by byte range, and canonicalization preserves that order.
         let transitions = self.get(state).transitions.clone();
-        let mut canon_transitions: Vec<(ByteRange, StateHandle)> = Vec::with_capacity(transitions.len());
+        let mut canon_transitions: Vec<(ByteRange, StateHandle)> =
+            Vec::with_capacity(transitions.len());
         for (range, child) in transitions {
             let target = self.minimize_trie(child, accept, memo, dedup);
             // Coalesce with the previous edge when it shares this target and its
@@ -124,8 +123,7 @@ impl Builder {
             // is the first point where it can happen. `checked_add` guards 0xFF.
             match canon_transitions.last_mut() {
                 Some((prev, prev_target))
-                    if *prev_target == target
-                        && prev.end.checked_add(1) == Some(range.start) =>
+                    if *prev_target == target && prev.end.checked_add(1) == Some(range.start) =>
                 {
                     prev.end = range.end;
                 }
@@ -466,7 +464,10 @@ mod tests {
         assert!(b.states[s_ax as usize].transitions.is_empty());
         // 'a' and 'b' lead to the same merged middle state, and are adjacent
         // bytes, so they coalesce into a single 'a'-'b' range edge.
-        assert_eq!(walk(&b.states, frag.start, b"a"), walk(&b.states, frag.start, b"b"));
+        assert_eq!(
+            walk(&b.states, frag.start, b"a"),
+            walk(&b.states, frag.start, b"b")
+        );
         assert_eq!(b.states[frag.start as usize].transitions.len(), 1);
         assert_eq!(frag.ends.len(), 1);
         assert_eq!(b.states.len(), 4);

@@ -1,9 +1,10 @@
 use codegen::Scope;
 use std::{fs::OpenOptions, io::Write};
 use ucd_parse::{
+    CaseFold, Codepoints, CoreProperty, DerivedNormalizationProperty, EmojiProperty, Property,
+    PropertyValueAlias, Script, ScriptExtension, UnicodeData,
     extracted::{DerivedBinaryProperties, DerivedGeneralCategory},
-    parse, CaseFold, Codepoints, CoreProperty, DerivedNormalizationProperty, EmojiProperty,
-    Property, PropertyValueAlias, Script, ScriptExtension, UnicodeData,
+    parse,
 };
 
 mod binary_properties;

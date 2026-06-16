@@ -5,11 +5,11 @@
 //! `next_byte_is_word_char`. TDFA currently bails on word-boundary
 //! patterns (see TODO in `close_priority`).
 
+use crate::Flags;
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::execute;
 use crate::automata::tdfa::Tdfa;
 use crate::automata::tdfa_backend::execute as tdfa_execute;
-use crate::Flags;
 
 fn build(pattern: &str, unicode: bool, icase: bool) -> Nfa {
     let flags = Flags {
@@ -17,8 +17,8 @@ fn build(pattern: &str, unicode: bool, icase: bool) -> Nfa {
         icase,
         ..Flags::default()
     };
-    let mut ire = crate::backends::try_parse(pattern.chars().map(u32::from), flags)
-        .expect("parse failed");
+    let mut ire =
+        crate::backends::try_parse(pattern.chars().map(u32::from), flags).expect("parse failed");
     crate::backends::optimize(&mut ire);
     Nfa::try_from(&ire).unwrap_or_else(|e| panic!("expected {pattern:?} to build, got {e:?}"))
 }

@@ -1,11 +1,11 @@
 //! TDFA construction and execution tests (Milestone 2).
 
+use crate::Flags;
 use crate::automata::nfa::Nfa;
-use crate::automata::nfa_backend::execute as execute_nfa_inner;
 use crate::automata::nfa_backend::NfaMatch;
+use crate::automata::nfa_backend::execute as execute_nfa_inner;
 use crate::automata::tdfa::Tdfa;
 use crate::automata::tdfa_backend::execute as execute_tdfa_inner;
-use crate::Flags;
 
 fn execute_nfa(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
     execute_nfa_inner(nfa, input, 0)
@@ -20,8 +20,8 @@ fn parse_ir(pattern: &str) -> crate::ir::Regex {
         unicode: true,
         ..Default::default()
     };
-    let mut re = crate::backends::try_parse(pattern.chars().map(u32::from), flags)
-        .expect("parse failed");
+    let mut re =
+        crate::backends::try_parse(pattern.chars().map(u32::from), flags).expect("parse failed");
     crate::optimizer::optimize(&mut re);
     re
 }
@@ -142,7 +142,8 @@ fn cross_check(pattern: &str, input: &[u8]) {
     let nfa_result = execute_nfa(&nfa, input);
     let tdfa_result = execute_tdfa(&tdfa, input);
     assert_eq!(
-        nfa_result, tdfa_result,
+        nfa_result,
+        tdfa_result,
         "mismatch on pattern {:?} input {:?}",
         pattern,
         std::str::from_utf8(input).unwrap_or("<binary>")

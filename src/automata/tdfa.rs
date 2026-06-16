@@ -191,10 +191,8 @@ pub fn canonicalize(cfg: TdfaState) -> (TdfaState, TagCommandList, HashMap<Input
     // emitted sequence is deterministic regardless of HashMap iteration
     // order — important for testability and for downstream Eq/Hash of
     // transition tables.
-    let mut pairs: Vec<(InputMark, InputMark)> = mapping
-        .iter()
-        .map(|(&raw, &canon)| (canon, raw))
-        .collect();
+    let mut pairs: Vec<(InputMark, InputMark)> =
+        mapping.iter().map(|(&raw, &canon)| (canon, raw)).collect();
     pairs.sort();
 
     // Skip no-op `canon := canon` copies — when `raw == canon` the value is
@@ -490,8 +488,10 @@ impl Build<'_> {
         self.anchor_alts.push(SmallVec::new());
         self.transitions
             .resize(self.transitions.len() + self.num_classes, TDFA_DEAD_STATE);
-        self.transition_commands
-            .resize(self.transition_commands.len() + self.num_classes, SmallVec::new());
+        self.transition_commands.resize(
+            self.transition_commands.len() + self.num_classes,
+            SmallVec::new(),
+        );
         self.state_map.insert(canon.clone(), id);
         self.worklist.push(canon);
         Ok((id, true))
@@ -506,14 +506,7 @@ impl Build<'_> {
         at_start_of_input: bool,
         multiline_start_fires: bool,
         wb_fires: &[(bool, bool)],
-    ) -> Result<
-        (
-            TdfaState,
-            TagCommandList,
-            SmallVec<[AnchorConditional; 1]>,
-        ),
-        Error,
-    > {
+    ) -> Result<(TdfaState, TagCommandList, SmallVec<[AnchorConditional; 1]>), Error> {
         let mut conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
         let (closure, current_cmds) = close_priority(
             self.alloc,
@@ -620,12 +613,8 @@ impl Build<'_> {
         cond: EpsCondition,
         id: TdfaStateId,
     ) -> Result<(), Error> {
-        let (canon_alt, _entry_alt, conds_alt) = self.closure_from_seeds(
-            seeds,
-            at_start_of_input,
-            multiline_start_fires,
-            wb_fires,
-        )?;
+        let (canon_alt, _entry_alt, conds_alt) =
+            self.closure_from_seeds(seeds, at_start_of_input, multiline_start_fires, wb_fires)?;
         if canon_alt == *canon {
             return Ok(());
         }
@@ -853,7 +842,9 @@ impl Tdfa {
 
         // State 0 = dead state (self-loops, not accepting). Represented as
         // the empty TdfaState so that an exhausted step() lands here.
-        build.state_map.insert(TdfaState::default(), TDFA_DEAD_STATE);
+        build
+            .state_map
+            .insert(TdfaState::default(), TDFA_DEAD_STATE);
         build.transitions.resize(num_classes, TDFA_DEAD_STATE);
         build
             .transition_commands

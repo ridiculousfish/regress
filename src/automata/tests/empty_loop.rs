@@ -5,11 +5,11 @@
 //! y.endIndex == x.endIndex, return failure" rule.
 //! See `build_loop_nullable`, `Node::can_match_empty`, rust-lang/regex#779.
 
+use crate::Flags;
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::execute;
 use crate::automata::tdfa::Tdfa;
 use crate::automata::tdfa_backend::execute as tdfa_execute;
-use crate::Flags;
 
 fn build(pattern: &str) -> Nfa {
     let mut ire = crate::backends::try_parse(pattern.chars().map(u32::from), Flags::default())

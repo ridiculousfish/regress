@@ -144,7 +144,10 @@ impl Nfa {
         result.push_str(&format!("    with tag writes: {}\n", eps_with_writes));
         result.push_str(&format!("    predicated:      {}\n", eps_predicated));
         result.push_str(&format!("  tags:              {}\n", self.num_tags()));
-        result.push_str(&format!("  capture tags:      {}\n", self.num_capture_tags()));
+        result.push_str(&format!(
+            "  capture tags:      {}\n",
+            self.num_capture_tags()
+        ));
         result
     }
 }

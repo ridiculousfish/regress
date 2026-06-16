@@ -1,7 +1,7 @@
 //! NFA tests
 
 use crate::automata::nfa::Nfa;
-use crate::automata::nfa_backend::{execute, NfaMatch};
+use crate::automata::nfa_backend::{NfaMatch, execute};
 
 /// Test wrapper: run anchored at byte 0 of `input`. Tests that pre-date
 /// the `start` parameter pass simple byte slices.
