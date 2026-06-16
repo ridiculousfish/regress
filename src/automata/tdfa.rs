@@ -265,147 +265,155 @@ fn close_priority(
     // sentinel-write and the gated check, i.e. the body matched empty).
     let closure_start_mark = alloc.count();
 
-    // DFS with an explicit stack: push in reverse so the first seed / first
-    // eps edge comes off the stack first, preserving source order in output.
-    // Mark `seen` at push time (not pop) so we don't mint duplicate marks for
-    // a child that will later be dropped by dedup — and so that lower-priority
-    // siblings correctly see "already reached" once a higher-priority path has
-    // claimed an NFA state.
+    // DFS with an explicit stack. Mark `seen` at push time (not pop) so we
+    // don't mint duplicate marks for a child that will later be dropped by
+    // dedup — and so that lower-priority siblings correctly see "already
+    // reached" once a higher-priority path has claimed an NFA state.
+    //
+    // Crucially, run each seed's closure to completion in priority order
+    // rather than pushing (and `seen`-marking) all seeds up front. A
+    // higher-priority seed's eps closure can reach a state that also appears
+    // as a *lower*-priority seed (e.g. an inner loop's exit edge landing on
+    // the next seed's NFA state). Processing seeds sequentially lets the
+    // higher-priority path claim that shared state — and propagate its tag
+    // map — before the lower-priority seed is even considered. Pre-marking
+    // all seeds would instead let the lower-priority seed keep the state,
+    // inverting capture priority for adjacent loops like `(a*)(a{1,2})`.
     let mut stack: Vec<TaggedNfaState> = Vec::new();
-    for seed in seeds.iter().rev() {
+    for seed in seeds {
         if seen[seed.state as usize] {
             continue;
         }
         seen[seed.state as usize] = true;
         stack.push(seed.clone());
-    }
-    while let Some(thread) = stack.pop() {
-        let parent_tag_map = thread.tag_map.clone();
-        let state = thread.state;
-        threads.push(thread);
-        let eps = &nfa.states[state as usize].eps;
-        for edge in eps.iter().rev() {
-            match &edge.cond {
-                EpsCondition::Always => {
-                    // Falls through to normal traversal below.
-                }
-                EpsCondition::StartOfLine { multiline: false } => {
-                    // Non-multiline `^` only fires at start of input. We
-                    // build two initial closures (anchored vs unanchored);
-                    // this flag distinguishes them.
-                    if !at_start_of_input {
+        while let Some(thread) = stack.pop() {
+            let parent_tag_map = thread.tag_map.clone();
+            let state = thread.state;
+            threads.push(thread);
+            let eps = &nfa.states[state as usize].eps;
+            for edge in eps.iter().rev() {
+                match &edge.cond {
+                    EpsCondition::Always => {
+                        // Falls through to normal traversal below.
+                    }
+                    EpsCondition::StartOfLine { multiline: false } => {
+                        // Non-multiline `^` only fires at start of input. We
+                        // build two initial closures (anchored vs unanchored);
+                        // this flag distinguishes them.
+                        if !at_start_of_input {
+                            continue;
+                        }
+                        // Fall through to normal traversal below.
+                    }
+                    EpsCondition::StartOfLine { multiline: true } => {
+                        // Multiline `^` fires at pos 0 or right after a line
+                        // terminator. `at_start_of_input` covers pos 0; the
+                        // `multiline_start_fires` flag is used by the alt
+                        // closure computed for `anchor_alt`, where the caller
+                        // asserts "assume ^ fired here."
+                        if !(at_start_of_input || multiline_start_fires) {
+                            continue;
+                        }
+                        // Fall through to normal traversal below.
+                    }
+                    EpsCondition::WordBoundary {
+                        invert,
+                        unicode_icase,
+                    } => {
+                        // Treat as firing only if the caller passed this exact
+                        // (invert, unicode_icase) tuple in `wb_fires`. The primary
+                        // closure passes none — alt closures (computed by
+                        // `compute_anchor_alt_for`) pass the specific tuple they
+                        // represent. Mirrors the multiline-^ scheme.
+                        if !wb_fires.contains(&(*invert, *unicode_icase)) {
+                            continue;
+                        }
+                        // Fall through to normal traversal below.
+                    }
+                    EpsCondition::ProgressSince(sentinel) => {
+                        // Runtime check `marks[sentinel] < current_pos` resolves
+                        // statically here as provenance: the sentinel's value at
+                        // the time of this check is whatever is in `parent_tag_map`.
+                        // If that mark was allocated within this same eps closure,
+                        // no input has been consumed since the write, so
+                        // `marks[sentinel] == current_pos` → predicate FAILS.
+                        // Otherwise (mark was inherited from a prior closure, or
+                        // the slot is empty) → predicate HOLDS.
+                        let sentinel_idx = *sentinel as usize;
+                        let written_in_this_closure = match parent_tag_map.get(sentinel_idx) {
+                            Some(Some(m)) => m.0 >= closure_start_mark,
+                            _ => false,
+                        };
+                        if written_in_this_closure {
+                            continue;
+                        }
+                        // Fall through to normal traversal.
+                    }
+                    EpsCondition::EndOfLine { .. } => {
+                        // Don't expand `$` into the determinized subset — record a
+                        // conditional accept hook instead. Mini-closure must
+                        // terminate at `GOAL_STATE` via only-eps; otherwise the
+                        // path can't be captured by a per-position accept and
+                        // we have to bail.
+                        let mut sub_tag_map = parent_tag_map.clone();
+                        let mut pre_cmds = TagCommandList::new();
+                        apply_eps_ops(&edge.ops, alloc, &mut sub_tag_map, &mut pre_cmds);
+                        let seed = TaggedNfaState {
+                            state: edge.target,
+                            tag_map: sub_tag_map,
+                        };
+                        let mut sub_conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
+                        let (sub_closure, sub_cmds) = close_priority(
+                            alloc,
+                            nfa,
+                            &[seed],
+                            num_tags,
+                            at_start_of_input,
+                            multiline_start_fires,
+                            wb_fires,
+                            &mut sub_conds,
+                        )?;
+                        let sub_closure = truncate_at_first_goal(sub_closure);
+                        // Bail iff the mini-closure could continue consuming
+                        // bytes — that means `$` is followed by more byte
+                        // matching, which the per-position accept hook can't
+                        // represent. Pure-eps relay states on the path to GOAL
+                        // (e.g. the synthetic `goal_start` build_goal creates
+                        // to write FULL_MATCH_END) have no byte transitions
+                        // and are harmless.
+                        let has_byte_continuation = sub_closure.0.iter().any(|t| {
+                            t.state != GOAL_STATE
+                                && !nfa.states[t.state as usize].transitions.is_empty()
+                        });
+                        if has_byte_continuation {
+                            return Err(Error::PredicatedEpsNotSupported);
+                        }
+                        if !sub_closure.0.iter().any(|t| t.state == GOAL_STATE) {
+                            continue; // Mini-closure didn't reach GOAL — no accept.
+                        }
+                        let mut all_cmds = TagCommandList::new();
+                        all_cmds.extend(pre_cmds);
+                        all_cmds.extend(sub_cmds);
+                        let finals = synthesize_finals(&sub_closure, num_tags);
+                        conditionals.push(AnchorConditional {
+                            cond: edge.cond.clone(),
+                            commands: all_cmds,
+                            finals,
+                        });
                         continue;
                     }
-                    // Fall through to normal traversal below.
                 }
-                EpsCondition::StartOfLine { multiline: true } => {
-                    // Multiline `^` fires at pos 0 or right after a line
-                    // terminator. `at_start_of_input` covers pos 0; the
-                    // `multiline_start_fires` flag is used by the alt
-                    // closure computed for `anchor_alt`, where the caller
-                    // asserts "assume ^ fired here."
-                    if !(at_start_of_input || multiline_start_fires) {
-                        continue;
-                    }
-                    // Fall through to normal traversal below.
-                }
-                EpsCondition::WordBoundary {
-                    invert,
-                    unicode_icase,
-                } => {
-                    // Treat as firing only if the caller passed this exact
-                    // (invert, unicode_icase) tuple in `wb_fires`. The primary
-                    // closure passes none — alt closures (computed by
-                    // `compute_anchor_alt_for`) pass the specific tuple they
-                    // represent. Mirrors the multiline-^ scheme.
-                    if !wb_fires.contains(&(*invert, *unicode_icase)) {
-                        continue;
-                    }
-                    // Fall through to normal traversal below.
-                }
-                EpsCondition::ProgressSince(sentinel) => {
-                    // Runtime check `marks[sentinel] < current_pos` resolves
-                    // statically here as provenance: the sentinel's value at
-                    // the time of this check is whatever is in `parent_tag_map`.
-                    // If that mark was allocated within this same eps closure,
-                    // no input has been consumed since the write, so
-                    // `marks[sentinel] == current_pos` → predicate FAILS.
-                    // Otherwise (mark was inherited from a prior closure, or
-                    // the slot is empty) → predicate HOLDS.
-                    let sentinel_idx = *sentinel as usize;
-                    let written_in_this_closure = match parent_tag_map.get(sentinel_idx) {
-                        Some(Some(m)) => m.0 >= closure_start_mark,
-                        _ => false,
-                    };
-                    if written_in_this_closure {
-                        continue;
-                    }
-                    // Fall through to normal traversal.
-                }
-                EpsCondition::EndOfLine { .. } => {
-                    // Don't expand `$` into the determinized subset — record a
-                    // conditional accept hook instead. Mini-closure must
-                    // terminate at `GOAL_STATE` via only-eps; otherwise the
-                    // path can't be captured by a per-position accept and
-                    // we have to bail.
-                    let mut sub_tag_map = parent_tag_map.clone();
-                    let mut pre_cmds = TagCommandList::new();
-                    apply_eps_ops(&edge.ops, alloc, &mut sub_tag_map, &mut pre_cmds);
-                    let seed = TaggedNfaState {
-                        state: edge.target,
-                        tag_map: sub_tag_map,
-                    };
-                    let mut sub_conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
-                    let (sub_closure, sub_cmds) = close_priority(
-                        alloc,
-                        nfa,
-                        &[seed],
-                        num_tags,
-                        at_start_of_input,
-                        multiline_start_fires,
-                        wb_fires,
-                        &mut sub_conds,
-                    )?;
-                    let sub_closure = truncate_at_first_goal(sub_closure);
-                    // Bail iff the mini-closure could continue consuming
-                    // bytes — that means `$` is followed by more byte
-                    // matching, which the per-position accept hook can't
-                    // represent. Pure-eps relay states on the path to GOAL
-                    // (e.g. the synthetic `goal_start` build_goal creates
-                    // to write FULL_MATCH_END) have no byte transitions
-                    // and are harmless.
-                    let has_byte_continuation = sub_closure.0.iter().any(|t| {
-                        t.state != GOAL_STATE
-                            && !nfa.states[t.state as usize].transitions.is_empty()
-                    });
-                    if has_byte_continuation {
-                        return Err(Error::PredicatedEpsNotSupported);
-                    }
-                    if !sub_closure.0.iter().any(|t| t.state == GOAL_STATE) {
-                        continue; // Mini-closure didn't reach GOAL — no accept.
-                    }
-                    let mut all_cmds = TagCommandList::new();
-                    all_cmds.extend(pre_cmds);
-                    all_cmds.extend(sub_cmds);
-                    let finals = synthesize_finals(&sub_closure, num_tags);
-                    conditionals.push(AnchorConditional {
-                        cond: edge.cond.clone(),
-                        commands: all_cmds,
-                        finals,
-                    });
+                if seen[edge.target as usize] {
                     continue;
                 }
+                seen[edge.target as usize] = true;
+                let mut child_tag_map = parent_tag_map.clone();
+                apply_eps_ops(&edge.ops, alloc, &mut child_tag_map, &mut commands);
+                stack.push(TaggedNfaState {
+                    state: edge.target,
+                    tag_map: child_tag_map,
+                });
             }
-            if seen[edge.target as usize] {
-                continue;
-            }
-            seen[edge.target as usize] = true;
-            let mut child_tag_map = parent_tag_map.clone();
-            apply_eps_ops(&edge.ops, alloc, &mut child_tag_map, &mut commands);
-            stack.push(TaggedNfaState {
-                state: edge.target,
-                tag_map: child_tag_map,
-            });
         }
     }
 
