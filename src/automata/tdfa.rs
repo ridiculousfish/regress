@@ -265,28 +265,34 @@ fn close_priority(
     // sentinel-write and the gated check, i.e. the body matched empty).
     let closure_start_mark = alloc.count();
 
-    // DFS with an explicit stack. Mark `seen` at push time (not pop) so we
-    // don't mint duplicate marks for a child that will later be dropped by
-    // dedup — and so that lower-priority siblings correctly see "already
-    // reached" once a higher-priority path has claimed an NFA state.
+    // Priority-ordered DFS with an explicit stack. `seen` is marked when a
+    // state is *popped* (visited), not when pushed — this is the standard
+    // iterative pre-order. Children are pushed in reverse, so the highest-
+    // priority sibling (and its whole subtree) is drained before any lower-
+    // priority sibling; the first pop of a state is therefore via the
+    // highest-priority path that reaches it, and it claims the state (and its
+    // tag map). Later, lower-priority arrivals pop and are skipped.
     //
-    // Crucially, run each seed's closure to completion in priority order
-    // rather than pushing (and `seen`-marking) all seeds up front. A
-    // higher-priority seed's eps closure can reach a state that also appears
-    // as a *lower*-priority seed (e.g. an inner loop's exit edge landing on
-    // the next seed's NFA state). Processing seeds sequentially lets the
-    // higher-priority path claim that shared state — and propagate its tag
-    // map — before the lower-priority seed is even considered. Pre-marking
-    // all seeds would instead let the lower-priority seed keep the state,
-    // inverting capture priority for adjacent loops like `(a*)(a{1,2})`.
+    // Marking at pop (rather than push) matters when a state is reachable
+    // both by a high-priority *descendant* of one sibling and by a lower-
+    // priority sibling directly. Pushing marks every child up front, so a
+    // lower-priority sibling — pushed before the earlier sibling's subtree is
+    // expanded — would claim the state and the higher-priority continuation
+    // would be dropped. That happens for a greedy loop over a non-greedy
+    // nullable body like `(a*?)*`, where the "keep iterating" continuation
+    // must outrank the loop-exit edge to GOAL.
+    //
+    // Seeds are drained one at a time, in priority order, so a higher-
+    // priority seed's closure claims any shared state before a later seed is
+    // considered — needed for adjacent loops like `(a*)(a{1,2})`.
     let mut stack: Vec<TaggedNfaState> = Vec::new();
     for seed in seeds {
-        if seen[seed.state as usize] {
-            continue;
-        }
-        seen[seed.state as usize] = true;
         stack.push(seed.clone());
         while let Some(thread) = stack.pop() {
+            if seen[thread.state as usize] {
+                continue;
+            }
+            seen[thread.state as usize] = true;
             let parent_tag_map = thread.tag_map.clone();
             let state = thread.state;
             threads.push(thread);
@@ -403,10 +409,13 @@ fn close_priority(
                         continue;
                     }
                 }
+                // Early-out for states already claimed (popped). Not-yet-
+                // popped duplicates are allowed onto the stack; the pop-time
+                // `seen` check keeps the first (highest-priority) one and
+                // drops the rest.
                 if seen[edge.target as usize] {
                     continue;
                 }
-                seen[edge.target as usize] = true;
                 let mut child_tag_map = parent_tag_map.clone();
                 apply_eps_ops(&edge.ops, alloc, &mut child_tag_map, &mut commands);
                 stack.push(TaggedNfaState {
