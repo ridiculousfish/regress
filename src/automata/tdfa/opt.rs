@@ -9,12 +9,156 @@
 //! `compact_marks` (the register cleanup: copy fold + dead-mark elimination +
 //! dense renumbering).
 
-use super::{FinalCommand, InputMark, MarkValue, TagCommand, TagCommandList, Tdfa};
-use std::collections::{HashMap, HashSet};
+use super::{FinalCommand, InputMark, MarkValue, TDFA_DEAD_STATE, TagCommand, TagCommandList, Tdfa};
+use smallvec::SmallVec;
+use std::collections::HashMap;
+use std::collections::HashSet;
 
-/// Run every optimization pass, in order, on `t`.
+/// Run every optimization pass, in order, on `t`. `compact_marks` runs first:
+/// folding and dead-mark elimination empty the tag-free transition commands, so
+/// equivalent states become byte-identical and `minimize` can merge them.
 pub(crate) fn optimize(t: &mut Tdfa) {
     compact_marks(t);
+    minimize(t);
+}
+
+/// Exact-equality state minimization (Moore partition refinement). Merges
+/// states that are byte-for-byte interchangeable: same `accepting`/`finals`,
+/// and for every byte class the same target block **and identical transition
+/// commands**. Because the commands must match exactly (same marks), this is
+/// sound without any register renaming — it mainly merges tag-free regions
+/// (e.g. the four equivalent "expecting b" states of `ab|cb|db|eb`).
+///
+/// States carrying anchor conditionals/alts (`$`, multiline `^`, `\b`) are
+/// pinned to their own block (those structures aren't compared here); they're
+/// rare.
+pub(crate) fn minimize(t: &mut Tdfa) {
+    let n = t.accepting.len();
+    let k = t.num_classes;
+    if n <= 1 {
+        return;
+    }
+
+    // Intern transition command lists to small ids (exact equality).
+    let mut cmd_intern: HashMap<Vec<TagCommand>, u32> = HashMap::new();
+    let mut cmd_id = vec![0u32; n * k];
+    for (idx, slot) in cmd_id.iter_mut().enumerate() {
+        let key: Vec<TagCommand> = t.transition_commands[idx].to_vec();
+        let next = cmd_intern.len() as u32;
+        *slot = *cmd_intern.entry(key).or_insert(next);
+    }
+
+    // Initial partition by output: accepting + finals, with anchor states pinned.
+    let mut block = vec![0u32; n];
+    let mut num_blocks: u32 = 0;
+    {
+        let mut out_intern: HashMap<(bool, Vec<FinalCommand>), u32> = HashMap::new();
+        for s in 0..n {
+            let pinned = !t.anchor_conditionals[s].is_empty() || !t.anchor_alts[s].is_empty();
+            block[s] = if pinned {
+                let b = num_blocks;
+                num_blocks += 1;
+                b
+            } else {
+                let key = (t.accepting[s], t.finals[s].to_vec());
+                match out_intern.get(&key) {
+                    Some(&b) => b,
+                    None => {
+                        let b = num_blocks;
+                        num_blocks += 1;
+                        out_intern.insert(key, b);
+                        b
+                    }
+                }
+            };
+        }
+    }
+
+    // Refine until the partition stops splitting. The signature is the current
+    // block plus, per class, the target's block and the command id.
+    loop {
+        let mut sig_intern: HashMap<(u32, Vec<(u32, u32)>), u32> = HashMap::new();
+        let mut next = vec![0u32; n];
+        let mut next_blocks: u32 = 0;
+        for s in 0..n {
+            let sig: Vec<(u32, u32)> = (0..k)
+                .map(|c| {
+                    let idx = s * k + c;
+                    (block[t.transitions[idx] as usize], cmd_id[idx])
+                })
+                .collect();
+            let key = (block[s], sig);
+            next[s] = match sig_intern.get(&key) {
+                Some(&b) => b,
+                None => {
+                    let b = next_blocks;
+                    next_blocks += 1;
+                    sig_intern.insert(key, b);
+                    b
+                }
+            };
+        }
+        block = next;
+        if next_blocks == num_blocks {
+            break;
+        }
+        num_blocks = next_blocks;
+    }
+
+    // Assign dense new ids by first appearance (so the dead state, id 0, stays
+    // id 0), recording one representative old state per block.
+    let mut block_to_new: HashMap<u32, u32> = HashMap::new();
+    let mut old_to_new = vec![0u32; n];
+    let mut rep: Vec<usize> = Vec::new();
+    for s in 0..n {
+        let nid = match block_to_new.get(&block[s]) {
+            Some(&id) => id,
+            None => {
+                let id = rep.len() as u32;
+                block_to_new.insert(block[s], id);
+                rep.push(s);
+                id
+            }
+        };
+        old_to_new[s] = nid;
+    }
+
+    let nn = rep.len();
+    if nn == n {
+        return; // nothing merged
+    }
+
+    // Rebuild the per-state arrays from each block's representative, remapping
+    // transition targets and anchor-alt targets to the new ids.
+    let mut accepting = vec![false; nn];
+    let mut finals: Vec<SmallVec<[FinalCommand; 4]>> = vec![SmallVec::new(); nn];
+    let mut conds = vec![SmallVec::new(); nn];
+    let mut alts = vec![SmallVec::new(); nn];
+    let mut transitions = vec![TDFA_DEAD_STATE; nn * k];
+    let mut transition_commands: Vec<TagCommandList> = vec![SmallVec::new(); nn * k];
+    for (nid, &r) in rep.iter().enumerate() {
+        accepting[nid] = t.accepting[r];
+        finals[nid] = t.finals[r].clone();
+        conds[nid] = t.anchor_conditionals[r].clone();
+        let mut a = t.anchor_alts[r].clone();
+        for alt in a.iter_mut() {
+            alt.alt = old_to_new[alt.alt as usize];
+        }
+        alts[nid] = a;
+        for c in 0..k {
+            transitions[nid * k + c] = old_to_new[t.transitions[r * k + c] as usize];
+            transition_commands[nid * k + c] = t.transition_commands[r * k + c].clone();
+        }
+    }
+
+    t.accepting = accepting.into_boxed_slice();
+    t.finals = finals.into_boxed_slice();
+    t.anchor_conditionals = conds.into_boxed_slice();
+    t.anchor_alts = alts.into_boxed_slice();
+    t.transitions = transitions.into_boxed_slice();
+    t.transition_commands = transition_commands.into_boxed_slice();
+    t.start_anchored = old_to_new[t.start_anchored as usize];
+    t.start_unanchored = old_to_new[t.start_unanchored as usize];
 }
 
 /// Cheap register cleanup: copy folding + dead-mark elimination + dense

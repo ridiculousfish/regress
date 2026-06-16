@@ -264,3 +264,56 @@ fn optimize_preserves_matches_and_shrinks() {
         }
     }
 }
+
+#[test]
+fn minimize_shrinks_and_preserves_matches() {
+    // Tag-free patterns with equivalent intermediate states must shrink.
+    for pat in ["ab|cb|db|eb", "a[bc]d|e[bc]d"] {
+        let nfa = Nfa::try_from(&parse_ir(pat)).expect("nfa");
+        let raw = Tdfa::try_from(&nfa).expect("tdfa");
+        let mut opt = raw.clone();
+        opt.optimize();
+        assert!(
+            opt.num_states() < raw.num_states(),
+            "{pat}: expected fewer states, {} -> {}",
+            raw.num_states(),
+            opt.num_states(),
+        );
+    }
+
+    // Brute-force differential: the optimized automaton must agree with the raw
+    // one on every short string (mix of tag-free and capture-bearing patterns).
+    let pats = [
+        "ab|cb|db|eb",
+        "a[bc]d|e[bc]d",
+        "(a)(b)*",
+        "(?:([^,]*),?)*",
+        "foo|bar|baz",
+        "(a*?)*",
+        "x(yz|yw)+",
+        "(a|b)*c",
+    ];
+    let alpha = b"abcdefxyz,";
+    let base = alpha.len() as u64;
+    for pat in pats {
+        let nfa = Nfa::try_from(&parse_ir(pat)).expect("nfa");
+        let raw = Tdfa::try_from(&nfa).expect("tdfa");
+        let mut opt = raw.clone();
+        opt.optimize();
+        for len in 0..=4u32 {
+            for mut code in 0..base.pow(len) {
+                let mut s = Vec::with_capacity(len as usize);
+                for _ in 0..len {
+                    s.push(alpha[(code % base) as usize]);
+                    code /= base;
+                }
+                assert_eq!(
+                    execute_tdfa(&raw, &s),
+                    execute_tdfa(&opt, &s),
+                    "pattern {pat:?} input {:?}: optimization changed the match",
+                    String::from_utf8_lossy(&s),
+                );
+            }
+        }
+    }
+}
