@@ -916,7 +916,7 @@ pub mod backends {
     #[cfg(feature = "nfa")]
     pub use crate::automata::nfa::{Error as NfaError, Nfa};
     #[cfg(feature = "nfa")]
-    pub use crate::automata::tdfa::Tdfa;
+    pub use crate::automata::tdfa::{Tdfa, TdfaStats};
     pub use crate::emit::emit;
     pub use crate::insn::CompiledRegex;
     pub use crate::optimizer::optimize;

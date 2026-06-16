@@ -835,6 +835,21 @@ pub struct AnchorAlt {
     pub commands: TagCommandList,
 }
 
+/// Static size metrics for a built `Tdfa`. Captures the cost of the current
+/// (naive) mark allocation so future register-allocation work can be measured
+/// against a recorded baseline. Command counts cover every list the executor
+/// can run: per-transition commands, both entry-command lists, and per-state
+/// anchor-conditional and anchor-alt commands.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TdfaStats {
+    pub num_states: usize,
+    /// Size of the executor's mark file (the per-search `marks` Vec).
+    pub num_marks: usize,
+    pub total_commands: usize,
+    pub copy_commands: usize,
+    pub currentpos_commands: usize,
+}
+
 impl Tdfa {
     pub fn try_from(nfa: &Nfa) -> Result<Self, Error> {
         let (byte_to_class, num_classes) = compute_byte_classes(nfa);
@@ -972,6 +987,44 @@ impl Tdfa {
 
     pub fn num_marks(&self) -> usize {
         self.num_marks
+    }
+
+    /// Compute static size metrics (see `TdfaStats`).
+    pub fn stats(&self) -> TdfaStats {
+        let mut total = 0usize;
+        let mut copy = 0usize;
+        let mut cur = 0usize;
+        let mut tally = |cmds: &[TagCommand]| {
+            for c in cmds {
+                total += 1;
+                match c.src {
+                    MarkValue::CurrentPos => cur += 1,
+                    MarkValue::Copy(_) => copy += 1,
+                }
+            }
+        };
+        tally(&self.entry_commands_anchored);
+        tally(&self.entry_commands_unanchored);
+        for cmds in self.transition_commands.iter() {
+            tally(cmds);
+        }
+        for conds in self.anchor_conditionals.iter() {
+            for ac in conds {
+                tally(&ac.commands);
+            }
+        }
+        for alts in self.anchor_alts.iter() {
+            for alt in alts {
+                tally(&alt.commands);
+            }
+        }
+        TdfaStats {
+            num_states: self.num_states(),
+            num_marks: self.num_marks,
+            total_commands: total,
+            copy_commands: copy,
+            currentpos_commands: cur,
+        }
     }
 
     pub fn transition_commands(&self) -> &[TagCommandList] {
