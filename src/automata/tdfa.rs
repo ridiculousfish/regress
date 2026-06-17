@@ -913,6 +913,12 @@ pub struct Tdfa {
     // `maybe_switch_anchor_alt` call when there are none. Recomputed after
     // `optimize`, which can remove states.
     has_anchor_alts: bool,
+
+    // Whether any state carries a `$`-style accept conditional. Precomputed
+    // (like `has_anchor_alts`) so the executor's dispatcher can drop the
+    // per-byte `record_conditionals` call when there are none. Recomputed
+    // after `optimize`.
+    has_conditionals: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1050,6 +1056,7 @@ impl Tdfa {
             transition_commands: build.transition_commands.into_boxed_slice(),
             transition_shuffles: Box::default(),
             finals: build.finals.into_boxed_slice(),
+            has_conditionals: build.anchor_conditionals.iter().any(|cs| !cs.is_empty()),
             anchor_conditionals: build.anchor_conditionals.into_boxed_slice(),
             has_anchor_alts: build.anchor_alts.iter().any(|alts| !alts.is_empty()),
             anchor_alts: build.anchor_alts.into_boxed_slice(),
@@ -1103,8 +1110,9 @@ impl Tdfa {
         // precompiled gather vectors must be rebuilt from the new state.
         self.compile_shuffles();
         // State minimization can remove anchor-alt-bearing states, so refresh
-        // the precomputed flag the executor's dispatcher reads.
+        // the precomputed flags the executor's dispatcher reads.
         self.has_anchor_alts = self.anchor_alts.iter().any(|alts| !alts.is_empty());
+        self.has_conditionals = self.anchor_conditionals.iter().any(|cs| !cs.is_empty());
     }
 
     /// `$`-style accept conditionals for `state`. Empty for most states.
@@ -1124,6 +1132,12 @@ impl Tdfa {
     /// executor's choice of monomorphization (see `TdfaExecConfig`).
     pub(crate) fn has_anchor_alts(&self) -> bool {
         self.has_anchor_alts
+    }
+
+    /// Whether any state carries a `$`-style accept conditional. Drives the
+    /// executor's choice of monomorphization (see `TdfaExecConfig`).
+    pub(crate) fn has_conditionals(&self) -> bool {
+        self.has_conditionals
     }
 
     pub fn num_tags(&self) -> usize {

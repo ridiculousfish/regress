@@ -90,14 +90,18 @@ pub(crate) trait TdfaExecConfig {
     /// Some state carries a forward-branching anchor alt. When false, the
     /// per-byte + entry `maybe_switch_anchor_alt` calls are not emitted.
     const HAS_ANCHOR_ALTS: bool;
+    /// Some state carries a `$`-style accept conditional. When false, the
+    /// entry + per-byte + EOI `record_conditionals` calls are not emitted.
+    const HAS_CONDITIONALS: bool;
 }
 
 /// Config marker parameterized directly on its flag bits, so adding a flag is a
 /// new `const` param rather than a new named type per combination.
-pub(crate) struct ExecConfig<const HAS_ANCHOR_ALTS: bool>;
+pub(crate) struct ExecConfig<const HAS_ANCHOR_ALTS: bool, const HAS_CONDITIONALS: bool>;
 
-impl<const A: bool> TdfaExecConfig for ExecConfig<A> {
+impl<const A: bool, const C: bool> TdfaExecConfig for ExecConfig<A, C> {
     const HAS_ANCHOR_ALTS: bool = A;
+    const HAS_CONDITIONALS: bool = C;
 }
 
 /// A recorded accept candidate: `(match end, finalization commands, match
@@ -160,10 +164,17 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     // `u32` marks can only address offsets `< u32::MAX` (reserving that value as
     // the `NO_MATCH` sentinel). For larger haystacks fall back to `usize`.
     let has_anchor_alts = tdfa.has_anchor_alts();
+    let has_conditionals = tdfa.has_conditionals();
     if input.len() >= u32::MAX as usize {
-        return dispatch!(usize; HAS_ANCHOR_ALTS = has_anchor_alts);
+        return dispatch!(usize;
+            HAS_ANCHOR_ALTS = has_anchor_alts,
+            HAS_CONDITIONALS = has_conditionals,
+        );
     }
-    dispatch!(u32; HAS_ANCHOR_ALTS = has_anchor_alts)
+    dispatch!(u32;
+        HAS_ANCHOR_ALTS = has_anchor_alts,
+        HAS_CONDITIONALS = has_conditionals,
+    )
 }
 
 /// Apply a `TagCommandList` to a mark file in place (scalar, two-phase). Used
@@ -240,16 +251,18 @@ fn execute_generic<P: Permute<T>, T: MarkElem, C: TdfaExecConfig>(
             &tdfa.finals()[state as usize],
         );
     }
-    record_conditionals::<T>(
-        tdfa,
-        state,
-        input,
-        start,
-        &src_buf,
-        &mut cond_buf,
-        &mut last_accept,
-        &mut best_snap,
-    );
+    if C::HAS_CONDITIONALS {
+        record_conditionals::<T>(
+            tdfa,
+            state,
+            input,
+            start,
+            &src_buf,
+            &mut cond_buf,
+            &mut last_accept,
+            &mut best_snap,
+        );
+    }
 
     let byte_to_class = tdfa.byte_to_class();
     let transitions = tdfa.transitions();
@@ -305,32 +318,36 @@ fn execute_generic<P: Permute<T>, T: MarkElem, C: TdfaExecConfig>(
                 &tdfa.finals()[state as usize],
             );
         }
-        record_conditionals::<T>(
-            tdfa,
-            state,
-            input,
-            pos + 1,
-            &src_buf,
-            &mut cond_buf,
-            &mut last_accept,
-            &mut best_snap,
-        );
+        if C::HAS_CONDITIONALS {
+            record_conditionals::<T>(
+                tdfa,
+                state,
+                input,
+                pos + 1,
+                &src_buf,
+                &mut cond_buf,
+                &mut last_accept,
+                &mut best_snap,
+            );
+        }
     }
 
     // EOI pass — `$` non-multiline naturally fires here; multiline `$` fires
     // here too if the previous-byte side of the predicate is satisfied. We use
     // `live_position` (not `input.len()`) so a state abandoned mid-input doesn't
     // falsely accept just because `pos == input.len()` satisfies `$`.
-    record_conditionals::<T>(
-        tdfa,
-        state,
-        input,
-        live_position,
-        &src_buf,
-        &mut cond_buf,
-        &mut last_accept,
-        &mut best_snap,
-    );
+    if C::HAS_CONDITIONALS {
+        record_conditionals::<T>(
+            tdfa,
+            state,
+            input,
+            live_position,
+            &src_buf,
+            &mut cond_buf,
+            &mut last_accept,
+            &mut best_snap,
+        );
+    }
 
     last_accept.map(|(end, finals, _)| finalize::<T>(finals, &best_snap, end, num_tags))
 }
