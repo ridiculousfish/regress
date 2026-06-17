@@ -180,9 +180,11 @@ mod exec;
 mod indexing;
 mod insn;
 mod ir;
-// UTF-16 never matches against bytes, so the byte-oriented literal lowering is
-// UTF-8 only. See `emit_code_point_sequence` for the UTF-16 path.
-#[cfg(not(feature = "utf16"))]
+// UTF-16 never matches against bytes, so the main engine's byte-oriented literal
+// lowering is UTF-8 only (see `emit_code_point_sequence` for the UTF-16 path).
+// The `nfa` automata backend is always byte-oriented, though, so it needs this
+// module regardless of `utf16`.
+#[cfg(any(not(feature = "utf16"), feature = "nfa"))]
 mod literal;
 mod matchers;
 mod optimizer;
