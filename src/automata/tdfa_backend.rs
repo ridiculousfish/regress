@@ -254,13 +254,13 @@ fn execute_generic<P: Permute<T>, T: MarkElem, C: TdfaExecConfig>(
     if C::HAS_ANCHOR_ALTS {
         maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut src_buf, input, start);
     }
-    if tdfa.accepting()[state as usize] {
+    if *tdfa.accepting().iat(state as usize) {
         consider_accept(
             &mut last_accept,
             &mut best_snap,
             start,
             &src_buf,
-            &tdfa.finals()[state as usize],
+            tdfa.finals().iat(state as usize),
         );
     }
     if C::HAS_CONDITIONALS {
@@ -295,9 +295,9 @@ fn execute_generic<P: Permute<T>, T: MarkElem, C: TdfaExecConfig>(
 
     for (i, &byte) in input[start..].iter().enumerate() {
         let pos = start + i;
-        let class = byte_to_class[byte as usize] as usize;
+        let class = *byte_to_class.iat(byte as usize) as usize;
         let idx = state as usize * num_classes + class;
-        let next = transitions[idx];
+        let next = *transitions.iat(idx);
         if next == TDFA_DEAD_STATE {
             break;
         }
@@ -306,14 +306,14 @@ fn execute_generic<P: Permute<T>, T: MarkElem, C: TdfaExecConfig>(
         // case — so we skip the gather + swap). Without, interpret the commands
         // in place.
         if use_gather {
-            let shuf = &trans_shuffles[idx];
+            let shuf = trans_shuffles.iat(idx);
             if !shuf.is_empty() {
-                src_buf[curpos_lane] = T::from_pos(pos + 1);
+                *src_buf.mat(curpos_lane) = T::from_pos(pos + 1);
                 P::apply(&src_buf, shuf, &mut dst_buf);
                 core::mem::swap(&mut src_buf, &mut dst_buf);
             }
         } else {
-            apply_cmds_scalar::<T>(&mut src_buf, &trans_cmds[idx], T::from_pos(pos + 1));
+            apply_cmds_scalar::<T>(&mut src_buf, trans_cmds.iat(idx), T::from_pos(pos + 1));
         }
         state = next;
         live_position = pos + 1;
@@ -321,13 +321,13 @@ fn execute_generic<P: Permute<T>, T: MarkElem, C: TdfaExecConfig>(
         if C::HAS_ANCHOR_ALTS {
             maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut src_buf, input, pos + 1);
         }
-        if accepting[state as usize] {
+        if *accepting.iat(state as usize) {
             consider_accept(
                 &mut last_accept,
                 &mut best_snap,
                 pos + 1,
                 &src_buf,
-                &tdfa.finals()[state as usize],
+                tdfa.finals().iat(state as usize),
             );
         }
         if C::HAS_CONDITIONALS {
