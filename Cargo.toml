@@ -48,3 +48,7 @@ smallvec = { version = "1.13", optional = true }
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["small_rng"] }
+# Local clone used only by the backend_bench example as a reference engine;
+# dev-only, so it doesn't affect regress's published deps. Path points outside
+# the repo so the clone's own cargo workspace doesn't collide with regress's.
+regex = { path = "../regress-vendor-regex" }

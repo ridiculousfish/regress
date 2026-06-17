@@ -1,15 +1,22 @@
 //! Cross-backend matching-throughput benchmark.
 //!
-//! Runs the same stress suite through all four backends — classical
-//! backtracking, PikeVM, the Thompson NFA simulation, and the tagged DFA —
-//! and reports MB/s for each, so they can be compared directly. Also checks
-//! that every available backend agrees on the match count (a cheap sanity
-//! guard); a mismatch is flagged with `!`.
+//! Runs the same stress suite through all four regress backends — classical
+//! backtracking, PikeVM, the Thompson NFA simulation, and the tagged DFA — plus
+//! the upstream `regex` crate as a reference column, and reports MB/s for each.
 //!
-//! All backends are built from the same *unoptimized* IR (the bytecode
-//! optimizer isn't applied — PikeVM doesn't support its `Loop1CharBody`
-//! form), and the non-ASCII `find` path is used for all four, so this is an
-//! apples-to-apples comparison rather than each backend's absolute best.
+//! Every column extracts capture groups, so the comparison is apples-to-apples:
+//! the regress backends iterate `find` (which produces full `Match`es with
+//! captures), and the `regex` column uses `captures_iter` (not `find_iter`,
+//! which would skip capture extraction and overstate `regex` by ~10x).
+//!
+//! The four regress backends are built from the same *unoptimized* IR (the
+//! bytecode optimizer isn't applied — PikeVM doesn't support its `Loop1CharBody`
+//! form) via the non-ASCII `find` path (apples-to-apples within regress); the
+//! TDFA is `optimize()`d. The `regex` column is the upstream crate in its
+//! default configuration, shown as a reference; its match semantics differ, so
+//! its count isn't cross-checked.
+//!
+//! `regex` is a dev-dependency pointing at a local clone outside the repo.
 //!
 //! Run with: `cargo run --release --example backend_bench`
 
@@ -71,10 +78,10 @@ fn main() {
 
     println!("throughput (MB/s), higher is better:\n");
     println!(
-        "{:<10} {:>12} {:>12} {:>12} {:>12}",
-        "case", "backtrack", "pikevm", "nfa", "tdfa"
+        "{:<10} {:>11} {:>11} {:>11} {:>11} {:>11}",
+        "case", "backtrack", "pikevm", "nfa", "tdfa", "regex"
     );
-    println!("{}", "-".repeat(62));
+    println!("{}", "-".repeat(70));
 
     for &(name, pattern, input) in suite {
         let flags = regress::Flags::from("");
@@ -87,9 +94,16 @@ fn main() {
         };
         let cr: CompiledRegex = backends::emit(&ire);
         let nfa = Nfa::try_from(&ire).ok();
-        let tdfa = nfa.as_ref().and_then(|n| Tdfa::try_from(n).ok());
+        let tdfa = nfa.as_ref().and_then(|n| Tdfa::try_from(n).ok()).map(|mut t| {
+            t.optimize();
+            t
+        });
+        // The upstream `regex` crate rejects some empty-repeat patterns; if so,
+        // its column is just "-". Its count isn't cross-checked (different
+        // match semantics).
+        let rx = regex::Regex::new(pattern).ok();
 
-        // Sanity: every available backend should report the same match count.
+        // Sanity: every regress backend should report the same match count.
         let bt_count = backends::find::<BacktrackExecutor>(&cr, input, 0).count();
         let mut agree = true;
         let mut check = |c: usize| {
@@ -119,14 +133,27 @@ fn main() {
                 backends::find::<TdfaExecutor>(t, input, 0).count()
             })
         });
+        let rx_mbps = rx.as_ref().map(|r| {
+            throughput(input.len(), || {
+                // Extract capture groups, matching the regress backends: their
+                // `find` produces full `Match`es with captures, so `captures_iter`
+                // (not `find_iter`) is the apples-to-apples comparison.
+                let mut groups = 0usize;
+                for caps in r.captures_iter(input) {
+                    groups += caps.len();
+                }
+                groups
+            })
+        });
 
         println!(
-            "{:<10} {:>12} {:>12} {:>12} {:>12}{}",
+            "{:<10} {:>11} {:>11} {:>11} {:>11} {:>11}{}",
             name,
             cell(Some(bt)),
             cell(Some(pike)),
             cell(nfa_mbps),
             cell(tdfa_mbps),
+            cell(rx_mbps),
             if agree { "" } else { "   ! counts disagree" },
         );
     }
