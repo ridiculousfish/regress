@@ -168,12 +168,12 @@ fn execute_generic<P: Permute<T>, T: MarkElem>(
     // Double buffer: a gather reads `src_buf` and writes `dst_buf`, then they
     // swap. The `clear` lane stays `NO_MATCH` (identity preserves it). Both
     // allocated once per scan — not per transition.
-    let mut src_buf = vec![T::NO_MATCH; width];
-    let mut dst_buf = vec![T::NO_MATCH; width];
+    let mut src_buf = vec![T::NO_MATCH; width].into_boxed_slice();
+    let mut dst_buf = vec![T::NO_MATCH; width].into_boxed_slice();
     // Reused snapshot of the winning accept's marks (copied in on replace only).
-    let mut best_snap = vec![T::NO_MATCH; width];
+    let mut best_snap = vec![T::NO_MATCH; width].into_boxed_slice();
     // Scratch for applying a `$`-conditional's commands before snapshotting.
-    let mut cond_buf = vec![T::NO_MATCH; width];
+    let mut cond_buf = vec![T::NO_MATCH; width].into_boxed_slice();
 
     apply_cmds_scalar::<T>(&mut src_buf, tdfa.entry_commands(start), T::from_pos(start));
 
