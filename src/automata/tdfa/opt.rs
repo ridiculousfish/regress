@@ -9,7 +9,10 @@
 //! `compact_marks` (the register cleanup: copy fold + dead-mark elimination +
 //! dense renumbering).
 
-use super::{FinalCommand, InputMark, MarkValue, TDFA_DEAD_STATE, TagCommand, TagCommandList, Tdfa};
+use super::{
+    FinalCommand, InputMark, MAX_SHUFFLE_MARKS, MarkValue, TDFA_DEAD_STATE, TagCommand,
+    TagCommandList, Tdfa,
+};
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -169,7 +172,21 @@ pub(crate) fn compact_marks(t: &mut Tdfa) {
     fold_currentpos_copies(t);
     eliminate_dead_marks(t);
     renumber_marks(t);
+    register_allocate(t);
 }
+
+/// Largest densely-numbered mark count for which we run the register allocator.
+/// Above this we keep the (already dead-eliminated, densely renumbered) mark
+/// file as-is to bound the liveness fixpoint; such automata are rare and already
+/// use the executor's allocation-free scalar command fallback.
+const MAX_RA_MARKS: usize = 1 << 14;
+
+/// Interference-graph budget: if `Σ_s |live(s)|²` (the cost of materializing the
+/// per-state cliques) would exceed this, the allocator bails after liveness and
+/// keeps the renumbered mark file. This caps work for high-register-pressure
+/// automata (e.g. a capture group inside an unbounded `.*` loop), which couldn't
+/// shrink below the gather cap anyway.
+const MAX_RA_INTERFERENCE: u128 = 8_000_000;
 
 /// Fold `r := CurrentPos` (phase 1) + `c := Copy(r)` (phase 2) into
 /// `c := CurrentPos`, collapsing the raw→canonical indirection for a
@@ -348,6 +365,284 @@ fn renumber_marks(t: &mut Tdfa) {
         *m = id;
     });
     t.num_marks = next as usize;
+}
+
+// ---------------------------------------------------------------------------
+// Register allocation: coalesce marks with disjoint live ranges.
+//
+// Marks come in densely numbered (`renumber_marks`) but vastly over-counted:
+// `canonicalize` gives each DFA state its own private register set, so
+// `num_marks ≈ Σ_states(registers/state)`. At runtime the executor is in one
+// state at a time, so those per-state register sets overwhelmingly have
+// disjoint lifetimes and can share physical slots. We compute liveness over the
+// transition graph, build an interference graph, color it greedily, and rewrite
+// every mark reference to its color — collapsing `num_marks` to roughly the
+// maximum number of simultaneously-live marks.
+//
+// Soundness: liveness is over-approximated (gen = all `Copy` sources, kill = all
+// command dsts, ignoring the two-phase ordering; conditional/alt sources and
+// dsts are all treated as touched at their state). Over-approximation only adds
+// interference edges — never removes them — so coalesced marks are guaranteed to
+// have non-overlapping live ranges and the match semantics are preserved.
+// ---------------------------------------------------------------------------
+
+#[inline]
+fn bs_set(bits: &mut [u64], i: u32) {
+    bits[(i >> 6) as usize] |= 1u64 << (i & 63);
+}
+
+/// Append the indices of set bits in `bits` to `out` (cleared first).
+fn bits_to_vec(bits: &[u64], out: &mut Vec<u32>) {
+    out.clear();
+    for (wi, &word) in bits.iter().enumerate() {
+        let mut w = word;
+        while w != 0 {
+            out.push((wi as u32) * 64 + w.trailing_zeros());
+            w &= w - 1;
+        }
+    }
+}
+
+fn register_allocate(t: &mut Tdfa) {
+    let m = t.num_marks;
+    // Skip when the mark file is already at/under the gather cap: such automata
+    // are already gather-eligible and RA would only marginally shrink the
+    // buffer, so it isn't worth the per-call cost (this covers the vast majority
+    // of patterns). Also skip absurdly large mark files to bound the liveness
+    // fixpoint — those can't shrink below the cap and use the scalar fallback.
+    if m <= MAX_SHUFFLE_MARKS || m > MAX_RA_MARKS {
+        return;
+    }
+    let n = t.accepting.len();
+    let k = t.num_classes;
+    let words = m.div_ceil(64);
+
+    // --- Backward liveness: `live[s]` = marks live when control is at state s.
+    // `reads_at[s]` seeds it with the marks read while at s (finals, plus the
+    // sources of conditional/alt command + final lists, treated conservatively).
+    let mut live = vec![0u64; n * words];
+    let mut reads_at = vec![0u64; n * words];
+    for s in 0..n {
+        let r = &mut reads_at[s * words..(s + 1) * words];
+        for fc in &t.finals[s] {
+            if let MarkValue::Copy(mk) = fc.src {
+                bs_set(r, mk.0);
+            }
+        }
+        for ac in &t.anchor_conditionals[s] {
+            for c in &ac.commands {
+                if let MarkValue::Copy(mk) = c.src {
+                    bs_set(r, mk.0);
+                }
+            }
+            for fc in &ac.finals {
+                if let MarkValue::Copy(mk) = fc.src {
+                    bs_set(r, mk.0);
+                }
+            }
+        }
+        for alt in &t.anchor_alts[s] {
+            for c in &alt.commands {
+                if let MarkValue::Copy(mk) = c.src {
+                    bs_set(r, mk.0);
+                }
+            }
+        }
+    }
+
+    // Predecessor lists for the worklist.
+    let mut preds: Vec<Vec<u32>> = vec![Vec::new(); n];
+    for s in 0..n {
+        for c in 0..k {
+            let tgt = t.transitions[s * k + c];
+            if tgt != TDFA_DEAD_STATE {
+                preds[tgt as usize].push(s as u32);
+            }
+        }
+    }
+
+    // Worklist fixpoint. `acc` accumulates the new `live[s]`.
+    let mut in_wl = vec![true; n];
+    let mut wl: std::collections::VecDeque<u32> = (0..n as u32).collect();
+    let mut acc = vec![0u64; words];
+    let mut tmp = vec![0u64; words];
+    while let Some(s) = wl.pop_front() {
+        let s = s as usize;
+        in_wl[s] = false;
+        acc.copy_from_slice(&reads_at[s * words..(s + 1) * words]);
+        for c in 0..k {
+            let tgt = t.transitions[s * k + c];
+            if tgt == TDFA_DEAD_STATE {
+                continue;
+            }
+            // Per-edge: live_before = use ∪ (live[tgt] \ def), computed in `tmp`
+            // then unioned into `acc` (so edges don't corrupt each other). Over-
+            // approximate: def = all dsts, use = all Copy srcs of this edge.
+            let cmds = &t.transition_commands[s * k + c];
+            tmp.copy_from_slice(&live[tgt as usize * words..(tgt as usize + 1) * words]);
+            for cmd in cmds {
+                bs_clear(&mut tmp, cmd.dst.0); // kill def
+            }
+            for cmd in cmds {
+                if let MarkValue::Copy(src) = cmd.src {
+                    bs_set(&mut tmp, src.0); // gen use
+                }
+            }
+            for (w, &tw) in tmp.iter().enumerate() {
+                acc[w] |= tw;
+            }
+        }
+        let cur = &mut live[s * words..(s + 1) * words];
+        if &*cur != acc.as_slice() {
+            cur.copy_from_slice(&acc);
+            for &p in &preds[s] {
+                if !in_wl[p as usize] {
+                    in_wl[p as usize] = true;
+                    wl.push_back(p);
+                }
+            }
+        }
+    }
+
+    // Bail if materializing the per-state cliques would be too expensive — a
+    // high-register-pressure automaton that can't shrink below the gather cap
+    // regardless. The renumbered (un-coalesced) mark file is kept; correctness
+    // is unaffected.
+    let mut clique_work: u128 = 0;
+    for s in 0..n {
+        let pc: u128 = live[s * words..(s + 1) * words]
+            .iter()
+            .map(|w| w.count_ones() as u128)
+            .sum();
+        clique_work += pc * pc;
+        if clique_work > MAX_RA_INTERFERENCE {
+            return;
+        }
+    }
+
+    // --- Interference graph. Marks simultaneously live interfere. Per state s
+    // we clique over everything live/touched at s; per non-empty edge we clique
+    // over the marks coexisting during its (two-phase) command application.
+    let mut adj: Vec<HashSet<u32>> = vec![HashSet::new(); m];
+    let mut members: Vec<u32> = Vec::new();
+    let mut edgeset = vec![0u64; words];
+    let add_clique = |adj: &mut [HashSet<u32>], members: &[u32]| {
+        for (i, &a) in members.iter().enumerate() {
+            for &b in &members[i + 1..] {
+                adj[a as usize].insert(b);
+                adj[b as usize].insert(a);
+            }
+        }
+    };
+    for s in 0..n {
+        // Touched-at-s: live[s] plus all marks appearing in finals/conditional/
+        // alt lists at s (sources and dsts), so nothing touched there is wrongly
+        // coalesced with a live mark.
+        edgeset.copy_from_slice(&live[s * words..(s + 1) * words]);
+        for fc in &t.finals[s] {
+            if let MarkValue::Copy(mk) = fc.src {
+                bs_set(&mut edgeset, mk.0);
+            }
+        }
+        for ac in &t.anchor_conditionals[s] {
+            for c in &ac.commands {
+                bs_set(&mut edgeset, c.dst.0);
+                if let MarkValue::Copy(mk) = c.src {
+                    bs_set(&mut edgeset, mk.0);
+                }
+            }
+            for fc in &ac.finals {
+                if let MarkValue::Copy(mk) = fc.src {
+                    bs_set(&mut edgeset, mk.0);
+                }
+            }
+        }
+        for alt in &t.anchor_alts[s] {
+            for c in &alt.commands {
+                bs_set(&mut edgeset, c.dst.0);
+                if let MarkValue::Copy(mk) = c.src {
+                    bs_set(&mut edgeset, mk.0);
+                }
+            }
+        }
+        bits_to_vec(&edgeset, &mut members);
+        add_clique(&mut adj, &members);
+
+        // Non-empty transition edges: dsts coexist with sources and survivors.
+        for c in 0..k {
+            let tgt = t.transitions[s * k + c];
+            if tgt == TDFA_DEAD_STATE {
+                continue;
+            }
+            let cmds = &t.transition_commands[s * k + c];
+            if cmds.is_empty() {
+                continue; // covered by the state cliques of s and tgt
+            }
+            edgeset.copy_from_slice(&live[tgt as usize * words..(tgt as usize + 1) * words]);
+            for cmd in cmds {
+                bs_set(&mut edgeset, cmd.dst.0);
+                if let MarkValue::Copy(src) = cmd.src {
+                    bs_set(&mut edgeset, src.0);
+                }
+            }
+            bits_to_vec(&edgeset, &mut members);
+            add_clique(&mut adj, &members);
+        }
+    }
+
+    // --- Greedy coloring, largest-degree-first. Colors become physical slots.
+    let mut order: Vec<u32> = (0..m as u32).collect();
+    order.sort_unstable_by_key(|&v| core::cmp::Reverse(adj[v as usize].len()));
+    let mut color = vec![u32::MAX; m];
+    let mut used: Vec<bool> = Vec::new();
+    for &v in &order {
+        used.clear();
+        for &nb in &adj[v as usize] {
+            let cc = color[nb as usize];
+            if cc != u32::MAX {
+                if cc as usize >= used.len() {
+                    used.resize(cc as usize + 1, false);
+                }
+                used[cc as usize] = true;
+            }
+        }
+        let chosen = used.iter().position(|&u| !u).unwrap_or(used.len());
+        color[v as usize] = chosen as u32;
+    }
+    let num_colors = color.iter().map(|&c| c + 1).max().unwrap_or(0) as usize;
+
+    // --- Rewrite every mark reference to its color, then drop self-copies.
+    for_each_mark_mut(t, |mk| mk.0 = color[mk.0 as usize]);
+    t.num_marks = num_colors;
+    drop_identity_copies(t);
+}
+
+#[inline]
+fn bs_clear(bits: &mut [u64], i: u32) {
+    bits[(i >> 6) as usize] &= !(1u64 << (i & 63));
+}
+
+/// After register coloring, a `Copy` whose source and destination map to the
+/// same slot is a no-op; remove such commands everywhere.
+fn drop_identity_copies(t: &mut Tdfa) {
+    let prune = |cmds: &mut TagCommandList| {
+        cmds.retain(|c| !matches!(c.src, MarkValue::Copy(s) if s == c.dst));
+    };
+    prune(&mut t.entry_commands_anchored);
+    prune(&mut t.entry_commands_unanchored);
+    for cmds in t.transition_commands.iter_mut() {
+        prune(cmds);
+    }
+    for conds in t.anchor_conditionals.iter_mut() {
+        for ac in conds.iter_mut() {
+            prune(&mut ac.commands);
+        }
+    }
+    for alts in t.anchor_alts.iter_mut() {
+        for alt in alts.iter_mut() {
+            prune(&mut alt.commands);
+        }
+    }
 }
 
 /// Fold `c := Copy(r)` into `c := CurrentPos` within one command list when `r`

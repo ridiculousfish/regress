@@ -314,7 +314,14 @@ fn main() -> Result<(), Error> {
                     nfa_cache = Some(Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)));
                 }
                 tdfa_cache = Some(match nfa_cache.as_ref().unwrap() {
-                    Ok(nfa) => Tdfa::try_from(nfa).map_err(|e| format!("{:?}", e)),
+                    Ok(nfa) => Tdfa::try_from(nfa)
+                        .map(|mut t| {
+                            if args.optimize {
+                                t.optimize();
+                            }
+                            t
+                        })
+                        .map_err(|e| format!("{:?}", e)),
                     Err(msg) => Err(format!("NFA build failed: {}", msg)),
                 });
             }
@@ -417,7 +424,14 @@ fn main() -> Result<(), Error> {
                                         Some(Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e)));
                                 }
                                 tdfa_cache = Some(match nfa_cache.as_ref().unwrap() {
-                                    Ok(nfa) => Tdfa::try_from(nfa).map_err(|e| format!("{:?}", e)),
+                                    Ok(nfa) => Tdfa::try_from(nfa)
+                        .map(|mut t| {
+                            if args.optimize {
+                                t.optimize();
+                            }
+                            t
+                        })
+                        .map_err(|e| format!("{:?}", e)),
                                     Err(msg) => Err(format!("NFA build failed: {}", msg)),
                                 });
                             }
