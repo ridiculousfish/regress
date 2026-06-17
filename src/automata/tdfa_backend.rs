@@ -19,6 +19,7 @@ use crate::automata::dfa::{DEAD_STATE, Dfa};
 use crate::automata::nfa::{FULL_MATCH_END, FULL_MATCH_START, TEXT_POS_NO_MATCH};
 use crate::automata::nfa_backend::{NfaMatch, tags_to_captures};
 use crate::automata::tdfa::{FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa};
+use crate::util::DebugCheckIndex;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use smallvec::SmallVec;
@@ -75,8 +76,19 @@ pub(crate) struct ScalarGather;
 impl<T: MarkElem> Permute<T> for ScalarGather {
     #[inline]
     fn apply(src: &[T], idx: &[u16], out: &mut [T]) {
-        for (o, &i) in out.iter_mut().zip(idx) {
-            *o = src[i as usize];
+        // All three are the mark file's width (`num_marks + 2`): `src`/`out` are
+        // mark files, and a non-empty shuffle has one source lane per output
+        // lane. The `zip` would silently leave `out`'s tail unwritten if `idx`
+        // were shorter, and the unchecked read below relies on every `idx` lane
+        // being in bounds of `src`.
+        debug_assert_eq!(src.len(), out.len(), "gather src/out length mismatch");
+        debug_assert_eq!(
+            idx.len(),
+            out.len(),
+            "shuffle length must match the mark file"
+        );
+        for o in 0..out.len() {
+            *out.mat(o) = *src.iat(*idx.iat(o) as usize);
         }
     }
 }
