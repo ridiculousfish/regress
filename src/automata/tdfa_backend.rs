@@ -81,6 +81,25 @@ impl<T: MarkElem> Permute<T> for ScalarGather {
     }
 }
 
+/// Compile-time switches that let [`execute_generic`] drop cold sites it can
+/// statically prove the current automaton can't hit. Each realized combination
+/// is one monomorphization; the dispatcher in [`execute`] picks one per scan
+/// from the [`Tdfa`]'s contents, so the guarded branches const-fold away and
+/// the hot loop carries no runtime check.
+pub(crate) trait TdfaExecConfig {
+    /// Some state carries a forward-branching anchor alt. When false, the
+    /// per-byte + entry `maybe_switch_anchor_alt` calls are not emitted.
+    const HAS_ANCHOR_ALTS: bool;
+}
+
+/// Config marker parameterized directly on its flag bits, so adding a flag is a
+/// new `const` param rather than a new named type per combination.
+pub(crate) struct ExecConfig<const HAS_ANCHOR_ALTS: bool>;
+
+impl<const A: bool> TdfaExecConfig for ExecConfig<A> {
+    const HAS_ANCHOR_ALTS: bool = A;
+}
+
 /// A recorded accept candidate: `(match end, finalization commands, match
 /// start)`. The finals slice borrows the `Tdfa` (per-state or per-conditional),
 /// so no clone is needed; the marks snapshot lives in a separate reused buffer
@@ -115,12 +134,36 @@ pub fn execute_dfa(dfa: &Dfa, input: &[u8]) -> bool {
 /// and calls the monomorphized [`execute_generic`]. The chosen body has no
 /// per-byte dispatch.
 pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
+    // Cross the mark width with the config-flag combinations, picking one
+    // monomorphization from the automaton's contents. Each `$flag` is a `bool`
+    // read off `tdfa`; the macro fans it out to a `true`/`false` match so the
+    // const generic is known at the call site. New flags are added by listing
+    // another `$flag = $value` pair (the arm count doubles per flag).
+    macro_rules! dispatch {
+        ($t:ty; $($flag:ident = $value:expr),* $(,)?) => {
+            dispatch!(@width $t; [$($flag = $value),*] [])
+        };
+        // Peel one flag: expand to a `match` over its two `bool` values, then
+        // recurse with the chosen literal appended to the resolved list.
+        (@width $t:ty; [$flag:ident = $value:expr $(, $rflag:ident = $rvalue:expr)*] [$($done:tt)*]) => {
+            match $value {
+                true => dispatch!(@width $t; [$($rflag = $rvalue),*] [$($done)* true,]),
+                false => dispatch!(@width $t; [$($rflag = $rvalue),*] [$($done)* false,]),
+            }
+        };
+        // All flags resolved to literals: emit the monomorphized call.
+        (@width $t:ty; [] [$($lit:tt)*]) => {
+            execute_generic::<ScalarGather, $t, ExecConfig<$($lit)*>>(tdfa, input, start)
+        };
+    }
+
     // `u32` marks can only address offsets `< u32::MAX` (reserving that value as
     // the `NO_MATCH` sentinel). For larger haystacks fall back to `usize`.
+    let has_anchor_alts = tdfa.has_anchor_alts();
     if input.len() >= u32::MAX as usize {
-        return execute_generic::<ScalarGather, usize>(tdfa, input, start);
+        return dispatch!(usize; HAS_ANCHOR_ALTS = has_anchor_alts);
     }
-    execute_generic::<ScalarGather, u32>(tdfa, input, start)
+    dispatch!(u32; HAS_ANCHOR_ALTS = has_anchor_alts)
 }
 
 /// Apply a `TagCommandList` to a mark file in place (scalar, two-phase). Used
@@ -154,7 +197,7 @@ fn apply_cmds_scalar<T: MarkElem>(buf: &mut [T], cmds: &[TagCommand], current_po
 
 /// The monomorphized scan. `P` is the gather strategy and `T` the mark element;
 /// both are fixed for the whole pass.
-fn execute_generic<P: Permute<T>, T: MarkElem>(
+fn execute_generic<P: Permute<T>, T: MarkElem, C: TdfaExecConfig>(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
@@ -185,7 +228,9 @@ fn execute_generic<P: Permute<T>, T: MarkElem>(
     }
     // Initial multiline-`^` check: if `start > 0` and the previous byte is a
     // line terminator, switch to the alt right at the start of execution.
-    maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut src_buf, input, start);
+    if C::HAS_ANCHOR_ALTS {
+        maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut src_buf, input, start);
+    }
     if tdfa.accepting()[state as usize] {
         consider_accept(
             &mut last_accept,
@@ -248,7 +293,9 @@ fn execute_generic<P: Permute<T>, T: MarkElem>(
         state = next;
         live_position = pos + 1;
         // Forward-branching anchor switch (mid-input multiline `^`).
-        maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut src_buf, input, pos + 1);
+        if C::HAS_ANCHOR_ALTS {
+            maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut src_buf, input, pos + 1);
+        }
         if accepting[state as usize] {
             consider_accept(
                 &mut last_accept,

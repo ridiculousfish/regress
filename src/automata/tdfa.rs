@@ -906,6 +906,13 @@ pub struct Tdfa {
     // writes that rearranges the marks array from this state's layout to
     // the alt's) and switches to `alt`.
     anchor_alts: Box<[SmallVec<[AnchorAlt; 1]>]>,
+
+    // Whether any state carries a forward-branching anchor alt. Precomputed
+    // (rather than re-scanned per `execute`) so the executor's dispatcher can
+    // cheaply pick a monomorphization that drops the per-byte
+    // `maybe_switch_anchor_alt` call when there are none. Recomputed after
+    // `optimize`, which can remove states.
+    has_anchor_alts: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1044,6 +1051,7 @@ impl Tdfa {
             transition_shuffles: Box::default(),
             finals: build.finals.into_boxed_slice(),
             anchor_conditionals: build.anchor_conditionals.into_boxed_slice(),
+            has_anchor_alts: build.anchor_alts.iter().any(|alts| !alts.is_empty()),
             anchor_alts: build.anchor_alts.into_boxed_slice(),
         };
         tdfa.compile_shuffles();
@@ -1094,6 +1102,9 @@ impl Tdfa {
         // `optimize` renumbers marks and rewrites the command lists, so the
         // precompiled gather vectors must be rebuilt from the new state.
         self.compile_shuffles();
+        // State minimization can remove anchor-alt-bearing states, so refresh
+        // the precomputed flag the executor's dispatcher reads.
+        self.has_anchor_alts = self.anchor_alts.iter().any(|alts| !alts.is_empty());
     }
 
     /// `$`-style accept conditionals for `state`. Empty for most states.
@@ -1107,6 +1118,12 @@ impl Tdfa {
     /// the marks array to the alt's layout and switches to the alt id.
     pub(crate) fn anchor_alts(&self, state: TdfaStateId) -> &[AnchorAlt] {
         &self.anchor_alts[state as usize]
+    }
+
+    /// Whether any state carries a forward-branching anchor alt. Drives the
+    /// executor's choice of monomorphization (see `TdfaExecConfig`).
+    pub(crate) fn has_anchor_alts(&self) -> bool {
+        self.has_anchor_alts
     }
 
     pub fn num_tags(&self) -> usize {
