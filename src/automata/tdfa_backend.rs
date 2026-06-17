@@ -10,6 +10,11 @@ use crate::automata::tdfa::{
 use alloc::vec::Vec;
 use smallvec::SmallVec;
 
+/// A recorded accept candidate: `(match end, marks snapshot at the accept,
+/// finalization commands)`. The best one (leftmost; see `consider_accept`)
+/// drives `finalize` at scan end.
+type LastAccept = Option<(usize, Vec<TextPos>, SmallVec<[FinalCommand; 4]>)>;
+
 /// Anchored match against a (non-tagged) DFA: returns true if `input` matches
 /// from the start. Used by DFA correctness tests; production paths go through
 /// `execute` (TDFA) instead.
@@ -47,7 +52,7 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     // The finals row to use at scan end. Cloned at each new accept so the
     // values that were live *at the accept* drive finalization (later
     // transitions / conditionals may overwrite them).
-    let mut last_accept: Option<(usize, Vec<TextPos>, SmallVec<[FinalCommand; 4]>)> = None;
+    let mut last_accept: LastAccept = None;
 
     if state == TDFA_DEAD_STATE {
         return None;
@@ -56,7 +61,12 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     // line terminator, switch to the alt right at the start of execution.
     maybe_switch_anchor_alt(tdfa, &mut state, &mut marks, input, start);
     if tdfa.accepting()[state as usize] {
-        last_accept = Some((start, marks.clone(), tdfa.finals()[state as usize].clone()));
+        consider_accept(
+            &mut last_accept,
+            start,
+            marks.clone(),
+            tdfa.finals()[state as usize].clone(),
+        );
     }
     record_conditionals(tdfa, state, input, start, &marks, &mut last_accept);
 
@@ -90,11 +100,12 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
         // alt and the predicate holds at the new position, swap to it.
         maybe_switch_anchor_alt(tdfa, &mut state, &mut marks, input, pos + 1);
         if accepting[state as usize] {
-            last_accept = Some((
+            consider_accept(
+                &mut last_accept,
                 pos + 1,
                 marks.clone(),
                 tdfa.finals()[state as usize].clone(),
-            ));
+            );
         }
         record_conditionals(tdfa, state, input, pos + 1, &marks, &mut last_accept);
     }
@@ -141,7 +152,7 @@ fn record_conditionals(
     input: &[u8],
     pos: usize,
     marks: &[TextPos],
-    last_accept: &mut Option<(usize, Vec<TextPos>, SmallVec<[FinalCommand; 4]>)>,
+    last_accept: &mut LastAccept,
 ) {
     let conds = tdfa.anchor_conditionals(state);
     if conds.is_empty() {
@@ -153,8 +164,50 @@ fn record_conditionals(
         }
         let mut snap: Vec<TextPos> = marks.to_vec();
         apply_commands(&mut snap, &ac.commands, pos);
-        *last_accept = Some((pos, snap, ac.finals.clone()));
+        consider_accept(last_accept, pos, snap, ac.finals.clone());
     }
+}
+
+/// Read the `FULL_MATCH_START` value a finalization snapshot would produce,
+/// or `TEXT_POS_NO_MATCH` if the row doesn't set it. Used to order accept
+/// candidates by match start so leftmost wins (see `consider_accept`).
+fn snapshot_match_start(finals: &[FinalCommand], marks: &[TextPos]) -> TextPos {
+    for cmd in finals {
+        if cmd.tag == FULL_MATCH_START {
+            if let MarkValue::Copy(src) = cmd.src {
+                return marks[src.0 as usize];
+            }
+        }
+    }
+    TEXT_POS_NO_MATCH
+}
+
+/// Record an accept candidate, keeping the **leftmost** match. A candidate
+/// replaces the current best unless it starts strictly later
+/// (`FULL_MATCH_START` greater): an earlier start always wins, and an equal
+/// start (greedy extension of the same match, or the latest-priority
+/// conditional at one position) replaces so the longest/last-priority extent
+/// is taken — matching the "latest accept wins" rule within a single start.
+///
+/// This guard matters only for unanchored search, where the implicit prefix
+/// can keep a lower-priority "still searching" thread alive past a completed
+/// match whose accept came via an `anchor_conditional` (e.g. `$`), so a
+/// later-starting match could otherwise overwrite the correct one. For
+/// anchored execution `FULL_MATCH_START` is constant across a run, so every
+/// candidate compares equal and this reduces to "latest accept wins".
+fn consider_accept(
+    last_accept: &mut LastAccept,
+    end: usize,
+    snap: Vec<TextPos>,
+    finals: SmallVec<[FinalCommand; 4]>,
+) {
+    let new_start = snapshot_match_start(&finals, &snap);
+    if let Some((_, best_snap, best_finals)) = last_accept {
+        if new_start > snapshot_match_start(best_finals, best_snap) {
+            return;
+        }
+    }
+    *last_accept = Some((end, snap, finals));
 }
 
 /// Apply a sequence of `TagCommand`s to the marks array. CurrentPos and Nil

@@ -18,7 +18,8 @@ fn build_nfa(pattern: &str) -> Result<Nfa, String> {
     let flags = regress::Flags::from("");
     let ire = backends::try_parse(pattern.chars().map(u32::from), flags)
         .map_err(|e| format!("parse: {:?}", e))?;
-    Nfa::try_from(&ire).map_err(|e| format!("nfa: {:?}", e))
+    // Unanchored build: the TdfaExecutor does single-pass unanchored search.
+    Nfa::try_from_unanchored(&ire).map_err(|e| format!("nfa: {:?}", e))
 }
 
 /// Repeat `base` until at least `target` bytes long.

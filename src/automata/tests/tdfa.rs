@@ -32,6 +32,14 @@ fn make_tdfa(pattern: &str) -> Tdfa {
     Tdfa::try_from(&nfa).expect("tdfa build failed")
 }
 
+/// Build the unanchored TDFA (implicit lazy `MatchAny*?` prefix) — what the
+/// executors run for single-pass `find`.
+fn make_tdfa_unanchored(pattern: &str) -> Tdfa {
+    let re = parse_ir(pattern);
+    let nfa = Nfa::try_from_unanchored(&re).expect("unanchored nfa build failed");
+    Tdfa::try_from(&nfa).expect("tdfa build failed")
+}
+
 fn end(tdfa: &Tdfa, input: &[u8]) -> Option<usize> {
     execute_tdfa(tdfa, input).map(|m| m.range.end)
 }
@@ -261,6 +269,118 @@ fn optimize_preserves_matches_and_shrinks() {
                 execute_tdfa(&opt, input.as_bytes()),
                 "pattern {pattern:?} input {input:?}: optimization changed the match",
             );
+        }
+    }
+}
+
+// ===== Unanchored single-pass search =====
+
+/// Leftmost match via the *old* anchored-retry semantics: try the anchored
+/// automaton at each successive byte offset, first hit wins. Inputs here are
+/// ASCII, so every byte offset is a codepoint boundary. This is the reference
+/// the new single-pass unanchored `execute` must reproduce.
+fn anchored_retry_first(anchored: &Tdfa, input: &[u8]) -> Option<NfaMatch> {
+    (0..=input.len()).find_map(|off| execute_tdfa_inner(anchored, input, off))
+}
+
+#[test]
+fn unanchored_matches_not_at_start() {
+    let t = make_tdfa_unanchored("abc");
+    assert_eq!(execute_tdfa(&t, b"xxabc").map(|m| m.range), Some(2..5));
+    assert_eq!(execute_tdfa(&t, b"abc").map(|m| m.range), Some(0..3));
+    assert!(execute_tdfa(&t, b"xyz").is_none());
+}
+
+#[test]
+fn unanchored_leftmost_wins() {
+    let t = make_tdfa_unanchored("abc");
+    // Earliest start wins, even though a later occurrence also matches.
+    assert_eq!(execute_tdfa(&t, b"abcZabc").map(|m| m.range), Some(0..3));
+    assert_eq!(execute_tdfa(&t, b"--abc--abc").map(|m| m.range), Some(2..5));
+}
+
+#[test]
+fn unanchored_captures_midstring() {
+    let t = make_tdfa_unanchored("(a)(b)c");
+    let m = execute_tdfa(&t, b"zzabc").expect("should match");
+    assert_eq!(m.range, 2..5);
+    assert_eq!(m.captures, vec![Some(2..3), Some(3..4)]);
+}
+
+#[test]
+fn unanchored_caret_only_at_start() {
+    // The implicit prefix must not let `^` fire after skipping bytes.
+    let t = make_tdfa_unanchored("^abc");
+    assert_eq!(execute_tdfa(&t, b"abc").map(|m| m.range), Some(0..3));
+    assert!(execute_tdfa(&t, b"xabc").is_none());
+}
+
+#[test]
+fn unanchored_dollar_takes_leftmost() {
+    // Regression for the `$`-conditional leftmost bug: the match completes via
+    // an anchor conditional (no byte-GOAL state), so the skip thread isn't
+    // pruned — the executor must still pick the earliest start.
+    let t = make_tdfa_unanchored("abc.$");
+    assert_eq!(execute_tdfa(&t, b"xxabc1").map(|m| m.range), Some(2..6));
+}
+
+#[test]
+fn unanchored_word_boundary() {
+    let t = make_tdfa_unanchored(r"\bcat\b");
+    assert_eq!(execute_tdfa(&t, b"a cat!").map(|m| m.range), Some(2..5));
+    // "cat" preceded by a word char => no `\b` before it.
+    assert!(execute_tdfa(&t, b"scat").is_none());
+}
+
+#[test]
+fn unanchored_matches_anchored_retry() {
+    // The new single-pass unanchored `execute` (raw and optimized) must agree
+    // with the old anchored-retry reference on the leftmost match, over a
+    // brute-force sweep of short ASCII strings. Also pins that `optimize()`
+    // stays sound on the prefixed automaton.
+    let pats = [
+        "abc",
+        "a|ab",
+        "(a)(b)*",
+        "[a-z]+",
+        "ab|cb|db",
+        "a*",
+        "a+b",
+        "x(yz|yw)+",
+        "(?:([^,]*),?)*",
+        "abc$",
+        "^ab",
+        r"\bca",
+    ];
+    let alpha = b"abcxyz,";
+    let base = alpha.len() as u64;
+    for pat in pats {
+        let re = parse_ir(pat);
+        let anchored = Tdfa::try_from(&Nfa::try_from(&re).expect("nfa")).expect("tdfa");
+        let raw = Tdfa::try_from(&Nfa::try_from_unanchored(&re).expect("nfa un")).expect("tdfa un");
+        let mut opt = raw.clone();
+        opt.optimize();
+        for len in 0..=4u32 {
+            for mut code in 0..base.pow(len) {
+                let mut s = Vec::with_capacity(len as usize);
+                for _ in 0..len {
+                    s.push(alpha[(code % base) as usize]);
+                    code /= base;
+                }
+                let reference = anchored_retry_first(&anchored, &s);
+                assert_eq!(
+                    execute_tdfa(&raw, &s),
+                    reference,
+                    "raw unanchored != retry for {pat:?} on {:?}",
+                    String::from_utf8_lossy(&s),
+                );
+                assert_eq!(
+                    execute_tdfa(&opt, &s),
+                    reference,
+                    "opt unanchored != retry for {pat:?} on {:?}",
+                    String::from_utf8_lossy(&s),
+                );
+            }
         }
     }
 }

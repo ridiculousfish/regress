@@ -1,12 +1,11 @@
-//! `MatchProducer`/`Executor` adapters wrapping the anchored automata
-//! backends so they fit the same iteration framework as the bytecode engines.
+//! `MatchProducer`/`Executor` adapters wrapping the automata backends so they
+//! fit the same iteration framework as the bytecode engines.
 //!
-//! The wrapped backends (`nfa_backend::execute`, `tdfa_backend::execute`)
-//! produce a single anchored match against a byte slice. These adapters
-//! implement search semantics by trying anchored execute at each codepoint
-//! boundary, mirroring the `next_match_with_prefix_search` loop in
-//! `classicalbacktrack.rs`. No start-predicate prefix search yet — pure
-//! byte-position advancement.
+//! The wrapped backends (`nfa_backend::execute`, `tdfa_backend::execute`) are
+//! built **unanchored** (see `Nfa::try_from_unanchored`): a lazy `MatchAny*?`
+//! prefix lets a single `execute(bytes, offset)` pass find the leftmost match
+//! at or after `offset`. So each `next_match` is one linear scan — no
+//! per-codepoint retry loop.
 //!
 //! Only `Utf8Input` is supported; the underlying backends consume raw bytes,
 //! and the harness only exercises these executors with UTF-8.
@@ -30,14 +29,16 @@ use crate::indexing::{InputIndexer, Utf8Input};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-/// Common search loop: try anchored execute at `pos`; advance one codepoint
-/// on miss; on hit, set `next_start` (handling zero-width) and return the
-/// match offset into the original input.
+/// Single unanchored pass: run `exec(bytes, offset)` once. The automaton's
+/// implicit lazy prefix already scans forward to the leftmost match at or
+/// after `offset`, so there's no per-position retry. On a hit, set
+/// `next_start` (handling zero-width) and return the match; on a miss there
+/// are no further matches.
 #[inline]
-fn next_match_anchored_loop<'t, F>(
+fn next_match_single_pass<'t, F>(
     input: Utf8Input<'t>,
     group_names: &[Box<str>],
-    mut pos: <Utf8Input<'t> as InputIndexer>::Position,
+    pos: <Utf8Input<'t> as InputIndexer>::Position,
     next_start: &mut Option<<Utf8Input<'t> as InputIndexer>::Position>,
     mut exec: F,
 ) -> Option<Match>
@@ -45,30 +46,26 @@ where
     F: FnMut(&[u8], usize) -> Option<nfa_backend::NfaMatch>,
 {
     let bytes = input.contents();
-    loop {
-        let offset = input.pos_to_offset(pos);
-        // Pass the FULL input plus a start offset so anchor predicates
-        // (`^`/`$`) can evaluate against actual byte positions in the
-        // input — otherwise `^` non-multiline would falsely fire at every
-        // attempted start position.
-        if let Some(m) = exec(bytes, offset) {
-            let start = m.range.start;
-            let end = m.range.end;
-            let end_pos = input.try_move_right(input.left_end(), end);
-            if end == start {
-                // Zero-width match: bump one codepoint to make forward progress.
-                *next_start = end_pos.and_then(|p| input.next_right_pos(p));
-            } else {
-                *next_start = end_pos;
-            }
-            return Some(Match {
-                range: start..end,
-                captures: m.captures,
-                group_names: group_names.to_vec().into_boxed_slice(),
-            });
-        }
-        pos = input.next_right_pos(pos)?;
+    // Pass the FULL input plus a start offset so anchor predicates (`^`/`$`)
+    // evaluate against actual byte positions: `^` non-multiline fires only at
+    // offset 0, and matches resume correctly from a non-zero `offset` on later
+    // `find_iter` calls.
+    let offset = input.pos_to_offset(pos);
+    let m = exec(bytes, offset)?;
+    let start = m.range.start;
+    let end = m.range.end;
+    let end_pos = input.try_move_right(input.left_end(), end);
+    if end == start {
+        // Zero-width match: bump one codepoint to make forward progress.
+        *next_start = end_pos.and_then(|p| input.next_right_pos(p));
+    } else {
+        *next_start = end_pos;
     }
+    Some(Match {
+        range: start..end,
+        captures: m.captures,
+        group_names: group_names.to_vec().into_boxed_slice(),
+    })
 }
 
 /// NFA-backed executor. Source = `Nfa`.
@@ -92,7 +89,7 @@ impl<'r, 't> MatchProducer for NfaExecutor<'r, 't> {
     ) -> Option<Match> {
         let nfa = self.nfa;
         let names = nfa.group_names();
-        next_match_anchored_loop(self.input, names, pos, next_start, |full, start| {
+        next_match_single_pass(self.input, names, pos, next_start, |full, start| {
             nfa_backend::execute(nfa, full, start)
         })
     }
@@ -131,7 +128,7 @@ impl<'r, 't> MatchProducer for TdfaExecutor<'r, 't> {
     ) -> Option<Match> {
         let tdfa = self.tdfa;
         let names = tdfa.group_names();
-        next_match_anchored_loop(self.input, names, pos, next_start, |full, start| {
+        next_match_single_pass(self.input, names, pos, next_start, |full, start| {
             tdfa_backend::execute(tdfa, full, start)
         })
     }

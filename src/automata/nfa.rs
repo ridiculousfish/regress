@@ -369,6 +369,28 @@ impl Builder {
         Ok(Fragment::new(start, []))
     }
 
+    /// Build a lazy `MatchAny*?` prefix — the implicit "skip any number of
+    /// codepoints, preferring to stop as early as possible" loop that turns
+    /// an anchored automaton into an unanchored one. A `router` state offers
+    /// two eps edges: exit the prefix (priority, lazy) or enter the skip body
+    /// (lowest priority). The body matches one codepoint and loops back to the
+    /// router. Because the skip path is lowest priority, it sits at the tail
+    /// of every configuration, so once an earlier-started pattern thread
+    /// reaches GOAL the skip thread is pruned and leftmost semantics hold.
+    fn build_unanchored_prefix(&mut self) -> Result<Fragment> {
+        let router = self.make()?;
+        let exit = self.make()?;
+        // `MatchAny` (not the line-terminator-excluding form) = `[\s\S]`.
+        let body = self.build_match_any(false)?;
+        // eps[0]: leave the prefix (lazy → highest priority).
+        self.get(router).add_eps(exit);
+        // eps[1]: consume a codepoint via the skip body (lowest priority).
+        self.get(router).add_eps(body.start);
+        // After skipping, return to the router to choose again.
+        self.join_eps(&body.ends, router);
+        Ok(Fragment::new(router, [exit]))
+    }
+
     fn build(&mut self, node: &Node) -> Result<Fragment> {
         match node {
             Node::Empty => self.build_empty(),
@@ -984,14 +1006,44 @@ fn collect_group_names(node: &Node) -> Box<[Box<str>]> {
 /// \return the NFA on success, or none if the IR has unsupported instructions,
 /// or we would exceed a budget.
 impl Nfa {
+    /// Build an anchored NFA: the pattern matches starting exactly at the byte
+    /// offset the executor hands `nfa_backend::execute`. Unanchored search over
+    /// this form is the caller's job (try every start offset). For a
+    /// single-pass unanchored automaton, use [`Nfa::try_from_unanchored`].
     pub fn try_from(re: &ir::Regex) -> Result<Self> {
+        Self::build(re, /* unanchored */ false)
+    }
+
+    /// Build an unanchored NFA: a lazy `MatchAny*?` prefix is prepended so a
+    /// single pass finds the leftmost match anywhere in the input.
+    /// `FULL_MATCH_START` is written when the prefix hands off to the pattern
+    /// (the true match start), not at offset 0. Non-multiline `^` still only
+    /// fires at the true start of input, because the TDFA's `at_start_of_input`
+    /// handling (and the NFA executor's position-based predicate evaluation)
+    /// gate it on the actual byte position.
+    pub fn try_from_unanchored(re: &ir::Regex) -> Result<Self> {
+        Self::build(re, /* unanchored */ true)
+    }
+
+    fn build(re: &ir::Regex, unanchored: bool) -> Result<Self> {
         // Pre-compute the capture-tag count so any sentinel tags allocated
         // during construction land *above* the capture range.
         let num_capture_tags = 2 + 2 * count_capture_groups(&re.node);
         let mut b: Builder = Builder::new(2048 * 16, re.flags.unicode, num_capture_tags);
 
-        // Create the start, capturing it.
-        let Fragment { start, ends } = b.build_start()?;
+        // The automaton start, and the loose end(s) that should connect to the
+        // pattern after writing FULL_MATCH_START. In the anchored form that's
+        // `build_start` (writes FULL_MATCH_START at offset 0). In the
+        // unanchored form the lazy prefix skips first, then FULL_MATCH_START is
+        // written on entering the pattern — i.e. at the real match start.
+        let (start, ends) = if unanchored {
+            let prefix = b.build_unanchored_prefix()?;
+            let fms_end = b.join_with_write(&prefix.ends, FULL_MATCH_START)?;
+            (prefix.start, smallvec![fms_end])
+        } else {
+            let Fragment { start, ends } = b.build_start()?;
+            (start, ends)
+        };
 
         // Should have no ends on the pattern since it's top level - everything ends in goal.
         let pattern_fragment = b.build(&re.node)?;

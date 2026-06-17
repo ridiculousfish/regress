@@ -93,7 +93,9 @@ fn main() {
             }
         };
         let cr: CompiledRegex = backends::emit(&ire);
-        let nfa = Nfa::try_from(&ire).ok();
+        // Executors do single-pass unanchored search; build the unanchored
+        // automaton (implicit lazy `MatchAny*?` prefix).
+        let nfa = Nfa::try_from_unanchored(&ire).ok();
         let tdfa = nfa.as_ref().and_then(|n| Tdfa::try_from(n).ok()).map(|mut t| {
             t.optimize();
             t

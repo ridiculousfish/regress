@@ -96,7 +96,10 @@ fn build_test_artifacts(
     if !matches!(backend, Backend::Tnfa | Backend::Tdfa) {
         return (cr, None, None);
     }
-    let nfa = match backends::Nfa::try_from(&ire) {
+    // The executors do single-pass unanchored search, so build the unanchored
+    // automaton (lazy `MatchAny*?` prefix). Anchored `try_from` is reserved for
+    // the unit tests that call `execute(.., 0)` directly.
+    let nfa = match backends::Nfa::try_from_unanchored(&ire) {
         Ok(n) => n,
         Err(_) => return (cr, None, None),
     };
