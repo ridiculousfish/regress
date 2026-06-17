@@ -97,6 +97,76 @@ pub struct TagCommand {
 /// scan start.
 pub type TagCommandList = SmallVec<[TagCommand; 4]>;
 
+/// A precompiled, data-parallel form of a transition's [`TagCommandList`]: a
+/// gather/permute control vector that the executor applies in one shot instead
+/// of interpreting commands one at a time.
+///
+/// The executor's mark file is laid out as `[marks[0..num_marks], clear,
+/// current_pos]` — real marks keep their natural index; the two trailing lanes
+/// are `clear` (= `TEXT_POS_NO_MATCH`) at index `num_marks` and the current
+/// input offset at index `num_marks + 1`. A `ShuffleVec` has one source-lane
+/// index per output lane (length `num_marks + 2`); applying it means
+/// `out[i] = src[shuffle[i]]`, which reproduces the simultaneous-assignment
+/// semantics of [`apply_commands`](crate::automata::tdfa_backend) (including a
+/// `Copy` that reads a sibling `CurrentPos`'s freshly stamped value) with no
+/// per-command branching, no intermediate buffer, and no cycle handling.
+///
+/// An **empty** `ShuffleVec` is the identity (the command list was empty); the
+/// executor skips it entirely, leaving the mark file untouched.
+pub type ShuffleVec = Box<[u16]>;
+
+/// Largest `num_marks` for which a TDFA precompiles [`ShuffleVec`]s. Above this
+/// the executor interprets command lists directly (see `compile_shuffles`).
+/// Comfortably covers realistic capture counts; keeps shuffle build/storage
+/// bounded for pathological or unoptimized automata.
+pub const MAX_SHUFFLE_MARKS: usize = 256;
+
+/// Largest transition table (`num_states * num_classes`) for which a TDFA
+/// precompiles [`ShuffleVec`]s. Above this, building a per-cell shuffle table is
+/// not worth the time/memory: such automata (e.g. huge Unicode property classes
+/// like `\p{RGI_Emoji}`) are typically capture-light, so the scalar command
+/// fallback — which is itself allocation-free (a stack `SmallVec`) — is just as
+/// fast, and only the SIMD speedup (which needs a tiny mark file) is forgone.
+pub const MAX_SHUFFLE_CELLS: usize = 1 << 18;
+
+/// Compile a [`TagCommandList`] into a [`ShuffleVec`] over a mark file of
+/// `num_marks` real marks plus the two trailing `clear` / `current_pos` lanes.
+///
+/// The result reproduces `apply_commands`'s two-phase semantics statically:
+/// `CurrentPos` writes are visible to sibling `Copy`s (Phase 1 before Phase 2),
+/// while `Copy`s read each other's *old* values (Phase 2 is a simultaneous
+/// read). An empty command list yields an empty (identity) shuffle.
+fn compile_shuffle(cmds: &[TagCommand], num_marks: usize) -> ShuffleVec {
+    if cmds.is_empty() {
+        return Box::default();
+    }
+    debug_assert!(num_marks + 2 <= u16::MAX as usize, "caller guards the u16 fit");
+    let current_pos = (num_marks + 1) as u16; // lane holding the input offset
+    // (lane `num_marks` holds `clear`/`NO_MATCH`; identity already preserves it.)
+
+    // Identity: every output lane reads its own source lane (preserve).
+    let mut idx: Vec<u16> = (0..(num_marks + 2)).map(|i| i as u16).collect();
+
+    // Marks stamped with CurrentPos in *this* list. A Copy whose source is one
+    // of these must read the freshly stamped value (cross-phase), so it routes
+    // to the current_pos lane rather than the source's old value.
+    let mut stamped = vec![false; num_marks];
+    for cmd in cmds {
+        if matches!(cmd.src, MarkValue::CurrentPos) {
+            stamped[cmd.dst.0 as usize] = true;
+        }
+    }
+    for cmd in cmds {
+        let dst = cmd.dst.0 as usize;
+        idx[dst] = match cmd.src {
+            MarkValue::CurrentPos => current_pos,
+            MarkValue::Copy(src) if stamped[src.0 as usize] => current_pos,
+            MarkValue::Copy(src) => src.0 as u16,
+        };
+    }
+    idx.into_boxed_slice()
+}
+
 /// A conditional-accept hook attached to a TDFA state. Records what happens
 /// if a `$`-style predicate fires at this state (the eps target's mini-
 /// closure runs entirely via epsilon, terminating at `GOAL_STATE`).
@@ -807,7 +877,15 @@ pub struct Tdfa {
     // `transitions` (indexed by `state * num_classes + class`). Each entry
     // is a list of `TagCommand`s — CurrentPos writes first, then Copy writes
     // from canonicalization. May be empty when a transition has no tag effect.
+    // Retained for display/debug; the executor uses `transition_shuffles`.
     transition_commands: Box<[TagCommandList]>,
+
+    // Precompiled gather form of `transition_commands`, same shape/indexing.
+    // Built by `compile_shuffles` at the end of `try_from` and rebuilt after
+    // `optimize` (which changes `num_marks` and the command lists). The
+    // executor's per-byte hot loop applies these instead of interpreting
+    // `TagCommand`s. An empty entry is the identity (skip). See [`ShuffleVec`].
+    transition_shuffles: Box<[ShuffleVec]>,
 
     // Per-state finalization commands. Indexed by state ID. For accepting
     // states this is `num_tags` commands (one per tag) describing how to read
@@ -950,7 +1028,7 @@ impl Tdfa {
 
         let num_marks = build.alloc.count() as usize;
 
-        Ok(Tdfa {
+        let mut tdfa = Tdfa {
             start_anchored,
             start_unanchored,
             entry_commands_anchored,
@@ -963,10 +1041,49 @@ impl Tdfa {
             transitions: build.transitions.into_boxed_slice(),
             accepting: build.accepting.into_boxed_slice(),
             transition_commands: build.transition_commands.into_boxed_slice(),
+            transition_shuffles: Box::default(),
             finals: build.finals.into_boxed_slice(),
             anchor_conditionals: build.anchor_conditionals.into_boxed_slice(),
             anchor_alts: build.anchor_alts.into_boxed_slice(),
-        })
+        };
+        tdfa.compile_shuffles();
+        Ok(tdfa)
+    }
+
+    /// Recompile `transition_shuffles` from `transition_commands` and the
+    /// current `num_marks`. Run at the end of `try_from` and again after
+    /// `optimize`, which renumbers marks and rewrites the command lists.
+    ///
+    /// Each command list compiles to a [`ShuffleVec`] of length `num_marks + 2`
+    /// (real marks plus the `clear` and `current_pos` lanes). An **empty**
+    /// command list compiles to an empty shuffle (identity / skip).
+    ///
+    /// Skipped entirely (leaving an empty table) when `num_marks` exceeds
+    /// [`MAX_SHUFFLE_MARKS`] — e.g. an unoptimized automaton with a sparse mark
+    /// file, or a pattern with very many capture groups. The gather pays off for
+    /// small mark files (its whole point), and a full-width shuffle per
+    /// tag-bearing transition would be expensive to build and store for a large
+    /// one; those automata interpret the command lists directly instead.
+    /// (Unoptimized automata with huge mark files are only ever executed after
+    /// [`optimize`](Self::optimize) shrinks them, where this recompiles.)
+    fn compile_shuffles(&mut self) {
+        let num_marks = self.num_marks;
+        if num_marks > MAX_SHUFFLE_MARKS || self.transition_commands.len() > MAX_SHUFFLE_CELLS {
+            self.transition_shuffles = Box::default();
+            return;
+        }
+        self.transition_shuffles = self
+            .transition_commands
+            .iter()
+            .map(|cmds| compile_shuffle(cmds, num_marks))
+            .collect();
+    }
+
+    /// Whether [`transition_shuffles`](Self::transition_shuffles) was compiled
+    /// (the common case) or skipped for an oversized mark file (the executor
+    /// then falls back to interpreting [`transition_commands`](Self::transition_commands)).
+    pub fn has_shuffles(&self) -> bool {
+        !self.transition_shuffles.is_empty()
     }
 
     /// Apply the optional optimization passes (state minimization + register
@@ -974,6 +1091,9 @@ impl Tdfa {
     /// correctly without it; this only shrinks the automaton.
     pub fn optimize(&mut self) {
         opt::optimize(self);
+        // `optimize` renumbers marks and rewrites the command lists, so the
+        // precompiled gather vectors must be rebuilt from the new state.
+        self.compile_shuffles();
     }
 
     /// `$`-style accept conditionals for `state`. Empty for most states.
@@ -1042,6 +1162,13 @@ impl Tdfa {
 
     pub fn transition_commands(&self) -> &[TagCommandList] {
         &self.transition_commands
+    }
+
+    /// Precompiled gather vectors for each transition, same shape/indexing as
+    /// [`transition_commands`](Self::transition_commands). The executor applies
+    /// these in its hot loop. See [`ShuffleVec`].
+    pub fn transition_shuffles(&self) -> &[ShuffleVec] {
+        &self.transition_shuffles
     }
 
     pub fn finals(&self) -> &[SmallVec<[FinalCommand; 4]>] {
