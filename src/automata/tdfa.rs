@@ -97,74 +97,138 @@ pub struct TagCommand {
 /// scan start.
 pub type TagCommandList = SmallVec<[TagCommand; 4]>;
 
-/// A precompiled, data-parallel form of a transition's [`TagCommandList`]: a
-/// gather/permute control vector that the executor applies in one shot instead
-/// of interpreting commands one at a time.
+/// One step of a transition's compiled mark update: `buf[dst] = buf[src]`,
+/// applied in order, in place, by the executor.
 ///
 /// The executor's mark file is laid out as `[marks[0..num_marks], clear,
-/// current_pos]` — real marks keep their natural index; the two trailing lanes
-/// are `clear` (= `TEXT_POS_NO_MATCH`) at index `num_marks` and the current
-/// input offset at index `num_marks + 1`. A `ShuffleVec` has one source-lane
-/// index per output lane (length `num_marks + 2`); applying it means
-/// `out[i] = src[shuffle[i]]`, which reproduces the simultaneous-assignment
-/// semantics of [`apply_commands`](crate::automata::tdfa_backend) (including a
-/// `Copy` that reads a sibling `CurrentPos`'s freshly stamped value) with no
-/// per-command branching, no intermediate buffer, and no cycle handling.
+/// current_pos, scratch]` — real marks keep their natural index; the trailing
+/// lanes are `clear` (= `TEXT_POS_NO_MATCH`) at `num_marks`, the current input
+/// offset at `num_marks + 1`, and a `scratch` slot at `num_marks + 2`. A `src`
+/// of the `current_pos` lane stamps the position; the `scratch` lane is used
+/// only to break copy cycles (see [`compile_moves`]).
 ///
-/// An **empty** `ShuffleVec` is the identity (the command list was empty); the
-/// executor skips it entirely, leaving the mark file untouched.
-pub type ShuffleVec = Box<[u16]>;
+/// Unlike a full-width gather, a move sequence touches **only** the lanes that
+/// change — no width-proportional identity copy and no double buffer.
+#[derive(Clone, Copy, Debug)]
+pub struct MoveOp {
+    pub dst: u16,
+    pub src: u16,
+}
 
-/// Largest `num_marks` for which a TDFA precompiles [`ShuffleVec`]s. Above this
-/// the executor interprets command lists directly (see `compile_shuffles`).
-/// Comfortably covers realistic capture counts; keeps shuffle build/storage
-/// bounded for pathological or unoptimized automata.
-pub const MAX_SHUFFLE_MARKS: usize = 256;
-
-/// Largest transition table (`num_states * num_classes`) for which a TDFA
-/// precompiles [`ShuffleVec`]s. Above this, building a per-cell shuffle table is
-/// not worth the time/memory: such automata (e.g. huge Unicode property classes
-/// like `\p{RGI_Emoji}`) are typically capture-light, so the scalar command
-/// fallback — which is itself allocation-free (a stack `SmallVec`) — is just as
-/// fast, and only the SIMD speedup (which needs a tiny mark file) is forgone.
-pub const MAX_SHUFFLE_CELLS: usize = 1 << 18;
-
-/// Compile a [`TagCommandList`] into a [`ShuffleVec`] over a mark file of
-/// `num_marks` real marks plus the two trailing `clear` / `current_pos` lanes.
+/// Compile a [`TagCommandList`] into an ordered, in-place [`MoveOp`] sequence
+/// over a mark file of `num_marks` real marks plus the trailing `clear` /
+/// `current_pos` / `scratch` lanes.
 ///
-/// The result reproduces `apply_commands`'s two-phase semantics statically:
-/// `CurrentPos` writes are visible to sibling `Copy`s (Phase 1 before Phase 2),
-/// while `Copy`s read each other's *old* values (Phase 2 is a simultaneous
-/// read). An empty command list yields an empty (identity) shuffle.
-fn compile_shuffle(cmds: &[TagCommand], num_marks: usize) -> ShuffleVec {
+/// The command list is a *parallel* (simultaneous) assignment: `CurrentPos`
+/// writes stamp the current position, and a `Copy` reads its source's value as
+/// of *before* the assignment — except a `Copy` whose source is itself stamped
+/// by a `CurrentPos` in this same list takes the freshly stamped value. We
+/// resolve every destination to one of: the constant `current_pos` lane, the
+/// *old* value of some mark, or (when a cycle forces it) the `scratch` lane,
+/// then sequentialize so every old-value read precedes the overwrite of that
+/// mark (the classic parallel-copy ordering). Because each destination has a
+/// single source, each dependency component holds at most one cycle, so a
+/// single `scratch` lane — saved once per cycle and consumed before the
+/// component finishes — suffices. An empty command list yields an empty
+/// sequence (the executor skips it, leaving the mark file untouched).
+fn compile_moves(cmds: &[TagCommand], num_marks: usize) -> Box<[MoveOp]> {
     if cmds.is_empty() {
         return Box::default();
     }
-    debug_assert!(num_marks + 2 <= u16::MAX as usize, "caller guards the u16 fit");
-    let current_pos = (num_marks + 1) as u16; // lane holding the input offset
-    // (lane `num_marks` holds `clear`/`NO_MATCH`; identity already preserves it.)
+    debug_assert!(num_marks + 3 <= u16::MAX as usize, "caller guards the u16 fit");
+    let curpos = (num_marks + 1) as u16;
+    let scratch = (num_marks + 2) as u16;
 
-    // Identity: every output lane reads its own source lane (preserve).
-    let mut idx: Vec<u16> = (0..(num_marks + 2)).map(|i| i as u16).collect();
-
-    // Marks stamped with CurrentPos in *this* list. A Copy whose source is one
-    // of these must read the freshly stamped value (cross-phase), so it routes
-    // to the current_pos lane rather than the source's old value.
+    // Marks stamped by a `CurrentPos` write in this list: a `Copy` reading such
+    // a mark takes the freshly stamped value (the constant `current_pos`).
     let mut stamped = vec![false; num_marks];
-    for cmd in cmds {
-        if matches!(cmd.src, MarkValue::CurrentPos) {
-            stamped[cmd.dst.0 as usize] = true;
+    for c in cmds {
+        if matches!(c.src, MarkValue::CurrentPos) {
+            stamped[c.dst.0 as usize] = true;
         }
     }
-    for cmd in cmds {
-        let dst = cmd.dst.0 as usize;
-        idx[dst] = match cmd.src {
-            MarkValue::CurrentPos => current_pos,
-            MarkValue::Copy(src) if stamped[src.0 as usize] => current_pos,
-            MarkValue::Copy(src) => src.0 as u16,
-        };
+
+    // Resolve each destination's source. `Const` reads `current_pos` (order-
+    // independent); `Mark(s)` reads the *old* value of mark `s` (must precede
+    // overwriting `s`); `Scratch` reads a value saved while breaking a cycle.
+    #[derive(Clone, Copy)]
+    enum Src {
+        Const,
+        Mark(u16),
+        Scratch,
     }
-    idx.into_boxed_slice()
+    let mut pred: Vec<Option<Src>> = vec![None; num_marks];
+    // `read_count[m]` = number of pending assignments still reading old `m`.
+    let mut read_count = vec![0u32; num_marks];
+    for c in cmds {
+        let dst = c.dst.0 as usize;
+        let new = match c.src {
+            MarkValue::CurrentPos => Src::Const,
+            MarkValue::Copy(s) if stamped[s.0 as usize] => Src::Const,
+            MarkValue::Copy(s) if s.0 as usize == dst => {
+                // `dst := old(dst)` is a no-op; drop it (and any prior write).
+                if let Some(Src::Mark(old)) = pred[dst] {
+                    read_count[old as usize] -= 1;
+                }
+                pred[dst] = None;
+                continue;
+            }
+            MarkValue::Copy(s) => Src::Mark(s.0 as u16),
+        };
+        if let Some(Src::Mark(old)) = pred[dst] {
+            read_count[old as usize] -= 1;
+        }
+        if let Src::Mark(s) = new {
+            read_count[s as usize] += 1;
+        }
+        pred[dst] = Some(new);
+    }
+
+    let mut ops: Vec<MoveOp> = Vec::with_capacity(cmds.len());
+    // A destination is ready to emit once nothing pending still needs its old
+    // value (`read_count == 0`).
+    let mut ready: Vec<u16> = (0..num_marks)
+        .filter(|&d| pred[d].is_some() && read_count[d] == 0)
+        .map(|d| d as u16)
+        .collect();
+    let mut remaining = pred.iter().filter(|p| p.is_some()).count();
+
+    while remaining > 0 {
+        if let Some(d) = ready.pop() {
+            let s = pred[d as usize].take().unwrap();
+            remaining -= 1;
+            let src_idx = match s {
+                Src::Const => curpos,
+                Src::Mark(m) => m,
+                Src::Scratch => scratch,
+            };
+            ops.push(MoveOp { dst: d, src: src_idx });
+            if let Src::Mark(m) = s {
+                read_count[m as usize] -= 1;
+                if read_count[m as usize] == 0 && pred[m as usize].is_some() {
+                    ready.push(m);
+                }
+            }
+        } else {
+            // No ready assignment but some remain: a copy cycle. Save one of its
+            // marks to `scratch` and redirect that mark's readers there; the
+            // mark is then free to overwrite and the component drains in order.
+            let m = (0..num_marks)
+                .find(|&x| pred[x].is_some() && read_count[x] > 0)
+                .expect("a cycle node exists when stalled with work remaining")
+                as u16;
+            ops.push(MoveOp { dst: scratch, src: m });
+            for d in 0..num_marks {
+                if matches!(pred[d], Some(Src::Mark(s)) if s == m) {
+                    pred[d] = Some(Src::Scratch);
+                    read_count[m as usize] -= 1;
+                }
+            }
+            debug_assert_eq!(read_count[m as usize], 0);
+            ready.push(m);
+        }
+    }
+    ops.into_boxed_slice()
 }
 
 /// A conditional-accept hook attached to a TDFA state. Records what happens
@@ -877,15 +941,17 @@ pub struct Tdfa {
     // `transitions` (indexed by `state * num_classes + class`). Each entry
     // is a list of `TagCommand`s — CurrentPos writes first, then Copy writes
     // from canonicalization. May be empty when a transition has no tag effect.
-    // Retained for display/debug; the executor uses `transition_shuffles`.
+    // Retained for display/debug and the scalar fallback; the executor's hot
+    // loop applies `transition_moves`.
     transition_commands: Box<[TagCommandList]>,
 
-    // Precompiled gather form of `transition_commands`, same shape/indexing.
-    // Built by `compile_shuffles` at the end of `try_from` and rebuilt after
-    // `optimize` (which changes `num_marks` and the command lists). The
-    // executor's per-byte hot loop applies these instead of interpreting
-    // `TagCommand`s. An empty entry is the identity (skip). See [`ShuffleVec`].
-    transition_shuffles: Box<[ShuffleVec]>,
+    // Precompiled in-place move sequence per transition, same shape/indexing as
+    // `transition_commands`. Built by `compile_moves_all` at the end of
+    // `try_from` and rebuilt after `optimize` (which changes `num_marks` and the
+    // command lists). The executor's per-byte hot loop applies these in order,
+    // in place, instead of interpreting `TagCommand`s. An empty entry has no tag
+    // effect (skip). See [`MoveOp`].
+    transition_moves: Box<[Box<[MoveOp]>]>,
 
     // Per-state finalization commands. Indexed by state ID. For accepting
     // states this is `num_tags` commands (one per tag) describing how to read
@@ -1054,51 +1120,44 @@ impl Tdfa {
             transitions: build.transitions.into_boxed_slice(),
             accepting: build.accepting.into_boxed_slice(),
             transition_commands: build.transition_commands.into_boxed_slice(),
-            transition_shuffles: Box::default(),
+            transition_moves: Box::default(),
             finals: build.finals.into_boxed_slice(),
             has_conditionals: build.anchor_conditionals.iter().any(|cs| !cs.is_empty()),
             anchor_conditionals: build.anchor_conditionals.into_boxed_slice(),
             has_anchor_alts: build.anchor_alts.iter().any(|alts| !alts.is_empty()),
             anchor_alts: build.anchor_alts.into_boxed_slice(),
         };
-        tdfa.compile_shuffles();
+        tdfa.compile_moves_all();
         Ok(tdfa)
     }
 
-    /// Recompile `transition_shuffles` from `transition_commands` and the
-    /// current `num_marks`. Run at the end of `try_from` and again after
-    /// `optimize`, which renumbers marks and rewrites the command lists.
+    /// Recompile `transition_moves` from `transition_commands` and the current
+    /// `num_marks`. Run at the end of `try_from` and again after `optimize`,
+    /// which renumbers marks and rewrites the command lists.
     ///
-    /// Each command list compiles to a [`ShuffleVec`] of length `num_marks + 2`
-    /// (real marks plus the `clear` and `current_pos` lanes). An **empty**
-    /// command list compiles to an empty shuffle (identity / skip).
-    ///
-    /// Skipped entirely (leaving an empty table) when `num_marks` exceeds
-    /// [`MAX_SHUFFLE_MARKS`] — e.g. an unoptimized automaton with a sparse mark
-    /// file, or a pattern with very many capture groups. The gather pays off for
-    /// small mark files (its whole point), and a full-width shuffle per
-    /// tag-bearing transition would be expensive to build and store for a large
-    /// one; those automata interpret the command lists directly instead.
-    /// (Unoptimized automata with huge mark files are only ever executed after
-    /// [`optimize`](Self::optimize) shrinks them, where this recompiles.)
-    fn compile_shuffles(&mut self) {
+    /// Each command list compiles (via [`compile_moves`]) to an ordered in-place
+    /// move sequence; an empty command list compiles to an empty sequence (skip).
+    /// Skipped entirely (leaving an empty table → the executor's scalar command
+    /// fallback) only for the degenerate case of a mark file too large to index
+    /// with the `u16` lane type — far beyond any realistic capture count.
+    fn compile_moves_all(&mut self) {
         let num_marks = self.num_marks;
-        if num_marks > MAX_SHUFFLE_MARKS || self.transition_commands.len() > MAX_SHUFFLE_CELLS {
-            self.transition_shuffles = Box::default();
+        if num_marks + 3 > u16::MAX as usize {
+            self.transition_moves = Box::default();
             return;
         }
-        self.transition_shuffles = self
+        self.transition_moves = self
             .transition_commands
             .iter()
-            .map(|cmds| compile_shuffle(cmds, num_marks))
+            .map(|cmds| compile_moves(cmds, num_marks))
             .collect();
     }
 
-    /// Whether [`transition_shuffles`](Self::transition_shuffles) was compiled
-    /// (the common case) or skipped for an oversized mark file (the executor
-    /// then falls back to interpreting [`transition_commands`](Self::transition_commands)).
-    pub fn has_shuffles(&self) -> bool {
-        !self.transition_shuffles.is_empty()
+    /// Whether `transition_moves` was compiled (effectively always) or skipped
+    /// for a mark file too large to index with `u16` (the executor then falls
+    /// back to interpreting [`transition_commands`](Self::transition_commands)).
+    pub fn has_moves(&self) -> bool {
+        !self.transition_moves.is_empty()
     }
 
     /// Apply the optional optimization passes (state minimization + register
@@ -1107,8 +1166,8 @@ impl Tdfa {
     pub fn optimize(&mut self) {
         opt::optimize(self);
         // `optimize` renumbers marks and rewrites the command lists, so the
-        // precompiled gather vectors must be rebuilt from the new state.
-        self.compile_shuffles();
+        // precompiled move sequences must be rebuilt from the new state.
+        self.compile_moves_all();
         // State minimization can remove anchor-alt-bearing states, so refresh
         // the precomputed flags the executor's dispatcher reads.
         self.has_anchor_alts = self.anchor_alts.iter().any(|alts| !alts.is_empty());
@@ -1195,11 +1254,11 @@ impl Tdfa {
         &self.transition_commands
     }
 
-    /// Precompiled gather vectors for each transition, same shape/indexing as
-    /// [`transition_commands`](Self::transition_commands). The executor applies
-    /// these in its hot loop. See [`ShuffleVec`].
-    pub fn transition_shuffles(&self) -> &[ShuffleVec] {
-        &self.transition_shuffles
+    /// Precompiled in-place move sequences for each transition, same
+    /// shape/indexing as [`transition_commands`](Self::transition_commands). The
+    /// executor applies these in its hot loop. See [`MoveOp`].
+    pub(crate) fn transition_moves(&self) -> &[Box<[MoveOp]>] {
+        &self.transition_moves
     }
 
     pub fn finals(&self) -> &[SmallVec<[FinalCommand; 4]>] {

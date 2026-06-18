@@ -5,9 +5,9 @@
 //! crate's canonical **Sherlock** pattern battery over the full text of *The
 //! Adventures of Sherlock Holmes* (~580 KiB, public domain, Project Gutenberg).
 //! Varied prose with sparse matches touches many transition rows per scan and
-//! spans a wide range of automaton sizes and match densities, so cache/locality
-//! effects (the shuffle pool, state layout, a future SIMD `Permute`) actually
-//! show up here.
+//! spans a wide range of automaton sizes and match densities, so executor and
+//! cache/locality effects actually show up here (unlike `backend_bench`'s tiny,
+//! fully L1-resident cases).
 //!
 //! Each row reports the built TDFA's size (`states`/`marks`) alongside per-
 //! backend throughput in MB/s. The four regress backends extract captures (via

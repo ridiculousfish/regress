@@ -10,8 +10,7 @@
 //! dense renumbering).
 
 use super::{
-    FinalCommand, InputMark, MAX_SHUFFLE_MARKS, MarkValue, TDFA_DEAD_STATE, TagCommand,
-    TagCommandList, Tdfa,
+    FinalCommand, InputMark, MarkValue, TDFA_DEAD_STATE, TagCommand, TagCommandList, Tdfa,
 };
 use smallvec::SmallVec;
 use std::collections::HashMap;
@@ -174,6 +173,13 @@ pub(crate) fn compact_marks(t: &mut Tdfa) {
     renumber_marks(t);
     register_allocate(t);
 }
+
+/// Mark count at/under which the register allocator is skipped: such mark files
+/// are already small, so RA would only marginally shrink the per-scan buffer and
+/// the per-transition move compile, not worth its cost. (This was historically
+/// the gather-eligibility cap; the executor no longer gathers, but the
+/// "already small enough" threshold is still a reasonable RA skip.)
+const RA_SKIP_MARKS: usize = 256;
 
 /// Largest densely-numbered mark count for which we run the register allocator.
 /// Above this we keep the (already dead-eliminated, densely renumbered) mark
@@ -410,7 +416,7 @@ fn register_allocate(t: &mut Tdfa) {
     // buffer, so it isn't worth the per-call cost (this covers the vast majority
     // of patterns). Also skip absurdly large mark files to bound the liveness
     // fixpoint — those can't shrink below the cap and use the scalar fallback.
-    if m <= MAX_SHUFFLE_MARKS || m > MAX_RA_MARKS {
+    if m <= RA_SKIP_MARKS || m > MAX_RA_MARKS {
         return;
     }
     let n = t.accepting.len();

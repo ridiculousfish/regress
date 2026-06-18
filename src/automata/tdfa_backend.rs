@@ -1,19 +1,16 @@
 //! TDFA execution backend.
 //!
-//! The hot path recasts each transition's mark update as a single data-parallel
-//! **gather**: the determinizer precompiles every transition's `TagCommandList`
-//! into a [`ShuffleVec`](crate::automata::tdfa::ShuffleVec) over a mark file
-//! laid out as `[marks[0..num_marks], clear, current_pos]`, and the executor
-//! applies it with one permute (`out[i] = src[shuffle[i]]`). This removes the
-//! per-transition allocation and two-phase command interpretation that used to
-//! dominate; the simultaneous-assignment semantics fall out of the gather.
+//! The hot path applies each transition's mark update as a short, precompiled
+//! sequence of in-place moves (`buf[dst] = buf[src]`): the determinizer turns
+//! every transition's `TagCommandList` into a [`MoveOp`](crate::automata::tdfa::MoveOp)
+//! list over a mark file laid out as `[marks[0..num_marks], clear, current_pos,
+//! scratch]`, ordered (with a `scratch` lane to break copy cycles) so the
+//! simultaneous-assignment semantics hold while writing in place. Only the lanes
+//! that change are touched — no width-proportional copy, no double buffer.
 //!
-//! The whole scan is generic over two axes, chosen once in [`execute`] and then
-//! monomorphized so the per-byte loop carries no dispatch:
-//! - [`MarkElem`] — the mark element type: `u32` (the fast path; haystacks
-//!   ≤ 4 GiB) or `usize` (the fallback for larger inputs).
-//! - [`Permute`] — the gather strategy: [`ScalarGather`] (portable reference)
-//!   or a SIMD impl chosen by target/feature.
+//! The scan is monomorphized once in [`execute`] over [`MarkElem`] — the mark
+//! element type: `u32` (the fast path; haystacks ≤ 4 GiB) or `usize` (the
+//! fallback for larger inputs) — so the per-byte loop carries no dispatch.
 
 use crate::automata::dfa::{DEAD_STATE, Dfa};
 use crate::automata::nfa::{FULL_MATCH_END, FULL_MATCH_START, TEXT_POS_NO_MATCH};
@@ -59,37 +56,6 @@ impl MarkElem for usize {
     #[inline]
     fn to_pos(self) -> usize {
         self
-    }
-}
-
-/// A gather strategy: `out[i] = src[idx[i]]` for the whole mark file at once.
-/// `idx` is a transition's [`ShuffleVec`](crate::automata::tdfa::ShuffleVec);
-/// `src` and `out` are mark files of equal length (`num_marks + 2`).
-pub(crate) trait Permute<T: MarkElem> {
-    fn apply(src: &[T], idx: &[u16], out: &mut [T]);
-}
-
-/// Portable reference gather. Correct for every `T` and arch; also the oracle
-/// the SIMD impls are differentially tested against.
-pub(crate) struct ScalarGather;
-
-impl<T: MarkElem> Permute<T> for ScalarGather {
-    #[inline]
-    fn apply(src: &[T], idx: &[u16], out: &mut [T]) {
-        // All three are the mark file's width (`num_marks + 2`): `src`/`out` are
-        // mark files, and a non-empty shuffle has one source lane per output
-        // lane. The `zip` would silently leave `out`'s tail unwritten if `idx`
-        // were shorter, and the unchecked read below relies on every `idx` lane
-        // being in bounds of `src`.
-        debug_assert_eq!(src.len(), out.len(), "gather src/out length mismatch");
-        debug_assert_eq!(
-            idx.len(),
-            out.len(),
-            "shuffle length must match the mark file"
-        );
-        for o in 0..out.len() {
-            *out.mat(o) = *src.iat(*idx.iat(o) as usize);
-        }
     }
 }
 
@@ -145,10 +111,9 @@ pub fn execute_dfa(dfa: &Dfa, input: &[u8]) -> bool {
 /// Execute the TDFA against `input`. Returns the first match (range + captures)
 /// or `None`.
 ///
-/// This is the dispatch wrapper: it picks the mark width and gather strategy
-/// **once** (based on haystack size, the mark-file width, and target features)
-/// and calls the monomorphized [`execute_generic`]. The chosen body has no
-/// per-byte dispatch.
+/// This is the dispatch wrapper: it picks the mark width and config flags
+/// **once** (based on haystack size and the automaton's contents) and calls the
+/// monomorphized [`execute_generic`]. The chosen body has no per-byte dispatch.
 pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     // Cross the mark width with the config-flag combinations, picking one
     // monomorphization from the automaton's contents. Each `$flag` is a `bool`
@@ -169,7 +134,7 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
         };
         // All flags resolved to literals: emit the monomorphized call.
         (@width $t:ty; [] [$($lit:tt)*]) => {
-            execute_generic::<ScalarGather, $t, ExecConfig<$($lit)*>>(tdfa, input, start)
+            execute_generic::<$t, ExecConfig<$($lit)*>>(tdfa, input, start)
         };
     }
 
@@ -192,9 +157,9 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
 /// Apply a `TagCommandList` to a mark file in place (scalar, two-phase). Used
 /// for the cold command sites — entry, anchor alts, and `$`-conditionals —
 /// which run at most once per scan or rarely; the per-byte transition path uses
-/// the precompiled gather instead. Touches only the real-mark lanes
-/// (`0..num_marks`); the trailing `clear`/`current_pos` lanes are irrelevant
-/// here because `CurrentPos` writes use `current_pos` directly.
+/// the precompiled move sequences instead. Touches only the real-mark lanes
+/// (`0..num_marks`); the trailing `clear`/`current_pos`/`scratch` lanes are
+/// irrelevant here because `CurrentPos` writes use `current_pos` directly.
 fn apply_cmds_scalar<T: MarkElem>(buf: &mut [T], cmds: &[TagCommand], current_pos: T) {
     if cmds.is_empty() {
         return;
@@ -218,24 +183,24 @@ fn apply_cmds_scalar<T: MarkElem>(buf: &mut [T], cmds: &[TagCommand], current_po
     }
 }
 
-/// The monomorphized scan. `P` is the gather strategy and `T` the mark element;
-/// both are fixed for the whole pass.
-fn execute_generic<P: Permute<T>, T: MarkElem, C: TdfaExecConfig>(
+/// The monomorphized scan. `T` is the mark element, fixed for the whole pass.
+fn execute_generic<T: MarkElem, C: TdfaExecConfig>(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
 ) -> Option<NfaMatch> {
     let num_tags = tdfa.num_tags();
     let num_marks = tdfa.num_marks();
-    // Mark file: real marks `0..num_marks`, then `clear` and `current_pos`.
-    let width = num_marks + 2;
+    // Mark file: real marks `0..num_marks`, then `clear`, `current_pos`, and a
+    // `scratch` lane (used by move sequences to break copy cycles).
+    let width = num_marks + 3;
     let curpos_lane = num_marks + 1;
 
-    // Double buffer: a gather reads `src_buf` and writes `dst_buf`, then they
-    // swap. The `clear` lane stays `NO_MATCH` (identity preserves it). Both
-    // allocated once per scan — not per transition.
+    // The working mark file, mutated in place by each transition's move
+    // sequence. The `clear` lane stays `NO_MATCH`; the `scratch` lane needs no
+    // init (always written before read within a sequence). Allocated once per
+    // scan — not per transition.
     let mut src_buf = vec![T::NO_MATCH; width].into_boxed_slice();
-    let mut dst_buf = vec![T::NO_MATCH; width].into_boxed_slice();
     // Reused snapshot of the winning accept's marks (copied in on replace only).
     let mut best_snap = vec![T::NO_MATCH; width].into_boxed_slice();
     // Scratch for applying a `$`-conditional's commands before snapshotting.
@@ -278,16 +243,17 @@ fn execute_generic<P: Permute<T>, T: MarkElem, C: TdfaExecConfig>(
 
     let byte_to_class = tdfa.byte_to_class();
     let transitions = tdfa.transitions();
-    let trans_shuffles = tdfa.transition_shuffles();
+    let trans_moves = tdfa.transition_moves();
     let trans_cmds = tdfa.transition_commands();
     let accepting = tdfa.accepting();
     let num_classes = tdfa.num_classes();
 
-    // Whether to drive transitions with the precompiled gather (the fast path)
-    // or interpret the command lists directly. The latter covers automata whose
-    // mark file is too large for compiled shuffles (see `Tdfa::compile_shuffles`).
-    // Loop-invariant, so the branch predicts perfectly.
-    let use_gather = tdfa.has_shuffles();
+    // Whether to drive transitions with the precompiled move sequences (the
+    // common path) or interpret the command lists directly. The latter covers
+    // only the degenerate too-many-marks-for-`u16` case (see
+    // `Tdfa::compile_moves_all`). Loop-invariant, so the branch predicts
+    // perfectly.
+    let use_moves = tdfa.has_moves();
 
     // Position where `state` was last actually entered (see the long-standing
     // note below: EOI conditionals evaluate against this, not `input.len()`).
@@ -301,16 +267,18 @@ fn execute_generic<P: Permute<T>, T: MarkElem, C: TdfaExecConfig>(
         if next == TDFA_DEAD_STATE {
             break;
         }
-        // Apply the transition's mark update. With shuffles, one gather (an
-        // empty shuffle is the identity — marks untouched, the common tag-free
-        // case — so we skip the gather + swap). Without, interpret the commands
-        // in place.
-        if use_gather {
-            let shuf = trans_shuffles.iat(idx);
-            if !shuf.is_empty() {
+        // Apply the transition's mark update in place. An empty move sequence is
+        // the common tag-free case (marks untouched, skipped). Each move is
+        // `buf[dst] = buf[src]`; the sequence is ordered so reads see pre-update
+        // values, with `src` possibly naming the `current_pos` or `scratch` lane.
+        if use_moves {
+            let moves = trans_moves.iat(idx);
+            if !moves.is_empty() {
                 *src_buf.mat(curpos_lane) = T::from_pos(pos + 1);
-                P::apply(&src_buf, shuf, &mut dst_buf);
-                core::mem::swap(&mut src_buf, &mut dst_buf);
+                for op in moves.iter() {
+                    let v = *src_buf.iat(op.src as usize);
+                    *src_buf.mat(op.dst as usize) = v;
+                }
             }
         } else {
             apply_cmds_scalar::<T>(&mut src_buf, trans_cmds.iat(idx), T::from_pos(pos + 1));
