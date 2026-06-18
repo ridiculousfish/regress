@@ -1021,11 +1021,23 @@ impl Nfa {
     /// fires at the true start of input, because the TDFA's `at_start_of_input`
     /// handling (and the NFA executor's position-based predicate evaluation)
     /// gate it on the actual byte position.
+    ///
+    /// As an optimization, a regex that is itself anchored to the start of input
+    /// (a leading non-multiline `^`, not inside an alternation — see
+    /// [`startpredicate::anchored_to_start`]) can only match at offset 0, so the
+    /// prefix is pure overhead. Such regexes skip the prefix and build the
+    /// anchored form instead; the `^` node still gates the match to position 0.
     pub fn try_from_unanchored(re: &ir::Regex) -> Result<Self> {
         Self::build(re, /* unanchored */ true)
     }
 
     fn build(re: &ir::Regex, unanchored: bool) -> Result<Self> {
+        // A start-anchored regex (leading non-multiline `^`) can only match at
+        // offset 0, so the lazy unanchored prefix would just scan the whole
+        // input to no purpose. Build the anchored form instead — the `^` node
+        // remains in the pattern and enforces the position-0 semantics.
+        let unanchored = unanchored && !crate::startpredicate::anchored_to_start(re);
+
         // Pre-compute the capture-tag count so any sentinel tags allocated
         // during construction land *above* the capture range.
         let num_capture_tags = 2 + 2 * count_capture_groups(&re.node);

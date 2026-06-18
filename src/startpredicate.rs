@@ -212,13 +212,19 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
     }
 }
 
+/// \return whether the entire regex is anchored to the start of input: it
+/// begins with a non-multiline `^` (not inside an alternation) and multiline
+/// mode is disabled. In multiline mode `^` matches at the start of any line, so
+/// the regex is not anchored to the string start.
+pub(crate) fn anchored_to_start(re: &ir::Regex) -> bool {
+    is_start_anchored(&re.node) && !re.flags.multiline
+}
+
 /// \return the start predicate for a Regex.
 pub fn predicate_for_re(re: &ir::Regex) -> StartPredicate {
     // Check if the regex is anchored to the start - if so, we can optimize
-    // by avoiding string searching entirely. However, only do this when
-    // multiline mode is disabled, since in multiline mode ^ can match
-    // at the beginning of any line, not just the string start.
-    if is_start_anchored(&re.node) && !re.flags.multiline {
+    // by avoiding string searching entirely.
+    if anchored_to_start(re) {
         return StartPredicate::StartAnchored;
     }
 

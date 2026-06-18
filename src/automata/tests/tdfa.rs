@@ -332,6 +332,95 @@ fn unanchored_word_boundary() {
     assert!(execute_tdfa(&t, b"scat").is_none());
 }
 
+// ---- Start-anchored prefix-skip optimization ----
+//
+// A regex with a leading non-multiline `^` (not inside an alternation) can only
+// match at offset 0, so `try_from_unanchored` drops the lazy `MatchAny*?` prefix
+// and builds the anchored form. These tests pin both the behavior and the fact
+// that the prefix is actually skipped (state-count equality with the anchored
+// build), and guard the multiline carve-out.
+
+/// Parse with the multiline flag set (otherwise like `parse_ir`).
+fn parse_ir_multiline(pattern: &str) -> crate::ir::Regex {
+    let flags = Flags {
+        unicode: true,
+        multiline: true,
+        ..Default::default()
+    };
+    let mut re =
+        crate::backends::try_parse(pattern.chars().map(u32::from), flags).expect("parse failed");
+    crate::optimizer::optimize(&mut re);
+    re
+}
+
+fn make_tdfa_unanchored_ml(pattern: &str) -> Tdfa {
+    let re = parse_ir_multiline(pattern);
+    let nfa = Nfa::try_from_unanchored(&re).expect("unanchored nfa build failed");
+    Tdfa::try_from(&nfa).expect("tdfa build failed")
+}
+
+#[test]
+fn start_anchored_skips_prefix() {
+    // The unanchored build of a start-anchored regex is identical to the
+    // anchored build (the prefix would otherwise add states).
+    let anchored = make_tdfa("^abc");
+    let unanchored = make_tdfa_unanchored("^abc");
+    assert_eq!(
+        anchored.num_states(),
+        unanchored.num_states(),
+        "start-anchored regex should skip the unanchored prefix"
+    );
+    assert_eq!(
+        execute_tdfa(&unanchored, b"abcdef").map(|m| m.range),
+        Some(0..3)
+    );
+    assert!(execute_tdfa(&unanchored, b"xabc").is_none());
+}
+
+#[test]
+fn start_anchored_no_match_at_nonzero_offset() {
+    // Non-multiline `^a` matches only at position 0; a search starting later
+    // finds nothing.
+    let t = make_tdfa_unanchored("^a");
+    assert_eq!(execute_tdfa_inner(&t, b"aaa", 0).map(|m| m.range), Some(0..1));
+    assert!(execute_tdfa_inner(&t, b"aaa", 1).is_none());
+}
+
+#[test]
+fn start_anchored_through_capture_group() {
+    // `is_start_anchored` descends through a leading capture group.
+    let t = make_tdfa_unanchored("^(a)(b)c");
+    assert_eq!(make_tdfa("^(a)(b)c").num_states(), t.num_states());
+    let m = execute_tdfa(&t, b"abc").expect("should match");
+    assert_eq!(m.range, 0..3);
+    assert_eq!(m.captures, vec![Some(0..1), Some(1..2)]);
+    assert!(execute_tdfa(&t, b"zabc").is_none());
+}
+
+#[test]
+fn multiline_caret_keeps_prefix() {
+    // With multiline, `^` matches at every line start, so the prefix must be
+    // retained — the build must NOT collapse to the anchored form.
+    let anchored = make_tdfa("^a"); // anchored form, no prefix
+    let ml = make_tdfa_unanchored_ml("^a");
+    assert_ne!(
+        anchored.num_states(),
+        ml.num_states(),
+        "multiline ^ must keep the unanchored prefix"
+    );
+    // Leftmost match is at the line start after `\n` (input doesn't start with 'a').
+    assert_eq!(execute_tdfa(&ml, b"b\na").map(|m| m.range), Some(2..3));
+}
+
+#[test]
+fn top_level_alt_not_anchored() {
+    // `^a|b` is an Alt at top level: the `b` arm is unanchored, so the prefix is
+    // kept and `b` matches mid-string.
+    let t = make_tdfa_unanchored("^a|b");
+    assert_eq!(execute_tdfa(&t, b"zzb").map(|m| m.range), Some(2..3));
+    assert_eq!(execute_tdfa(&t, b"a").map(|m| m.range), Some(0..1));
+}
+
 #[test]
 fn unanchored_matches_anchored_retry() {
     // The new single-pass unanchored `execute` (raw and optimized) must agree
