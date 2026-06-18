@@ -382,7 +382,10 @@ fn start_anchored_no_match_at_nonzero_offset() {
     // Non-multiline `^a` matches only at position 0; a search starting later
     // finds nothing.
     let t = make_tdfa_unanchored("^a");
-    assert_eq!(execute_tdfa_inner(&t, b"aaa", 0).map(|m| m.range), Some(0..1));
+    assert_eq!(
+        execute_tdfa_inner(&t, b"aaa", 0).map(|m| m.range),
+        Some(0..1)
+    );
     assert!(execute_tdfa_inner(&t, b"aaa", 1).is_none());
 }
 
@@ -419,6 +422,19 @@ fn top_level_alt_not_anchored() {
     let t = make_tdfa_unanchored("^a|b");
     assert_eq!(execute_tdfa(&t, b"zzb").map(|m| m.range), Some(2..3));
     assert_eq!(execute_tdfa(&t, b"a").map(|m| m.range), Some(0..1));
+}
+
+#[test]
+fn all_arms_anchored_alt_skips_prefix() {
+    // `^a|^b` is correctly detected as anchored.
+    let t = make_tdfa_unanchored("^a|^b");
+    assert_eq!(make_tdfa("^a|^b").num_states(), t.num_states());
+    assert_eq!(execute_tdfa(&t, b"b").map(|m| m.range), Some(0..1));
+    assert!(execute_tdfa(&t, b"zzb").is_none());
+    // This descends into capture groups as well.
+    let t2 = make_tdfa_unanchored("(^a)|(^b)");
+    assert_eq!(make_tdfa("(^a)|(^b)").num_states(), t2.num_states());
+    assert!(execute_tdfa(&t2, b"xb").is_none());
 }
 
 #[test]
