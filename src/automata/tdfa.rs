@@ -139,47 +139,71 @@ fn compile_moves(cmds: &[TagCommand], num_marks: usize) -> Box<[MoveOp]> {
     let curpos = (num_marks + 1) as u16;
     let scratch = (num_marks + 2) as u16;
 
+    // Index every scratch array by a dense, *local* numbering of only the marks
+    // this list mentions (as a destination or a `Copy` source). `compile_moves`
+    // runs once per transition, so sizing the scratch arrays to the global mark
+    // file (`num_marks`, which reaches tens of thousands for large character
+    // classes) would make construction quadratic; a command list touches only a
+    // handful of marks. `marks[local] -> global` recovers the real id on emit.
+    let mut marks: SmallVec<[u16; 8]> = SmallVec::new();
+    for c in cmds {
+        let d = c.dst.0 as u16;
+        if !marks.contains(&d) {
+            marks.push(d);
+        }
+        if let MarkValue::Copy(s) = c.src {
+            let s = s.0 as u16;
+            if !marks.contains(&s) {
+                marks.push(s);
+            }
+        }
+    }
+    let n = marks.len();
+    // Every dst/src above was interned, so this lookup always succeeds.
+    let local = |m: u16| marks.iter().position(|&x| x == m).unwrap();
+
     // Marks stamped by a `CurrentPos` write in this list: a `Copy` reading such
     // a mark takes the freshly stamped value (the constant `current_pos`).
-    let mut stamped = vec![false; num_marks];
+    let mut stamped = vec![false; n];
     for c in cmds {
         if matches!(c.src, MarkValue::CurrentPos) {
-            stamped[c.dst.0 as usize] = true;
+            stamped[local(c.dst.0 as u16)] = true;
         }
     }
 
     // Resolve each destination's source. `Const` reads `current_pos` (order-
-    // independent); `Mark(s)` reads the *old* value of mark `s` (must precede
-    // overwriting `s`); `Scratch` reads a value saved while breaking a cycle.
+    // independent); `Mark(s)` reads the *old* value of (local) mark `s` (must
+    // precede overwriting `s`); `Scratch` reads a value saved while breaking a
+    // cycle.
     #[derive(Clone, Copy)]
     enum Src {
         Const,
-        Mark(u16),
+        Mark(usize),
         Scratch,
     }
-    let mut pred: Vec<Option<Src>> = vec![None; num_marks];
+    let mut pred: Vec<Option<Src>> = vec![None; n];
     // `read_count[m]` = number of pending assignments still reading old `m`.
-    let mut read_count = vec![0u32; num_marks];
+    let mut read_count = vec![0u32; n];
     for c in cmds {
-        let dst = c.dst.0 as usize;
+        let dst = local(c.dst.0 as u16);
         let new = match c.src {
             MarkValue::CurrentPos => Src::Const,
-            MarkValue::Copy(s) if stamped[s.0 as usize] => Src::Const,
-            MarkValue::Copy(s) if s.0 as usize == dst => {
+            MarkValue::Copy(s) if stamped[local(s.0 as u16)] => Src::Const,
+            MarkValue::Copy(s) if s.0 == c.dst.0 => {
                 // `dst := old(dst)` is a no-op; drop it (and any prior write).
                 if let Some(Src::Mark(old)) = pred[dst] {
-                    read_count[old as usize] -= 1;
+                    read_count[old] -= 1;
                 }
                 pred[dst] = None;
                 continue;
             }
-            MarkValue::Copy(s) => Src::Mark(s.0 as u16),
+            MarkValue::Copy(s) => Src::Mark(local(s.0 as u16)),
         };
         if let Some(Src::Mark(old)) = pred[dst] {
-            read_count[old as usize] -= 1;
+            read_count[old] -= 1;
         }
         if let Src::Mark(s) = new {
-            read_count[s as usize] += 1;
+            read_count[s] += 1;
         }
         pred[dst] = Some(new);
     }
@@ -187,25 +211,27 @@ fn compile_moves(cmds: &[TagCommand], num_marks: usize) -> Box<[MoveOp]> {
     let mut ops: Vec<MoveOp> = Vec::with_capacity(cmds.len());
     // A destination is ready to emit once nothing pending still needs its old
     // value (`read_count == 0`).
-    let mut ready: Vec<u16> = (0..num_marks)
+    let mut ready: Vec<usize> = (0..n)
         .filter(|&d| pred[d].is_some() && read_count[d] == 0)
-        .map(|d| d as u16)
         .collect();
     let mut remaining = pred.iter().filter(|p| p.is_some()).count();
 
     while remaining > 0 {
         if let Some(d) = ready.pop() {
-            let s = pred[d as usize].take().unwrap();
+            let s = pred[d].take().unwrap();
             remaining -= 1;
             let src_idx = match s {
                 Src::Const => curpos,
-                Src::Mark(m) => m,
+                Src::Mark(m) => marks[m],
                 Src::Scratch => scratch,
             };
-            ops.push(MoveOp { dst: d, src: src_idx });
+            ops.push(MoveOp {
+                dst: marks[d],
+                src: src_idx,
+            });
             if let Src::Mark(m) = s {
-                read_count[m as usize] -= 1;
-                if read_count[m as usize] == 0 && pred[m as usize].is_some() {
+                read_count[m] -= 1;
+                if read_count[m] == 0 && pred[m].is_some() {
                     ready.push(m);
                 }
             }
@@ -213,18 +239,20 @@ fn compile_moves(cmds: &[TagCommand], num_marks: usize) -> Box<[MoveOp]> {
             // No ready assignment but some remain: a copy cycle. Save one of its
             // marks to `scratch` and redirect that mark's readers there; the
             // mark is then free to overwrite and the component drains in order.
-            let m = (0..num_marks)
+            let m = (0..n)
                 .find(|&x| pred[x].is_some() && read_count[x] > 0)
-                .expect("a cycle node exists when stalled with work remaining")
-                as u16;
-            ops.push(MoveOp { dst: scratch, src: m });
-            for d in 0..num_marks {
+                .expect("a cycle node exists when stalled with work remaining");
+            ops.push(MoveOp {
+                dst: scratch,
+                src: marks[m],
+            });
+            for d in 0..n {
                 if matches!(pred[d], Some(Src::Mark(s)) if s == m) {
                     pred[d] = Some(Src::Scratch);
-                    read_count[m as usize] -= 1;
+                    read_count[m] -= 1;
                 }
             }
-            debug_assert_eq!(read_count[m as usize], 0);
+            debug_assert_eq!(read_count[m], 0);
             ready.push(m);
         }
     }

@@ -41,13 +41,22 @@ pub(crate) fn minimize(t: &mut Tdfa) {
         return;
     }
 
-    // Intern transition command lists to small ids (exact equality).
-    let mut cmd_intern: HashMap<Vec<TagCommand>, u32> = HashMap::new();
+    // Intern transition command lists to small ids (exact equality). Key by the
+    // `SmallVec` directly and clone only on a miss: the common (small) list is
+    // inline, so a hit costs no allocation and a miss clones inline data — vs.
+    // the old `.to_vec()` which heap-allocated for every one of `n * k` cells.
+    let mut cmd_intern: HashMap<TagCommandList, u32> = HashMap::new();
     let mut cmd_id = vec![0u32; n * k];
     for (idx, slot) in cmd_id.iter_mut().enumerate() {
-        let key: Vec<TagCommand> = t.transition_commands[idx].to_vec();
-        let next = cmd_intern.len() as u32;
-        *slot = *cmd_intern.entry(key).or_insert(next);
+        let cmds = &t.transition_commands[idx];
+        *slot = match cmd_intern.get(cmds) {
+            Some(&id) => id,
+            None => {
+                let id = cmd_intern.len() as u32;
+                cmd_intern.insert(cmds.clone(), id);
+                id
+            }
+        };
     }
 
     // Initial partition by output: accepting + finals, with anchor states pinned.
@@ -76,31 +85,48 @@ pub(crate) fn minimize(t: &mut Tdfa) {
         }
     }
 
-    // Refine until the partition stops splitting. The signature is the current
-    // block plus, per class, the target's block and the command id.
+    // Refine until the partition stops splitting. Each state's signature is its
+    // current block followed by, per class, the target's block and command id.
+    // We materialize signatures as fixed-width rows in one reusable buffer and
+    // group equal rows by sorting an index permutation — no per-state heap
+    // allocation or hashing of long keys (the previous `HashMap<(u32, Vec<_>)>`
+    // approach allocated and hashed a length-`k` vector for every state every
+    // round, which dominated `optimize` for large automata).
+    let row_len = 1 + 2 * k;
+    let mut rows = vec![0u32; n * row_len];
+    let mut perm: Vec<u32> = (0..n as u32).collect();
+    let mut next = vec![0u32; n];
     loop {
-        let mut sig_intern: HashMap<(u32, Vec<(u32, u32)>), u32> = HashMap::new();
-        let mut next = vec![0u32; n];
-        let mut next_blocks: u32 = 0;
         for s in 0..n {
-            let sig: Vec<(u32, u32)> = (0..k)
-                .map(|c| {
-                    let idx = s * k + c;
-                    (block[t.transitions[idx] as usize], cmd_id[idx])
-                })
-                .collect();
-            let key = (block[s], sig);
-            next[s] = match sig_intern.get(&key) {
-                Some(&b) => b,
-                None => {
-                    let b = next_blocks;
-                    next_blocks += 1;
-                    sig_intern.insert(key, b);
-                    b
-                }
-            };
+            let base = s * row_len;
+            rows[base] = block[s];
+            let trow = s * k;
+            for c in 0..k {
+                let idx = trow + c;
+                rows[base + 1 + 2 * c] = block[t.transitions[idx] as usize];
+                rows[base + 2 + 2 * c] = cmd_id[idx];
+            }
         }
-        block = next;
+        perm.sort_unstable_by(|&a, &b| {
+            let a = a as usize * row_len;
+            let b = b as usize * row_len;
+            rows[a..a + row_len].cmp(&rows[b..b + row_len])
+        });
+        let mut next_blocks: u32 = 0;
+        for i in 0..n {
+            let s = perm[i] as usize;
+            if i > 0 {
+                let p = perm[i - 1] as usize;
+                if rows[s * row_len..s * row_len + row_len]
+                    != rows[p * row_len..p * row_len + row_len]
+                {
+                    next_blocks += 1;
+                }
+            }
+            next[s] = next_blocks;
+        }
+        next_blocks += 1; // ids are 0-based; the count is the last id + 1.
+        std::mem::swap(&mut block, &mut next);
         if next_blocks == num_blocks {
             break;
         }
@@ -226,12 +252,14 @@ fn fold_currentpos_copies(t: &mut Tdfa) {
 
 /// Per-mark count of reads (`Copy` sources in commands + `FinalCommand`
 /// sources) across the whole automaton.
-fn global_src_counts(t: &Tdfa) -> HashMap<InputMark, usize> {
-    let mut counts: HashMap<InputMark, usize> = HashMap::new();
+fn global_src_counts(t: &Tdfa) -> Vec<u32> {
+    // Indexed by mark id (all `< num_marks`); array indexing avoids hashing a
+    // mark for every `Copy` source across the whole automaton.
+    let mut counts = vec![0u32; t.num_marks];
     let mut bump_cmds = |cmds: &[TagCommand]| {
         for c in cmds {
             if let MarkValue::Copy(m) = c.src {
-                *counts.entry(m).or_insert(0) += 1;
+                counts[m.0 as usize] += 1;
             }
         }
     };
@@ -254,7 +282,7 @@ fn global_src_counts(t: &Tdfa) -> HashMap<InputMark, usize> {
     let mut bump_finals = |finals: &[FinalCommand]| {
         for fc in finals {
             if let MarkValue::Copy(m) = fc.src {
-                *counts.entry(m).or_insert(0) += 1;
+                counts[m.0 as usize] += 1;
             }
         }
     };
@@ -272,12 +300,15 @@ fn global_src_counts(t: &Tdfa) -> HashMap<InputMark, usize> {
 /// Dead-mark elimination to a fixpoint: a command whose destination is read
 /// nowhere is dead; removing a `Copy` can make its source dead too.
 fn eliminate_dead_marks(t: &mut Tdfa) {
+    // `used` is a dense bitmap indexed by mark id (all `< num_marks`), reused
+    // across fixpoint rounds — no hashing, no per-round reallocation.
+    let mut used = vec![false; t.num_marks];
     loop {
-        let used = read_marks(t);
+        read_marks(t, &mut used);
         let mut changed = false;
         let mut prune = |cmds: &mut TagCommandList| {
             let before = cmds.len();
-            cmds.retain(|c| used.contains(&c.dst));
+            cmds.retain(|c| used[c.dst.0 as usize]);
             changed |= cmds.len() != before;
         };
         prune(&mut t.entry_commands_anchored);
@@ -304,28 +335,27 @@ fn eliminate_dead_marks(t: &mut Tdfa) {
 /// Set of marks read anywhere — as a `Copy` source in any command or as a
 /// `FinalCommand` source. A conservative (never per-path) global use-set, so a
 /// mark absent here is read on no path and its writes are dead.
-fn read_marks(t: &Tdfa) -> HashSet<InputMark> {
-    let mut used = HashSet::new();
-    collect_cmd_srcs(&t.entry_commands_anchored, &mut used);
-    collect_cmd_srcs(&t.entry_commands_unanchored, &mut used);
+fn read_marks(t: &Tdfa, used: &mut [bool]) {
+    used.fill(false);
+    collect_cmd_srcs(&t.entry_commands_anchored, used);
+    collect_cmd_srcs(&t.entry_commands_unanchored, used);
     for cmds in t.transition_commands.iter() {
-        collect_cmd_srcs(cmds, &mut used);
+        collect_cmd_srcs(cmds, used);
     }
     for fs in t.finals.iter() {
-        collect_final_srcs(fs, &mut used);
+        collect_final_srcs(fs, used);
     }
     for conds in t.anchor_conditionals.iter() {
         for ac in conds {
-            collect_cmd_srcs(&ac.commands, &mut used);
-            collect_final_srcs(&ac.finals, &mut used);
+            collect_cmd_srcs(&ac.commands, used);
+            collect_final_srcs(&ac.finals, used);
         }
     }
     for alts in t.anchor_alts.iter() {
         for alt in alts {
-            collect_cmd_srcs(&alt.commands, &mut used);
+            collect_cmd_srcs(&alt.commands, used);
         }
     }
-    used
 }
 
 /// Visit every `InputMark` slot (each command `dst`, and each `Copy` source in
@@ -355,20 +385,17 @@ fn for_each_mark_mut(t: &mut Tdfa, mut f: impl FnMut(&mut InputMark)) {
 /// Renumber surviving marks densely (`0..k`) by first appearance in a fixed
 /// walk, rewriting every reference, and set `num_marks = k`.
 fn renumber_marks(t: &mut Tdfa) {
-    let mut remap: HashMap<InputMark, InputMark> = HashMap::new();
+    // Old ids are all `< num_marks`, so a plain array (sentinel = unassigned)
+    // remaps in O(1) without hashing.
+    let mut remap = vec![u32::MAX; t.num_marks];
     let mut next = 0u32;
     for_each_mark_mut(t, |m| {
-        let old = *m;
-        let id = match remap.get(&old) {
-            Some(&id) => id,
-            None => {
-                let id = InputMark(next);
-                next += 1;
-                remap.insert(old, id);
-                id
-            }
-        };
-        *m = id;
+        let old = m.0 as usize;
+        if remap[old] == u32::MAX {
+            remap[old] = next;
+            next += 1;
+        }
+        *m = InputMark(remap[old]);
     });
     t.num_marks = next as usize;
 }
@@ -654,23 +681,29 @@ fn drop_identity_copies(t: &mut Tdfa) {
 /// Fold `c := Copy(r)` into `c := CurrentPos` within one command list when `r`
 /// is a once-read mark stamped by a `CurrentPos` in this list and `c` is not
 /// itself a `Copy` source here. See `fold_currentpos_copies` for why.
-fn fold_list(cmds: &mut TagCommandList, src_count: &HashMap<InputMark, usize>) {
-    let mut stamped_here: HashSet<InputMark> = HashSet::new();
-    let mut copy_src_here: HashSet<InputMark> = HashSet::new();
+fn fold_list(cmds: &mut TagCommandList, src_count: &[u32]) {
+    // Command lists are tiny (typically ≤ a handful), so inline `SmallVec`s with
+    // linear membership beat per-call `HashSet` allocations.
+    let mut stamped_here: SmallVec<[InputMark; 8]> = SmallVec::new();
+    let mut copy_src_here: SmallVec<[InputMark; 8]> = SmallVec::new();
     for c in cmds.iter() {
         match c.src {
             MarkValue::CurrentPos => {
-                stamped_here.insert(c.dst);
+                if !stamped_here.contains(&c.dst) {
+                    stamped_here.push(c.dst);
+                }
             }
             MarkValue::Copy(s) => {
-                copy_src_here.insert(s);
+                if !copy_src_here.contains(&s) {
+                    copy_src_here.push(s);
+                }
             }
         }
     }
     for c in cmds.iter_mut() {
         if let MarkValue::Copy(r) = c.src {
             if stamped_here.contains(&r)
-                && src_count.get(&r).copied().unwrap_or(0) == 1
+                && src_count[r.0 as usize] == 1
                 && !copy_src_here.contains(&c.dst)
             {
                 c.src = MarkValue::CurrentPos;
@@ -680,19 +713,19 @@ fn fold_list(cmds: &mut TagCommandList, src_count: &HashMap<InputMark, usize>) {
 }
 
 /// Add every `Copy` source in `cmds` to `used`.
-fn collect_cmd_srcs(cmds: &[TagCommand], used: &mut HashSet<InputMark>) {
+fn collect_cmd_srcs(cmds: &[TagCommand], used: &mut [bool]) {
     for c in cmds {
         if let MarkValue::Copy(m) = c.src {
-            used.insert(m);
+            used[m.0 as usize] = true;
         }
     }
 }
 
 /// Add every `Copy` source in `finals` to `used`.
-fn collect_final_srcs(finals: &[FinalCommand], used: &mut HashSet<InputMark>) {
+fn collect_final_srcs(finals: &[FinalCommand], used: &mut [bool]) {
     for fc in finals {
         if let MarkValue::Copy(m) = fc.src {
-            used.insert(m);
+            used[m.0 as usize] = true;
         }
     }
 }
