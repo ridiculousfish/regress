@@ -170,11 +170,12 @@ fn unicode_sets_breaking_change_from_u_to_v_28() {
 }
 
 fn test_unicode_sets_matches(tc: TestConfig, expression: &str, matches: &[&str], fails: &[&str]) {
+    let cr = tc.compilef(expression, "v");
     for m in matches {
-        tc.test_match_succeeds(expression, "v", m);
+        cr.test_succeeds(m);
     }
     for f in fails {
-        tc.test_match_fails(expression, "v", f);
+        cr.test_fails(f);
     }
 }
 
