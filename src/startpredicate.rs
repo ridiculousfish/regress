@@ -22,6 +22,8 @@ fn is_start_anchored(n: &Node) -> bool {
             nodes.first().is_some_and(is_start_anchored)
         }
         Node::CaptureGroup { contents, .. } => is_start_anchored(contents),
+        // For alternation, both arms must be start-anchored
+        Node::Alt(left, right) => is_start_anchored(left) && is_start_anchored(right),
         // Other nodes are not anchored
         _ => false,
     }
