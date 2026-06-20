@@ -6,6 +6,7 @@ pub mod executors;
 pub mod nfa;
 pub mod nfa_backend;
 mod nfa_optimize;
+pub mod prefilter;
 pub mod tdfa;
 pub mod tdfa_backend;
 mod trie;

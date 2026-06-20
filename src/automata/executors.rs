@@ -22,8 +22,7 @@
 use crate::api::Match;
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend;
-use crate::automata::tdfa::Tdfa;
-use crate::automata::tdfa_backend;
+use crate::automata::prefilter::TdfaProgram;
 use crate::exec::{Executor, MatchProducer};
 use crate::indexing::{InputIndexer, Utf8Input};
 #[cfg(not(feature = "std"))]
@@ -107,10 +106,12 @@ impl<'r, 't> Executor<'r, 't> for NfaExecutor<'r, 't> {
     }
 }
 
-/// TDFA-backed executor. Source = `Tdfa`.
+/// TDFA-backed executor. Source = `TdfaProgram` (an automaton plus the strategy
+/// used to drive it: plain unanchored scan, or a literal prefilter that skips
+/// to candidates and verifies with an anchored automaton).
 #[derive(Debug)]
 pub struct TdfaExecutor<'r, 't> {
-    tdfa: &'r Tdfa,
+    program: &'r TdfaProgram,
     input: Utf8Input<'t>,
 }
 
@@ -126,21 +127,24 @@ impl<'r, 't> MatchProducer for TdfaExecutor<'r, 't> {
         pos: Self::Position,
         next_start: &mut Option<Self::Position>,
     ) -> Option<Match> {
-        let tdfa = self.tdfa;
-        let names = tdfa.group_names();
+        let program = self.program;
+        let names = program.group_names();
+        // `find_at` already locates the leftmost match at or after the offset
+        // (via the prefilter when one is available), so this stays a single
+        // logical pass — same adapter as the NFA executor.
         next_match_single_pass(self.input, names, pos, next_start, |full, start| {
-            tdfa_backend::execute(tdfa, full, start)
+            program.find_at(full, start)
         })
     }
 }
 
 impl<'r, 't> Executor<'r, 't> for TdfaExecutor<'r, 't> {
-    type Source = Tdfa;
+    type Source = TdfaProgram;
     type AsAscii = TdfaExecutor<'r, 't>;
 
-    fn new(source: &'r Tdfa, text: &'t str) -> Self {
+    fn new(source: &'r TdfaProgram, text: &'t str) -> Self {
         Self {
-            tdfa: source,
+            program: source,
             input: Utf8Input::new(text, /* unicode */ true),
         }
     }

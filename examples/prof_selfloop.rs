@@ -3,6 +3,7 @@
 //! can attribute the cost. Usage: `prof_selfloop <tdfa|backtrack|nfa|pikevm> [iters]`
 use regress::backends::{
     self, BacktrackExecutor, CompiledRegex, Nfa, NfaExecutor, PikeVMExecutor, Tdfa, TdfaExecutor,
+    TdfaProgram,
 };
 use std::hint::black_box;
 
@@ -19,8 +20,9 @@ fn main() {
     let ire = backends::try_parse(pattern.chars().map(u32::from), flags).unwrap();
     let cr: CompiledRegex = backends::emit(&ire);
     let nfa = Nfa::try_from_unanchored(&ire).unwrap();
-    let mut tdfa = Tdfa::try_from(&nfa).unwrap();
-    tdfa.optimize();
+    let mut raw_tdfa = Tdfa::try_from(&nfa).unwrap();
+    raw_tdfa.optimize();
+    let tdfa = TdfaProgram::scan(raw_tdfa);
 
     let mut total = 0usize;
     for _ in 0..iters {

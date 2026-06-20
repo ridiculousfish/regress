@@ -83,7 +83,7 @@ fn build_test_artifacts(
 ) -> (
     regress::backends::CompiledRegex,
     Option<regress::backends::Nfa>,
-    Option<regress::backends::Tdfa>,
+    Option<regress::backends::TdfaProgram>,
 ) {
     use regress::backends;
     let mut ire = backends::try_parse(pattern.chars().map(u32::from), flags)
@@ -106,14 +106,13 @@ fn build_test_artifacts(
     if matches!(backend, Backend::Tnfa) {
         return (cr, Some(nfa), None);
     }
-    // Backend::Tdfa. Run the optional optimization passes so the whole corpus
-    // exercises the optimized automaton (the riskier path); a freshly built
-    // TDFA matches identically without them.
-    match backends::Tdfa::try_from(&nfa) {
-        Ok(mut t) => {
-            t.optimize();
-            (cr, Some(nfa), Some(t))
-        }
+    // Backend::Tdfa. Build the production `TdfaProgram`, so the whole corpus
+    // exercises the real search path — including the literal prefilter (skip to
+    // candidates + anchored verify) whenever the regex has a usable prefix
+    // literal. `try_from_ir` optimizes internally and picks anchored-prefilter
+    // vs unanchored-scan; results must match the bytecode engines regardless.
+    match backends::TdfaProgram::try_from_ir(&ire) {
+        Ok(prog) => (cr, Some(nfa), Some(prog)),
         Err(_) => (cr, None, None),
     }
 }
@@ -125,7 +124,7 @@ pub struct TestCompiledRegex {
     re: regress::Regex,
     cr: regress::backends::CompiledRegex,
     nfa: Option<regress::backends::Nfa>,
-    tdfa: Option<regress::backends::Tdfa>,
+    tdfa: Option<regress::backends::TdfaProgram>,
     tc: TestConfig,
 }
 

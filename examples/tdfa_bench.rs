@@ -9,7 +9,7 @@
 //!
 //! Run with: `cargo run --release --example tdfa_bench`
 
-use regress::backends::{self, Nfa, Tdfa, TdfaExecutor};
+use regress::backends::{self, Nfa, Tdfa, TdfaExecutor, TdfaProgram};
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
@@ -72,14 +72,14 @@ fn main() {
     println!("{}", "-".repeat(72));
 
     // Median MB/s of `find().count()` over `input`, or None for short inputs.
-    let throughput = |tdfa: &Tdfa, input: &str| -> Option<f64> {
+    let throughput = |prog: &TdfaProgram, input: &str| -> Option<f64> {
         if input.len() <= 4096 {
             return None;
         }
         let dt = median_time(RUNS, || {
             let mut n = 0usize;
             for _ in 0..ITERS {
-                n += backends::find::<TdfaExecutor>(tdfa, input, 0).count();
+                n += backends::find::<TdfaExecutor>(prog, input, 0).count();
             }
             black_box(n);
         });
@@ -105,7 +105,12 @@ fn main() {
         opt.optimize();
         let (su, so) = (un.stats(), opt.stats());
 
-        let speed = match (throughput(&un, input), throughput(&opt, input)) {
+        // Measure each automaton in isolation via a plain (prefilter-free) scan
+        // program, so this stays a pure un-vs-optimized comparison.
+        let speed = match (
+            throughput(&TdfaProgram::scan(un.clone()), input),
+            throughput(&TdfaProgram::scan(opt.clone()), input),
+        ) {
             (Some(a), Some(b)) => format!("{:.0}->{:.0}", a, b),
             _ => "-".to_string(),
         };

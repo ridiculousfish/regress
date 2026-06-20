@@ -28,6 +28,7 @@
 
 use regress::backends::{
     self, BacktrackExecutor, CompiledRegex, Nfa, NfaExecutor, PikeVMExecutor, Tdfa, TdfaExecutor,
+    TdfaProgram,
 };
 use std::hint::black_box;
 use std::time::{Duration, Instant};
@@ -122,7 +123,9 @@ fn main() {
         let nfa = Nfa::try_from_unanchored(&ire).ok();
         let tdfa = nfa.as_ref().and_then(|n| Tdfa::try_from(n).ok()).map(|mut t| {
             t.optimize();
-            t
+            // Plain scan program (no prefilter): this suite measures the
+            // automaton in isolation over tiny L1-resident inputs.
+            TdfaProgram::scan(t)
         });
         // The upstream `regex` crate rejects some empty-repeat patterns; if so,
         // its column is just "-". Its count isn't cross-checked (different

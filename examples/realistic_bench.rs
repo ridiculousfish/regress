@@ -21,7 +21,8 @@
 //! Run with: `cargo run --release --example realistic_bench`
 
 use regress::backends::{
-    self, BacktrackExecutor, CompiledRegex, Nfa, NfaExecutor, PikeVMExecutor, Tdfa, TdfaExecutor,
+    self, BacktrackExecutor, CompiledRegex, Nfa, NfaExecutor, PikeVMExecutor, TdfaExecutor,
+    TdfaProgram,
 };
 use std::collections::HashMap;
 use std::hint::black_box;
@@ -141,20 +142,23 @@ fn main() {
 
     for &(name, pattern, flags_str) in suite {
         let flags = regress::Flags::from(flags_str);
-        let ire = match backends::try_parse(pattern.chars().map(u32::from), flags) {
+        let mut ire = match backends::try_parse(pattern.chars().map(u32::from), flags) {
             Ok(ire) => ire,
             Err(e) => {
                 println!("{:<28} parse failed: {:?}", name, e);
                 continue;
             }
         };
+        // Optimize the IR once (lowers literal runs to `ByteSequence`, etc.) so
+        // every backend — and the TDFA prefilter in particular — sees literals.
+        backends::optimize(&mut ire);
         let cr: CompiledRegex = backends::emit(&ire);
         // Single-pass unanchored search (implicit lazy `MatchAny*?` prefix).
         let nfa = Nfa::try_from_unanchored(&ire).ok();
-        let tdfa = nfa.as_ref().and_then(|n| Tdfa::try_from(n).ok()).map(|mut t| {
-            t.optimize();
-            t
-        });
+        // The TDFA column drives the automaton via a `TdfaProgram`, which uses a
+        // literal prefilter (memchr/memmem to candidates + anchored verify) when
+        // the match must begin with a literal, else the plain unanchored scan.
+        let tdfa = TdfaProgram::try_from_ir(&ire).ok();
         let rx = regex::RegexBuilder::new(pattern)
             .case_insensitive(flags_str.contains('i'))
             .multi_line(flags_str.contains('m'))
