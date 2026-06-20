@@ -16,6 +16,7 @@ use crate::automata::dfa::{DEAD_STATE, Dfa};
 use crate::automata::nfa::{FULL_MATCH_END, FULL_MATCH_START, TEXT_POS_NO_MATCH};
 use crate::automata::nfa_backend::{NfaMatch, tags_to_captures};
 use crate::automata::tdfa::{FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa};
+use crate::insn::StartPredicate;
 use crate::util::DebugCheckIndex;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -154,6 +155,45 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     )
 }
 
+/// Execute an **anchored** TDFA driven by a literal prefilter: skip to each
+/// candidate `pred` allows and verify there, returning the leftmost match or
+/// `None`. Same dispatch as [`execute`], but to [`execute_prefiltered_generic`]
+/// so the mark buffers are allocated once and reused across all candidates.
+pub fn execute_prefiltered(
+    tdfa: &Tdfa,
+    input: &[u8],
+    start: usize,
+    pred: &StartPredicate,
+) -> Option<NfaMatch> {
+    macro_rules! dispatch {
+        ($t:ty; $($flag:ident = $value:expr),* $(,)?) => {
+            dispatch!(@width $t; [$($flag = $value),*] [])
+        };
+        (@width $t:ty; [$flag:ident = $value:expr $(, $rflag:ident = $rvalue:expr)*] [$($done:tt)*]) => {
+            match $value {
+                true => dispatch!(@width $t; [$($rflag = $rvalue),*] [$($done)* true,]),
+                false => dispatch!(@width $t; [$($rflag = $rvalue),*] [$($done)* false,]),
+            }
+        };
+        (@width $t:ty; [] [$($lit:tt)*]) => {
+            execute_prefiltered_generic::<$t, ExecConfig<$($lit)*>>(tdfa, input, start, pred)
+        };
+    }
+
+    let has_anchor_alts = tdfa.has_anchor_alts();
+    let has_conditionals = tdfa.has_conditionals();
+    if input.len() >= u32::MAX as usize {
+        return dispatch!(usize;
+            HAS_ANCHOR_ALTS = has_anchor_alts,
+            HAS_CONDITIONALS = has_conditionals,
+        );
+    }
+    dispatch!(u32;
+        HAS_ANCHOR_ALTS = has_anchor_alts,
+        HAS_CONDITIONALS = has_conditionals,
+    )
+}
+
 /// Apply a `TagCommandList` to a mark file in place (scalar, two-phase). Used
 /// for the cold command sites — entry, anchor alts, and `$`-conditionals —
 /// which run at most once per scan or rarely; the per-byte transition path uses
@@ -183,30 +223,56 @@ fn apply_cmds_scalar<T: MarkElem>(buf: &mut [T], cmds: &[TagCommand], current_po
     }
 }
 
-/// The monomorphized scan. `T` is the mark element, fixed for the whole pass.
-fn execute_generic<T: MarkElem, C: TdfaExecConfig>(
+/// The reusable per-search mark buffers. Allocating these is the only
+/// heap cost of an anchored run, so the prefilter path allocates one `Scratch`
+/// per *search* and reuses it across every candidate (see `run_anchored`),
+/// rather than three `Vec`s per candidate.
+struct Scratch<T: MarkElem> {
+    /// The working mark file, mutated in place by each transition. Reset to
+    /// `NO_MATCH` at the start of every `run_anchored`.
+    src_buf: Box<[T]>,
+    /// Snapshot of the winning accept's marks (copied in on replace only).
+    best_snap: Box<[T]>,
+    /// Scratch for applying a `$`-conditional's commands before snapshotting.
+    cond_buf: Box<[T]>,
+}
+
+impl<T: MarkElem> Scratch<T> {
+    /// `width` = `num_marks + 3` (real marks, then `clear`, `current_pos`,
+    /// `scratch`).
+    fn new(width: usize) -> Self {
+        Self {
+            src_buf: vec![T::NO_MATCH; width].into_boxed_slice(),
+            best_snap: vec![T::NO_MATCH; width].into_boxed_slice(),
+            cond_buf: vec![T::NO_MATCH; width].into_boxed_slice(),
+        }
+    }
+}
+
+/// One anchored attempt: run the automaton from byte offset `start`, reusing the
+/// caller-owned `scratch`. Returns the match (range + captures) or `None`. `T`
+/// is the mark element, fixed for the whole pass.
+#[inline]
+fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
+    scratch: &mut Scratch<T>,
 ) -> Option<NfaMatch> {
     let num_tags = tdfa.num_tags();
     let num_marks = tdfa.num_marks();
-    // Mark file: real marks `0..num_marks`, then `clear`, `current_pos`, and a
-    // `scratch` lane (used by move sequences to break copy cycles).
-    let width = num_marks + 3;
     let curpos_lane = num_marks + 1;
 
-    // The working mark file, mutated in place by each transition's move
-    // sequence. The `clear` lane stays `NO_MATCH`; the `scratch` lane needs no
-    // init (always written before read within a sequence). Allocated once per
-    // scan — not per transition.
-    let mut src_buf = vec![T::NO_MATCH; width].into_boxed_slice();
-    // Reused snapshot of the winning accept's marks (copied in on replace only).
-    let mut best_snap = vec![T::NO_MATCH; width].into_boxed_slice();
-    // Scratch for applying a `$`-conditional's commands before snapshotting.
-    let mut cond_buf = vec![T::NO_MATCH; width].into_boxed_slice();
+    // Reset the working mark file (it's reused across candidates). The `clear`
+    // lane must stay `NO_MATCH`, which the fill restores. `best_snap`/`cond_buf`
+    // are always written before read, so they need no reset.
+    scratch.src_buf.fill(T::NO_MATCH);
 
-    apply_cmds_scalar::<T>(&mut src_buf, tdfa.entry_commands(start), T::from_pos(start));
+    apply_cmds_scalar::<T>(
+        &mut scratch.src_buf,
+        tdfa.entry_commands(start),
+        T::from_pos(start),
+    );
 
     let mut state = tdfa.start(start);
     let mut last_accept: LastAccept<T> = None;
@@ -217,14 +283,14 @@ fn execute_generic<T: MarkElem, C: TdfaExecConfig>(
     // Initial multiline-`^` check: if `start > 0` and the previous byte is a
     // line terminator, switch to the alt right at the start of execution.
     if C::HAS_ANCHOR_ALTS {
-        maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut src_buf, input, start);
+        maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut scratch.src_buf, input, start);
     }
     if *tdfa.accepting().iat(state as usize) {
         consider_accept(
             &mut last_accept,
-            &mut best_snap,
+            &mut scratch.best_snap,
             start,
-            &src_buf,
+            &scratch.src_buf,
             tdfa.finals().iat(state as usize),
         );
     }
@@ -234,10 +300,10 @@ fn execute_generic<T: MarkElem, C: TdfaExecConfig>(
             state,
             input,
             start,
-            &src_buf,
-            &mut cond_buf,
+            &scratch.src_buf,
+            &mut scratch.cond_buf,
             &mut last_accept,
-            &mut best_snap,
+            &mut scratch.best_snap,
         );
     }
 
@@ -274,27 +340,27 @@ fn execute_generic<T: MarkElem, C: TdfaExecConfig>(
         if use_moves {
             let moves = trans_moves.iat(idx);
             if !moves.is_empty() {
-                *src_buf.mat(curpos_lane) = T::from_pos(pos + 1);
+                *scratch.src_buf.mat(curpos_lane) = T::from_pos(pos + 1);
                 for op in moves.iter() {
-                    let v = *src_buf.iat(op.src as usize);
-                    *src_buf.mat(op.dst as usize) = v;
+                    let v = *scratch.src_buf.iat(op.src as usize);
+                    *scratch.src_buf.mat(op.dst as usize) = v;
                 }
             }
         } else {
-            apply_cmds_scalar::<T>(&mut src_buf, trans_cmds.iat(idx), T::from_pos(pos + 1));
+            apply_cmds_scalar::<T>(&mut scratch.src_buf, trans_cmds.iat(idx), T::from_pos(pos + 1));
         }
         state = next;
         live_position = pos + 1;
         // Forward-branching anchor switch (mid-input multiline `^`).
         if C::HAS_ANCHOR_ALTS {
-            maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut src_buf, input, pos + 1);
+            maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut scratch.src_buf, input, pos + 1);
         }
         if *accepting.iat(state as usize) {
             consider_accept(
                 &mut last_accept,
-                &mut best_snap,
+                &mut scratch.best_snap,
                 pos + 1,
-                &src_buf,
+                &scratch.src_buf,
                 tdfa.finals().iat(state as usize),
             );
         }
@@ -304,10 +370,10 @@ fn execute_generic<T: MarkElem, C: TdfaExecConfig>(
                 state,
                 input,
                 pos + 1,
-                &src_buf,
-                &mut cond_buf,
+                &scratch.src_buf,
+                &mut scratch.cond_buf,
                 &mut last_accept,
-                &mut best_snap,
+                &mut scratch.best_snap,
             );
         }
     }
@@ -322,14 +388,51 @@ fn execute_generic<T: MarkElem, C: TdfaExecConfig>(
             state,
             input,
             live_position,
-            &src_buf,
-            &mut cond_buf,
+            &scratch.src_buf,
+            &mut scratch.cond_buf,
             &mut last_accept,
-            &mut best_snap,
+            &mut scratch.best_snap,
         );
     }
 
-    last_accept.map(|(end, finals, _)| finalize::<T>(finals, &best_snap, end, num_tags))
+    last_accept.map(|(end, finals, _)| finalize::<T>(finals, &scratch.best_snap, end, num_tags))
+}
+
+/// The monomorphized scan: one anchored/unanchored run from `start`. Allocates
+/// the mark buffers once and runs once.
+fn execute_generic<T: MarkElem, C: TdfaExecConfig>(
+    tdfa: &Tdfa,
+    input: &[u8],
+    start: usize,
+) -> Option<NfaMatch> {
+    let mut scratch = Scratch::<T>::new(tdfa.num_marks() + 3);
+    run_anchored::<T, C>(tdfa, input, start, &mut scratch)
+}
+
+/// The monomorphized prefilter scan: skip to each candidate the `pred` allows
+/// (at or after `start`) and run the anchored automaton there, returning the
+/// first (leftmost) match. The mark buffers are allocated **once** and reused
+/// across every candidate — the whole point of this path vs. calling
+/// `execute_generic` per candidate.
+fn execute_prefiltered_generic<T: MarkElem, C: TdfaExecConfig>(
+    tdfa: &Tdfa,
+    input: &[u8],
+    start: usize,
+    pred: &StartPredicate,
+) -> Option<NfaMatch> {
+    let mut scratch = Scratch::<T>::new(tdfa.num_marks() + 3);
+    let mut pos = start;
+    loop {
+        let cand = pred.find_from(input, pos)?;
+        if let Some(m) = run_anchored::<T, C>(tdfa, input, cand, &mut scratch) {
+            // Anchored automaton: the match starts exactly at `cand`, and since
+            // candidates are visited left to right this is the leftmost match.
+            return Some(m);
+        }
+        // No match anchored here; advance past this candidate. Candidate offsets
+        // are UTF-8 lead bytes (codepoint boundaries), so `+1` is safe.
+        pos = cand + 1;
+    }
 }
 
 /// If `state` has an anchor alt and its predicate holds at `pos`, apply the

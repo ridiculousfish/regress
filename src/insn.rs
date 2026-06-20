@@ -186,6 +186,29 @@ pub enum StartPredicate {
     StartAnchored,
 }
 
+impl StartPredicate {
+    /// Find the next byte offset `>= from` in `input` where this predicate could
+    /// start a match, or `None` if there is none. `Arbitrary`/`StartAnchored`
+    /// impose no searchable constraint and return `None`. Uses the same SIMD
+    /// searchers (memchr/memmem, bitmap scan) the backtracker relies on.
+    pub fn find_from(&self, input: &[u8], from: usize) -> Option<usize> {
+        use crate::bytesearch::ByteSearcher;
+        if from > input.len() {
+            return None;
+        }
+        let hay = &input[from..];
+        let idx = match self {
+            StartPredicate::ByteSet1([a]) => memchr::memchr(*a, hay),
+            StartPredicate::ByteSet2([a, b]) => memchr::memchr2(*a, *b, hay),
+            StartPredicate::ByteSet3([a, b, c]) => memchr::memchr3(*a, *b, *c, hay),
+            StartPredicate::ByteSeq(finder) => finder.find(hay),
+            StartPredicate::ByteBracket(bm) => bm.find_in(hay),
+            StartPredicate::Arbitrary | StartPredicate::StartAnchored => return None,
+        };
+        idx.map(|i| from + i)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CompiledRegex {
     // Sequence of instructions.

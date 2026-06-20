@@ -25,7 +25,6 @@ use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{self, Tdfa, TdfaStats};
 use crate::automata::tdfa_backend;
-use crate::bytesearch::{ByteBitmap, ByteSearcher};
 use crate::insn::StartPredicate;
 use crate::ir;
 use crate::startpredicate;
@@ -97,25 +96,6 @@ fn should_prefilter(pred: &StartPredicate) -> bool {
     }
 }
 
-/// Find the next position `>= from` in `input` that the prefilter could start a
-/// match at, or `None` if there is none. Reuses the same SIMD searchers the
-/// backtracker relies on.
-fn find_candidate(pred: &StartPredicate, input: &[u8], from: usize) -> Option<usize> {
-    if from > input.len() {
-        return None;
-    }
-    let hay = &input[from..];
-    let idx = match pred {
-        StartPredicate::ByteSet1([a]) => memchr::memchr(*a, hay),
-        StartPredicate::ByteSet2([a, b]) => memchr::memchr2(*a, *b, hay),
-        StartPredicate::ByteSet3([a, b, c]) => memchr::memchr3(*a, *b, *c, hay),
-        StartPredicate::ByteSeq(finder) => finder.find(hay),
-        StartPredicate::ByteBracket(bm) => ByteBitmap::find_in(bm, hay),
-        StartPredicate::Arbitrary | StartPredicate::StartAnchored => return None,
-    };
-    idx.map(|i| from + i)
-}
-
 impl TdfaProgram {
     /// Build a program from the IR, choosing a prefilter strategy when the
     /// regex's match must begin with a literal/byte set, else falling back to
@@ -176,18 +156,9 @@ impl TdfaProgram {
                 anchored,
                 prefilter,
             } => {
-                let mut p = offset;
-                loop {
-                    let cand = find_candidate(prefilter, bytes, p)?;
-                    if let Some(m) = tdfa_backend::execute(anchored, bytes, cand) {
-                        // Anchored: m.range.start == cand, the leftmost match.
-                        return Some(m);
-                    }
-                    // No match anchored here; try the next candidate. Candidate
-                    // offsets are UTF-8 lead bytes (codepoint boundaries), so
-                    // +1 then re-searching is correct.
-                    p = cand + 1;
-                }
+                // The candidate loop lives in `execute_prefiltered` so the mark
+                // buffers are allocated once and reused across every candidate.
+                tdfa_backend::execute_prefiltered(anchored, bytes, offset, prefilter)
             }
         }
     }
