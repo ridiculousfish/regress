@@ -24,7 +24,7 @@
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{self, Tdfa, TdfaStats};
-use crate::automata::tdfa_backend;
+use crate::automata::tdfa_backend::{self, Scratch};
 use crate::insn::StartPredicate;
 use crate::ir;
 use crate::startpredicate;
@@ -147,20 +147,34 @@ impl TdfaProgram {
     }
 
     /// Find the leftmost match at or after byte `offset`, returning the raw
-    /// NFA-style match (range + captures), or `None`. The executor adapter
-    /// turns this into a `Match`.
-    pub(crate) fn find_at(&self, bytes: &[u8], offset: usize) -> Option<NfaMatch> {
+    /// NFA-style match (range + captures), or `None`. `scratch` is the
+    /// caller-owned (executor-owned) reusable mark buffer, so a `find_iter` over
+    /// many matches allocates nothing per match. The executor adapter turns the
+    /// result into a `Match`.
+    pub(crate) fn find_at(
+        &self,
+        bytes: &[u8],
+        offset: usize,
+        scratch: &mut Scratch<u32>,
+    ) -> Option<NfaMatch> {
         match &self.strategy {
-            Strategy::Scan { unanchored } => tdfa_backend::execute(unanchored, bytes, offset),
+            Strategy::Scan { unanchored } => {
+                tdfa_backend::execute_reuse(unanchored, bytes, offset, scratch)
+            }
             Strategy::Prefix {
                 anchored,
                 prefilter,
-            } => {
-                // The candidate loop lives in `execute_prefiltered` so the mark
-                // buffers are allocated once and reused across every candidate.
-                tdfa_backend::execute_prefiltered(anchored, bytes, offset, prefilter)
-            }
+            } => tdfa_backend::execute_prefiltered_reuse(anchored, bytes, offset, prefilter, scratch),
         }
+    }
+
+    /// The mark-file width a reused [`Scratch`] for this program must have.
+    pub(crate) fn mark_width(&self) -> usize {
+        let tdfa = match &self.strategy {
+            Strategy::Scan { unanchored } => unanchored,
+            Strategy::Prefix { anchored, .. } => anchored,
+        };
+        tdfa_backend::mark_file_width(tdfa)
     }
 
     /// Capture-group names, indexed by group id (see `Tdfa::group_names`).

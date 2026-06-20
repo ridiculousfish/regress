@@ -13,7 +13,7 @@
 //! fallback for larger inputs) — so the per-byte loop carries no dispatch.
 
 use crate::automata::dfa::{DEAD_STATE, Dfa};
-use crate::automata::nfa::{FULL_MATCH_END, FULL_MATCH_START, TEXT_POS_NO_MATCH};
+use crate::automata::nfa::{FULL_MATCH_END, FULL_MATCH_START, TEXT_POS_NO_MATCH, TextPos};
 use crate::automata::nfa_backend::{NfaMatch, tags_to_captures};
 use crate::automata::tdfa::{FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa};
 use crate::insn::StartPredicate;
@@ -109,89 +109,126 @@ pub fn execute_dfa(dfa: &Dfa, input: &[u8]) -> bool {
     accepting[state as usize]
 }
 
-/// Execute the TDFA against `input`. Returns the first match (range + captures)
-/// or `None`.
-///
-/// This is the dispatch wrapper: it picks the mark width and config flags
-/// **once** (based on haystack size and the automaton's contents) and calls the
-/// monomorphized [`execute_generic`]. The chosen body has no per-byte dispatch.
-pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
-    // Cross the mark width with the config-flag combinations, picking one
-    // monomorphization from the automaton's contents. Each `$flag` is a `bool`
-    // read off `tdfa`; the macro fans it out to a `true`/`false` match so the
-    // const generic is known at the call site. New flags are added by listing
-    // another `$flag = $value` pair (the arm count doubles per flag).
-    macro_rules! dispatch {
-        ($t:ty; $($flag:ident = $value:expr),* $(,)?) => {
-            dispatch!(@width $t; [$($flag = $value),*] [])
-        };
-        // Peel one flag: expand to a `match` over its two `bool` values, then
-        // recurse with the chosen literal appended to the resolved list.
-        (@width $t:ty; [$flag:ident = $value:expr $(, $rflag:ident = $rvalue:expr)*] [$($done:tt)*]) => {
-            match $value {
-                true => dispatch!(@width $t; [$($rflag = $rvalue),*] [$($done)* true,]),
-                false => dispatch!(@width $t; [$($rflag = $rvalue),*] [$($done)* false,]),
-            }
-        };
-        // All flags resolved to literals: emit the monomorphized call.
-        (@width $t:ty; [] [$($lit:tt)*]) => {
-            execute_generic::<$t, ExecConfig<$($lit)*>>(tdfa, input, start)
-        };
-    }
-
-    // `u32` marks can only address offsets `< u32::MAX` (reserving that value as
-    // the `NO_MATCH` sentinel). For larger haystacks fall back to `usize`.
-    let has_anchor_alts = tdfa.has_anchor_alts();
-    let has_conditionals = tdfa.has_conditionals();
-    if input.len() >= u32::MAX as usize {
-        return dispatch!(usize;
-            HAS_ANCHOR_ALTS = has_anchor_alts,
-            HAS_CONDITIONALS = has_conditionals,
-        );
-    }
-    dispatch!(u32;
-        HAS_ANCHOR_ALTS = has_anchor_alts,
-        HAS_CONDITIONALS = has_conditionals,
-    )
+/// `num_marks + 3`: the mark-file width (real marks, then `clear`,
+/// `current_pos`, `scratch`). The size a [`Scratch`] must be built with.
+pub(crate) fn mark_file_width(tdfa: &Tdfa) -> usize {
+    tdfa.num_marks() + 3
 }
 
-/// Execute an **anchored** TDFA driven by a literal prefilter: skip to each
-/// candidate `pred` allows and verify there, returning the leftmost match or
-/// `None`. Same dispatch as [`execute`], but to [`execute_prefiltered_generic`]
-/// so the mark buffers are allocated once and reused across all candidates.
+/// Pick the config-flag monomorphization (`HAS_ANCHOR_ALTS` × `HAS_CONDITIONALS`)
+/// from the automaton's contents and run one anchored attempt. The flag check is
+/// once per attempt; the const generic still drops the per-byte branches inside
+/// `run_anchored`.
+fn run_anchored_dyn<T: MarkElem>(
+    tdfa: &Tdfa,
+    input: &[u8],
+    start: usize,
+    scratch: &mut Scratch<T>,
+) -> Option<NfaMatch> {
+    match (tdfa.has_anchor_alts(), tdfa.has_conditionals()) {
+        (false, false) => run_anchored::<T, ExecConfig<false, false>>(tdfa, input, start, scratch),
+        (true, false) => run_anchored::<T, ExecConfig<true, false>>(tdfa, input, start, scratch),
+        (false, true) => run_anchored::<T, ExecConfig<false, true>>(tdfa, input, start, scratch),
+        (true, true) => run_anchored::<T, ExecConfig<true, true>>(tdfa, input, start, scratch),
+    }
+}
+
+/// The prefilter loop: skip to each candidate `pred` allows (at or after
+/// `start`) and run the anchored automaton there, returning the first (leftmost)
+/// match. The `scratch` is reused across every candidate.
+fn run_prefiltered_dyn<T: MarkElem>(
+    tdfa: &Tdfa,
+    input: &[u8],
+    start: usize,
+    pred: &StartPredicate,
+    scratch: &mut Scratch<T>,
+) -> Option<NfaMatch> {
+    let mut pos = start;
+    loop {
+        let cand = pred.find_from(input, pos)?;
+        if let Some(m) = run_anchored_dyn::<T>(tdfa, input, cand, scratch) {
+            // Anchored automaton: the match starts exactly at `cand`, and since
+            // candidates are visited left to right this is the leftmost match.
+            return Some(m);
+        }
+        // No match anchored here; advance past this candidate. Candidate offsets
+        // are UTF-8 lead bytes (codepoint boundaries), so `+1` is safe.
+        pos = cand + 1;
+    }
+}
+
+/// `u32` marks can only address offsets `< u32::MAX` (reserving that value as the
+/// `NO_MATCH` sentinel); larger haystacks fall back to `usize`. The common path
+/// is `u32`, so [`execute_reuse`] lets a caller hand in a reused `u32` scratch.
+#[inline]
+fn needs_wide_marks(input: &[u8]) -> bool {
+    input.len() >= u32::MAX as usize
+}
+
+/// Execute the TDFA against `input`, allocating fresh buffers. Returns the first
+/// match (range + captures) or `None`. Used by tests and one-shot callers; the
+/// match-iteration hot path uses [`execute_reuse`] with a caller-owned scratch.
+pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
+    let width = mark_file_width(tdfa);
+    if needs_wide_marks(input) {
+        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(width))
+    } else {
+        run_anchored_dyn::<u32>(tdfa, input, start, &mut Scratch::new(width))
+    }
+}
+
+/// Like [`execute`], but reuses the caller-owned `u32` `scratch` (sized to
+/// [`mark_file_width`]) instead of allocating — so a `find_iter` over many
+/// matches stays allocation-free per match. Oversized (`>= 4 GiB`) inputs are
+/// rare and still allocate a local `usize` scratch.
+pub(crate) fn execute_reuse(
+    tdfa: &Tdfa,
+    input: &[u8],
+    start: usize,
+    scratch: &mut Scratch<u32>,
+) -> Option<NfaMatch> {
+    if needs_wide_marks(input) {
+        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(mark_file_width(tdfa)))
+    } else {
+        run_anchored_dyn::<u32>(tdfa, input, start, scratch)
+    }
+}
+
+/// Execute an **anchored** TDFA driven by a literal prefilter, allocating fresh
+/// buffers (see [`execute_prefiltered_reuse`] for the reused-scratch variant).
 pub fn execute_prefiltered(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
     pred: &StartPredicate,
 ) -> Option<NfaMatch> {
-    macro_rules! dispatch {
-        ($t:ty; $($flag:ident = $value:expr),* $(,)?) => {
-            dispatch!(@width $t; [$($flag = $value),*] [])
-        };
-        (@width $t:ty; [$flag:ident = $value:expr $(, $rflag:ident = $rvalue:expr)*] [$($done:tt)*]) => {
-            match $value {
-                true => dispatch!(@width $t; [$($rflag = $rvalue),*] [$($done)* true,]),
-                false => dispatch!(@width $t; [$($rflag = $rvalue),*] [$($done)* false,]),
-            }
-        };
-        (@width $t:ty; [] [$($lit:tt)*]) => {
-            execute_prefiltered_generic::<$t, ExecConfig<$($lit)*>>(tdfa, input, start, pred)
-        };
+    let width = mark_file_width(tdfa);
+    if needs_wide_marks(input) {
+        run_prefiltered_dyn::<usize>(tdfa, input, start, pred, &mut Scratch::new(width))
+    } else {
+        run_prefiltered_dyn::<u32>(tdfa, input, start, pred, &mut Scratch::new(width))
     }
+}
 
-    let has_anchor_alts = tdfa.has_anchor_alts();
-    let has_conditionals = tdfa.has_conditionals();
-    if input.len() >= u32::MAX as usize {
-        return dispatch!(usize;
-            HAS_ANCHOR_ALTS = has_anchor_alts,
-            HAS_CONDITIONALS = has_conditionals,
-        );
+/// Like [`execute_prefiltered`], but reuses the caller-owned `u32` `scratch`.
+pub(crate) fn execute_prefiltered_reuse(
+    tdfa: &Tdfa,
+    input: &[u8],
+    start: usize,
+    pred: &StartPredicate,
+    scratch: &mut Scratch<u32>,
+) -> Option<NfaMatch> {
+    if needs_wide_marks(input) {
+        run_prefiltered_dyn::<usize>(
+            tdfa,
+            input,
+            start,
+            pred,
+            &mut Scratch::new(mark_file_width(tdfa)),
+        )
+    } else {
+        run_prefiltered_dyn::<u32>(tdfa, input, start, pred, scratch)
     }
-    dispatch!(u32;
-        HAS_ANCHOR_ALTS = has_anchor_alts,
-        HAS_CONDITIONALS = has_conditionals,
-    )
 }
 
 /// Apply a `TagCommandList` to a mark file in place (scalar, two-phase). Used
@@ -223,11 +260,14 @@ fn apply_cmds_scalar<T: MarkElem>(buf: &mut [T], cmds: &[TagCommand], current_po
     }
 }
 
-/// The reusable per-search mark buffers. Allocating these is the only
-/// heap cost of an anchored run, so the prefilter path allocates one `Scratch`
-/// per *search* and reuses it across every candidate (see `run_anchored`),
-/// rather than three `Vec`s per candidate.
-struct Scratch<T: MarkElem> {
+/// The reusable per-search buffers. Allocating these is the only heap cost of an
+/// anchored run, so callers reuse one `Scratch` across many runs: the prefilter
+/// loop reuses it across every candidate, and `TdfaExecutor` owns one and reuses
+/// it across every match in a `find_iter` (see `execute_reuse`). That keeps the
+/// hot path allocation-free per match — only the returned `NfaMatch`'s own
+/// captures Vec (empty for capture-free patterns) is per-match.
+#[derive(Debug)]
+pub(crate) struct Scratch<T: MarkElem> {
     /// The working mark file, mutated in place by each transition. Reset to
     /// `NO_MATCH` at the start of every `run_anchored`.
     src_buf: Box<[T]>,
@@ -235,16 +275,20 @@ struct Scratch<T: MarkElem> {
     best_snap: Box<[T]>,
     /// Scratch for applying a `$`-conditional's commands before snapshotting.
     cond_buf: Box<[T]>,
+    /// Reusable per-tag value buffer for `finalize` (refilled each call). Holds
+    /// `usize` offsets regardless of `T`, so it's not width-typed.
+    tag_values: Vec<TextPos>,
 }
 
 impl<T: MarkElem> Scratch<T> {
     /// `width` = `num_marks + 3` (real marks, then `clear`, `current_pos`,
     /// `scratch`).
-    fn new(width: usize) -> Self {
+    pub(crate) fn new(width: usize) -> Self {
         Self {
             src_buf: vec![T::NO_MATCH; width].into_boxed_slice(),
             best_snap: vec![T::NO_MATCH; width].into_boxed_slice(),
             cond_buf: vec![T::NO_MATCH; width].into_boxed_slice(),
+            tag_values: Vec::new(),
         }
     }
 }
@@ -395,44 +439,15 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
         );
     }
 
-    last_accept.map(|(end, finals, _)| finalize::<T>(finals, &scratch.best_snap, end, num_tags))
-}
-
-/// The monomorphized scan: one anchored/unanchored run from `start`. Allocates
-/// the mark buffers once and runs once.
-fn execute_generic<T: MarkElem, C: TdfaExecConfig>(
-    tdfa: &Tdfa,
-    input: &[u8],
-    start: usize,
-) -> Option<NfaMatch> {
-    let mut scratch = Scratch::<T>::new(tdfa.num_marks() + 3);
-    run_anchored::<T, C>(tdfa, input, start, &mut scratch)
-}
-
-/// The monomorphized prefilter scan: skip to each candidate the `pred` allows
-/// (at or after `start`) and run the anchored automaton there, returning the
-/// first (leftmost) match. The mark buffers are allocated **once** and reused
-/// across every candidate — the whole point of this path vs. calling
-/// `execute_generic` per candidate.
-fn execute_prefiltered_generic<T: MarkElem, C: TdfaExecConfig>(
-    tdfa: &Tdfa,
-    input: &[u8],
-    start: usize,
-    pred: &StartPredicate,
-) -> Option<NfaMatch> {
-    let mut scratch = Scratch::<T>::new(tdfa.num_marks() + 3);
-    let mut pos = start;
-    loop {
-        let cand = pred.find_from(input, pos)?;
-        if let Some(m) = run_anchored::<T, C>(tdfa, input, cand, &mut scratch) {
-            // Anchored automaton: the match starts exactly at `cand`, and since
-            // candidates are visited left to right this is the leftmost match.
-            return Some(m);
-        }
-        // No match anchored here; advance past this candidate. Candidate offsets
-        // are UTF-8 lead bytes (codepoint boundaries), so `+1` is safe.
-        pos = cand + 1;
-    }
+    last_accept.map(|(end, finals, _)| {
+        finalize::<T>(
+            finals,
+            &scratch.best_snap,
+            end,
+            num_tags,
+            &mut scratch.tag_values,
+        )
+    })
 }
 
 /// If `state` has an anchor alt and its predicate holds at `pos`, apply the
@@ -535,8 +550,11 @@ fn finalize<T: MarkElem>(
     marks: &[T],
     end: usize,
     num_tags: usize,
+    tag_values: &mut Vec<TextPos>,
 ) -> NfaMatch {
-    let mut tag_values = vec![TEXT_POS_NO_MATCH; num_tags];
+    // Reused scratch: refill rather than allocate.
+    tag_values.clear();
+    tag_values.resize(num_tags, TEXT_POS_NO_MATCH);
     for cmd in finals {
         let val = match cmd.src {
             MarkValue::Copy(src) => marks[src.0 as usize],
@@ -565,7 +583,7 @@ fn finalize<T: MarkElem>(
         start_pos
     };
 
-    let captures = tags_to_captures(&tag_values);
+    let captures = tags_to_captures(tag_values);
     NfaMatch {
         range: start_pos..end_pos,
         captures,
