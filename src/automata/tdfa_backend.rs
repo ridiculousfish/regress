@@ -307,16 +307,23 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     let num_marks = tdfa.num_marks();
     let curpos_lane = num_marks + 1;
 
+    // Pull the three mark buffers out of `scratch` (and the deref through the
+    // `&mut Scratch`) into direct `&mut [T]` locals held on the stack for the
+    // whole run. These are disjoint fields, so all three borrows coexist; the
+    // hot per-byte loop then indexes a plain slice (one indirection) instead of
+    // chasing `&mut Scratch` -> `Box<[T]>` -> data on every access. `tag_values`
+    // is only touched once at the end.
+    let src_buf: &mut [T] = &mut scratch.src_buf;
+    let best_snap: &mut [T] = &mut scratch.best_snap;
+    let cond_buf: &mut [T] = &mut scratch.cond_buf;
+    let tag_values: &mut Vec<TextPos> = &mut scratch.tag_values;
+
     // Reset the working mark file (it's reused across candidates). The `clear`
     // lane must stay `NO_MATCH`, which the fill restores. `best_snap`/`cond_buf`
     // are always written before read, so they need no reset.
-    scratch.src_buf.fill(T::NO_MATCH);
+    src_buf.fill(T::NO_MATCH);
 
-    apply_cmds_scalar::<T>(
-        &mut scratch.src_buf,
-        tdfa.entry_commands(start),
-        T::from_pos(start),
-    );
+    apply_cmds_scalar::<T>(src_buf, tdfa.entry_commands(start), T::from_pos(start));
 
     let mut state = tdfa.start(start);
     let mut last_accept: LastAccept<T> = None;
@@ -327,14 +334,14 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     // Initial multiline-`^` check: if `start > 0` and the previous byte is a
     // line terminator, switch to the alt right at the start of execution.
     if C::HAS_ANCHOR_ALTS {
-        maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut scratch.src_buf, input, start);
+        maybe_switch_anchor_alt::<T>(tdfa, &mut state, src_buf, input, start);
     }
     if *tdfa.accepting().iat(state as usize) {
         consider_accept(
             &mut last_accept,
-            &mut scratch.best_snap,
+            best_snap,
             start,
-            &scratch.src_buf,
+            src_buf,
             tdfa.finals().iat(state as usize),
         );
     }
@@ -344,10 +351,10 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             state,
             input,
             start,
-            &scratch.src_buf,
-            &mut scratch.cond_buf,
+            src_buf,
+            cond_buf,
             &mut last_accept,
-            &mut scratch.best_snap,
+            best_snap,
         );
     }
 
@@ -384,27 +391,27 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
         if use_moves {
             let moves = trans_moves.iat(idx);
             if !moves.is_empty() {
-                *scratch.src_buf.mat(curpos_lane) = T::from_pos(pos + 1);
+                *src_buf.mat(curpos_lane) = T::from_pos(pos + 1);
                 for op in moves.iter() {
-                    let v = *scratch.src_buf.iat(op.src as usize);
-                    *scratch.src_buf.mat(op.dst as usize) = v;
+                    let v = *src_buf.iat(op.src as usize);
+                    *src_buf.mat(op.dst as usize) = v;
                 }
             }
         } else {
-            apply_cmds_scalar::<T>(&mut scratch.src_buf, trans_cmds.iat(idx), T::from_pos(pos + 1));
+            apply_cmds_scalar::<T>(src_buf, trans_cmds.iat(idx), T::from_pos(pos + 1));
         }
         state = next;
         live_position = pos + 1;
         // Forward-branching anchor switch (mid-input multiline `^`).
         if C::HAS_ANCHOR_ALTS {
-            maybe_switch_anchor_alt::<T>(tdfa, &mut state, &mut scratch.src_buf, input, pos + 1);
+            maybe_switch_anchor_alt::<T>(tdfa, &mut state, src_buf, input, pos + 1);
         }
         if *accepting.iat(state as usize) {
             consider_accept(
                 &mut last_accept,
-                &mut scratch.best_snap,
+                best_snap,
                 pos + 1,
-                &scratch.src_buf,
+                src_buf,
                 tdfa.finals().iat(state as usize),
             );
         }
@@ -414,10 +421,10 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
                 state,
                 input,
                 pos + 1,
-                &scratch.src_buf,
-                &mut scratch.cond_buf,
+                src_buf,
+                cond_buf,
                 &mut last_accept,
-                &mut scratch.best_snap,
+                best_snap,
             );
         }
     }
@@ -432,22 +439,17 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             state,
             input,
             live_position,
-            &scratch.src_buf,
-            &mut scratch.cond_buf,
+            src_buf,
+            cond_buf,
             &mut last_accept,
-            &mut scratch.best_snap,
+            best_snap,
         );
     }
 
-    last_accept.map(|(end, finals, _)| {
-        finalize::<T>(
-            finals,
-            &scratch.best_snap,
-            end,
-            num_tags,
-            &mut scratch.tag_values,
-        )
-    })
+    match last_accept {
+        Some((end, finals, _)) => Some(finalize::<T>(finals, best_snap, end, num_tags, tag_values)),
+        None => None,
+    }
 }
 
 /// If `state` has an anchor alt and its predicate holds at `pos`, apply the
