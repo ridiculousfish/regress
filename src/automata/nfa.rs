@@ -1075,6 +1075,20 @@ impl Nfa {
         })
     }
 
+    /// Construct an NFA directly from a reversed state graph (see
+    /// `automata::reverse::reverse_nfa`). Tag-free: `num_tags`/`num_capture_tags`
+    /// are zero and there are no group names, since the reverse automaton is used
+    /// only for acceptance (locating a match start), never for captures.
+    pub(super) fn from_reversed_parts(start: StateHandle, states: Box<[State]>) -> Self {
+        Nfa {
+            start,
+            states,
+            num_tags: 0,
+            num_capture_tags: 0,
+            group_names: Box::new([]),
+        }
+    }
+
     pub(super) fn at(&self, idx: StateHandle) -> &State {
         &self.states[idx as usize]
     }

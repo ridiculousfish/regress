@@ -220,6 +220,43 @@ pub(crate) fn anchored_to_start(re: &ir::Regex) -> bool {
     is_start_anchored(&re.node) && !re.flags.multiline
 }
 
+/// If the regex ends in a mandatory literal byte sequence (length >= 2) with at
+/// least one consuming element before it, return that literal. This is the
+/// "required suffix" used by the reverse-automaton search: every match ends with
+/// these bytes, so `memmem` for them finds candidate match ends.
+///
+/// Conservative on purpose — only a top-level `Cat` (optionally wrapped in a
+/// capture group) whose **last** node is a `ByteSequence` qualifies. A pattern
+/// that is itself a pure prefix/whole literal is left to the Phase-1 prefilter
+/// (it has a usable prefix predicate, so this path isn't reached for it).
+pub(crate) fn required_suffix_literal(re: &ir::Regex) -> Option<Vec<u8>> {
+    fn of_node(n: &Node) -> Option<Vec<u8>> {
+        match n {
+            Node::Cat(nodes) => {
+                // The optimizer appends a zero-width `Goal` (and sometimes
+                // `Empty`) marker; the real suffix is the last *consuming* node.
+                let mut rev = nodes
+                    .iter()
+                    .rev()
+                    .skip_while(|n| matches!(n, Node::Goal | Node::Empty));
+                let last = rev.next()?;
+                if let Node::ByteSequence(bytes) = last {
+                    // Require something consuming before the literal, so this is
+                    // a genuine *suffix* (not a whole/prefix literal that the
+                    // Phase-1 prefilter already handles).
+                    if bytes.len() >= 2 && rev.next().is_some() {
+                        return Some(bytes.clone());
+                    }
+                }
+                None
+            }
+            Node::CaptureGroup { contents, .. } => of_node(contents),
+            _ => None,
+        }
+    }
+    of_node(&re.node)
+}
+
 /// \return the start predicate for a Regex.
 pub fn predicate_for_re(re: &ir::Regex) -> StartPredicate {
     // Check if the regex is anchored to the start - if so, we can optimize

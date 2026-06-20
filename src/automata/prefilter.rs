@@ -21,8 +21,10 @@
 //!   condition on the match's first element, so the leftmost candidate that
 //!   verifies is the leftmost match.
 
+use crate::automata::dfa::Dfa;
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::NfaMatch;
+use crate::automata::reverse;
 use crate::automata::tdfa::{self, Tdfa, TdfaStats};
 use crate::automata::tdfa_backend::{self, PrefixSkip, Scratch};
 use crate::insn::StartPredicate;
@@ -30,6 +32,7 @@ use crate::ir;
 use crate::startpredicate;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
+use memchr::memmem;
 
 /// A built TDFA search program: an automaton plus the strategy used to drive it
 /// over an input. This is the `Source` consumed by `TdfaExecutor`.
@@ -50,6 +53,16 @@ enum Strategy {
         anchored: Tdfa,
         prefilter: StartPredicate,
         skip: Option<PrefixSkip>,
+    },
+    /// Required *suffix* literal, no usable prefix (e.g. `\w+\s+Holmes`). Find
+    /// the literal with `memmem`, drive the `reverse` DFA leftward from its end
+    /// to the leftmost match start, then run the `forward` anchored TDFA there
+    /// for the real extent and captures.
+    ReverseInner {
+        forward: Tdfa,
+        reverse: Dfa,
+        literal: Box<memmem::Finder<'static>>,
+        lit_len: usize,
     },
 }
 
@@ -128,24 +141,65 @@ impl TdfaProgram {
                 _ => None,
             };
             let group_names = anchored.group_names().to_vec().into_boxed_slice();
-            Ok(Self {
+            return Ok(Self {
                 strategy: Strategy::Prefix {
                     anchored,
                     prefilter: pred,
                     skip,
                 },
                 group_names,
-            })
-        } else {
-            let nfa = Nfa::try_from_unanchored(re)?;
-            let mut unanchored = Tdfa::try_from(&nfa)?;
-            unanchored.optimize();
-            let group_names = unanchored.group_names().to_vec().into_boxed_slice();
-            Ok(Self {
-                strategy: Strategy::Scan { unanchored },
-                group_names,
-            })
+            });
         }
+
+        // No usable prefix. If the regex ends in a required literal, try the
+        // reverse-automaton strategy (find the suffix, walk backwards to the
+        // start, forward-verify). Falls back to a plain scan when that isn't
+        // applicable (e.g. zero-width assertions defeat the tag-free reverse
+        // DFA — see `reverse::reverse_nfa`).
+        if let Some(suffix) = startpredicate::required_suffix_literal(re) {
+            if let Some(program) = Self::try_reverse_inner(re, suffix)? {
+                return Ok(program);
+            }
+        }
+
+        let nfa = Nfa::try_from_unanchored(re)?;
+        let mut unanchored = Tdfa::try_from(&nfa)?;
+        unanchored.optimize();
+        let group_names = unanchored.group_names().to_vec().into_boxed_slice();
+        Ok(Self {
+            strategy: Strategy::Scan { unanchored },
+            group_names,
+        })
+    }
+
+    /// Try to build a [`Strategy::ReverseInner`] for a regex ending in the
+    /// required `suffix` literal. Returns `Ok(None)` (caller falls back to a
+    /// scan) when the reverse automaton can't be built — currently when the
+    /// pattern has zero-width assertions, which the tag-free reverse DFA can't
+    /// honor, or when the reverse DFA exceeds its state budget. NFA/TDFA build
+    /// failures propagate as `Err`.
+    fn try_reverse_inner(re: &ir::Regex, suffix: Vec<u8>) -> Result<Option<Self>, BuildError> {
+        let anchored_nfa = Nfa::try_from(re)?;
+        let Some(reverse_nfa) = reverse::reverse_nfa(&anchored_nfa) else {
+            return Ok(None);
+        };
+        let Ok(reverse) = Dfa::try_from(&reverse_nfa) else {
+            return Ok(None);
+        };
+        let mut forward = Tdfa::try_from(&anchored_nfa)?;
+        forward.optimize();
+        let group_names = forward.group_names().to_vec().into_boxed_slice();
+        let lit_len = suffix.len();
+        let literal = Box::new(memmem::Finder::new(&suffix).into_owned());
+        Ok(Some(Self {
+            strategy: Strategy::ReverseInner {
+                forward,
+                reverse,
+                literal,
+                lit_len,
+            },
+            group_names,
+        }))
     }
 
     /// Wrap an already-built (unanchored) TDFA as a plain linear-scan program,
@@ -181,6 +235,29 @@ impl TdfaProgram {
             } => tdfa_backend::execute_prefiltered_reuse(
                 anchored, bytes, offset, prefilter, scratch, *skip,
             ),
+            Strategy::ReverseInner {
+                forward,
+                reverse,
+                literal,
+                lit_len,
+            } => {
+                let mut pos = offset;
+                loop {
+                    let i = literal.find(&bytes[pos..]).map(|k| pos + k)?;
+                    let end = i + lit_len;
+                    // Walk the reverse DFA back from the literal end to the
+                    // leftmost start, then forward-verify there for the real
+                    // extent + captures. The forward run is the source of truth
+                    // (it fixes a greedy end and produces captures); the reverse
+                    // only locates the start.
+                    if let Some(s) = reverse::reverse_find_start(reverse, bytes, end, offset) {
+                        if let Some(m) = tdfa_backend::execute_reuse(forward, bytes, s, scratch) {
+                            return Some(m);
+                        }
+                    }
+                    pos = i + 1;
+                }
+            }
         }
     }
 
@@ -189,6 +266,7 @@ impl TdfaProgram {
         let tdfa = match &self.strategy {
             Strategy::Scan { unanchored } => unanchored,
             Strategy::Prefix { anchored, .. } => anchored,
+            Strategy::ReverseInner { forward, .. } => forward,
         };
         tdfa_backend::mark_file_width(tdfa)
     }
@@ -198,11 +276,18 @@ impl TdfaProgram {
         &self.group_names
     }
 
+    /// Test-only: whether this program uses the reverse-automaton strategy.
+    #[cfg(test)]
+    pub(crate) fn is_reverse_inner(&self) -> bool {
+        matches!(self.strategy, Strategy::ReverseInner { .. })
+    }
+
     /// Stats of the underlying automaton (for the benchmarks' size columns).
     pub fn stats(&self) -> TdfaStats {
         match &self.strategy {
             Strategy::Scan { unanchored } => unanchored.stats(),
             Strategy::Prefix { anchored, .. } => anchored.stats(),
+            Strategy::ReverseInner { forward, .. } => forward.stats(),
         }
     }
 }
