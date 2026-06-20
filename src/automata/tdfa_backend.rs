@@ -124,29 +124,38 @@ fn run_anchored_dyn<T: MarkElem>(
     input: &[u8],
     start: usize,
     scratch: &mut Scratch<T>,
+    warm: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
     match (tdfa.has_anchor_alts(), tdfa.has_conditionals()) {
-        (false, false) => run_anchored::<T, ExecConfig<false, false>>(tdfa, input, start, scratch),
-        (true, false) => run_anchored::<T, ExecConfig<true, false>>(tdfa, input, start, scratch),
-        (false, true) => run_anchored::<T, ExecConfig<false, true>>(tdfa, input, start, scratch),
-        (true, true) => run_anchored::<T, ExecConfig<true, true>>(tdfa, input, start, scratch),
+        (false, false) => {
+            run_anchored::<T, ExecConfig<false, false>>(tdfa, input, start, scratch, warm)
+        }
+        (true, false) => {
+            run_anchored::<T, ExecConfig<true, false>>(tdfa, input, start, scratch, warm)
+        }
+        (false, true) => {
+            run_anchored::<T, ExecConfig<false, true>>(tdfa, input, start, scratch, warm)
+        }
+        (true, true) => run_anchored::<T, ExecConfig<true, true>>(tdfa, input, start, scratch, warm),
     }
 }
 
 /// The prefilter loop: skip to each candidate `pred` allows (at or after
 /// `start`) and run the anchored automaton there, returning the first (leftmost)
-/// match. The `scratch` is reused across every candidate.
+/// match. The `scratch` is reused across every candidate; `skip`, when set,
+/// warm-starts each attempt past the matched literal (see [`PrefixSkip`]).
 fn run_prefiltered_dyn<T: MarkElem>(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
     pred: &StartPredicate,
     scratch: &mut Scratch<T>,
+    skip: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
     let mut pos = start;
     loop {
         let cand = pred.find_from(input, pos)?;
-        if let Some(m) = run_anchored_dyn::<T>(tdfa, input, cand, scratch) {
+        if let Some(m) = run_anchored_dyn::<T>(tdfa, input, cand, scratch, skip) {
             // Anchored automaton: the match starts exactly at `cand`, and since
             // candidates are visited left to right this is the leftmost match.
             return Some(m);
@@ -171,9 +180,9 @@ fn needs_wide_marks(input: &[u8]) -> bool {
 pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     let width = mark_file_width(tdfa);
     if needs_wide_marks(input) {
-        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(width))
+        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(width), None)
     } else {
-        run_anchored_dyn::<u32>(tdfa, input, start, &mut Scratch::new(width))
+        run_anchored_dyn::<u32>(tdfa, input, start, &mut Scratch::new(width), None)
     }
 }
 
@@ -188,35 +197,22 @@ pub(crate) fn execute_reuse(
     scratch: &mut Scratch<u32>,
 ) -> Option<NfaMatch> {
     if needs_wide_marks(input) {
-        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(mark_file_width(tdfa)))
+        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(mark_file_width(tdfa)), None)
     } else {
-        run_anchored_dyn::<u32>(tdfa, input, start, scratch)
+        run_anchored_dyn::<u32>(tdfa, input, start, scratch, None)
     }
 }
 
-/// Execute an **anchored** TDFA driven by a literal prefilter, allocating fresh
-/// buffers (see [`execute_prefiltered_reuse`] for the reused-scratch variant).
-pub fn execute_prefiltered(
-    tdfa: &Tdfa,
-    input: &[u8],
-    start: usize,
-    pred: &StartPredicate,
-) -> Option<NfaMatch> {
-    let width = mark_file_width(tdfa);
-    if needs_wide_marks(input) {
-        run_prefiltered_dyn::<usize>(tdfa, input, start, pred, &mut Scratch::new(width))
-    } else {
-        run_prefiltered_dyn::<u32>(tdfa, input, start, pred, &mut Scratch::new(width))
-    }
-}
-
-/// Like [`execute_prefiltered`], but reuses the caller-owned `u32` `scratch`.
+/// Execute an **anchored** TDFA driven by a literal prefilter, reusing the
+/// caller-owned `u32` `scratch`. `skip` warm-starts each verify past the matched
+/// literal (see [`PrefixSkip`]).
 pub(crate) fn execute_prefiltered_reuse(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
     pred: &StartPredicate,
     scratch: &mut Scratch<u32>,
+    skip: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
     if needs_wide_marks(input) {
         run_prefiltered_dyn::<usize>(
@@ -225,9 +221,10 @@ pub(crate) fn execute_prefiltered_reuse(
             start,
             pred,
             &mut Scratch::new(mark_file_width(tdfa)),
+            skip,
         )
     } else {
-        run_prefiltered_dyn::<u32>(tdfa, input, start, pred, scratch)
+        run_prefiltered_dyn::<u32>(tdfa, input, start, pred, scratch, skip)
     }
 }
 
@@ -293,15 +290,89 @@ impl<T: MarkElem> Scratch<T> {
     }
 }
 
+/// A precomputed "skip the prefix literal" descriptor. After `memmem` confirms
+/// the `len`-byte prefilter literal at offset `P`, the anchored automaton would
+/// just re-consume those bytes to reach `post_state` with the mark file
+/// unchanged from entry. So a warm start jumps straight to `post_state` and
+/// resumes the byte loop at `P + len`, never re-scanning the literal. For a
+/// fully-literal regex `post_state` is already accepting and the next byte
+/// dead-ends, so the match is produced with no transition-table work at all.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PrefixSkip {
+    post_state: u32,
+    len: usize,
+}
+
+/// Try to build a [`PrefixSkip`] for `literal` (the prefilter's exact byte
+/// sequence) against the anchored `tdfa`. Returns `None` — meaning fall back to
+/// a normal anchored run from `P` — whenever replaying the literal isn't
+/// trivially a no-op on the mark file: any literal transition that writes marks
+/// (e.g. a capture opening inside the leading literal), an automaton with anchor
+/// alts / `$`-conditionals (which could fire inside the literal), `^` making the
+/// offset-0 start differ, or a literal byte that dead-ends (shouldn't happen for
+/// a genuine mandatory prefix).
+pub(crate) fn compute_prefix_skip(tdfa: &Tdfa, literal: &[u8]) -> Option<PrefixSkip> {
+    if literal.is_empty() || tdfa.has_anchor_alts() || tdfa.has_conditionals() || !tdfa.has_moves()
+    {
+        return None;
+    }
+    // `^` makes the offset-0 start state differ from the general start; one
+    // `post_state` can't serve both, so bail and stay offset-independent.
+    if tdfa.start(0) != tdfa.start(1) {
+        return None;
+    }
+
+    let byte_to_class = tdfa.byte_to_class();
+    let transitions = tdfa.transitions();
+    let trans_moves = tdfa.transition_moves();
+    let num_classes = tdfa.num_classes();
+
+    let mut state = tdfa.start(1);
+    for &b in literal {
+        if state == TDFA_DEAD_STATE {
+            return None;
+        }
+        let class = *byte_to_class.iat(b as usize) as usize;
+        let idx = state as usize * num_classes + class;
+        // Replaying the literal must not touch the mark file, or the warm start
+        // would have to reconstruct it. This rejects capture groups that
+        // open/close inside the leading literal.
+        if !trans_moves.iat(idx).is_empty() {
+            return None;
+        }
+        let next = *transitions.iat(idx);
+        if next == TDFA_DEAD_STATE {
+            return None;
+        }
+        state = next;
+    }
+    // No accept can fire strictly inside a mandatory prefix (that would mean a
+    // match shorter than the literal exists), so intermediate accept checks are
+    // unnecessary; the boundary accept at `P + len` is still performed by the
+    // warm start. `state` is where the byte loop resumes.
+    Some(PrefixSkip {
+        post_state: state,
+        len: literal.len(),
+    })
+}
+
 /// One anchored attempt: run the automaton from byte offset `start`, reusing the
 /// caller-owned `scratch`. Returns the match (range + captures) or `None`. `T`
 /// is the mark element, fixed for the whole pass.
+///
+/// `warm`, when set, is a [`PrefixSkip`]: the start `start` is the literal's
+/// offset and the run jumps to `warm.post_state`, resuming the byte loop at
+/// `start + warm.len` instead of re-scanning the literal. It's only ever set
+/// when the automaton has no anchor alts / conditionals (see
+/// `compute_prefix_skip`), so those `C` branches are statically dead on the warm
+/// path.
 #[inline]
 fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
     scratch: &mut Scratch<T>,
+    warm: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
     let num_tags = tdfa.num_tags();
     let num_marks = tdfa.num_marks();
@@ -325,22 +396,33 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
 
     apply_cmds_scalar::<T>(src_buf, tdfa.entry_commands(start), T::from_pos(start));
 
-    let mut state = tdfa.start(start);
     let mut last_accept: LastAccept<T> = None;
+
+    // Cold start: begin in the start state and scan from `start`. Warm start
+    // (prefix-skip): begin in the post-literal state and scan from `start + len`
+    // — the mark file is unchanged from entry because the literal writes none
+    // (guaranteed by `compute_prefix_skip`).
+    let (mut state, loop_start) = match warm {
+        Some(s) => (s.post_state, start + s.len),
+        None => (tdfa.start(start), start),
+    };
 
     if state == TDFA_DEAD_STATE {
         return None;
     }
-    // Initial multiline-`^` check: if `start > 0` and the previous byte is a
-    // line terminator, switch to the alt right at the start of execution.
+    // Initial position checks at `loop_start`. Cold path (`loop_start == start`):
+    // multiline-`^` switch and the start-state empty-match accept. Warm path:
+    // the boundary accept right after the literal (the interior accept checks it
+    // skipped can't fire — see `compute_prefix_skip`); anchor-alt / conditional
+    // branches are statically dead since warm is only set when neither exists.
     if C::HAS_ANCHOR_ALTS {
-        maybe_switch_anchor_alt::<T>(tdfa, &mut state, src_buf, input, start);
+        maybe_switch_anchor_alt::<T>(tdfa, &mut state, src_buf, input, loop_start);
     }
     if *tdfa.accepting().iat(state as usize) {
         consider_accept(
             &mut last_accept,
             best_snap,
-            start,
+            loop_start,
             src_buf,
             tdfa.finals().iat(state as usize),
         );
@@ -350,7 +432,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             tdfa,
             state,
             input,
-            start,
+            loop_start,
             src_buf,
             cond_buf,
             &mut last_accept,
@@ -374,10 +456,10 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
 
     // Position where `state` was last actually entered (see the long-standing
     // note below: EOI conditionals evaluate against this, not `input.len()`).
-    let mut live_position = start;
+    let mut live_position = loop_start;
 
-    for (i, &byte) in input[start..].iter().enumerate() {
-        let pos = start + i;
+    for (i, &byte) in input[loop_start..].iter().enumerate() {
+        let pos = loop_start + i;
         let class = *byte_to_class.iat(byte as usize) as usize;
         let idx = state as usize * num_classes + class;
         let next = *transitions.iat(idx);

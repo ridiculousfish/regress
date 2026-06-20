@@ -24,7 +24,7 @@
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{self, Tdfa, TdfaStats};
-use crate::automata::tdfa_backend::{self, Scratch};
+use crate::automata::tdfa_backend::{self, PrefixSkip, Scratch};
 use crate::insn::StartPredicate;
 use crate::ir;
 use crate::startpredicate;
@@ -44,9 +44,12 @@ enum Strategy {
     /// No usable literal: one linear pass over the unanchored automaton.
     Scan { unanchored: Tdfa },
     /// Prefix literal / byte set: skip to candidates, anchored TDFA verifies.
+    /// `skip` (set only for an exact `ByteSeq` literal with a trivially
+    /// replayable traversal) warm-starts each verify past the literal.
     Prefix {
         anchored: Tdfa,
         prefilter: StartPredicate,
+        skip: Option<PrefixSkip>,
     },
 }
 
@@ -115,11 +118,21 @@ impl TdfaProgram {
             let nfa = Nfa::try_from(re)?;
             let mut anchored = Tdfa::try_from(&nfa)?;
             anchored.optimize();
+            // For an exact literal prefix, precompute a warm start that skips
+            // re-scanning it through the automaton (a no-op for byte-set/bracket
+            // prefixes, which have no fixed literal).
+            let skip = match &pred {
+                StartPredicate::ByteSeq(finder) => {
+                    tdfa_backend::compute_prefix_skip(&anchored, finder.needle())
+                }
+                _ => None,
+            };
             let group_names = anchored.group_names().to_vec().into_boxed_slice();
             Ok(Self {
                 strategy: Strategy::Prefix {
                     anchored,
                     prefilter: pred,
+                    skip,
                 },
                 group_names,
             })
@@ -164,7 +177,10 @@ impl TdfaProgram {
             Strategy::Prefix {
                 anchored,
                 prefilter,
-            } => tdfa_backend::execute_prefiltered_reuse(anchored, bytes, offset, prefilter, scratch),
+                skip,
+            } => tdfa_backend::execute_prefiltered_reuse(
+                anchored, bytes, offset, prefilter, scratch, *skip,
+            ),
         }
     }
 
