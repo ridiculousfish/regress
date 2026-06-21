@@ -543,8 +543,10 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
         if C::HAS_CONDITIONALS {
             live_position = pos + 1;
         }
-        // Forward-branching anchor switch (mid-input multiline `^`).
-        if C::HAS_ANCHOR_ALTS {
+        // Forward-branching anchor switch (mid-input multiline `^`). Guard on the
+        // per-state list so the common (no-alt) state skips the call — most states
+        // on a literal-verify path carry neither an alt nor a conditional.
+        if C::HAS_ANCHOR_ALTS && !tdfa.anchor_alts(state).is_empty() {
             maybe_switch_anchor_alt::<T>(tdfa, &mut state, src_buf, input, pos + 1);
         }
         if *accepting.iat(state as usize) {
@@ -559,7 +561,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
                 &mut read_live,
             );
         }
-        if C::HAS_CONDITIONALS {
+        if C::HAS_CONDITIONALS && !tdfa.anchor_conditionals(state).is_empty() {
             record_conditionals::<T>(
                 tdfa,
                 state,
