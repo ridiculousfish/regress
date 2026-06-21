@@ -8,7 +8,9 @@
 mod opt;
 
 use crate::automata::dfa::{compute_byte_classes, representative_bytes};
-use crate::automata::nfa::{EpsCondition, GOAL_STATE, Nfa, OpKind, StateHandle, TagIdx, TagOp};
+use crate::automata::nfa::{
+    EpsCondition, FULL_MATCH_START, GOAL_STATE, Nfa, OpKind, StateHandle, TagIdx, TagOp,
+};
 
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
@@ -26,6 +28,13 @@ pub const TDFA_COMMITTED_ACCEPT_STATE: TdfaStateId = 1;
 
 /// Highest sentinel id; real states start at `TDFA_LAST_SENTINEL + 1`.
 pub const TDFA_LAST_SENTINEL: TdfaStateId = TDFA_COMMITTED_ACCEPT_STATE;
+
+/// High bit marking an accepting target in the capture-free `exec_transitions`
+/// fast table (see [`Tdfa::exec_transitions`]). State budget is far below this,
+/// so it never collides with a real (premultiplied) state value.
+pub const EXEC_ACCEPT_FLAG: u32 = 1 << 31;
+/// Mask recovering the premultiplied state from an `exec_transitions` entry.
+pub const EXEC_STATE_MASK: u32 = !EXEC_ACCEPT_FLAG;
 
 /// Maximum number of TDFA states before we bail out. Matches
 /// `dfa::DFA_STATE_BUDGET`.
@@ -1026,6 +1035,25 @@ pub struct Tdfa {
     // per-byte `record_conditionals` call when there are none. Recomputed
     // after `optimize`.
     has_conditionals: bool,
+
+    // Whether the `FULL_MATCH_START` mark is fixed at entry — i.e. no transition
+    // ever writes the mark(s) that accepting states read back as
+    // `FULL_MATCH_START`. True for anchored/prefilter builds (the start is the
+    // run's `start` offset); false for the unanchored `.*?`-prefixed scan, whose
+    // handoff transition stamps the start mid-loop. Lets the capture-free hot
+    // loop skip per-byte mark application entirely (the entry value survives, so
+    // `snapshot_match_start` still reads the right start). Recomputed after
+    // `optimize`.
+    start_fixed: bool,
+
+    // Premultiplied + accept-flagged transition table for the capture-free fast
+    // loop. Same shape/indexing as `transitions` (`state * num_classes + class`),
+    // but each entry holds `target * num_classes` (so the loop indexes with a bare
+    // add, no per-byte multiply) with `EXEC_ACCEPT_FLAG` set when `target` is
+    // accepting (so the accept check is a register bit-test, no `accepting[]`
+    // load). `TDFA_DEAD_STATE` stays 0. Built only when the fast loop can run
+    // (`start_fixed`, no captures/conditionals/anchor-alts); empty otherwise.
+    exec_transitions: Box<[u32]>,
 }
 
 #[derive(Debug, Clone)]
@@ -1194,6 +1222,8 @@ impl Tdfa {
             anchor_conditionals: build.anchor_conditionals.into_boxed_slice(),
             has_anchor_alts: build.anchor_alts.iter().any(|alts| !alts.is_empty()),
             anchor_alts: build.anchor_alts.into_boxed_slice(),
+            start_fixed: false,
+            exec_transitions: Box::default(),
         };
         tdfa.compile_moves_all();
         Ok(tdfa)
@@ -1209,6 +1239,8 @@ impl Tdfa {
     /// fallback) only for the degenerate case of a mark file too large to index
     /// with the `u16` lane type — far beyond any realistic capture count.
     fn compile_moves_all(&mut self) {
+        self.start_fixed = self.compute_start_fixed();
+        self.build_exec_transitions();
         let num_marks = self.num_marks;
         if num_marks + 3 > u16::MAX as usize {
             self.transition_moves = Box::default();
@@ -1219,6 +1251,78 @@ impl Tdfa {
             .iter()
             .map(|cmds| compile_moves(cmds, num_marks))
             .collect();
+    }
+
+    /// Build the capture-free fast-loop transition table (see
+    /// [`exec_transitions`](Self::exec_transitions)). Only worthwhile when the
+    /// fast loop can actually run, so it's gated on the same conditions the
+    /// executor's dispatcher checks; otherwise the table is left empty.
+    fn build_exec_transitions(&mut self) {
+        let fast_ok = !self.has_captures
+            && self.start_fixed
+            && !self.has_conditionals
+            && !self.has_anchor_alts;
+        if !fast_ok {
+            self.exec_transitions = Box::default();
+            return;
+        }
+        let nc = self.num_classes as u32;
+        let accepting = &self.accepting;
+        self.exec_transitions = self
+            .transitions
+            .iter()
+            .map(|&t| {
+                if t == TDFA_DEAD_STATE {
+                    0
+                } else {
+                    let premult = t * nc;
+                    if accepting[t as usize] {
+                        premult | EXEC_ACCEPT_FLAG
+                    } else {
+                        premult
+                    }
+                }
+            })
+            .collect();
+    }
+
+    /// The capture-free fast-loop transition table, or empty when the fast loop
+    /// is not applicable to this automaton.
+    pub(crate) fn exec_transitions(&self) -> &[u32] {
+        &self.exec_transitions
+    }
+
+    /// Whether `FULL_MATCH_START` is written only by the entry commands (never by
+    /// a transition). Collect every mark an accepting state reads back as
+    /// `FULL_MATCH_START`, then check no transition command writes one of them.
+    /// Conservatively `false` if no accepting state names a start mark.
+    fn compute_start_fixed(&self) -> bool {
+        let mut start_marks: SmallVec<[u32; 4]> = SmallVec::new();
+        for finals in self.finals.iter() {
+            for cmd in finals.iter() {
+                if cmd.tag == FULL_MATCH_START {
+                    if let MarkValue::Copy(m) = cmd.src {
+                        if !start_marks.contains(&m.0) {
+                            start_marks.push(m.0);
+                        }
+                    }
+                }
+            }
+        }
+        if start_marks.is_empty() {
+            return false;
+        }
+        !self
+            .transition_commands
+            .iter()
+            .flat_map(|cmds| cmds.iter())
+            .any(|cmd| start_marks.contains(&cmd.dst.0))
+    }
+
+    /// Whether the match start is fixed at the run's `start` offset (no
+    /// transition writes the `FULL_MATCH_START` mark). See the field docs.
+    pub(crate) fn start_fixed(&self) -> bool {
+        self.start_fixed
     }
 
     /// Whether `transition_moves` was compiled (effectively always) or skipped

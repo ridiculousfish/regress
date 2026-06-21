@@ -15,7 +15,9 @@
 use crate::automata::dfa::{DEAD_STATE, Dfa};
 use crate::automata::nfa::{FULL_MATCH_END, FULL_MATCH_START, TEXT_POS_NO_MATCH, TextPos};
 use crate::automata::nfa_backend::{NfaMatch, tags_to_captures};
-use crate::automata::tdfa::{FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa};
+use crate::automata::tdfa::{
+    EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
+};
 use crate::insn::StartPredicate;
 use crate::util::DebugCheckIndex;
 #[cfg(not(feature = "std"))]
@@ -466,10 +468,49 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     // perfectly.
     let use_moves = tdfa.has_moves();
 
+    // When the pattern has no captures and `FULL_MATCH_START` is fixed at entry
+    // (anchored/prefilter builds), no per-byte mark is ever read back: the match
+    // is `[start, end]` with `start` from the untouched entry mark and `end` from
+    // the accept position. So the whole transition-mark application is dead and we
+    // drop it from the hot loop. Loop-invariant — predicts perfectly. (Capture or
+    // `.*?`-scan runs keep applying marks.)
+    let skip_marks = !has_captures && tdfa.start_fixed();
+
+    // The capture-free fast loop: premultiplied transitions (no per-byte index
+    // multiply) + accept-flagged targets (no `accepting[]` load) + no mark work.
+    // Applicable exactly when `exec_transitions` was built (capture-free,
+    // `start_fixed`, and — guaranteed by the dispatcher's const flags — no
+    // conditionals or anchor alts). The match always starts at `start`, so accepts
+    // record that directly.
+    let use_fast = skip_marks
+        && !C::HAS_CONDITIONALS
+        && !C::HAS_ANCHOR_ALTS
+        && !tdfa.exec_transitions().is_empty();
+
     // Position where `state` was last actually entered (see the long-standing
     // note below: EOI conditionals evaluate against this, not `input.len()`).
     let mut live_position = loop_start;
 
+    if use_fast {
+        // `state` is premultiplied here; `estate + class` indexes the table with a
+        // bare add. No marks, no `accepting[]` load, no `finals` — the accept is a
+        // bit test and the start is the run's `start`.
+        let exec_trans = tdfa.exec_transitions();
+        let mut estate = state * num_classes as u32;
+        for (i, &byte) in input[loop_start..].iter().enumerate() {
+            let class = *byte_to_class.iat(byte as usize) as u32;
+            let raw = *exec_trans.iat((estate + class) as usize);
+            if raw == TDFA_DEAD_STATE {
+                break;
+            }
+            estate = raw & EXEC_STATE_MASK;
+            if raw & EXEC_ACCEPT_FLAG != 0 {
+                // Latest (longest) accept wins; start is fixed at `start`.
+                last_accept = Some((loop_start + i + 1, &[], T::from_pos(start)));
+                read_live = false;
+            }
+        }
+    } else {
     for (i, &byte) in input[loop_start..].iter().enumerate() {
         let pos = loop_start + i;
         let class = *byte_to_class.iat(byte as usize) as usize;
@@ -482,20 +523,26 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
         // the common tag-free case (marks untouched, skipped). Each move is
         // `buf[dst] = buf[src]`; the sequence is ordered so reads see pre-update
         // values, with `src` possibly naming the `current_pos` or `scratch` lane.
-        if use_moves {
-            let moves = trans_moves.iat(idx);
-            if !moves.is_empty() {
-                *src_buf.mat(curpos_lane) = T::from_pos(pos + 1);
-                for op in moves.iter() {
-                    let v = *src_buf.iat(op.src as usize);
-                    *src_buf.mat(op.dst as usize) = v;
+        if !skip_marks {
+            if use_moves {
+                let moves = trans_moves.iat(idx);
+                if !moves.is_empty() {
+                    *src_buf.mat(curpos_lane) = T::from_pos(pos + 1);
+                    for op in moves.iter() {
+                        let v = *src_buf.iat(op.src as usize);
+                        *src_buf.mat(op.dst as usize) = v;
+                    }
                 }
+            } else {
+                apply_cmds_scalar::<T>(src_buf, trans_cmds.iat(idx), T::from_pos(pos + 1));
             }
-        } else {
-            apply_cmds_scalar::<T>(src_buf, trans_cmds.iat(idx), T::from_pos(pos + 1));
         }
         state = next;
-        live_position = pos + 1;
+        // `live_position` only feeds the EOI conditional pass below, so the
+        // per-byte store is dead weight unless this run has conditionals.
+        if C::HAS_CONDITIONALS {
+            live_position = pos + 1;
+        }
         // Forward-branching anchor switch (mid-input multiline `^`).
         if C::HAS_ANCHOR_ALTS {
             maybe_switch_anchor_alt::<T>(tdfa, &mut state, src_buf, input, pos + 1);
@@ -526,6 +573,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
                 &mut read_live,
             );
         }
+    }
     }
 
     // EOI pass — `$` non-multiline naturally fires here; multiline `$` fires
