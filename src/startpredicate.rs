@@ -155,9 +155,13 @@ fn compute_start_predicate(n: &Node) -> Option<AbstractStartPredicate> {
         // MatchAnyExceptLineTerminator (aka .) is too common to do a fast prefix search for.
         Node::MatchAnyExceptLineTerminator => arbitrary,
 
-        // TODO: can probably exploit some of these.
-        Node::Anchor { .. } => arbitrary,
-        Node::WordBoundary { .. } => arbitrary,
+        // Zero-width assertions: like `LookaroundAssertion` below, they consume
+        // nothing, so they contribute no predicate and a leading one must be
+        // skipped (return `None`) rather than poisoning a `Cat` to `Arbitrary`.
+        // This lets `^Sherlock Holmes|Sherlock Holmes$` extract the shared
+        // literal prefix. The anchor is still re-verified at each candidate.
+        Node::Anchor { .. } => None,
+        Node::WordBoundary { .. } => None,
 
         // Capture groups delegate to their contents.
         Node::CaptureGroup { contents, .. } => compute_start_predicate(contents),
