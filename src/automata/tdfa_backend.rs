@@ -377,6 +377,8 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     let num_tags = tdfa.num_tags();
     let num_marks = tdfa.num_marks();
     let curpos_lane = num_marks + 1;
+    // Loop-invariant: capture-free patterns skip the per-byte accept snapshot.
+    let has_captures = tdfa.has_captures();
 
     // Pull the three mark buffers out of `scratch` (and the deref through the
     // `&mut Scratch`) into direct `&mut [T]` locals held on the stack for the
@@ -425,6 +427,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             loop_start,
             src_buf,
             tdfa.finals().iat(state as usize),
+            has_captures,
         );
     }
     if C::HAS_CONDITIONALS {
@@ -437,6 +440,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             cond_buf,
             &mut last_accept,
             best_snap,
+            has_captures,
         );
     }
 
@@ -495,6 +499,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
                 pos + 1,
                 src_buf,
                 tdfa.finals().iat(state as usize),
+                has_captures,
             );
         }
         if C::HAS_CONDITIONALS {
@@ -507,6 +512,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
                 cond_buf,
                 &mut last_accept,
                 best_snap,
+                has_captures,
             );
         }
     }
@@ -525,11 +531,16 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             cond_buf,
             &mut last_accept,
             best_snap,
+            has_captures,
         );
     }
 
     match last_accept {
-        Some((end, finals, _)) => Some(finalize::<T>(finals, best_snap, end, num_tags, tag_values)),
+        Some((end, finals, start)) => Some(if has_captures {
+            finalize::<T>(finals, best_snap, end, num_tags, tag_values)
+        } else {
+            finalize_nocap::<T>(start, end)
+        }),
         None => None,
     }
 }
@@ -567,6 +578,7 @@ fn record_conditionals<'a, T: MarkElem>(
     cond_buf: &mut [T],
     last_accept: &mut LastAccept<'a, T>,
     best_snap: &mut [T],
+    has_captures: bool,
 ) {
     let conds = tdfa.anchor_conditionals(state);
     if conds.is_empty() {
@@ -578,7 +590,7 @@ fn record_conditionals<'a, T: MarkElem>(
         }
         cond_buf.copy_from_slice(marks);
         apply_cmds_scalar::<T>(cond_buf, &ac.commands, T::from_pos(pos));
-        consider_accept(last_accept, best_snap, pos, cond_buf, &ac.finals);
+        consider_accept(last_accept, best_snap, pos, cond_buf, &ac.finals, has_captures);
     }
 }
 
@@ -607,12 +619,20 @@ fn snapshot_match_start<T: MarkElem>(finals: &[FinalCommand], marks: &[T]) -> T 
 /// only for unanchored search, where the implicit prefix can keep a "still
 /// searching" thread alive past a `$`-completed match; for anchored runs
 /// `FULL_MATCH_START` is constant and this reduces to "latest accept wins".
+///
+/// `has_captures` is loop-invariant (const per scan): when false we skip the
+/// per-byte `best_snap` copy entirely — the match is `start..end` with no
+/// captures (`finalize_nocap`), so the snapshot is dead weight. This is the big
+/// win for accept-heavy capture-free patterns like `.*`, which would otherwise
+/// memcpy the mark file on every byte.
+#[inline]
 fn consider_accept<'a, T: MarkElem>(
     last_accept: &mut LastAccept<'a, T>,
     best_snap: &mut [T],
     end: usize,
     marks: &[T],
     finals: &'a [FinalCommand],
+    has_captures: bool,
 ) {
     let new_start = snapshot_match_start(finals, marks);
     if let Some((_, _, best_start)) = last_accept {
@@ -620,8 +640,20 @@ fn consider_accept<'a, T: MarkElem>(
             return;
         }
     }
-    best_snap.copy_from_slice(marks);
+    if has_captures {
+        best_snap.copy_from_slice(marks);
+    }
     *last_accept = Some((end, finals, new_start));
+}
+
+/// Build a capture-free match directly from the recorded start (the
+/// `FULL_MATCH_START` snapshot value) and end — no mark file, no captures.
+fn finalize_nocap<T: MarkElem>(start: T, end: usize) -> NfaMatch {
+    let start = if start == T::NO_MATCH { 0 } else { start.to_pos() };
+    NfaMatch {
+        range: start..end,
+        captures: Vec::new(),
+    }
 }
 
 /// Build an `NfaMatch` from a finalization snapshot. `finals` is the row of

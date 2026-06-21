@@ -941,6 +941,11 @@ pub struct Tdfa {
     entry_commands_unanchored: TagCommandList,
     num_classes: usize, // Number of byte equivalence classes.
     num_tags: usize,    // Number of semantic tags (capture positions).
+    /// Whether the pattern has user capture groups (beyond the full match). When
+    /// false, the executor's accept path skips the per-byte mark snapshot — the
+    /// match is just `[start, end]` — which is a big win for accept-heavy
+    /// capture-free patterns like `.*`.
+    has_captures: bool,
     // Capture-group names cloned from the source NFA so callers can attach
     // them to returned matches without keeping the NFA alive.
     group_names: Box<[Box<str>]>,
@@ -1142,6 +1147,7 @@ impl Tdfa {
             entry_commands_unanchored,
             num_classes,
             num_tags,
+            has_captures: nfa.num_capture_tags() > 2,
             num_marks,
             group_names: nfa.group_names().to_vec().into_boxed_slice(),
             byte_to_class,
@@ -1225,6 +1231,12 @@ impl Tdfa {
     /// executor's choice of monomorphization (see `TdfaExecConfig`).
     pub(crate) fn has_conditionals(&self) -> bool {
         self.has_conditionals
+    }
+
+    /// Whether the pattern has user capture groups (beyond the full match).
+    /// When false the executor skips the per-byte accept snapshot.
+    pub(crate) fn has_captures(&self) -> bool {
+        self.has_captures
     }
 
     pub fn num_tags(&self) -> usize {
