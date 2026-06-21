@@ -133,6 +133,11 @@ fn main() {
         ("dictionary64", dict.as_str(), ""),
     ];
 
+    // Optional CLI filters: run only cases whose name contains any given
+    // substring, e.g. `cargo run --release --example realistic_bench -- everything_greedy_nl`.
+    let filters: Vec<String> = std::env::args().skip(1).collect();
+    let selected = |name: &str| filters.is_empty() || filters.iter().any(|f| name.contains(f));
+
     println!("Sherlock corpus ({} bytes), throughput (MB/s), higher is better:\n", haystack.len());
     println!(
         "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}",
@@ -141,6 +146,9 @@ fn main() {
     println!("{}", "-".repeat(105));
 
     for &(name, pattern, flags_str) in suite {
+        if !selected(name) {
+            continue;
+        }
         let flags = regress::Flags::from(flags_str);
         let mut ire = match backends::try_parse(pattern.chars().map(u32::from), flags) {
             Ok(ire) => ire,
