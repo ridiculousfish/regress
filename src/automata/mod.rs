@@ -1,6 +1,8 @@
 //! Conversion of IR to finite automata.
 
 pub mod anchors;
+mod byte_frequencies;
+mod casefold_search;
 pub mod dfa;
 pub mod executors;
 pub mod nfa;

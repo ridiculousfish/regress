@@ -21,6 +21,7 @@
 //!   condition on the match's first element, so the leftmost candidate that
 //!   verifies is the leftmost match.
 
+use crate::automata::casefold_search::CaseFoldSearcher;
 use crate::automata::dfa::Dfa;
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::NfaMatch;
@@ -33,6 +34,7 @@ use crate::startpredicate;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
 use memchr::memmem;
+use smallvec::SmallVec;
 
 /// A built TDFA search program: an automaton plus the strategy used to drive it
 /// over an input. This is the `Source` consumed by `TdfaExecutor`.
@@ -60,6 +62,19 @@ enum Strategy {
         anchored: Tdfa,
         prefilter: StartPredicate,
         skip: Option<PrefixSkip>,
+    },
+    /// Case-insensitive literal (e.g. `Sherlock`/i) — a chain of per-character
+    /// case sets, so no fixed `ByteSequence` and the first set has a common byte.
+    /// Search the longest *fold-clean* ASCII run (`herlock`) case-insensitively,
+    /// then run the `forward` anchored TDFA over the small start window before it
+    /// (the pre-run literal may be 1–2 bytes per problematic char, e.g. `S`/`ſ`),
+    /// which verifies the full pattern incl. the width-changing ſ/Kelvin folds.
+    CaseFoldLiteral {
+        forward: Tdfa,
+        searcher: CaseFoldSearcher,
+        /// Min/max byte width of the literal portion before the clean run.
+        prefix_lo: usize,
+        prefix_hi: usize,
     },
     /// Required *suffix* literal, no usable prefix (e.g. `\w+\s+Holmes`). Find
     /// the literal with `memmem`, drive the `reverse` DFA leftward from its end
@@ -123,6 +138,137 @@ fn whole_literal(re: &ir::Regex) -> Option<Vec<u8>> {
     lit(&re.node)
 }
 
+/// The fold-clean run extracted from a case-insensitive literal: the run's
+/// per-position ASCII case-sets, plus the min/max byte width of the literal
+/// portion *before* it.
+struct CleanRunInfo {
+    sets: Vec<SmallVec<[u8; 4]>>,
+    prefix_lo: usize,
+    prefix_hi: usize,
+}
+
+/// UTF-8 byte width of a codepoint.
+fn cp_width(c: u32) -> usize {
+    if c < 0x80 {
+        1
+    } else if c < 0x800 {
+        2
+    } else if c < 0x1_0000 {
+        3
+    } else {
+        4
+    }
+}
+
+/// If the regex is a pure **case-fold literal** — a `Cat` of per-character
+/// byte/char sets with no loops/alternations/anchors/captures — return its
+/// longest contiguous *fold-clean* ASCII run (length ≥ 2) and the byte-width
+/// range of the literal before it. Returns `None` otherwise (→ other strategies
+/// / `Scan`). A bare `ByteSequence` literal is handled by [`whole_literal`].
+///
+/// "Fold-clean" = the position's fold set is all single-byte ASCII. The
+/// optimizer already encoded each position's fold set as the node itself
+/// (`ByteSet`/coalesced `ByteSequence` = clean ASCII; `CharSet` = includes the
+/// non-ASCII, width-changing `s`→ſ / `k`→Kelvin fold), so we read it straight
+/// off the IR — conformant by construction with what the automaton matches.
+fn casefold_clean_run(re: &ir::Regex) -> Option<CleanRunInfo> {
+    use ir::Node;
+    /// A clean ASCII case-set (width 1), or a width-`wmin..=wmax` problem char.
+    enum Pos {
+        Clean(SmallVec<[u8; 4]>),
+        Problem { wmin: usize, wmax: usize },
+    }
+
+    let nodes: &[Node] = match &re.node {
+        Node::Cat(n) => n,
+        _ => return None,
+    };
+    let mut positions: Vec<Pos> = Vec::new();
+    for n in nodes {
+        match n {
+            Node::Goal | Node::Empty => {}
+            Node::ByteSet(bytes) => {
+                if bytes.iter().any(|&b| b >= 0x80) {
+                    return None;
+                }
+                positions.push(Pos::Clean(bytes.iter().copied().collect()));
+            }
+            Node::ByteSequence(bytes) => {
+                for &b in bytes {
+                    if b >= 0x80 {
+                        return None; // non-ASCII literal char
+                    }
+                    positions.push(Pos::Clean(SmallVec::from_slice(&[b])));
+                }
+            }
+            Node::CharSet(chars) => {
+                let wmin = chars.iter().map(|&c| cp_width(c)).min()?;
+                let wmax = chars.iter().map(|&c| cp_width(c)).max()?;
+                positions.push(Pos::Problem { wmin, wmax });
+            }
+            Node::Char { c } if *c < 0x80 => {
+                positions.push(Pos::Clean(SmallVec::from_slice(&[*c as u8])));
+            }
+            // Any consuming / structural node: not a pure literal.
+            _ => return None,
+        }
+    }
+
+    // Longest contiguous clean run.
+    let (mut best_start, mut best_len) = (0usize, 0usize);
+    let mut i = 0;
+    while i < positions.len() {
+        if matches!(positions[i], Pos::Clean(_)) {
+            let start = i;
+            while i < positions.len() && matches!(positions[i], Pos::Clean(_)) {
+                i += 1;
+            }
+            if i - start > best_len {
+                best_len = i - start;
+                best_start = start;
+            }
+        } else {
+            i += 1;
+        }
+    }
+    if best_len < 2 {
+        return None;
+    }
+
+    // Byte-width range of the literal before the run.
+    let (mut lo, mut hi) = (0usize, 0usize);
+    for p in &positions[..best_start] {
+        match p {
+            Pos::Clean(_) => {
+                lo += 1;
+                hi += 1;
+            }
+            Pos::Problem { wmin, wmax } => {
+                lo += wmin;
+                hi += wmax;
+            }
+        }
+    }
+    // Keep the per-hit verify window tiny.
+    const MAX_PREFIX_SPREAD: usize = 4;
+    if hi - lo > MAX_PREFIX_SPREAD {
+        return None;
+    }
+
+    let sets = positions[best_start..best_start + best_len]
+        .iter()
+        .map(|p| match p {
+            Pos::Clean(s) => s.clone(),
+            Pos::Problem { .. } => unreachable!("run is all Clean"),
+        })
+        .collect();
+    Some(CleanRunInfo {
+        sets,
+        prefix_lo: lo,
+        prefix_hi: hi,
+    })
+}
+
 /// Bytes that are too common in typical (prose) text for a single-byte-class
 /// prefilter to be worth it: skipping to every one of them and running an
 /// anchored verify that fails immediately costs more than a straight scan.
@@ -170,6 +316,28 @@ impl TdfaProgram {
                 strategy: Strategy::WholeLiteral { literal, len },
                 group_names: Box::new([]),
             });
+        }
+
+        // Case-insensitive literal (per-character case sets): search its longest
+        // fold-clean ASCII run and verify the full pattern with the anchored
+        // automaton. Tried before the start-predicate gate, which would reject
+        // the common-first-byte icase predicate.
+        if let Some(run) = casefold_clean_run(re) {
+            if let Some(searcher) = CaseFoldSearcher::new(run.sets) {
+                let nfa = Nfa::try_from(re)?;
+                let mut forward = Tdfa::try_from(&nfa)?;
+                forward.optimize();
+                let group_names = forward.group_names().to_vec().into_boxed_slice();
+                return Ok(Self {
+                    strategy: Strategy::CaseFoldLiteral {
+                        forward,
+                        searcher,
+                        prefix_lo: run.prefix_lo,
+                        prefix_hi: run.prefix_hi,
+                    },
+                    group_names,
+                });
+            }
         }
 
         let pred = startpredicate::predicate_for_re(re);
@@ -282,6 +450,34 @@ impl TdfaProgram {
                     captures: Vec::new(),
                 })
             }
+            Strategy::CaseFoldLiteral {
+                forward,
+                searcher,
+                prefix_lo,
+                prefix_hi,
+            } => {
+                let mut pos = offset;
+                loop {
+                    let j = searcher.find(bytes, pos)?; // clean-run start
+                    // Candidate match starts: s = j - w for each possible
+                    // pre-run byte width w ∈ [prefix_lo, prefix_hi], i.e.
+                    // s ∈ [j - prefix_hi, j - prefix_lo], clamped to ≥ offset.
+                    // Try ascending (leftmost s first); the automaton verifies the
+                    // full pattern, folding the width-changing ſ/Kelvin correctly.
+                    if let Some(s_hi) = j.checked_sub(*prefix_lo) {
+                        let s_lo = j.saturating_sub(*prefix_hi).max(offset);
+                        let mut s = s_lo;
+                        while s <= s_hi {
+                            if let Some(m) = tdfa_backend::execute_reuse(forward, bytes, s, scratch)
+                            {
+                                return Some(m);
+                            }
+                            s += 1;
+                        }
+                    }
+                    pos = j + 1;
+                }
+            }
             Strategy::Scan { unanchored } => {
                 tdfa_backend::execute_reuse(unanchored, bytes, offset, scratch)
             }
@@ -326,6 +522,7 @@ impl TdfaProgram {
             Strategy::WholeLiteral { .. } => return 3,
             Strategy::Scan { unanchored } => unanchored,
             Strategy::Prefix { anchored, .. } => anchored,
+            Strategy::CaseFoldLiteral { forward, .. } => forward,
             Strategy::ReverseInner { forward, .. } => forward,
         };
         tdfa_backend::mark_file_width(tdfa)
@@ -342,6 +539,12 @@ impl TdfaProgram {
         matches!(self.strategy, Strategy::ReverseInner { .. })
     }
 
+    /// Test-only: whether this program uses the case-fold-literal strategy.
+    #[cfg(test)]
+    pub(crate) fn is_casefold_literal(&self) -> bool {
+        matches!(self.strategy, Strategy::CaseFoldLiteral { .. })
+    }
+
     /// Stats of the underlying automaton (for the benchmarks' size columns).
     pub fn stats(&self) -> TdfaStats {
         match &self.strategy {
@@ -355,6 +558,7 @@ impl TdfaProgram {
             },
             Strategy::Scan { unanchored } => unanchored.stats(),
             Strategy::Prefix { anchored, .. } => anchored.stats(),
+            Strategy::CaseFoldLiteral { forward, .. } => forward.stats(),
             Strategy::ReverseInner { forward, .. } => forward.stats(),
         }
     }
