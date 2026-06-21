@@ -275,6 +275,12 @@ fn capture_showcase(haystack: &str, selected: &impl Fn(&str) -> bool) {
         ("cap_words4", r"(\w+)\s+(\w+)\s+(\w+)\s+(\w+)", ""),
         // Other many-match capture patterns.
         ("cap_first_rest", r"(\w)(\w*)", ""),
+        // Capture-shape varieties.
+        ("cap_nested", r"((\w+)\s+(\w+))", ""), // nested groups
+        ("cap_separators", r"(\w+)(\s+)(\w+)", ""), // capture the whitespace too
+        ("cap_optional", r"(\w+)(\s+\w+)?", ""), // 2nd group is None at line ends
+        ("cap_five", r"(\w)(\w)(\w)(\w)(\w)", ""), // many small groups
+        ("cap_quant_group", r"(\w+\s*)+", ""),  // quantified group: last iteration wins
         // Capturing variant of the capture-free `quotes` row, to isolate the
         // cost of materializing the inner group on a content-heavy match.
         ("cap_quoted", "\"([^\"]*)\"", ""),
