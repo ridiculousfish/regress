@@ -57,6 +57,22 @@ fn cell(mbps: Option<f64>) -> String {
     }
 }
 
+/// A checksum over a match that *forces capture extraction*: the full-match end
+/// plus every capture group's end offset. Summed over all matches it is the
+/// per-backend workload the capture-showcase loop times, and — since every
+/// regress backend shares ECMAScript capture semantics and the `Some(0..0)`
+/// unmatched convention — a value the cross-backend canary compares against the
+/// backtracker oracle (captures, not just match counts).
+fn cap_sum(m: &regress::Match) -> usize {
+    let mut s = m.range.end;
+    for c in &m.captures {
+        if let Some(r) = c {
+            s = s.wrapping_add(r.end);
+        }
+    }
+    s
+}
+
 /// Build a large capture-free alternation from the corpus's own vocabulary:
 /// the `n` most frequent purely-alphabetic words, longest-first within a
 /// frequency tie (so the alternation prefers the longer match). This yields a
@@ -233,6 +249,135 @@ fn main() {
             cell(tdfa_mbps),
             cell(rx_mbps),
             if agree { "" } else { "   ! counts disagree" },
+        );
+    }
+
+    capture_showcase(haystack, &selected);
+}
+
+/// Capture-group showcase. Same corpus and column layout as the main table, but
+/// every backend *materializes the capture groups* of every match (timed via
+/// `cap_sum`) rather than just counting — the workload where a tagged DFA pulls
+/// ahead of the thread-tracking PikeVM (and the regex crate's capture engines):
+/// the bytecode engines carry a capture-slot set per live thread, while the TDFA
+/// resolves all groups in one linear pass (its per-match cost shows up only as a
+/// bigger `marks` file, not slower scanning). The canary now checks the capture
+/// checksum, so it verifies the TDFA's *captures* against the backtracker oracle.
+fn capture_showcase(haystack: &str, selected: &impl Fn(&str) -> bool) {
+    let suite: &[(&str, &str, &str)] = &[
+        // Capture-count ladder over word runs: no usable literal prefilter, so
+        // every engine must scan the whole corpus and the only growing cost is
+        // capture bookkeeping. The TDFA stays flat as groups are added while the
+        // PikeVM degrades per added slot; watch the `marks` column climb.
+        ("cap_words1", r"(\w+)", ""),
+        ("cap_words2", r"(\w+)\s+(\w+)", ""),
+        ("cap_words3", r"(\w+)\s+(\w+)\s+(\w+)", ""),
+        ("cap_words4", r"(\w+)\s+(\w+)\s+(\w+)\s+(\w+)", ""),
+        // Other many-match capture patterns.
+        ("cap_first_rest", r"(\w)(\w*)", ""),
+        // Capturing variant of the capture-free `quotes` row, to isolate the
+        // cost of materializing the inner group on a content-heavy match.
+        ("cap_quoted", "\"([^\"]*)\"", ""),
+        // Honest counterpoint: when a rare literal exists the regex crate's
+        // prefilter (here a memmem on `'`) skips the scan the TDFA still does.
+        ("cap_contraction", r"(\w+)'(\w+)", ""),
+    ];
+
+    println!("\nCapturing groups — every backend materializes capture groups per match (MB/s):\n");
+    println!(
+        "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}",
+        "case", "states", "marks", "backtrack", "pikevm", "nfa", "tdfa", "regex"
+    );
+    println!("{}", "-".repeat(105));
+
+    for &(name, pattern, flags_str) in suite {
+        if !selected(name) {
+            continue;
+        }
+        let flags = regress::Flags::from(flags_str);
+        let mut ire = match backends::try_parse(pattern.chars().map(u32::from), flags) {
+            Ok(ire) => ire,
+            Err(e) => {
+                println!("{:<28} parse failed: {:?}", name, e);
+                continue;
+            }
+        };
+        backends::optimize(&mut ire);
+        let cr: CompiledRegex = backends::emit(&ire);
+        let nfa = Nfa::try_from_unanchored(&ire).ok();
+        let tdfa = TdfaProgram::try_from_ir(&ire).ok();
+        let rx = regex::RegexBuilder::new(pattern)
+            .case_insensitive(flags_str.contains('i'))
+            .multi_line(flags_str.contains('m'))
+            .dot_matches_new_line(flags_str.contains('s'))
+            .build()
+            .ok();
+
+        // Capture canary: checksum over matches AND their group offsets, so the
+        // TDFA's captures (not just counts) are verified against the backtracker.
+        let bt_sum: usize = backends::find::<BacktrackExecutor>(&cr, haystack, 0)
+            .map(|m| cap_sum(&m))
+            .sum();
+        let mut agree = true;
+        let mut check = |c: usize| agree &= c == bt_sum;
+        check(backends::find::<PikeVMExecutor>(&cr, haystack, 0).map(|m| cap_sum(&m)).sum());
+        if let Some(n) = &nfa {
+            check(backends::find::<NfaExecutor>(n, haystack, 0).map(|m| cap_sum(&m)).sum());
+        }
+        if let Some(t) = &tdfa {
+            check(backends::find::<TdfaExecutor>(t, haystack, 0).map(|m| cap_sum(&m)).sum());
+        }
+
+        let (states, marks) = match &tdfa {
+            Some(t) => {
+                let s = t.stats();
+                (s.num_states.to_string(), s.num_marks.to_string())
+            }
+            None => ("-".to_string(), "-".to_string()),
+        };
+
+        let bt = throughput(haystack.len(), || {
+            backends::find::<BacktrackExecutor>(&cr, haystack, 0).map(|m| cap_sum(&m)).sum()
+        });
+        let pike = throughput(haystack.len(), || {
+            backends::find::<PikeVMExecutor>(&cr, haystack, 0).map(|m| cap_sum(&m)).sum()
+        });
+        let nfa_mbps = nfa.as_ref().map(|n| {
+            throughput(haystack.len(), || {
+                backends::find::<NfaExecutor>(n, haystack, 0).map(|m| cap_sum(&m)).sum()
+            })
+        });
+        let tdfa_mbps = tdfa.as_ref().map(|t| {
+            throughput(haystack.len(), || {
+                backends::find::<TdfaExecutor>(t, haystack, 0).map(|m| cap_sum(&m)).sum()
+            })
+        });
+        // Force the regex crate to materialize captures too (sum of group ends).
+        let rx_mbps = rx.as_ref().map(|r| {
+            throughput(haystack.len(), || {
+                let mut total = 0usize;
+                for caps in r.captures_iter(haystack) {
+                    for i in 0..caps.len() {
+                        if let Some(g) = caps.get(i) {
+                            total = total.wrapping_add(g.end());
+                        }
+                    }
+                }
+                total
+            })
+        });
+
+        println!(
+            "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}{}",
+            name,
+            states,
+            marks,
+            cell(Some(bt)),
+            cell(Some(pike)),
+            cell(nfa_mbps),
+            cell(tdfa_mbps),
+            cell(rx_mbps),
+            if agree { "" } else { "   ! capture checksums disagree" },
         );
     }
 }
