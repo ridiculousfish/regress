@@ -7,7 +7,6 @@ Cargo.lock
 regexp-pcre.js
 
 .claude/
-CLAUDE.md
 
 # Unicode Database Files
 DerivedCoreProperties.txt
