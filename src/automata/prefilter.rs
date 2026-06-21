@@ -44,6 +44,13 @@ pub struct TdfaProgram {
 
 #[derive(Debug)]
 enum Strategy {
+    /// The whole regex is exactly a literal (no captures, tail, or assertions):
+    /// the `memmem` span IS the match, so we skip the automaton entirely — just
+    /// `memmem` + build the `Match`. This is the regex-crate pure-literal path.
+    WholeLiteral {
+        literal: Box<memmem::Finder<'static>>,
+        len: usize,
+    },
     /// No usable literal: one linear pass over the unanchored automaton.
     Scan { unanchored: Tdfa },
     /// Prefix literal / byte set: skip to candidates, anchored TDFA verifies.
@@ -85,6 +92,37 @@ impl From<tdfa::Error> for BuildError {
     }
 }
 
+/// If the regex is *exactly* a literal byte sequence — no captures, no tail, no
+/// anchors/assertions — return those bytes. Then the match is simply the
+/// `memmem` span and no automaton is needed at all. The optimizer leaves such a
+/// pattern as a `ByteSequence` (optionally inside a `Cat` with only trailing
+/// zero-width `Goal`/`Empty` markers).
+fn whole_literal(re: &ir::Regex) -> Option<Vec<u8>> {
+    use ir::Node;
+    fn lit(n: &Node) -> Option<Vec<u8>> {
+        match n {
+            Node::ByteSequence(b) if !b.is_empty() => Some(b.clone()),
+            Node::Cat(nodes) => {
+                let mut found: Option<Vec<u8>> = None;
+                for node in nodes {
+                    match node {
+                        Node::Goal | Node::Empty => {}
+                        Node::ByteSequence(b) if found.is_none() && !b.is_empty() => {
+                            found = Some(b.clone());
+                        }
+                        // A second literal, or any consuming/grouping/anchoring
+                        // node, means it isn't a bare whole literal.
+                        _ => return None,
+                    }
+                }
+                found
+            }
+            _ => None,
+        }
+    }
+    lit(&re.node)
+}
+
 /// Bytes that are too common in typical (prose) text for a single-byte-class
 /// prefilter to be worth it: skipping to every one of them and running an
 /// anchored verify that fails immediately costs more than a straight scan.
@@ -123,6 +161,17 @@ impl TdfaProgram {
     /// `ByteSet` literals; without it a literal like `Sherlock` stays a chain of
     /// `Char` nodes and yields no prefilter.
     pub fn try_from_ir(re: &ir::Regex) -> Result<Self, BuildError> {
+        // Fastest path: a bare literal needs no automaton — the `memmem` span is
+        // the whole match.
+        if let Some(bytes) = whole_literal(re) {
+            let len = bytes.len();
+            let literal = Box::new(memmem::Finder::new(&bytes).into_owned());
+            return Ok(Self {
+                strategy: Strategy::WholeLiteral { literal, len },
+                group_names: Box::new([]),
+            });
+        }
+
         let pred = startpredicate::predicate_for_re(re);
         if should_prefilter(&pred) {
             // Anchored automaton: matches only at the offset handed to
@@ -225,6 +274,14 @@ impl TdfaProgram {
         scratch: &mut Scratch<u32>,
     ) -> Option<NfaMatch> {
         match &self.strategy {
+            Strategy::WholeLiteral { literal, len } => {
+                let i = literal.find(&bytes[offset..]).map(|k| offset + k)?;
+                // The literal is the entire match: no captures, no automaton.
+                Some(NfaMatch {
+                    range: i..i + len,
+                    captures: Vec::new(),
+                })
+            }
             Strategy::Scan { unanchored } => {
                 tdfa_backend::execute_reuse(unanchored, bytes, offset, scratch)
             }
@@ -264,6 +321,9 @@ impl TdfaProgram {
     /// The mark-file width a reused [`Scratch`] for this program must have.
     pub(crate) fn mark_width(&self) -> usize {
         let tdfa = match &self.strategy {
+            // No automaton; the executor's scratch is never touched. Any
+            // non-zero width is fine.
+            Strategy::WholeLiteral { .. } => return 3,
             Strategy::Scan { unanchored } => unanchored,
             Strategy::Prefix { anchored, .. } => anchored,
             Strategy::ReverseInner { forward, .. } => forward,
@@ -285,6 +345,14 @@ impl TdfaProgram {
     /// Stats of the underlying automaton (for the benchmarks' size columns).
     pub fn stats(&self) -> TdfaStats {
         match &self.strategy {
+            // No automaton was built.
+            Strategy::WholeLiteral { .. } => TdfaStats {
+                num_states: 0,
+                num_marks: 0,
+                total_commands: 0,
+                copy_commands: 0,
+                currentpos_commands: 0,
+            },
             Strategy::Scan { unanchored } => unanchored.stats(),
             Strategy::Prefix { anchored, .. } => anchored.stats(),
             Strategy::ReverseInner { forward, .. } => forward.stats(),
