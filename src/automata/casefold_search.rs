@@ -55,11 +55,14 @@ fn find_byteset(set: &[u8], hay: &[u8]) -> Option<usize> {
     }
 }
 
+#[cfg(not(target_arch = "aarch64"))]
 const ONES: u64 = 0x0101_0101_0101_0101;
+#[cfg(not(target_arch = "aarch64"))]
 const HIGHS: u64 = 0x8080_8080_8080_8080;
 
 /// SWAR: high bit set in each byte-lane of `word` that equals `c` (the classic
 /// "has-zero" test applied to `word ^ broadcast(c)`).
+#[cfg(not(target_arch = "aarch64"))]
 #[inline]
 fn eq_mask(word: u64, c: u8) -> u64 {
     let x = word ^ (ONES.wrapping_mul(c as u64));
@@ -67,6 +70,7 @@ fn eq_mask(word: u64, c: u8) -> u64 {
 }
 
 /// High bit set in each lane of `word` that is a member of `set` (1–4 bytes).
+#[cfg(not(target_arch = "aarch64"))]
 #[inline]
 fn set_mask(set: &[u8], word: u64) -> u64 {
     let mut m = 0;
@@ -153,8 +157,48 @@ impl CaseFoldSearcher {
         }
     }
 
-    /// SWAR packed-pair: scan 8 bytes per step, AND the two anchor masks
-    /// (anchors `o1 < o2`, `delta` apart) so only true pairs surface, then verify.
+    /// NEON packed-pair candidate mask for the 16 positions starting at `i`:
+    /// load 16 bytes at `i` (anchor 1) and at `i + delta` (anchor 2), match each
+    /// against its set, AND, then pack the per-byte 0x00/0xFF result to 4 bits
+    /// per byte via `vshrn`. Caller must ensure `i + delta + 16 <= haystack.len()`
+    /// and masks the result with `0x1111…` to get one bit per matched lane.
+    ///
+    /// # Safety
+    /// `i + delta + 16 <= haystack.len()`. NEON is baseline on aarch64.
+    #[cfg(target_arch = "aarch64")]
+    #[inline]
+    unsafe fn neon_pair_bits(
+        &self,
+        haystack: &[u8],
+        i: usize,
+        delta: usize,
+        set1: &[u8],
+        set2: &[u8],
+    ) -> u64 {
+        use core::arch::aarch64::*;
+        // SAFETY: caller guarantees `i + delta + 16 <= haystack.len()`, so both
+        // 16-byte loads are in bounds; NEON is baseline on aarch64.
+        unsafe {
+            let va = vld1q_u8(haystack.as_ptr().add(i));
+            let vb = vld1q_u8(haystack.as_ptr().add(i + delta));
+            let mut ma = vdupq_n_u8(0);
+            for &c in set1 {
+                ma = vorrq_u8(ma, vceqq_u8(va, vdupq_n_u8(c)));
+            }
+            let mut mb = vdupq_n_u8(0);
+            for &c in set2 {
+                mb = vorrq_u8(mb, vceqq_u8(vb, vdupq_n_u8(c)));
+            }
+            let cand = vandq_u8(ma, mb);
+            let narrowed = vshrn_n_u16::<4>(vreinterpretq_u16_u8(cand));
+            vget_lane_u64::<0>(vreinterpret_u64_u8(narrowed))
+        }
+    }
+
+    /// Packed-pair: AND the two anchor masks (anchors `o1 < o2`, `delta` apart)
+    /// over a vector at a time so only true pairs surface, then verify each. Uses
+    /// NEON (16 bytes/step) on aarch64, SWAR (8 bytes/step) elsewhere; identical
+    /// results either way.
     fn find_packed(&self, haystack: &[u8], from: usize) -> Option<usize> {
         let run_len = self.sets.len();
         let n = haystack.len();
@@ -167,21 +211,46 @@ impl CaseFoldSearcher {
         let end_a1 = n - run_len + o1; // inclusive
 
         let mut i = start_a1;
-        // SWAR while both 8-byte loads (A at i, B at i+delta) are in bounds.
+
+        // For each candidate lane bit set in `bits` (one per matched a1 position
+        // starting at base `i`), verify and return the leftmost true match.
+        macro_rules! drain_lanes {
+            ($bits:expr, $stride:expr) => {{
+                let mut bits = $bits;
+                while bits != 0 {
+                    let lane = (bits.trailing_zeros() as usize) / $stride;
+                    let a1pos = i + lane;
+                    if a1pos <= end_a1 && self.verify(haystack, a1pos - o1) {
+                        return Some(a1pos - o1);
+                    }
+                    bits &= bits - 1; // clear lowest set bit (ascending → leftmost)
+                }
+            }};
+        }
+
+        // NEON: 16 candidate positions per step. NEON is baseline on aarch64, so
+        // no runtime detection. Each lane of the compare is 0x00/0xFF; `vshrn` by
+        // 4 packs it to 4 bits per byte, and masking `0x1111…` leaves one bit per
+        // matched lane at bit `4*lane`.
+        #[cfg(target_arch = "aarch64")]
+        while i <= end_a1 && i + delta + 16 <= n {
+            let bits = unsafe { self.neon_pair_bits(haystack, i, delta, set1, set2) }
+                & 0x1111_1111_1111_1111u64;
+            drain_lanes!(bits, 4);
+            i += 16;
+        }
+
+        // SWAR: 8 candidate positions per step; one 0x80 bit per matched lane at
+        // bit `8*lane + 7`.
+        #[cfg(not(target_arch = "aarch64"))]
         while i <= end_a1 && i + delta + 8 <= n {
             let wa = u64::from_le_bytes(haystack[i..i + 8].try_into().unwrap());
             let wb = u64::from_le_bytes(haystack[i + delta..i + delta + 8].try_into().unwrap());
-            let mut cand = set_mask(set1, wa) & set_mask(set2, wb);
-            while cand != 0 {
-                let lane = (cand.trailing_zeros() / 8) as usize;
-                let a1pos = i + lane;
-                if a1pos <= end_a1 && self.verify(haystack, a1pos - o1) {
-                    return Some(a1pos - o1);
-                }
-                cand &= cand - 1; // clear lowest set lane (ascending → leftmost)
-            }
+            let bits = set_mask(set1, wa) & set_mask(set2, wb);
+            drain_lanes!(bits, 8);
             i += 8;
         }
+
         // Scalar tail.
         while i <= end_a1 {
             if set1.contains(&haystack[i])
