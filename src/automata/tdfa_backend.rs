@@ -399,6 +399,11 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     apply_cmds_scalar::<T>(src_buf, tdfa.entry_commands(start), T::from_pos(start));
 
     let mut last_accept: LastAccept<T> = None;
+    // Whether the winning accept's tags live in `src_buf` (read at scan end) or
+    // were snapshotted into `best_snap`. Updated by every recorded accept.
+    let mut read_live = false;
+    // Per-state fallback flags: which accepting states need the eager snapshot.
+    let accept_fallback = tdfa.accept_fallback();
 
     // Cold start: begin in the start state and scan from `start`. Warm start
     // (prefix-skip): begin in the post-literal state and scan from `start + len`
@@ -421,13 +426,15 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
         maybe_switch_anchor_alt::<T>(tdfa, &mut state, src_buf, input, loop_start);
     }
     if *tdfa.accepting().iat(state as usize) {
-        consider_accept(
+        record_accept::<T>(
             &mut last_accept,
             best_snap,
             loop_start,
             src_buf,
             tdfa.finals().iat(state as usize),
             has_captures,
+            C::HAS_CONDITIONALS || *accept_fallback.iat(state as usize),
+            &mut read_live,
         );
     }
     if C::HAS_CONDITIONALS {
@@ -441,6 +448,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             &mut last_accept,
             best_snap,
             has_captures,
+            &mut read_live,
         );
     }
 
@@ -493,13 +501,15 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             maybe_switch_anchor_alt::<T>(tdfa, &mut state, src_buf, input, pos + 1);
         }
         if *accepting.iat(state as usize) {
-            consider_accept(
+            record_accept::<T>(
                 &mut last_accept,
                 best_snap,
                 pos + 1,
                 src_buf,
                 tdfa.finals().iat(state as usize),
                 has_captures,
+                C::HAS_CONDITIONALS || *accept_fallback.iat(state as usize),
+                &mut read_live,
             );
         }
         if C::HAS_CONDITIONALS {
@@ -513,6 +523,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
                 &mut last_accept,
                 best_snap,
                 has_captures,
+                &mut read_live,
             );
         }
     }
@@ -532,15 +543,28 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             &mut last_accept,
             best_snap,
             has_captures,
+            &mut read_live,
         );
     }
 
     match last_accept {
-        Some((end, finals, start)) => Some(if has_captures {
-            finalize::<T>(finals, best_snap, end, num_tags, tag_values)
-        } else {
-            finalize_nocap::<T>(start, end)
-        }),
+        Some((end, finals, start)) => {
+            // The winner's tags are in the live registers (`src_buf`, read here at
+            // scan end) for cheap-recorded accepts, or in the eager snapshot
+            // (`best_snap`) for fallback/conditional accepts.
+            let marks: &[T] = if read_live { src_buf } else { best_snap };
+            Some(if has_captures {
+                finalize::<T>(finals, marks, end, num_tags, tag_values)
+            } else {
+                // Snapshot path stored the start; cheap path derives it now.
+                let s = if read_live {
+                    snapshot_match_start(finals, marks)
+                } else {
+                    start
+                };
+                finalize_nocap::<T>(s, end)
+            })
+        }
         None => None,
     }
 }
@@ -579,6 +603,7 @@ fn record_conditionals<'a, T: MarkElem>(
     last_accept: &mut LastAccept<'a, T>,
     best_snap: &mut [T],
     has_captures: bool,
+    read_live: &mut bool,
 ) {
     let conds = tdfa.anchor_conditionals(state);
     if conds.is_empty() {
@@ -590,7 +615,15 @@ fn record_conditionals<'a, T: MarkElem>(
         }
         cond_buf.copy_from_slice(marks);
         apply_cmds_scalar::<T>(cond_buf, &ac.commands, T::from_pos(pos));
-        consider_accept(last_accept, best_snap, pos, cond_buf, &ac.finals, has_captures);
+        consider_accept(
+            last_accept,
+            best_snap,
+            pos,
+            cond_buf,
+            &ac.finals,
+            has_captures,
+            read_live,
+        );
     }
 }
 
@@ -614,6 +647,43 @@ fn snapshot_match_start<T: MarkElem>(finals: &[FinalCommand], marks: &[T]) -> T 
 /// the same match, or the latest-priority conditional at one position) replaces
 /// so the longest/last-priority extent is taken.
 ///
+/// Record an accept at a regular accepting state.
+///
+/// The Laurikari/TDFA insight: tag values live in registers, and `best_snap`
+/// only ever yields the *final* winner — every intermediate snapshot is
+/// overwritten. So for the common case we record only `(end, finals)` and read
+/// the registers at scan end (`run_anchored`'s finalize). That's correct because
+/// `truncate_at_first_goal` pruning fixes the leftmost start once a match is
+/// found, so the **last** accept is the winner and the diverging higher-priority
+/// continuations that run past it write *different* registers (the determinizer's
+/// allocation), leaving the winner's registers intact.
+///
+/// The exception is the "fallback" case the snapshot was invented for: with a
+/// `$`-style conditional, the unanchored prefix can stay alive past a completed
+/// match and produce a later-start accept, so there we still snapshot eagerly
+/// and keep the leftmost ([`consider_accept`]).
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn record_accept<'a, T: MarkElem>(
+    last_accept: &mut LastAccept<'a, T>,
+    best_snap: &mut [T],
+    end: usize,
+    marks: &[T],
+    finals: &'a [FinalCommand],
+    has_captures: bool,
+    snapshot: bool,
+    read_live: &mut bool,
+) {
+    if snapshot {
+        consider_accept(last_accept, best_snap, end, marks, finals, has_captures, read_live);
+    } else {
+        // No per-byte copy or start read: last accept wins, registers read at
+        // scan end from the live `src_buf`.
+        *last_accept = Some((end, finals, T::NO_MATCH));
+        *read_live = true;
+    }
+}
+
 /// The start is read from the live `marks` *before* any copy, so a non-replacing
 /// candidate costs only the comparison — no snapshot copy. This guard matters
 /// only for unanchored search, where the implicit prefix can keep a "still
@@ -633,6 +703,7 @@ fn consider_accept<'a, T: MarkElem>(
     marks: &[T],
     finals: &'a [FinalCommand],
     has_captures: bool,
+    read_live: &mut bool,
 ) {
     let new_start = snapshot_match_start(finals, marks);
     if let Some((_, _, best_start)) = last_accept {
@@ -644,6 +715,9 @@ fn consider_accept<'a, T: MarkElem>(
         best_snap.copy_from_slice(marks);
     }
     *last_accept = Some((end, finals, new_start));
+    // This accept's tags are in the snapshot (or, for nocap, in the stored
+    // start), not the live registers.
+    *read_live = false;
 }
 
 /// Build a capture-free match directly from the recorded start (the

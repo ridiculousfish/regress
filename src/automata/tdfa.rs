@@ -970,6 +970,14 @@ pub struct Tdfa {
     // matches when scanning ends in that state.
     accepting: Box<[bool]>,
 
+    // Per-state "fallback" flag. Indexed by state ID. True for an accepting
+    // state that has a transition to a non-dead, non-accepting state — i.e. the
+    // automaton can accept here, read further, clobber registers, then fail and
+    // need to rewind. Only such accepts need the eager mark snapshot; for the
+    // rest (e.g. `.*`, whose accept self-loops to an accepting state) the
+    // executor records the accept cheaply and reads the registers at scan end.
+    accept_fallback: Box<[bool]>,
+
     // Tag commands to apply when a transition fires. Same shape as
     // `transitions` (indexed by `state * num_classes + class`). Each entry
     // is a list of `TagCommand`s — CurrentPos writes first, then Copy writes
@@ -1040,6 +1048,29 @@ pub struct TdfaStats {
     pub total_commands: usize,
     pub copy_commands: usize,
     pub currentpos_commands: usize,
+}
+
+/// Per-state fallback flag: an accepting state needs an eager mark snapshot iff
+/// some transition leads to a non-dead, non-accepting state — a path that can
+/// clobber registers and then fail, forcing a rewind to this accept. Accepting
+/// states whose transitions all go to dead-or-accepting states (e.g. `.*`) don't
+/// need it; the executor records them cheaply and reads registers at scan end.
+fn compute_accept_fallback(
+    accepting: &[bool],
+    transitions: &[TdfaStateId],
+    num_classes: usize,
+) -> Box<[bool]> {
+    let mut out = vec![false; accepting.len()].into_boxed_slice();
+    for (s, &acc) in accepting.iter().enumerate() {
+        if !acc {
+            continue;
+        }
+        let row = &transitions[s * num_classes..(s + 1) * num_classes];
+        out[s] = row
+            .iter()
+            .any(|&t| t != TDFA_DEAD_STATE && !accepting[t as usize]);
+    }
+    out
 }
 
 impl Tdfa {
@@ -1139,6 +1170,8 @@ impl Tdfa {
         }
 
         let num_marks = build.alloc.count() as usize;
+        let accept_fallback =
+            compute_accept_fallback(&build.accepting, &build.transitions, num_classes);
 
         let mut tdfa = Tdfa {
             start_anchored,
@@ -1153,6 +1186,7 @@ impl Tdfa {
             byte_to_class,
             transitions: build.transitions.into_boxed_slice(),
             accepting: build.accepting.into_boxed_slice(),
+            accept_fallback,
             transition_commands: build.transition_commands.into_boxed_slice(),
             transition_moves: Box::default(),
             finals: build.finals.into_boxed_slice(),
@@ -1206,6 +1240,8 @@ impl Tdfa {
         // the precomputed flags the executor's dispatcher reads.
         self.has_anchor_alts = self.anchor_alts.iter().any(|alts| !alts.is_empty());
         self.has_conditionals = self.anchor_conditionals.iter().any(|cs| !cs.is_empty());
+        self.accept_fallback =
+            compute_accept_fallback(&self.accepting, &self.transitions, self.num_classes);
     }
 
     /// `$`-style accept conditionals for `state`. Empty for most states.
@@ -1237,6 +1273,12 @@ impl Tdfa {
     /// When false the executor skips the per-byte accept snapshot.
     pub(crate) fn has_captures(&self) -> bool {
         self.has_captures
+    }
+
+    /// Per-state fallback flags (see the `accept_fallback` field): an accepting
+    /// state needs the eager snapshot only when its entry here is true.
+    pub(crate) fn accept_fallback(&self) -> &[bool] {
+        &self.accept_fallback
     }
 
     pub fn num_tags(&self) -> usize {
