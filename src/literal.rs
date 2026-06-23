@@ -4,6 +4,9 @@ use crate::insn::MAX_CHAR_SET_LENGTH;
 use crate::ir::Node;
 use crate::unicode;
 
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Piece {
     // A character which could not be lowered, such as a surrogate.
