@@ -1203,7 +1203,7 @@ where
                                 Some(0x7C /* | */) => {
                                     self.consume('|');
                                     if !alternative.is_empty() {
-                                        let alternative = std::mem::take(&mut alternative).into_boxed_slice();
+                                        let alternative = core::mem::take(&mut alternative).into_boxed_slice();
                                         alternatives.push(alternative);
 
                                     }
