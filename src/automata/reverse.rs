@@ -57,7 +57,20 @@ pub(crate) fn reverse_nfa(nfa: &Nfa) -> Option<Nfa> {
     for (u, st) in nfa.states.iter().enumerate() {
         let u = u as StateHandle;
         for &(range, v) in &st.transitions {
-            new_states[swap(v) as usize].add_transition(range, swap(u));
+            // Reverse of `u --range--> v`: from `swap(v)`, consume `range` to
+            // reach `swap(u)`. The forward NFA is byte-deterministic per state,
+            // but the reversed graph is not — several forward states may
+            // transition into the same `v` over overlapping ranges, which
+            // `State`'s single-destination-per-byte table can't represent.
+            // Route each reversed byte edge through its own fresh intermediate
+            // state reached by an (unconditional) eps edge, so no state ever
+            // accumulates overlapping byte ranges; the nondeterminism then
+            // lives in the eps closure, where `Dfa::try_from` handles it.
+            let mid = new_states.len() as StateHandle;
+            let mut mid_state = State::default();
+            mid_state.add_transition(range, swap(u));
+            new_states.push(mid_state);
+            new_states[swap(v) as usize].add_eps(mid);
         }
         for e in &st.eps {
             if !matches!(e.cond, EpsCondition::Always) {
