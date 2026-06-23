@@ -6,6 +6,9 @@ use crate::unicode;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Piece {
     // A character which could not be lowered, such as a surrogate.
