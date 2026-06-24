@@ -7,6 +7,9 @@
 
 mod opt;
 
+#[cfg(feature = "tdfa-jit")]
+pub mod jit;
+
 use crate::automata::dfa::{compute_byte_classes, representative_bytes};
 use crate::automata::nfa::{
     EpsCondition, FULL_MATCH_START, GOAL_STATE, Nfa, OpKind, StateHandle, TagIdx, TagOp,

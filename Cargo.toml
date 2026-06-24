@@ -41,10 +41,18 @@ pattern = []
 # Enables NFA backend with optimized data structures.
 nfa = ["smallvec"]
 
+# Enables the TDFA JIT backend: a hand-rolled native code generator that
+# specializes a built TDFA into machine code. Requires `std` (executable memory)
+# and `nfa` (the TDFA itself), and is incompatible with `prohibit-unsafe`
+# (codegen + calling generated code is inherently unsafe). aarch64 + x86-64 only.
+tdfa-jit = ["nfa", "std", "dep:region"]
+
 [dependencies]
 hashbrown = { version = ">=0.16, <0.18", optional = true }
 memchr = { version = "2.4.0", default-features = false }
 smallvec = { version = "1.13", optional = true }
+# Cross-platform executable-memory protection for the `tdfa-jit` backend only.
+region = { version = "3", optional = true }
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["small_rng"] }
