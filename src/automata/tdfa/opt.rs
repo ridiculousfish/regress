@@ -200,12 +200,15 @@ pub(crate) fn compact_marks(t: &mut Tdfa) {
     register_allocate(t);
 }
 
-/// Mark count at/under which the register allocator is skipped: such mark files
-/// are already small, so RA would only marginally shrink the per-scan buffer and
-/// the per-transition move compile, not worth its cost. (This was historically
-/// the gather-eligibility cap; the executor no longer gathers, but the
-/// "already small enough" threshold is still a reasonable RA skip.)
-const RA_SKIP_MARKS: usize = 256;
+/// Mark count at/under which the register allocator is skipped: a handful of
+/// marks has essentially nothing to coalesce, so RA isn't worth even its (small)
+/// cost. This was historically 256 (the since-removed gather-eligibility cap),
+/// but that wrongly skipped RA for the *moderate* mark files where it matters
+/// most — e.g. an unanchored alternation, whose per-state private register sets
+/// blow up to ~O(n²) (n = arms) and coalesce back to O(1) once RA runs. RA over
+/// the whole transition graph is cheap and bounded (see `MAX_RA_*`), so keep the
+/// skip tiny.
+const RA_SKIP_MARKS: usize = 4;
 
 /// Largest densely-numbered mark count for which we run the register allocator.
 /// Above this we keep the (already dead-eliminated, densely renumbered) mark
@@ -518,7 +521,18 @@ fn register_allocate(t: &mut Tdfa) {
             }
             for cmd in cmds {
                 if let MarkValue::Copy(src) = cmd.src {
-                    bs_set(&mut tmp, src.0); // gen use
+                    // A `Copy` source stamped by a `CurrentPos` in this same list
+                    // reads the fresh stamp (two-phase: CurrentPos = phase 1, Copy
+                    // reads = phase 2), so it is *not* live-before. Excluding it
+                    // avoids spurious interference from canonicalize's parallel-
+                    // shift pattern (`m := pos; x := m`), which otherwise keeps
+                    // every per-state stamp mark mutually live and defeats RA.
+                    let stamped_here = cmds
+                        .iter()
+                        .any(|d| d.dst == src && matches!(d.src, MarkValue::CurrentPos));
+                    if !stamped_here {
+                        bs_set(&mut tmp, src.0); // gen use
+                    }
                 }
             }
             for (w, &tw) in tmp.iter().enumerate() {

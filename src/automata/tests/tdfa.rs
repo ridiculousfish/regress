@@ -273,6 +273,30 @@ fn optimize_preserves_matches_and_shrinks() {
     }
 }
 
+/// Regression: an unanchored alternation's per-state private register sets used
+/// to blow up ~O(n²) in the number of arms (e.g. 10 arms → ~100 marks), because
+/// the register allocator was both skipped for moderate mark counts and defeated
+/// by spurious interference from canonicalize's `m:=pos; x:=m` parallel shifts.
+/// Both are fixed (RA runs, and its liveness no longer treats a stamped-then-
+/// copied mark as live-before), so the count must stay flat — O(1), not O(n²).
+#[test]
+fn unanchored_alternation_marks_stay_bounded() {
+    let arm = |i: u8| format!("{}{}", (b'a' + i) as char, (b'A' + i) as char);
+    let small: Vec<String> = (0..2).map(arm).collect();
+    let big: Vec<String> = (0..12).map(arm).collect();
+    let mut t2 = make_tdfa_unanchored(&small.join("|"));
+    let mut t12 = make_tdfa_unanchored(&big.join("|"));
+    t2.optimize();
+    t12.optimize();
+    // 12 arms must not need materially more marks than 2 (flat, not quadratic).
+    assert!(
+        t12.num_marks() <= t2.num_marks() + 2 && t12.num_marks() < 10,
+        "unanchored alternation marks grew with arms: 2-arm={}, 12-arm={}",
+        t2.num_marks(),
+        t12.num_marks(),
+    );
+}
+
 // ===== Unanchored single-pass search =====
 
 /// Leftmost match via the *old* anchored-retry semantics: try the anchored
