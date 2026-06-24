@@ -38,13 +38,20 @@ const OFF: u32 = 7;
 const MARKS: u32 = 3;
 const ACC_END: u32 = 9;
 const ACC_STATE: u32 = 10;
-const MOVE_TMP: u32 = 7; // shared with OFF; only used in move stubs
+const BEST_SNAP: u32 = 11; // capture tier: snapshot destination (from arg 4)
+const MOVE_TMP: u32 = 7; // shared with OFF; only used in move/snapshot code
+const SNAP_CTR: u32 = 6; // snapshot loop counter (shared with BYTE; free at accept)
 
 const XZR: u32 = 31;
 
 // AArch64 condition codes.
 const COND_EQ: u32 = 0;
+const COND_LO: u32 = 3; // unsigned lower (<)
 const COND_LS: u32 = 9; // unsigned lower or same (<=)
+
+/// The 4th integer argument register (x4) — holds `best_snap` on entry, before
+/// the prologue reuses x4 for the class table.
+const ARG4: u32 = 4;
 
 /// A pending patch applied in [`finish`] once every label is bound.
 enum Fixup {
@@ -157,6 +164,22 @@ impl Aarch64Asm {
     fn movz_x(&mut self, rd: u32, imm16: u32) {
         debug_assert!(imm16 < 0x1_0000);
         self.emit_u32(0xD280_0000 | (imm16 << 5) | rd);
+    }
+
+    /// `MOVK Xd, #imm16, LSL #16` (keeps the other bits).
+    fn movk_x_hi16(&mut self, rd: u32, imm16: u32) {
+        debug_assert!(imm16 < 0x1_0000);
+        self.emit_u32(0xF2A0_0000 | (imm16 << 5) | rd);
+    }
+
+    /// `LDR Wt, [Xn, Xm, LSL #2]` (32-bit register offset).
+    fn ldr_w_idx(&mut self, rt: u32, rn: u32, rm: u32) {
+        self.emit_u32(0xB860_7800 | (rm << 16) | (rn << 5) | rt);
+    }
+
+    /// `STR Wt, [Xn, Xm, LSL #2]` (32-bit register offset).
+    fn str_w_idx(&mut self, rt: u32, rn: u32, rm: u32) {
+        self.emit_u32(0xB820_7800 | (rm << 16) | (rn << 5) | rt);
     }
 
     /// `STR Wt, [Xn, #imm12*4]` (32-bit, unsigned scaled offset).
@@ -311,15 +334,34 @@ impl Assembler for Aarch64Asm {
     }
 
     fn cap_prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label) {
+        self.mov_reg(BEST_SNAP, ARG4); // best_snap = arg4 (x4), before x4 is reused
         self.movn_w_zero(ACC_END); // acc_end = 0xFFFF_FFFF (no accept)
-        self.adrp_add(CLASSTAB, classtab);
+        self.adrp_add(CLASSTAB, classtab); // overwrites x4 with the class table
         self.cbz(POS, start_anchored);
         self.b(start_unanchored);
     }
 
-    fn cap_record_accept(&mut self, state_id: u32) {
+    fn cap_record_accept(&mut self, state_id: u32, is_fallback: bool) {
         self.mov_reg(ACC_END, POS); // acc_end = pos
         self.movz_x(ACC_STATE, state_id); // acc_state = state_id
+        if is_fallback {
+            // Set bit 31 of acc_state (the snapshot flag): MOVK Xd,#0x8000,LSL#16.
+            self.movk_x_hi16(ACC_STATE, 0x8000);
+        }
+    }
+
+    fn cap_snapshot(&mut self, width: u32) {
+        // for i in 0..width { best_snap[i] = marks[i] }  (u32 lanes)
+        self.movz_x(SNAP_CTR, 0); // i = 0
+        let loop_top = self.code.len() as u32;
+        self.ldr_w_idx(MOVE_TMP, MARKS, SNAP_CTR); // tmp = marks[i]
+        self.str_w_idx(MOVE_TMP, BEST_SNAP, SNAP_CTR); // best_snap[i] = tmp
+        self.add_imm(SNAP_CTR, SNAP_CTR, 1); // i += 1
+        self.cmp_imm_w(SNAP_CTR, width); // cmp i, width
+        // b.lo loop_top  (backward branch; compute the displacement directly)
+        let at = self.here();
+        let imm19 = (((loop_top as i64 - at as i64) >> 2) as u32) & 0x7_FFFF;
+        self.emit_u32(0x5400_0000 | (imm19 << 5) | COND_LO);
     }
 
     fn cap_move_stub(&mut self, curpos_idx: u32, moves: &[(u16, u16)], target: Label) {

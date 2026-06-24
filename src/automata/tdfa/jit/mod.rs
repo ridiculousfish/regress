@@ -39,11 +39,18 @@ use alloc::vec::Vec;
 /// for no match`. The match is `start..end` with no captures.
 type CaptureFreeFn = extern "C" fn(*const u8, usize, usize) -> usize;
 
-/// Capture C ABI: `(input, len, start, marks) -> packed result`. The mark file
-/// `marks` is prepared by the caller (reset + entry commands) and filled in
-/// place by the generated code. The return is `u64::MAX` for no match, else
-/// `(winning_state << 32) | match_end`.
-type CaptureFn = extern "C" fn(*const u8, usize, usize, *mut u32) -> u64;
+/// Capture C ABI: `(input, len, start, marks, best_snap) -> packed result`. The
+/// mark file `marks` is prepared by the caller (reset + entry commands) and
+/// filled in place by the generated code; `best_snap` receives an eager copy of
+/// the marks on a fallback accept. The return is `u64::MAX` for no match, else
+/// `(read_live << 63) | (winning_state << 32) | match_end`, where the high bit
+/// is clear when the winner's marks are live in `marks` and set when they were
+/// snapshotted into `best_snap`.
+type CaptureFn = extern "C" fn(*const u8, usize, usize, *mut u32, *mut u32) -> u64;
+
+/// High bit of the capture return: set when the winning marks live in
+/// `best_snap` (a fallback accept), clear when live in `marks`.
+const SNAPSHOT_FLAG: u64 = 1 << 63;
 
 /// Which tier a `Tdfa` compiled to (picks the generated function's ABI).
 #[derive(Clone, Copy)]
@@ -160,13 +167,20 @@ impl JittedTdfa {
                     return tdfa_backend::execute_reuse(tdfa, input, start, scratch);
                 }
                 tdfa_backend::jit_prepare_marks(tdfa, scratch, start);
-                let packed = f(input.as_ptr(), input.len(), start, scratch.src_buf_mut_ptr());
+                let packed = f(
+                    input.as_ptr(),
+                    input.len(),
+                    start,
+                    scratch.src_buf_mut_ptr(),
+                    scratch.best_snap_mut_ptr(),
+                );
                 if packed == u64::MAX {
                     return None;
                 }
+                let read_live = packed & SNAPSHOT_FLAG == 0;
                 let end = (packed & 0xFFFF_FFFF) as usize;
-                let state = (packed >> 32) as u32;
-                Some(tdfa_backend::jit_finalize(tdfa, state, scratch, end))
+                let state = ((packed >> 32) as u32) & 0x7FFF_FFFF;
+                Some(tdfa_backend::jit_finalize(tdfa, state, scratch, end, read_live))
             }
         }
     }
@@ -380,11 +394,12 @@ fn emit_capture_free<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
     Ok(asm.finish())
 }
 
-/// Largest mark-file index the JIT addresses, bounded so aarch64's scaled `ldr`
-/// immediate (`imm12 * 4`) reaches every lane. The interpreter handles bigger
-/// mark files; the JIT just declines them.
+/// Largest mark-file width the JIT addresses, bounded so aarch64's scaled `ldr`
+/// immediate (`imm12 * 4`) reaches every lane and the snapshot loop's `cmp`
+/// immediate fits `imm12`. The interpreter handles bigger mark files; the JIT
+/// just declines them.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-const JIT_MAX_MARK_LANES: usize = 4096;
+const JIT_MAX_MARK_LANES: usize = 4095;
 
 /// Codegen driver for the **anchored capture tier**: like
 /// [`emit_capture_free`], but threads the u32 mark file through (arg 3), applies
@@ -419,23 +434,17 @@ fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
         return Err(JitError::Unsupported("too many states for movz state id"));
     }
     let accepting = tdfa.accepting();
+    // Fallback accepts (an accepting state that can read on and clobber the
+    // winner's registers) are handled with an eager snapshot into `best_snap`;
+    // see `cap_snapshot` and the `SNAPSHOT_FLAG` return bit.
     let fallback = tdfa.accept_fallback();
-    // The read-live scheme requires that no accepting state can accept, read
-    // further, and clobber the winner's registers. `accept_fallback` flags
-    // exactly those; eager snapshotting for them is a later phase.
-    if accepting
-        .iter()
-        .zip(fallback.iter())
-        .any(|(&a, &f)| a && f)
-    {
-        return Err(JitError::Unsupported("fallback accepts (need eager snapshot)"));
-    }
 
     let nc = tdfa.num_classes();
     let transitions = tdfa.transitions();
     let trans_moves = tdfa.transition_moves();
     let byte_to_class = tdfa.byte_to_class();
     let curpos_idx = (num_marks + 1) as u32;
+    let mark_width = (num_marks + 3) as u32;
     let start_anchored = tdfa.start(0) as usize;
     let start_unanchored = tdfa.start(1) as usize;
 
@@ -476,7 +485,12 @@ fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
     for s in 0..num_states {
         asm.bind(block[s]);
         if accepting[s] {
-            asm.cap_record_accept(s as u32);
+            // Record the accept; for a fallback accept also snapshot the live
+            // marks (they may be clobbered before scan end).
+            asm.cap_record_accept(s as u32, fallback[s]);
+            if fallback[s] {
+                asm.cap_snapshot(mark_width);
+            }
         }
         asm.eoi_check(done);
         emit_dispatch(&mut asm, &plans[s], jt[s], done);
@@ -714,9 +728,9 @@ mod tests {
     /// quantified groups (last iteration wins).
     #[test]
     fn jit_captures_vs_interpreter() {
-        // Non-fallback capture patterns: every accepting state dead-ends or only
-        // extends to accepting states, so the read-live scheme applies and the
-        // capture tier compiles.
+        // Capture patterns, including fallback accepts (quantified groups like
+        // `(ab)+` / `(\w+\s*)+`, which accept then read on) handled by the eager
+        // snapshot.
         let patterns = [
             "foo(\\d+)",
             "(\\d+)-(\\d+)",
@@ -724,6 +738,9 @@ mod tests {
             "x(\\w)(\\w)",
             "(\\d+)(z)?",
             "([a-c])([0-9])",
+            "(ab)+",
+            "(\\w+\\s*)+",
+            "(\\d+,)+",
         ];
         for pat in patterns {
             let tdfa = anchored_tdfa(pat);
@@ -735,7 +752,10 @@ mod tests {
                 "{pat:?} should use the capture tier",
             );
             let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
-            let inputs = ["foo123", "12-345", "aaabb", "xpq", "ababab", "9", "b7", "", "zzz"];
+            let inputs = [
+                "foo123", "12-345", "aaabb", "xpq", "ababab", "9", "b7", "", "zzz", "abab",
+                "a b  c ", "1,2,3,", "ab a",
+            ];
             for input in inputs {
                 let bytes = input.as_bytes();
                 for start in 0..=bytes.len() {
@@ -749,18 +769,6 @@ mod tests {
                 }
             }
         }
-
-        // A quantified capture group (`(ab)+`) has a fallback accept — accept
-        // "ab", then continue to "a" (non-accepting) — so the read-live scheme
-        // doesn't apply and the JIT declines it (interpreter handles it).
-        let fallback = anchored_tdfa("(ab)+");
-        assert!(
-            matches!(
-                JittedTdfa::compile(&fallback),
-                Err(JitError::Unsupported(_))
-            ),
-            "(ab)+ should decline to the interpreter (fallback accept)",
-        );
     }
 
     /// Validate the executable-memory path end to end on this host: hand-encode

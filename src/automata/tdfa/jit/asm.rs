@@ -140,14 +140,22 @@ pub(crate) trait Assembler {
     // shared with the capture-free tier (each encoder keeps a register map that
     // agrees across both tiers).
 
-    /// Capture-tier prologue: initialize the accept-end sentinel, load
-    /// `classtab`, then branch to the start state (anchored when `start == 0`).
+    /// Capture-tier prologue: stash the `best_snap` pointer (arg 4), initialize
+    /// the accept-end sentinel, load `classtab`, then branch to the start state
+    /// (anchored when `start == 0`).
     fn cap_prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label);
 
     /// Record an accept at the current position in state `state_id`:
-    /// `acc_end = pos`, `acc_state = state_id`. Emitted at the top of accepting
-    /// blocks only.
-    fn cap_record_accept(&mut self, state_id: u32);
+    /// `acc_end = pos`, `acc_state = state_id`. When `is_fallback`, the winning
+    /// marks may be clobbered before scan end, so the snapshot flag (high bit)
+    /// is folded into `acc_state` (the caller then reads `best_snap`); the
+    /// driver emits a following [`cap_snapshot`](Self::cap_snapshot).
+    fn cap_record_accept(&mut self, state_id: u32, is_fallback: bool);
+
+    /// Copy `width` u32 lanes from the live mark file into `best_snap` (a
+    /// fallback accept's eager snapshot). Emitted at the top of fallback
+    /// accepting blocks, right after [`cap_record_accept`](Self::cap_record_accept).
+    fn cap_snapshot(&mut self, width: u32);
 
     /// A move stub: stamp the current position into mark lane `curpos_idx`, then
     /// apply each `(dst, src)` move as `marks[dst] = marks[src]` (u32 lanes),

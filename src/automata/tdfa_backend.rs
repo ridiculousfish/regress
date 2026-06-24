@@ -287,6 +287,13 @@ impl Scratch<u32> {
     pub(crate) fn src_buf_mut_ptr(&mut self) -> *mut u32 {
         self.src_buf.as_mut_ptr()
     }
+
+    /// Raw pointer to the accept-snapshot buffer, handed to JIT-compiled capture
+    /// code (which copies the live marks here on a fallback accept). Valid until
+    /// the next mutation of `self`.
+    pub(crate) fn best_snap_mut_ptr(&mut self) -> *mut u32 {
+        self.best_snap.as_mut_ptr()
+    }
 }
 
 impl<T: MarkElem> Scratch<T> {
@@ -855,20 +862,26 @@ pub(crate) fn jit_prepare_marks(tdfa: &Tdfa, scratch: &mut Scratch<u32>, start: 
 }
 
 /// JIT capture-path finalize: build the winning `NfaMatch` for the accept at
-/// `state`/`end` from the live mark file (valid because the supported capture
-/// tier has no fallback accepts — every accepting state dead-ends or extends,
-/// so the last accept's registers survive). Reuses the interpreter's
-/// [`finalize`].
+/// `state`/`end`. `read_live` selects the buffer holding the winner's marks —
+/// the live `src_buf` (the common case, a non-fallback accept whose registers
+/// survive to scan end) or the eager `best_snap` taken at a fallback accept
+/// (Laurikari). Reuses the interpreter's [`finalize`].
 #[cfg(feature = "tdfa-jit")]
 pub(crate) fn jit_finalize(
     tdfa: &Tdfa,
     state: u32,
     scratch: &mut Scratch<u32>,
     end: usize,
+    read_live: bool,
 ) -> NfaMatch {
+    let marks: &[u32] = if read_live {
+        &scratch.src_buf
+    } else {
+        &scratch.best_snap
+    };
     finalize::<u32>(
         &tdfa.finals()[state as usize],
-        &scratch.src_buf,
+        marks,
         end,
         tdfa.num_tags(),
         &mut scratch.tag_values,

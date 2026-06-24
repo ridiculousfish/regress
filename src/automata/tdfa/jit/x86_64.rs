@@ -185,18 +185,43 @@ impl Assembler for X86_64Asm {
     }
 
     fn cap_prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label) {
+        // best_snap (arg 4 = r8) lives in callee-saved rbx for the whole run.
+        self.emit(&[0x53]); // push rbx
+        self.emit(&[0x4C, 0x89, 0xC3]); // mov rbx, r8   (best_snap, before r8 reused)
         // mov r9d, -1          (acc_end = 0xFFFF_FFFF)  41 B9 FF FF FF FF
         self.emit(&[0x41, 0xB9, 0xFF, 0xFF, 0xFF, 0xFF]);
-        self.load_classtab(classtab);
+        self.load_classtab(classtab); // overwrites r8 with the class table
         self.start_dispatch(start_anchored, start_unanchored);
     }
 
-    fn cap_record_accept(&mut self, state_id: u32) {
+    fn cap_record_accept(&mut self, state_id: u32, is_fallback: bool) {
         // mov r9, rdx          (acc_end = pos)       49 89 D1
         self.emit(&[0x49, 0x89, 0xD1]);
         // mov r10d, state_id                         41 BA <imm32>
         self.emit(&[0x41, 0xBA]);
         self.emit_u32(state_id);
+        if is_fallback {
+            // or r10d, 0x8000_0000  (snapshot flag -> bit 63 of the return)
+            self.emit(&[0x41, 0x81, 0xCA]);
+            self.emit_u32(0x8000_0000);
+        }
+    }
+
+    fn cap_snapshot(&mut self, width: u32) {
+        // for i in 0..width { best_snap[i] = marks[i] }  (u32 lanes)
+        self.emit(&[0x31, 0xC0]); // xor eax, eax   (i = 0)
+        let loop_top = self.code.len() as u32;
+        self.emit(&[0x44, 0x8B, 0x1C, 0x81]); // mov r11d, [rcx + rax*4]
+        self.emit(&[0x44, 0x89, 0x1C, 0x83]); // mov [rbx + rax*4], r11d
+        self.emit(&[0xFF, 0xC0]); // inc eax
+        self.emit(&[0x3D]); // cmp eax, imm32
+        self.emit_u32(width);
+        // jb loop_top   (0F 82 <rel32>, backward)
+        self.emit(&[0x0F, 0x82]);
+        let field = self.code.len() as u32;
+        self.emit(&[0, 0, 0, 0]);
+        let rel = (loop_top as i64 - (field as i64 + 4)) as i32 as u32;
+        write_u32(&mut self.code, field, rel);
     }
 
     fn cap_move_stub(&mut self, curpos_idx: u32, moves: &[(u16, u16)], target: Label) {
@@ -227,10 +252,12 @@ impl Assembler for X86_64Asm {
         self.emit(&[0x49, 0x8B, 0xC2]); // mov rax, r10
         self.emit(&[0x48, 0xC1, 0xE0, 0x20]); // shl rax, 32
         self.emit(&[0x49, 0x0B, 0xC1]); // or rax, r9
+        self.emit(&[0x5B]); // pop rbx
         self.emit(&[0xC3]); // ret
-        // no_match: mov rax, -1 ; ret
+        // no_match: mov rax, -1 ; pop rbx ; ret
         self.bind(no_match);
         self.emit(&[0x48, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF]);
+        self.emit(&[0x5B]); // pop rbx
         self.emit(&[0xC3]);
     }
 
