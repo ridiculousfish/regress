@@ -8,8 +8,10 @@
 //! become branches/jump-tables, accepts become inline stores, and the hot
 //! values (`pos`, `end`, `input`, `last_accept`) are pinned in registers.
 //!
-//! Status: Phase 1 — capture-free tier only (the `exec_transitions` fast path:
-//! no marks, `start_fixed`, no conditionals/anchor-alts). Unsupported automata
+//! Tiers supported: the capture-free fast path (no marks, `start_fixed`, no
+//! conditionals/anchor-alts) and the anchored capture path (per-transition
+//! `MoveOp` stores + `finalize`, no fallback accepts). Automata outside these
+//! (unanchored scan, `$`-conditionals, multiline-`^` alts, fallback accepts)
 //! return an error so the caller falls back to the interpreter backend.
 
 // JIT codegen, executable memory, and calling generated code are inherently
