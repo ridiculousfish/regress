@@ -31,6 +31,15 @@ const BYTE: u32 = 5; // also holds class after the second load
 const JT: u32 = 6;
 const OFF: u32 = 7;
 
+// Capture tier: the mark-file pointer (arg 3) reuses x3 (the capture-free tier's
+// `acc`), and the accept bookkeeping moves to x9/x10. The shared per-byte
+// methods (`fetch_and_classify`, `dispatch`, `eoi_check`) never touch x3/x9/x10,
+// so they serve both tiers unchanged.
+const MARKS: u32 = 3;
+const ACC_END: u32 = 9;
+const ACC_STATE: u32 = 10;
+const MOVE_TMP: u32 = 7; // shared with OFF; only used in move stubs
+
 const XZR: u32 = 31;
 
 /// A pending patch applied in [`finish`] once every label is bound.
@@ -135,6 +144,46 @@ impl Aarch64Asm {
         self.emit_u32(0xD65F_03C0);
     }
 
+    /// `MOVN Wd, #0` → `Wd = 0xFFFF_FFFF` (zero-extended into Xd).
+    fn movn_w_zero(&mut self, rd: u32) {
+        self.emit_u32(0x1280_0000 | rd);
+    }
+
+    /// `MOVZ Xd, #imm16` (LSL #0).
+    fn movz_x(&mut self, rd: u32, imm16: u32) {
+        debug_assert!(imm16 < 0x1_0000);
+        self.emit_u32(0xD280_0000 | (imm16 << 5) | rd);
+    }
+
+    /// `STR Wt, [Xn, #imm12*4]` (32-bit, unsigned scaled offset).
+    fn str_w(&mut self, rt: u32, rn: u32, imm12: u32) {
+        debug_assert!(imm12 < 0x1000);
+        self.emit_u32(0xB900_0000 | (imm12 << 10) | (rn << 5) | rt);
+    }
+
+    /// `LDR Wt, [Xn, #imm12*4]` (32-bit, unsigned scaled offset).
+    fn ldr_w(&mut self, rt: u32, rn: u32, imm12: u32) {
+        debug_assert!(imm12 < 0x1000);
+        self.emit_u32(0xB940_0000 | (imm12 << 10) | (rn << 5) | rt);
+    }
+
+    /// `CMN Wn, #1` (ADDS WZR, Wn, #1): sets Z iff `Wn == 0xFFFF_FFFF`.
+    fn cmn_w1(&mut self, rn: u32) {
+        self.emit_u32(0x3100_0000 | (1 << 10) | (rn << 5) | XZR);
+    }
+
+    /// `B.EQ label`.
+    fn b_eq(&mut self, label: Label) {
+        let at = self.here();
+        self.emit_u32(0x5400_0000); // cond = EQ = 0
+        self.fixups.push(Fixup::Cond19 { at, label });
+    }
+
+    /// `ORR Xd, Xn, Xm, LSL #32`.
+    fn orr_lsl32(&mut self, rd: u32, rn: u32, rm: u32) {
+        self.emit_u32(0xAA00_0000 | (rm << 16) | (32 << 10) | (rn << 5) | rd);
+    }
+
     /// Pad with zero bytes until the emission offset is 4-byte aligned. Code is
     /// already 4-aligned; this guards data tables emitted after odd-length runs
     /// (there are none today, but keeps jump tables naturally aligned).
@@ -217,6 +266,41 @@ impl Assembler for Aarch64Asm {
                 table_off,
             });
         }
+    }
+
+    fn cap_prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label) {
+        self.movn_w_zero(ACC_END); // acc_end = 0xFFFF_FFFF (no accept)
+        self.adrp_add(CLASSTAB, classtab);
+        self.cbz(POS, start_anchored);
+        self.b(start_unanchored);
+    }
+
+    fn cap_record_accept(&mut self, state_id: u32) {
+        self.mov_reg(ACC_END, POS); // acc_end = pos
+        self.movz_x(ACC_STATE, state_id); // acc_state = state_id
+    }
+
+    fn cap_move_stub(&mut self, curpos_idx: u32, moves: &[(u16, u16)], target: Label) {
+        // Stamp current position into the curpos lane, then apply the moves.
+        self.str_w(POS, MARKS, curpos_idx);
+        for &(dst, src) in moves {
+            self.ldr_w(MOVE_TMP, MARKS, src as u32);
+            self.str_w(MOVE_TMP, MARKS, dst as u32);
+        }
+        self.b(target);
+    }
+
+    fn cap_done(&mut self) {
+        // if acc_end == 0xFFFF_FFFF (no accept) -> return u64::MAX
+        self.cmn_w1(ACC_END);
+        let no_match = self.labels.fresh();
+        self.b_eq(no_match);
+        // x0 = (acc_state << 32) | acc_end
+        self.orr_lsl32(INPUT, ACC_END, ACC_STATE);
+        self.ret();
+        self.bind(no_match);
+        self.emit_u32(0x9280_0000); // MOVN x0, #0  -> x0 = u64::MAX
+        self.ret();
     }
 
     fn finish(mut self) -> Vec<u8> {

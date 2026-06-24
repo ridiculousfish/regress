@@ -491,7 +491,7 @@ impl TdfaProgram {
     ) -> Option<NfaMatch> {
         #[cfg(feature = "tdfa-jit")]
         if let Some(jit) = &self.jit {
-            return jit.run(bytes, s);
+            return jit.run(tdfa, bytes, s, scratch);
         }
         tdfa_backend::execute_reuse(tdfa, bytes, s, scratch)
     }
@@ -559,7 +559,7 @@ impl TdfaProgram {
                     let mut pos = offset;
                     loop {
                         let cand = prefilter.find_from(bytes, pos)?;
-                        if let Some(m) = jit.run(bytes, cand) {
+                        if let Some(m) = jit.run(anchored, bytes, cand, scratch) {
                             return Some(m);
                         }
                         pos = cand + 1;

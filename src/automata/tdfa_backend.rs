@@ -279,6 +279,16 @@ pub(crate) struct Scratch<T: MarkElem> {
     tag_values: Vec<TextPos>,
 }
 
+#[cfg(feature = "tdfa-jit")]
+impl Scratch<u32> {
+    /// Raw pointer to the working mark file, handed to JIT-compiled capture
+    /// code (which applies per-transition marks in place). Valid until the next
+    /// mutation of `self`.
+    pub(crate) fn src_buf_mut_ptr(&mut self) -> *mut u32 {
+        self.src_buf.as_mut_ptr()
+    }
+}
+
 impl<T: MarkElem> Scratch<T> {
     /// `width` = `num_marks + 3` (real marks, then `clear`, `current_pos`,
     /// `scratch`).
@@ -828,4 +838,39 @@ fn finalize<T: MarkElem>(
         range: start_pos..end_pos,
         captures,
     }
+}
+
+/// JIT capture-path setup: reset the working mark file to the unset sentinel and
+/// apply the automaton's entry commands for `start`. The JIT-compiled code then
+/// applies per-transition marks in place; [`jit_finalize`] reads them back. This
+/// mirrors `run_anchored`'s pre-loop `src_buf.fill` + entry-command application.
+#[cfg(feature = "tdfa-jit")]
+pub(crate) fn jit_prepare_marks(tdfa: &Tdfa, scratch: &mut Scratch<u32>, start: usize) {
+    scratch.src_buf.fill(<u32 as MarkElem>::NO_MATCH);
+    apply_cmds_scalar::<u32>(
+        &mut scratch.src_buf,
+        tdfa.entry_commands(start),
+        <u32 as MarkElem>::from_pos(start),
+    );
+}
+
+/// JIT capture-path finalize: build the winning `NfaMatch` for the accept at
+/// `state`/`end` from the live mark file (valid because the supported capture
+/// tier has no fallback accepts — every accepting state dead-ends or extends,
+/// so the last accept's registers survive). Reuses the interpreter's
+/// [`finalize`].
+#[cfg(feature = "tdfa-jit")]
+pub(crate) fn jit_finalize(
+    tdfa: &Tdfa,
+    state: u32,
+    scratch: &mut Scratch<u32>,
+    end: usize,
+) -> NfaMatch {
+    finalize::<u32>(
+        &tdfa.finals()[state as usize],
+        &scratch.src_buf,
+        end,
+        tdfa.num_tags(),
+        &mut scratch.tag_values,
+    )
 }

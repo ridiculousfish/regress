@@ -27,14 +27,28 @@ mod x86_64;
 
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{TDFA_DEAD_STATE, Tdfa};
+use crate::automata::tdfa_backend::{self, Scratch};
 use asm::{Assembler, Label};
 use mem::ExecBuffer;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-/// C ABI of the generated function:
-/// `(input, len, start) -> match-end offset, or usize::MAX for no match`.
-type EntryFn = extern "C" fn(*const u8, usize, usize) -> usize;
+/// Capture-free C ABI: `(input, len, start) -> match-end offset, or usize::MAX
+/// for no match`. The match is `start..end` with no captures.
+type CaptureFreeFn = extern "C" fn(*const u8, usize, usize) -> usize;
+
+/// Capture C ABI: `(input, len, start, marks) -> packed result`. The mark file
+/// `marks` is prepared by the caller (reset + entry commands) and filled in
+/// place by the generated code. The return is `u64::MAX` for no match, else
+/// `(winning_state << 32) | match_end`.
+type CaptureFn = extern "C" fn(*const u8, usize, usize, *mut u32) -> u64;
+
+/// Which tier a `Tdfa` compiled to (picks the generated function's ABI).
+#[derive(Clone, Copy)]
+enum Tier {
+    CaptureFree,
+    Capture,
+}
 
 /// Why a [`Tdfa`] could not be JIT-compiled. The caller falls back to the
 /// interpreter backend on any of these.
@@ -65,60 +79,125 @@ impl core::fmt::Display for JitError {
     }
 }
 
+/// The generated function plus its ABI tier.
+enum Compiled {
+    CaptureFree(CaptureFreeFn),
+    Capture(CaptureFn),
+}
+
 /// A [`Tdfa`] compiled to native code. Holds the executable mapping and a
 /// pointer into it; the mapping is freed on drop, so this must outlive every
 /// [`run`](Self::run) call. Build with [`compile`](Self::compile).
 #[derive(Debug)]
 pub struct JittedTdfa {
-    /// Keeps the executable mapping alive; `entry` points into it.
+    /// Keeps the executable mapping alive; `compiled` points into it.
     _buf: ExecBuffer,
-    entry: EntryFn,
+    compiled: Compiled,
 }
 
-impl JittedTdfa {
-    /// Compile `tdfa` to native code for the host architecture, or return why
-    /// it can't be (so the caller falls back to the interpreter). Only the
-    /// capture-free tier is supported in this phase.
-    pub fn compile(tdfa: &Tdfa) -> Result<Self, JitError> {
-        let code = compile_capture_free(tdfa)?;
-        let buf = ExecBuffer::new(&code)?;
-        // SAFETY: `buf` is kept alive in the returned struct; the generated
-        // code implements exactly this C ABI signature (see `asm` register map).
-        let entry: EntryFn = unsafe { core::mem::transmute(buf.entry_ptr()) };
-        Ok(Self { _buf: buf, entry })
-    }
-
-    /// Run the anchored automaton from byte offset `start`. Returns the
-    /// (capture-free) match `start..end`, or `None`.
-    pub fn run(&self, input: &[u8], start: usize) -> Option<NfaMatch> {
-        debug_assert!(start <= input.len());
-        let end = (self.entry)(input.as_ptr(), input.len(), start);
-        if end == usize::MAX {
-            None
-        } else {
-            Some(NfaMatch {
-                range: start..end,
-                captures: Vec::new(),
-            })
+impl core::fmt::Debug for Compiled {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Compiled::CaptureFree(_) => f.write_str("CaptureFree"),
+            Compiled::Capture(_) => f.write_str("Capture"),
         }
     }
 }
 
-/// Pick the host-arch encoder and lower the capture-free tier. Errors with
+impl JittedTdfa {
+    /// Compile `tdfa` to native code for the host architecture, or return why
+    /// it can't be (so the caller falls back to the interpreter). Supported:
+    /// the capture-free tier and the anchored capture tier (no conditionals /
+    /// anchor alts / fallback accepts).
+    pub fn compile(tdfa: &Tdfa) -> Result<Self, JitError> {
+        let (tier, code) = compile_code(tdfa)?;
+        let buf = ExecBuffer::new(&code)?;
+        // SAFETY: `buf` is kept alive in the returned struct; the generated code
+        // implements exactly the ABI selected by `tier` (see `asm` register map).
+        let entry = buf.entry_ptr();
+        let compiled = match tier {
+            // SAFETY: the generated code implements exactly the ABI selected by
+            // `tier` (see the `asm` register map); `buf` outlives `compiled`.
+            Tier::CaptureFree => {
+                Compiled::CaptureFree(unsafe { core::mem::transmute::<*const u8, CaptureFreeFn>(entry) })
+            }
+            Tier::Capture => {
+                Compiled::Capture(unsafe { core::mem::transmute::<*const u8, CaptureFn>(entry) })
+            }
+        };
+        Ok(Self {
+            _buf: buf,
+            compiled,
+        })
+    }
+
+    /// Run the anchored automaton from byte offset `start`, returning the match
+    /// (range + captures) or `None`. `tdfa` is the automaton this was compiled
+    /// from (used by the capture path for entry/finalize); `scratch` is the
+    /// reusable mark buffer.
+    pub(crate) fn run(
+        &self,
+        tdfa: &Tdfa,
+        input: &[u8],
+        start: usize,
+        scratch: &mut Scratch<u32>,
+    ) -> Option<NfaMatch> {
+        debug_assert!(start <= input.len());
+        match self.compiled {
+            Compiled::CaptureFree(f) => {
+                let end = f(input.as_ptr(), input.len(), start);
+                (end != usize::MAX).then(|| NfaMatch {
+                    range: start..end,
+                    captures: Vec::new(),
+                })
+            }
+            Compiled::Capture(f) => {
+                // The capture tier uses a u32 mark file; oversized (≥ 4 GiB)
+                // inputs are rare — fall back to the interpreter for those.
+                if input.len() >= u32::MAX as usize {
+                    return tdfa_backend::execute_reuse(tdfa, input, start, scratch);
+                }
+                tdfa_backend::jit_prepare_marks(tdfa, scratch, start);
+                let packed = f(input.as_ptr(), input.len(), start, scratch.src_buf_mut_ptr());
+                if packed == u64::MAX {
+                    return None;
+                }
+                let end = (packed & 0xFFFF_FFFF) as usize;
+                let state = (packed >> 32) as u32;
+                Some(tdfa_backend::jit_finalize(tdfa, state, scratch, end))
+            }
+        }
+    }
+}
+
+/// Lower `tdfa` to machine code, picking the tier from whether it has captures
+/// and dispatching to the host-arch encoder. Errors with
 /// [`JitError::UnsupportedArch`] on architectures without an encoder.
-fn compile_capture_free(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
+fn compile_code(tdfa: &Tdfa) -> Result<(Tier, Vec<u8>), JitError> {
+    let tier = if tdfa.has_captures() {
+        Tier::Capture
+    } else {
+        Tier::CaptureFree
+    };
     #[cfg(target_arch = "aarch64")]
-    {
-        emit::<aarch64::Aarch64Asm>(tdfa)
-    }
+    let code = lower::<aarch64::Aarch64Asm>(tdfa, tier)?;
     #[cfg(target_arch = "x86_64")]
-    {
-        emit::<x86_64::X86_64Asm>(tdfa)
-    }
+    let code = lower::<x86_64::X86_64Asm>(tdfa, tier)?;
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    {
-        let _ = tdfa;
-        Err(JitError::UnsupportedArch)
+    let code = {
+        let _ = (tdfa, tier);
+        return Err(JitError::UnsupportedArch);
+    };
+    #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+    Ok((tier, code))
+}
+
+/// Dispatch to the tier's codegen driver.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn lower<A: Assembler>(tdfa: &Tdfa, tier: Tier) -> Result<Vec<u8>, JitError> {
+    match tier {
+        Tier::CaptureFree => emit_capture_free::<A>(tdfa),
+        Tier::Capture => emit_capture::<A>(tdfa),
     }
 }
 
@@ -127,7 +206,8 @@ fn compile_capture_free(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
 /// EOI check, byte fetch, then jump-table dispatch); a shared class table and
 /// per-state jump tables follow the code. Dead transitions route to `done`.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-fn emit<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
+#[allow(clippy::needless_range_loop)] // state id indexes several parallel arrays
+fn emit_capture_free<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
     // Capture-free tier only: the conditions under which `exec_transitions`
     // exists (no marks read back per byte, fixed start, no `$`-conditionals or
     // multiline-`^` alts).
@@ -191,12 +271,138 @@ fn emit<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
     Ok(asm.finish())
 }
 
+/// Largest mark-file index the JIT addresses, bounded so aarch64's scaled `ldr`
+/// immediate (`imm12 * 4`) reaches every lane. The interpreter handles bigger
+/// mark files; the JIT just declines them.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+const JIT_MAX_MARK_LANES: usize = 4096;
+
+/// Codegen driver for the **anchored capture tier**: like
+/// [`emit_capture_free`], but threads the u32 mark file through (arg 3), applies
+/// each transition's `MoveOp` sequence as an inlined move stub, and tracks the
+/// winning `(end, state)` for the caller to `finalize`. Supported only when the
+/// "read live registers at scan end" scheme is valid — i.e. no fallback accepts,
+/// no `$`-conditionals or anchor alts, a fixed start, and a small-enough mark
+/// file (see gating).
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+#[allow(clippy::needless_range_loop)] // state id indexes several parallel arrays
+fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
+    if !tdfa.start_fixed() {
+        return Err(JitError::Unsupported("unanchored / start not fixed"));
+    }
+    if tdfa.has_conditionals() {
+        return Err(JitError::Unsupported("$-conditionals"));
+    }
+    if tdfa.has_anchor_alts() {
+        return Err(JitError::Unsupported("multiline-^ anchor alts"));
+    }
+    // We apply marks via the precompiled `MoveOp` sequences; the interpreter's
+    // scalar fallback (huge mark files) isn't lowered.
+    if !tdfa.has_moves() {
+        return Err(JitError::Unsupported("no compiled moves (mark file too large)"));
+    }
+    let num_marks = tdfa.num_marks();
+    if num_marks + 3 > JIT_MAX_MARK_LANES {
+        return Err(JitError::Unsupported("mark file too large for JIT offsets"));
+    }
+    let num_states = tdfa.num_states();
+    if num_states > u16::MAX as usize {
+        return Err(JitError::Unsupported("too many states for movz state id"));
+    }
+    let accepting = tdfa.accepting();
+    let fallback = tdfa.accept_fallback();
+    // The read-live scheme requires that no accepting state can accept, read
+    // further, and clobber the winner's registers. `accept_fallback` flags
+    // exactly those; eager snapshotting for them is a later phase.
+    if accepting
+        .iter()
+        .zip(fallback.iter())
+        .any(|(&a, &f)| a && f)
+    {
+        return Err(JitError::Unsupported("fallback accepts (need eager snapshot)"));
+    }
+
+    let nc = tdfa.num_classes();
+    let transitions = tdfa.transitions();
+    let trans_moves = tdfa.transition_moves();
+    let byte_to_class = tdfa.byte_to_class();
+    let curpos_idx = (num_marks + 1) as u32;
+    let start_anchored = tdfa.start(0) as usize;
+    let start_unanchored = tdfa.start(1) as usize;
+
+    let mut asm = A::new();
+    let classtab = asm.fresh_label();
+    let done = asm.fresh_label();
+    let block: Vec<Label> = (0..num_states).map(|_| asm.fresh_label()).collect();
+    let jt: Vec<Label> = (0..num_states).map(|_| asm.fresh_label()).collect();
+    // A move stub label per edge whose transition has a non-empty move sequence.
+    let mut stub: Vec<Option<Label>> = vec![None; num_states * nc];
+    for s in 0..num_states {
+        for c in 0..nc {
+            let idx = s * nc + c;
+            if transitions[idx] != TDFA_DEAD_STATE && !trans_moves[idx].is_empty() {
+                stub[idx] = Some(asm.fresh_label());
+            }
+        }
+    }
+
+    asm.cap_prologue(classtab, block[start_anchored], block[start_unanchored]);
+    for s in 0..num_states {
+        asm.bind(block[s]);
+        if accepting[s] {
+            asm.cap_record_accept(s as u32);
+        }
+        asm.eoi_check(done);
+        asm.fetch_and_classify();
+        asm.dispatch(jt[s]);
+    }
+    asm.bind(done);
+    asm.cap_done();
+
+    // Move stubs: stamp current pos, apply the edge's moves, jump to the target.
+    let mut mvs: Vec<(u16, u16)> = Vec::new();
+    for s in 0..num_states {
+        for c in 0..nc {
+            let idx = s * nc + c;
+            if let Some(lbl) = stub[idx] {
+                asm.bind(lbl);
+                mvs.clear();
+                mvs.extend(trans_moves[idx].iter().map(|m| (m.dst, m.src)));
+                asm.cap_move_stub(curpos_idx, &mvs, block[transitions[idx] as usize]);
+            }
+        }
+    }
+
+    // Data: shared class table, then one jump table per state. A slot routes to
+    // `done` (dead), a move stub (transition with marks), or straight to the
+    // target block (transition with no marks).
+    asm.class_table(classtab, byte_to_class);
+    let mut entries: Vec<Label> = Vec::with_capacity(nc);
+    for s in 0..num_states {
+        entries.clear();
+        for c in 0..nc {
+            let idx = s * nc + c;
+            let t = transitions[idx];
+            entries.push(if t == TDFA_DEAD_STATE {
+                done
+            } else if let Some(lbl) = stub[idx] {
+                lbl
+            } else {
+                block[t as usize]
+            });
+        }
+        asm.jump_table(jt[s], &entries);
+    }
+
+    Ok(asm.finish())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use super::mem::ExecBuffer;
     use crate::automata::nfa::Nfa;
-    use crate::automata::tdfa_backend;
+    use crate::automata::tdfa_backend::{self, Scratch};
 
     fn anchored_tdfa(pattern: &str) -> Tdfa {
         let flags = crate::api::Flags::default();
@@ -208,20 +414,21 @@ mod tests {
         tdfa
     }
 
-    /// JIT output must match the interpreter (the oracle) for every (input,
-    /// start) pair, across patterns that exercise the capture-free tier.
+    /// JIT output (range **and** captures) must match the interpreter (the
+    /// oracle) for every (input, start) pair.
     fn assert_matches_interpreter(pattern: &str, inputs: &[&str]) {
         let tdfa = anchored_tdfa(pattern);
         let jit = JittedTdfa::compile(&tdfa)
             .unwrap_or_else(|e| panic!("compile {pattern:?}: {e}"));
+        let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
         for input in inputs {
             let bytes = input.as_bytes();
             for start in 0..=bytes.len() {
                 let want = tdfa_backend::execute(&tdfa, bytes, start);
-                let got = jit.run(bytes, start);
+                let got = jit.run(&tdfa, bytes, start, &mut scratch);
                 assert_eq!(
-                    want.as_ref().map(|m| m.range.clone()),
-                    got.as_ref().map(|m| m.range.clone()),
+                    want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                    got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
                     "pattern {pattern:?} input {input:?} start {start}",
                 );
             }
@@ -306,6 +513,7 @@ mod tests {
         use std::time::Instant;
         let tdfa = anchored_tdfa("[a-z]+");
         let jit = JittedTdfa::compile(&tdfa).expect("compile");
+        let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
         let input = vec![b'a'; 4 * 1024 * 1024];
         let iters = 200;
 
@@ -319,7 +527,7 @@ mod tests {
 
         let t = Instant::now();
         for _ in 0..iters {
-            sink += jit.run(&input, 0).map_or(0, |m| m.range.end);
+            sink += jit.run(&tdfa, &input, 0, &mut scratch).map_or(0, |m| m.range.end);
         }
         let jitted = t.elapsed();
 
@@ -351,21 +559,76 @@ mod tests {
             let Ok(jit) = JittedTdfa::compile(&tdfa) else {
                 continue; // legitimately unsupported tier; backend falls back
             };
+            let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
             for _ in 0..200 {
                 let len = rng.gen_range(0..12);
                 let bytes: Vec<u8> =
                     (0..len).map(|_| alphabet[rng.gen_range(0..alphabet.len())]).collect();
                 for start in 0..=bytes.len() {
                     let want = tdfa_backend::execute(&tdfa, &bytes, start);
-                    let got = jit.run(&bytes, start);
+                    let got = jit.run(&tdfa, &bytes, start, &mut scratch);
                     assert_eq!(
-                        want.as_ref().map(|m| m.range.clone()),
-                        got.as_ref().map(|m| m.range.clone()),
+                        want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
                         "pattern {pat:?} input {bytes:?} start {start}",
                     );
                 }
             }
         }
+    }
+
+    /// Capture tier: ranges **and** captured group spans must match the
+    /// interpreter, including unmatched groups (the `Some(0..0)` sentinel) and
+    /// quantified groups (last iteration wins).
+    #[test]
+    fn jit_captures_vs_interpreter() {
+        // Non-fallback capture patterns: every accepting state dead-ends or only
+        // extends to accepting states, so the read-live scheme applies and the
+        // capture tier compiles.
+        let patterns = [
+            "foo(\\d+)",
+            "(\\d+)-(\\d+)",
+            "(a+)(b+)",
+            "x(\\w)(\\w)",
+            "(\\d+)(z)?",
+            "([a-c])([0-9])",
+        ];
+        for pat in patterns {
+            let tdfa = anchored_tdfa(pat);
+            // The capture tier must actually compile for these.
+            let jit = JittedTdfa::compile(&tdfa)
+                .unwrap_or_else(|e| panic!("compile {pat:?}: {e}"));
+            assert!(
+                matches!(jit.compiled, Compiled::Capture(_)),
+                "{pat:?} should use the capture tier",
+            );
+            let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
+            let inputs = ["foo123", "12-345", "aaabb", "xpq", "ababab", "9", "b7", "", "zzz"];
+            for input in inputs {
+                let bytes = input.as_bytes();
+                for start in 0..=bytes.len() {
+                    let want = tdfa_backend::execute(&tdfa, bytes, start);
+                    let got = jit.run(&tdfa, bytes, start, &mut scratch);
+                    assert_eq!(
+                        want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        "pattern {pat:?} input {input:?} start {start}",
+                    );
+                }
+            }
+        }
+
+        // A quantified capture group (`(ab)+`) has a fallback accept — accept
+        // "ab", then continue to "a" (non-accepting) — so the read-live scheme
+        // doesn't apply and the JIT declines it (interpreter handles it).
+        let fallback = anchored_tdfa("(ab)+");
+        assert!(
+            matches!(
+                JittedTdfa::compile(&fallback),
+                Err(JitError::Unsupported(_))
+            ),
+            "(ab)+ should decline to the interpreter (fallback accept)",
+        );
     }
 
     /// Validate the executable-memory path end to end on this host: hand-encode

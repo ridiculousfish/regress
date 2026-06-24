@@ -113,4 +113,34 @@ pub(crate) trait Assembler {
 
     /// Resolve all label references and return the finished machine code.
     fn finish(self) -> Vec<u8>;
+
+    // ----- capture tier -----
+    //
+    // Same control flow as the capture-free tier, but the mark file (arg 3, a
+    // `*mut u32`) is threaded through and per-transition `MoveOp`s are applied
+    // as inlined stores. The accept bookkeeping tracks `(end, winning state)`
+    // instead of just `end`, and `cap_done` packs both into the `u64` return
+    // (`(state << 32) | end`, or `u64::MAX` for no match). `eoi_check`,
+    // `fetch_and_classify`, `dispatch`, `jump_table`, and `class_table` are
+    // shared with the capture-free tier (each encoder keeps a register map that
+    // agrees across both tiers).
+
+    /// Capture-tier prologue: initialize the accept-end sentinel, load
+    /// `classtab`, then branch to the start state (anchored when `start == 0`).
+    fn cap_prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label);
+
+    /// Record an accept at the current position in state `state_id`:
+    /// `acc_end = pos`, `acc_state = state_id`. Emitted at the top of accepting
+    /// blocks only.
+    fn cap_record_accept(&mut self, state_id: u32);
+
+    /// A move stub: stamp the current position into mark lane `curpos_idx`, then
+    /// apply each `(dst, src)` move as `marks[dst] = marks[src]` (u32 lanes),
+    /// then branch to `target`. A jump-table slot for an edge with a non-empty
+    /// move sequence points here instead of straight at the target block.
+    fn cap_move_stub(&mut self, curpos_idx: u32, moves: &[(u16, u16)], target: Label);
+
+    /// Capture-tier epilogue: if no accept fired, return `u64::MAX`; else return
+    /// `(acc_state << 32) | acc_end`.
+    fn cap_done(&mut self);
 }
