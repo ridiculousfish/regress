@@ -187,8 +187,8 @@ fn main() {
 
     println!("Sherlock corpus ({} bytes), throughput (MB/s), higher is better:\n", haystack.len());
     println!(
-        "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}{}",
-        "case", "states", "marks", "backtrack", "pikevm", "nfa", "tdfa", "regex", jit_header_seg()
+        "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10}{} {:>10}",
+        "case", "states", "marks", "backtrack", "pikevm", "nfa", "tdfa", jit_header_seg(), "regex"
     );
     println!("{}", "-".repeat(rule_width()));
 
@@ -289,7 +289,7 @@ fn main() {
         let jit_seg = String::new();
 
         println!(
-            "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}{}{}",
+            "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10}{} {:>10}{}",
             name,
             states,
             marks,
@@ -297,8 +297,8 @@ fn main() {
             cell(Some(pike)),
             cell(nfa_mbps),
             cell(tdfa_mbps),
-            cell(rx_mbps),
             jit_seg,
+            cell(rx_mbps),
             if agree { "" } else { "   ! counts disagree" },
         );
     }
@@ -342,8 +342,8 @@ fn capture_showcase(haystack: &str, selected: &impl Fn(&str) -> bool) {
 
     println!("\nCapturing groups — every backend materializes capture groups per match (MB/s):\n");
     println!(
-        "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}{}",
-        "case", "states", "marks", "backtrack", "pikevm", "nfa", "tdfa", "regex", jit_header_seg()
+        "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10}{} {:>10}",
+        "case", "states", "marks", "backtrack", "pikevm", "nfa", "tdfa", jit_header_seg(), "regex"
     );
     println!("{}", "-".repeat(rule_width()));
 
@@ -449,7 +449,7 @@ fn capture_showcase(haystack: &str, selected: &impl Fn(&str) -> bool) {
         let jit_seg = String::new();
 
         println!(
-            "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}{}{}",
+            "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10}{} {:>10}{}",
             name,
             states,
             marks,
@@ -457,8 +457,8 @@ fn capture_showcase(haystack: &str, selected: &impl Fn(&str) -> bool) {
             cell(Some(pike)),
             cell(nfa_mbps),
             cell(tdfa_mbps),
-            cell(rx_mbps),
             jit_seg,
+            cell(rx_mbps),
             if agree { "" } else { "   ! capture checksums disagree" },
         );
     }
