@@ -47,12 +47,18 @@ nfa = ["smallvec"]
 # (codegen + calling generated code is inherently unsafe). aarch64 + x86-64 only.
 tdfa-jit = ["nfa", "std", "dep:region"]
 
+# Adds `--dump-jit` disassembly of the generated TDFA-JIT code (via capstone).
+# A development aid only; off by default.
+tdfa-jit-dump = ["tdfa-jit", "dep:capstone"]
+
 [dependencies]
 hashbrown = { version = ">=0.16, <0.18", optional = true }
 memchr = { version = "2.4.0", default-features = false }
 smallvec = { version = "1.13", optional = true }
 # Cross-platform executable-memory protection for the `tdfa-jit` backend only.
 region = { version = "3", optional = true }
+# Disassembler for `tdfa-jit-dump` (--dump-jit) only.
+capstone = { version = "0.14", optional = true }
 
 [dev-dependencies]
 rand = { version = "0.8", features = ["small_rng"] }

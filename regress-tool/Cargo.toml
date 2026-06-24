@@ -13,6 +13,8 @@ nfa = ["regress/nfa"]
 backend-pikevm = ["regress/backend-pikevm"]
 # Enables the `--exec tdfa-jit` backend (native-code TDFA).
 tdfa-jit = ["nfa", "regress/tdfa-jit"]
+# Enables `--dump-jit` disassembly of the generated TDFA-JIT code.
+tdfa-jit-dump = ["tdfa-jit", "regress/tdfa-jit-dump"]
 
 [dependencies]
 structopt = "0.3"

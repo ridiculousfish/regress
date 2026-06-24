@@ -62,6 +62,12 @@ struct Opt {
     #[structopt(long)]
     dump_dfa_dot: bool,
 
+    /// Disassemble the TDFA-JIT machine code (anchored + unanchored). Requires
+    /// the `tdfa-jit-dump` feature.
+    #[cfg(feature = "tdfa-jit-dump")]
+    #[structopt(long)]
+    dump_jit: bool,
+
     /// Print summary stats instead of the full automaton dump (modifies --dump-nfa/--dump-dfa).
     #[structopt(long)]
     stats_only: bool,
@@ -262,7 +268,17 @@ fn main() -> Result<(), Error> {
         || args.dump_nfa
         || args.dump_nfa_dot
         || args.dump_dfa
-        || args.dump_dfa_dot;
+        || args.dump_dfa_dot
+        || {
+            #[cfg(feature = "tdfa-jit-dump")]
+            {
+                args.dump_jit
+            }
+            #[cfg(not(feature = "tdfa-jit-dump"))]
+            {
+                false
+            }
+        };
 
     let flags = args.flags.unwrap_or_default();
     let mut ire = backends::try_parse(args.pattern.chars().map(u32::from), flags)?;
@@ -358,6 +374,35 @@ fn main() -> Result<(), Error> {
         }
         #[cfg(not(feature = "nfa"))]
         println!("DFA backend not available. Compile with --features nfa");
+    }
+
+    #[cfg(feature = "tdfa-jit-dump")]
+    if args.dump_jit {
+        // The JIT compiles whatever Tdfa it's handed: the anchored automaton on
+        // the prefilter-verify path, the unanchored (`.*?`) one on the Scan
+        // path. Dump both. `ire` is optimized above (wants_nfa covers dump_jit).
+        for (label, nfa) in [
+            ("anchored", Nfa::try_from(&ire).map_err(|e| format_nfa_error(&e))),
+            (
+                "unanchored",
+                Nfa::try_from_unanchored(&ire).map_err(|e| format_nfa_error(&e)),
+            ),
+        ] {
+            println!("=== tdfa-jit {label} ===");
+            match nfa {
+                Ok(nfa) => match Tdfa::try_from(&nfa) {
+                    Ok(mut tdfa) => {
+                        tdfa.optimize();
+                        match backends::disassemble_jit(&tdfa) {
+                            Ok(asm) => print!("{asm}"),
+                            Err(e) => println!("not JIT-compilable: {e}"),
+                        }
+                    }
+                    Err(e) => println!("TDFA build failed: {:?}", e),
+                },
+                Err(msg) => println!("NFA build failed: {}", msg),
+            }
+        }
     }
 
     // Bytecode dump (always available) — needs the Regex.

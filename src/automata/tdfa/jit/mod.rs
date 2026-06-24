@@ -213,6 +213,66 @@ fn compile_code(tdfa: &Tdfa) -> Result<(Tier, Vec<u8>), JitError> {
     Ok((tier, code))
 }
 
+/// Disassemble the machine code the JIT would generate for `tdfa` (a dev aid;
+/// feature `tdfa-jit-dump`). One line per instruction: `addr: bytes  mnemonic
+/// operands`, prefixed by the tier and byte count. Errors exactly as
+/// [`JittedTdfa::compile`] does (e.g. unsupported pattern / arch).
+#[cfg(feature = "tdfa-jit-dump")]
+pub fn disassemble(tdfa: &Tdfa) -> Result<String, JitError> {
+    use core::fmt::Write as _;
+    let (tier, code) = compile_code(tdfa)?;
+    let cs = host_capstone()?;
+    let insns = cs
+        .disasm_all(&code, 0)
+        .map_err(|_| JitError::Unsupported("capstone disassembly failed"))?;
+    let tier_name = match tier {
+        Tier::CaptureFree => "capture-free",
+        Tier::Capture => "capture",
+    };
+    let mut out = String::new();
+    let _ = writeln!(out, "; tier={tier_name} bytes={}", code.len());
+    for insn in insns.iter() {
+        let hex: Vec<String> = insn.bytes().iter().map(|b| format!("{b:02x}")).collect();
+        let _ = writeln!(
+            out,
+            "  {:#06x}: {:<23} {} {}",
+            insn.address(),
+            hex.join(" "),
+            insn.mnemonic().unwrap_or(""),
+            insn.op_str().unwrap_or(""),
+        );
+    }
+    Ok(out)
+}
+
+#[cfg(all(feature = "tdfa-jit-dump", target_arch = "aarch64"))]
+fn host_capstone() -> Result<capstone::Capstone, JitError> {
+    use capstone::prelude::*;
+    capstone::Capstone::new()
+        .arm64()
+        .mode(arch::arm64::ArchMode::Arm)
+        .build()
+        .map_err(|_| JitError::UnsupportedArch)
+}
+
+#[cfg(all(feature = "tdfa-jit-dump", target_arch = "x86_64"))]
+fn host_capstone() -> Result<capstone::Capstone, JitError> {
+    use capstone::prelude::*;
+    capstone::Capstone::new()
+        .x86()
+        .mode(arch::x86::ArchMode::Mode64)
+        .build()
+        .map_err(|_| JitError::UnsupportedArch)
+}
+
+#[cfg(all(
+    feature = "tdfa-jit-dump",
+    not(any(target_arch = "aarch64", target_arch = "x86_64"))
+))]
+fn host_capstone() -> Result<capstone::Capstone, JitError> {
+    Err(JitError::UnsupportedArch)
+}
+
 /// Dispatch to the tier's codegen driver.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 fn lower<A: Assembler>(tdfa: &Tdfa, tier: Tier) -> Result<Vec<u8>, JitError> {
@@ -559,6 +619,19 @@ mod tests {
         let mut tdfa = Tdfa::try_from(&nfa).expect("tdfa build failed");
         tdfa.optimize();
         tdfa
+    }
+
+    /// `disassemble` (feature `tdfa-jit-dump`) produces readable output for both
+    /// tiers — a smoke test that the capstone path is wired and the generated
+    /// code decodes (ends in `ret`).
+    #[cfg(feature = "tdfa-jit-dump")]
+    #[test]
+    fn jit_disassemble_smoke() {
+        for pat in ["foo[0-9]+", "foo(\\d+)"] {
+            let asm = disassemble(&anchored_tdfa(pat)).unwrap_or_else(|e| panic!("{pat}: {e}"));
+            assert!(asm.contains("ret"), "{pat} disasm missing ret:\n{asm}");
+            assert!(asm.lines().count() > 5, "{pat} disasm too short:\n{asm}");
+        }
     }
 
     fn unanchored_tdfa(pattern: &str) -> Tdfa {

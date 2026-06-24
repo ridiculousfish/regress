@@ -923,6 +923,8 @@ pub mod backends {
     pub use crate::automata::prefilter::TdfaJitProgram;
     #[cfg(feature = "tdfa-jit")]
     pub use crate::automata::tdfa::jit::{JitError, JittedTdfa};
+    #[cfg(feature = "tdfa-jit-dump")]
+    pub use crate::automata::tdfa::jit::disassemble as disassemble_jit;
     #[cfg(feature = "nfa")]
     pub use crate::automata::tdfa::{Tdfa, TdfaStats};
     pub use crate::emit::emit;
