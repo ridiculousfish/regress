@@ -13,9 +13,10 @@
 //! | jt base   | x6  | scratch (jump-table address / target)   |
 //! | offset    | x7  | scratch (signed jump-table entry)       |
 //!
-//! All label references resolve to *offset-relative* immediates (adrp/add page
-//! deltas, branch displacements, and 32-bit relative jump-table words), so the
-//! finished code is position-independent — no relocation after mapping.
+//! All label references resolve to *offset-relative* immediates (`adr`
+//! PC-relative offsets, branch displacements, and 32-bit relative jump-table
+//! words), so the finished code is position-independent — no relocation after
+//! mapping.
 
 use super::asm::{Assembler, Label, Labels};
 #[cfg(not(feature = "std"))]
@@ -55,8 +56,8 @@ const ARG4: u32 = 4;
 
 /// A pending patch applied in [`finish`] once every label is bound.
 enum Fixup {
-    /// `adrp`/`add` pair at `at` / `at+4` loading `label`'s address.
-    AdrpAdd { at: u32, label: Label },
+    /// `adr` at `at` loading `label`'s PC-relative address (±1 MiB).
+    Adr { at: u32, label: Label },
     /// 19-bit conditional/`cbz` displacement at `at`.
     Cond19 { at: u32, label: Label },
     /// 26-bit `b` displacement at `at`.
@@ -90,12 +91,12 @@ impl Aarch64Asm {
         self.emit_u32(0xAA00_0000 | (rm << 16) | (XZR << 5) | rd);
     }
 
-    /// `ADRP Xd, label` + `ADD Xd, Xd, #:lo12:label` (patched in `finish`).
-    fn adrp_add(&mut self, rd: u32, label: Label) {
+    /// `ADR Xd, label` — PC-relative address in a single instruction (±1 MiB,
+    /// always satisfied within our code budget; patched in `finish`).
+    fn adr_addr(&mut self, rd: u32, label: Label) {
         let at = self.here();
-        self.emit_u32(0x9000_0000 | rd); // ADRP (imm patched later)
-        self.emit_u32(0x9100_0000 | (rd << 5) | rd); // ADD Xd, Xd, #0
-        self.fixups.push(Fixup::AdrpAdd { at, label });
+        self.emit_u32(0x1000_0000 | rd); // ADR (imm patched later)
+        self.fixups.push(Fixup::Adr { at, label });
     }
 
     /// `CBZ Xt, label`.
@@ -258,7 +259,7 @@ impl Assembler for Aarch64Asm {
 
     fn prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label) {
         self.movn_zero(ACC); // acc = usize::MAX
-        self.adrp_add(CLASSTAB, classtab); // classtab = &table
+        self.adr_addr(CLASSTAB, classtab); // classtab = &table
         // start == 0 ? anchored : unanchored
         self.cbz(POS, start_anchored);
         self.b(start_unanchored);
@@ -301,7 +302,7 @@ impl Assembler for Aarch64Asm {
     }
 
     fn dispatch(&mut self, jump_table: Label) {
-        self.adrp_add(JT, jump_table); // jt = &table
+        self.adr_addr(JT, jump_table); // jt = &table
         self.ldrsw_lsl2(OFF, JT, BYTE); // off = jt[class]
         self.add_reg(JT, JT, OFF); // target = jt + off
         self.br(JT);
@@ -336,7 +337,7 @@ impl Assembler for Aarch64Asm {
     fn cap_prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label) {
         self.mov_reg(BEST_SNAP, ARG4); // best_snap = arg4 (x4), before x4 is reused
         self.movn_w_zero(ACC_END); // acc_end = 0xFFFF_FFFF (no accept)
-        self.adrp_add(CLASSTAB, classtab); // overwrites x4 with the class table
+        self.adr_addr(CLASSTAB, classtab); // overwrites x4 with the class table
         self.cbz(POS, start_anchored);
         self.b(start_unanchored);
     }
@@ -393,25 +394,17 @@ impl Assembler for Aarch64Asm {
     fn finish(mut self) -> Vec<u8> {
         for fx in &self.fixups {
             match *fx {
-                Fixup::AdrpAdd { at, label } => {
-                    let target = self.labels.offset_of(label) as i64;
-                    let adrp_at = at as i64;
-                    // Page delta is base-independent because the mapping is
-                    // page-aligned: ((base+target)&!0xFFF) - ((base+adrp)&!0xFFF)
-                    // collapses to the offset-only difference.
-                    let page = ((target & !0xFFF) - (adrp_at & !0xFFF)) >> 12;
-                    let immlo = (page & 0x3) as u32;
-                    let immhi = ((page >> 2) & 0x7_FFFF) as u32;
-                    let mut adrp = read_u32(&self.code, at);
-                    adrp &= !((0x3 << 29) | (0x7_FFFF << 5));
-                    adrp |= (immlo << 29) | (immhi << 5);
-                    write_u32(&mut self.code, at, adrp);
-
-                    let lo12 = (target & 0xFFF) as u32;
-                    let mut add = read_u32(&self.code, at + 4);
-                    add &= !(0xFFF << 10);
-                    add |= lo12 << 10;
-                    write_u32(&mut self.code, at + 4, add);
+                Fixup::Adr { at, label } => {
+                    // ADR encodes the signed byte offset to the label (±1 MiB),
+                    // split into immlo[1:0] (bits 30:29) and immhi[20:2] (bits 23:5).
+                    let delta = self.labels.offset_of(label) as i64 - at as i64;
+                    debug_assert!((-(1 << 20)..(1 << 20)).contains(&delta), "adr out of range");
+                    let immlo = (delta & 0x3) as u32;
+                    let immhi = ((delta >> 2) & 0x7_FFFF) as u32;
+                    let mut adr = read_u32(&self.code, at);
+                    adr &= !((0x3 << 29) | (0x7_FFFF << 5));
+                    adr |= (immlo << 29) | (immhi << 5);
+                    write_u32(&mut self.code, at, adr);
                 }
                 Fixup::Cond19 { at, label } => {
                     let target = self.labels.offset_of(label) as i64;
