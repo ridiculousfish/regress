@@ -72,6 +72,10 @@ impl Assembler for X86_64Asm {
         }
     }
 
+    fn offset(&self) -> usize {
+        self.code.len()
+    }
+
     fn fresh_label(&mut self) -> Label {
         self.labels.fresh()
     }

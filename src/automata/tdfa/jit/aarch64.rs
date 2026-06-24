@@ -248,6 +248,10 @@ impl Assembler for Aarch64Asm {
         }
     }
 
+    fn offset(&self) -> usize {
+        self.code.len()
+    }
+
     fn fresh_label(&mut self) -> Label {
         self.labels.fresh()
     }

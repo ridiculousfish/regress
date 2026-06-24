@@ -76,6 +76,10 @@ impl Labels {
 pub(crate) trait Assembler {
     fn new() -> Self;
 
+    /// Current emission offset (bytes emitted so far). Records the code/data
+    /// boundary for `--dump-jit`.
+    fn offset(&self) -> usize;
+
     /// Mint a fresh label.
     fn fresh_label(&mut self) -> Label;
     /// Bind `l` to the current emission offset (start of the next instruction).

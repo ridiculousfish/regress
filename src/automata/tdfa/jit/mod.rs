@@ -119,7 +119,7 @@ impl JittedTdfa {
     /// the capture-free tier and the anchored capture tier (no conditionals /
     /// anchor alts / fallback accepts).
     pub fn compile(tdfa: &Tdfa) -> Result<Self, JitError> {
-        let (tier, code) = compile_code(tdfa)?;
+        let (tier, code, _data_start) = compile_code(tdfa)?;
         let buf = ExecBuffer::new(&code)?;
         // SAFETY: `buf` is kept alive in the returned struct; the generated code
         // implements exactly the ABI selected by `tier` (see `asm` register map).
@@ -194,53 +194,116 @@ impl JittedTdfa {
 /// shape isn't a fixed `start..end`: user captures, *or* an unanchored automaton
 /// whose `.*?` prefix stamps `FULL_MATCH_START` mid-scan (`!start_fixed`). The
 /// capture-free tier is reserved for anchored, capture-free automata.
-fn compile_code(tdfa: &Tdfa) -> Result<(Tier, Vec<u8>), JitError> {
+fn compile_code(tdfa: &Tdfa) -> Result<(Tier, Vec<u8>, usize), JitError> {
     let tier = if tdfa.has_captures() || !tdfa.start_fixed() {
         Tier::Capture
     } else {
         Tier::CaptureFree
     };
     #[cfg(target_arch = "aarch64")]
-    let code = lower::<aarch64::Aarch64Asm>(tdfa, tier)?;
+    let (code, data_start) = lower::<aarch64::Aarch64Asm>(tdfa, tier)?;
     #[cfg(target_arch = "x86_64")]
-    let code = lower::<x86_64::X86_64Asm>(tdfa, tier)?;
+    let (code, data_start) = lower::<x86_64::X86_64Asm>(tdfa, tier)?;
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    let code = {
+    let (code, data_start) = {
         let _ = (tdfa, tier);
         return Err(JitError::UnsupportedArch);
     };
     #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-    Ok((tier, code))
+    Ok((tier, code, data_start))
+}
+
+/// Parse a branch instruction's PC-relative target address from its operand
+/// string — the last `0x..` / `#0x..` token. Returns `None` for non-branches and
+/// indirect branches (`br x6`, no static target). Detection is by mnemonic,
+/// which is reliable for the JIT's small, known instruction set (aarch64 `b` /
+/// `b.<cc>` / `cbz`; x86 `j*`).
+#[cfg(feature = "tdfa-jit-dump")]
+fn branch_target(mnemonic: &str, op_str: &str) -> Option<u64> {
+    let is_branch = mnemonic == "b"
+        || mnemonic.starts_with("b.")
+        || mnemonic == "cbz"
+        || mnemonic.starts_with('j');
+    if !is_branch {
+        return None;
+    }
+    op_str
+        .rsplit([' ', ','])
+        .filter_map(|tok| {
+            let h = tok.trim().trim_start_matches('#').strip_prefix("0x")?;
+            u64::from_str_radix(h, 16).ok()
+        })
+        .next()
 }
 
 /// Disassemble the machine code the JIT would generate for `tdfa` (a dev aid;
-/// feature `tdfa-jit-dump`). One line per instruction: `addr: bytes  mnemonic
-/// operands`, prefixed by the tier and byte count. Errors exactly as
+/// feature `tdfa-jit-dump`). Code is shown one instruction per line with
+/// `L_xxxx:` labels at every branch target (and branch operands rewritten to use
+/// them); the trailing class table + jump tables are shown as a hex dump rather
+/// than decoded as bogus instructions. Errors exactly as
 /// [`JittedTdfa::compile`] does (e.g. unsupported pattern / arch).
 #[cfg(feature = "tdfa-jit-dump")]
 pub fn disassemble(tdfa: &Tdfa) -> Result<String, JitError> {
     use core::fmt::Write as _;
-    let (tier, code) = compile_code(tdfa)?;
+    use std::collections::BTreeSet;
+
+    let (tier, code, data_start) = compile_code(tdfa)?;
     let cs = host_capstone()?;
     let insns = cs
-        .disasm_all(&code, 0)
+        .disasm_all(&code[..data_start], 0)
         .map_err(|_| JitError::Unsupported("capstone disassembly failed"))?;
+
+    // Pass 1: collect branch targets so we can place labels at them.
+    let mut targets: BTreeSet<u64> = BTreeSet::new();
+    for insn in insns.iter() {
+        if let Some(t) = branch_target(insn.mnemonic().unwrap_or(""), insn.op_str().unwrap_or("")) {
+            targets.insert(t);
+        }
+    }
+    let label = |a: u64| if a == 0 { "entry".to_string() } else { format!("L_{a:04x}") };
+
     let tier_name = match tier {
         Tier::CaptureFree => "capture-free",
         Tier::Capture => "capture",
     };
     let mut out = String::new();
-    let _ = writeln!(out, "; tier={tier_name} bytes={}", code.len());
+    let _ = writeln!(
+        out,
+        "; tier={tier_name} bytes={} (code={data_start}, data={})",
+        code.len(),
+        code.len() - data_start,
+    );
+
+    // Pass 2: print, with labels at targets and branch operands rewritten.
     for insn in insns.iter() {
+        let addr = insn.address();
+        if addr == 0 || targets.contains(&addr) {
+            let _ = writeln!(out, "{}:", label(addr));
+        }
+        let mnem = insn.mnemonic().unwrap_or("");
+        let op_str = insn.op_str().unwrap_or("");
+        let ops = match branch_target(mnem, op_str) {
+            // Rewrite the literal `#0x..`/`0x..` target to the label name.
+            Some(t) => op_str
+                .replace(&format!("#0x{t:x}"), &label(t))
+                .replace(&format!("0x{t:x}"), &label(t)),
+            None => op_str.to_string(),
+        };
         let hex: Vec<String> = insn.bytes().iter().map(|b| format!("{b:02x}")).collect();
+        let _ = writeln!(out, "  {addr:#06x}: {:<23} {mnem} {ops}", hex.join(" "));
+    }
+
+    // The class table + jump tables are data; dump them as bytes.
+    if data_start < code.len() {
         let _ = writeln!(
             out,
-            "  {:#06x}: {:<23} {} {}",
-            insn.address(),
-            hex.join(" "),
-            insn.mnemonic().unwrap_or(""),
-            insn.op_str().unwrap_or(""),
+            "; data: class table + jump tables ({} bytes)",
+            code.len() - data_start,
         );
+        for (i, chunk) in code[data_start..].chunks(16).enumerate() {
+            let hex: Vec<String> = chunk.iter().map(|b| format!("{b:02x}")).collect();
+            let _ = writeln!(out, "  {:#06x}: {}", data_start + i * 16, hex.join(" "));
+        }
     }
     Ok(out)
 }
@@ -275,7 +338,7 @@ fn host_capstone() -> Result<capstone::Capstone, JitError> {
 
 /// Dispatch to the tier's codegen driver.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-fn lower<A: Assembler>(tdfa: &Tdfa, tier: Tier) -> Result<Vec<u8>, JitError> {
+fn lower<A: Assembler>(tdfa: &Tdfa, tier: Tier) -> Result<(Vec<u8>, usize), JitError> {
     match tier {
         Tier::CaptureFree => emit_capture_free::<A>(tdfa),
         Tier::Capture => emit_capture::<A>(tdfa),
@@ -378,7 +441,7 @@ fn emit_dispatch<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, done: La
 /// `done`. Jump tables are emitted only for the states that use them.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 #[allow(clippy::needless_range_loop)] // state id indexes several parallel arrays
-fn emit_capture_free<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
+fn emit_capture_free<A: Assembler>(tdfa: &Tdfa) -> Result<(Vec<u8>, usize), JitError> {
     // Capture-free tier only: the conditions under which `exec_transitions`
     // exists (no marks read back per byte, fixed start, no `$`-conditionals or
     // multiline-`^` alts).
@@ -438,6 +501,7 @@ fn emit_capture_free<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
     asm.ret_done();
 
     // Data: shared class table, then a jump table for each dense state only.
+    let data_start = asm.offset();
     asm.class_table(classtab, byte_to_class);
     let mut entries: Vec<Label> = Vec::with_capacity(nc);
     for s in 0..num_states {
@@ -456,7 +520,7 @@ fn emit_capture_free<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
         asm.jump_table(jt[s], &entries);
     }
 
-    Ok(asm.finish())
+    Ok((asm.finish(), data_start))
 }
 
 /// Largest mark-file width the JIT addresses, bounded so aarch64's scaled `ldr`
@@ -475,7 +539,7 @@ const JIT_MAX_MARK_LANES: usize = 4095;
 /// file (see gating).
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 #[allow(clippy::needless_range_loop)] // state id indexes several parallel arrays
-fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
+fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<(Vec<u8>, usize), JitError> {
     // Works for both anchored (fixed start) and unanchored (start stamped by the
     // `.*?` prefix's handoff transition, read back by `finalize`) automata; the
     // leftmost-start rule reduces to last-accept-wins without conditionals.
@@ -580,6 +644,7 @@ fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
     // Data: shared class table, then one jump table per state. A slot routes to
     // `done` (dead), a move stub (transition with marks), or straight to the
     // target block (transition with no marks).
+    let data_start = asm.offset();
     asm.class_table(classtab, byte_to_class);
     let mut entries: Vec<Label> = Vec::with_capacity(nc);
     for s in 0..num_states {
@@ -601,7 +666,7 @@ fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
         asm.jump_table(jt[s], &entries);
     }
 
-    Ok(asm.finish())
+    Ok((asm.finish(), data_start))
 }
 
 #[cfg(test)]
