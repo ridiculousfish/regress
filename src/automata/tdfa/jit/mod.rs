@@ -513,33 +513,37 @@ mod tests {
     #[ignore = "performance, run manually with --ignored --nocapture"]
     fn jit_throughput_vs_interpreter() {
         use std::time::Instant;
-        let tdfa = anchored_tdfa("[a-z]+");
-        let jit = JittedTdfa::compile(&tdfa).expect("compile");
-        let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
-        let input = vec![b'a'; 4 * 1024 * 1024];
-        let iters = 200;
+        // A capture-free scan and a capture scan (group marks stamped per byte).
+        for pattern in ["[a-z]+", "([a-z]+)"] {
+            let tdfa = anchored_tdfa(pattern);
+            let jit = JittedTdfa::compile(&tdfa).expect("compile");
+            let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
+            let input = vec![b'a'; 4 * 1024 * 1024];
+            let iters = 200;
 
-        // Warm + time the interpreter.
-        let mut sink = 0usize;
-        let t = Instant::now();
-        for _ in 0..iters {
-            sink += tdfa_backend::execute(&tdfa, &input, 0).map_or(0, |m| m.range.end);
+            let mut sink = 0usize;
+            let t = Instant::now();
+            for _ in 0..iters {
+                sink += tdfa_backend::execute(&tdfa, &input, 0).map_or(0, |m| m.range.end);
+            }
+            let interp = t.elapsed();
+
+            let t = Instant::now();
+            for _ in 0..iters {
+                sink += jit
+                    .run(&tdfa, &input, 0, &mut scratch)
+                    .map_or(0, |m| m.range.end);
+            }
+            let jitted = t.elapsed();
+
+            let mb = (input.len() * iters) as f64 / (1024.0 * 1024.0);
+            eprintln!(
+                "{pattern:<10} interp: {:>5.0} MB/s   jit: {:>5.0} MB/s   speedup: {:.2}x   (sink={sink})",
+                mb / interp.as_secs_f64(),
+                mb / jitted.as_secs_f64(),
+                interp.as_secs_f64() / jitted.as_secs_f64(),
+            );
         }
-        let interp = t.elapsed();
-
-        let t = Instant::now();
-        for _ in 0..iters {
-            sink += jit.run(&tdfa, &input, 0, &mut scratch).map_or(0, |m| m.range.end);
-        }
-        let jitted = t.elapsed();
-
-        let mb = (input.len() * iters) as f64 / (1024.0 * 1024.0);
-        eprintln!(
-            "interp: {:.0} MB/s   jit: {:.0} MB/s   speedup: {:.2}x   (sink={sink})",
-            mb / interp.as_secs_f64(),
-            mb / jitted.as_secs_f64(),
-            interp.as_secs_f64() / jitted.as_secs_f64(),
-        );
     }
 
     /// Randomized differential test: for a spread of patterns, compare the JIT
