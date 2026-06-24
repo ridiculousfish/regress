@@ -12,6 +12,11 @@
 //! no marks, `start_fixed`, no conditionals/anchor-alts). Unsupported automata
 //! return an error so the caller falls back to the interpreter backend.
 
+// JIT codegen, executable memory, and calling generated code are inherently
+// unsafe, so the backend is fundamentally incompatible with `prohibit-unsafe`.
+#[cfg(feature = "prohibit-unsafe")]
+compile_error!("feature `tdfa-jit` requires unsafe code and is incompatible with `prohibit-unsafe`");
+
 mod asm;
 mod mem;
 

@@ -23,6 +23,15 @@ cross-check automata output against it. When in doubt, it is right.
 Feature gate: `nfa` (default-on in `Cargo.toml`; it is what pulls in the
 `smallvec` dep). The executors only support `Utf8Input`.
 
+The optional `tdfa-jit` feature (off by default; requires `std`, incompatible
+with `prohibit-unsafe`) adds a native-code TDFA backend selected as
+`TdfaJitExecutor` over a `TdfaJitProgram` — a sibling to `TdfaExecutor` that
+reuses all the prefilter machinery but runs the anchored verify automaton as
+JIT-compiled machine code where supported (capture-free tier), falling back to
+the interpreter otherwise. Cross-check it against the backtracker oracle the
+same way; `--exec tdfa-jit` in `regress-tool` labels output `tdfa-jit` vs
+`tdfa-jit(interp)` so you can see which path ran.
+
 ## Pipeline at a glance
 
 ```
@@ -55,6 +64,7 @@ ir::Regex (src/ir.rs)
 | `tdfa/opt.rs` | TDFA optimization, never part of `try_from`. `compact_marks` (copy-fold, dead-mark elim, register allocation) + Moore `minimize`. | `Tdfa::optimize` body |
 | `nfa_backend.rs` | Anchored NFA executor (Thompson simulation over bytes). | `execute` :193, `NfaMatch` :75 |
 | `tdfa_backend.rs` | Anchored TDFA byte-loop executor. Reusable `Scratch` mark buffers; leftmost accept with Laurikari-style fallback snapshot. | `execute`, `run_anchored_dyn`, `Scratch` |
+| `tdfa/jit/` | **TDFA JIT** (feature `tdfa-jit`): hand-rolled native codegen that specializes a built `Tdfa` into machine code — states→code blocks, transitions→jump tables, `pos/end/input/acc` pinned in fixed registers. Capture-free tier only so far (the `exec_transitions` conditions). aarch64 + x86-64 encoders behind one `Assembler` trait; RX pages via `region`. | `JittedTdfa::compile`/`run`, `emit` (driver), `aarch64.rs`/`x86_64.rs` |
 | `prefilter.rs` | `TdfaProgram` = automaton + a search `Strategy`: `WholeLiteral` (memmem only), `CaseFoldLiteral`, `Prefix` (+optional `PrefixSkip` warm-start), `ReverseInner`, `Scan` (plain unanchored). Selectivity gate `should_prefilter`. | `try_from_ir` :309, `should_prefilter` :286, `find_at` |
 | `reverse.rs` | Reverse NFA/DFA for required-suffix literals (`\w+\s+Holmes`). Walks back to the leftmost start, then forward-verifies. Bails on conditional eps edges. | `reverse_nfa`, `reverse_find_start` |
 | `casefold_search.rs` | SIMD case-insensitive literal scan: packed-pair on two rare anchor bytes (NEON on aarch64, SWAR fallback). Anchors chosen by `byte_frequencies`. | `CaseFoldSearcher` |
@@ -90,6 +100,10 @@ ir::Regex (src/ir.rs)
 # Tests (modules: nfa_backend, dfa, tdfa, casefold, reverse, empty_loop, word_boundary)
 cargo test --features nfa
 cargo test --features nfa automata::tests::tdfa
+
+# TDFA JIT (aarch64 native; x86-64 via cross-compile + Rosetta on Apple Silicon)
+cargo test --features tdfa-jit automata::tdfa::jit
+cargo test --features tdfa-jit --target x86_64-apple-darwin automata::tdfa::jit
 
 # Benchmarks — cross-backend MB/s (Backtrack, PikeVM, NFA, TDFA; realistic_bench
 # also has a `regex`-crate reference column)
