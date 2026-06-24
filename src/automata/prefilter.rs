@@ -465,15 +465,17 @@ impl TdfaProgram {
     #[cfg(feature = "tdfa-jit")]
     fn enable_jit(&mut self) {
         use crate::automata::tdfa::jit::JittedTdfa;
-        let anchored = match &self.strategy {
+        let automaton = match &self.strategy {
             Strategy::Prefix { anchored, .. } => Some(anchored),
             Strategy::CaseFoldLiteral { forward, .. } => Some(forward),
             Strategy::ReverseInner { forward, .. } => Some(forward),
-            // Whole-literal needs no automaton; the unanchored Scan isn't the
-            // capture-free tier the JIT compiles.
-            Strategy::WholeLiteral { .. } | Strategy::Scan { .. } => None,
+            // The unanchored single-pass scan: the JIT's capture tier handles
+            // its `.*?`-stamped start.
+            Strategy::Scan { unanchored } => Some(unanchored),
+            // Whole-literal needs no automaton.
+            Strategy::WholeLiteral { .. } => None,
         };
-        if let Some(tdfa) = anchored {
+        if let Some(tdfa) = automaton {
             self.jit = JittedTdfa::compile(tdfa).ok();
         }
     }
@@ -543,9 +545,7 @@ impl TdfaProgram {
                     pos = j + 1;
                 }
             }
-            Strategy::Scan { unanchored } => {
-                tdfa_backend::execute_reuse(unanchored, bytes, offset, scratch)
-            }
+            Strategy::Scan { unanchored } => self.verify_at(unanchored, bytes, offset, scratch),
             Strategy::Prefix {
                 anchored,
                 prefilter,

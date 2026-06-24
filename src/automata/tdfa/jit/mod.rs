@@ -186,11 +186,16 @@ impl JittedTdfa {
     }
 }
 
-/// Lower `tdfa` to machine code, picking the tier from whether it has captures
-/// and dispatching to the host-arch encoder. Errors with
-/// [`JitError::UnsupportedArch`] on architectures without an encoder.
+/// Lower `tdfa` to machine code, picking the tier and dispatching to the
+/// host-arch encoder. Errors with [`JitError::UnsupportedArch`] on
+/// architectures without an encoder.
+///
+/// The capture tier (mark application + finalize) is used whenever the match
+/// shape isn't a fixed `start..end`: user captures, *or* an unanchored automaton
+/// whose `.*?` prefix stamps `FULL_MATCH_START` mid-scan (`!start_fixed`). The
+/// capture-free tier is reserved for anchored, capture-free automata.
 fn compile_code(tdfa: &Tdfa) -> Result<(Tier, Vec<u8>), JitError> {
-    let tier = if tdfa.has_captures() {
+    let tier = if tdfa.has_captures() || !tdfa.start_fixed() {
         Tier::Capture
     } else {
         Tier::CaptureFree
@@ -411,9 +416,9 @@ const JIT_MAX_MARK_LANES: usize = 4095;
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 #[allow(clippy::needless_range_loop)] // state id indexes several parallel arrays
 fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
-    if !tdfa.start_fixed() {
-        return Err(JitError::Unsupported("unanchored / start not fixed"));
-    }
+    // Works for both anchored (fixed start) and unanchored (start stamped by the
+    // `.*?` prefix's handoff transition, read back by `finalize`) automata; the
+    // leftmost-start rule reduces to last-accept-wins without conditionals.
     if tdfa.has_conditionals() {
         return Err(JitError::Unsupported("$-conditionals"));
     }
@@ -556,6 +561,16 @@ mod tests {
         tdfa
     }
 
+    fn unanchored_tdfa(pattern: &str) -> Tdfa {
+        let flags = crate::api::Flags::default();
+        let re = crate::backends::try_parse(pattern.chars().map(u32::from), flags)
+            .expect("parse failed");
+        let nfa = Nfa::try_from_unanchored(&re).expect("unanchored nfa build failed");
+        let mut tdfa = Tdfa::try_from(&nfa).expect("tdfa build failed");
+        tdfa.optimize();
+        tdfa
+    }
+
     /// JIT output (range **and** captures) must match the interpreter (the
     /// oracle) for every (input, start) pair.
     fn assert_matches_interpreter(pattern: &str, inputs: &[&str]) {
@@ -604,16 +619,15 @@ mod tests {
         use crate::automata::prefilter::{TdfaJitProgram, TdfaProgram};
         use crate::backends::{self, TdfaExecutor, TdfaJitExecutor};
 
-        // `expect_jit`: `Some(true)` patterns must run native code (a rare
-        // literal prefix + tail → anchored verify); `Some(false)` must stay
-        // interpreted (a bare literal is the memmem-only whole-literal path; a
-        // common-first-byte pattern like `a+b` has no selective prefilter and
-        // takes the unanchored `Scan`, outside the capture-free tier). `None`
-        // is selection-dependent — only correctness is checked.
+        // `expect_jit`: `Some(true)` patterns must run native code — a literal
+        // prefix + tail (anchored verify) or an unanchored `Scan` (`a+b`).
+        // `Some(false)` stays interpreted: a bare literal is the memmem-only
+        // whole-literal path (no automaton). `None` is selection-dependent —
+        // only correctness is checked.
         let cases: &[(&str, &str, Option<bool>)] = &[
             ("abc", "xx abc yy abcabc zz", Some(false)),
             ("foo[0-9]+", "foo12 foobar foo3 foo", Some(true)),
-            ("a+b", "aaab ab cab b aaa", Some(false)),
+            ("a+b", "aaab ab cab b aaa", Some(true)),
             ("(?:cat|dog)s?", "cats dog doghouse ca dogs", None),
             ("xyz[a-z]*", "xyzabc xy xyz xyzzz", Some(true)),
         ];
@@ -644,6 +658,40 @@ mod tests {
         assert_matches_interpreter("a.c", &["abc", "axc", "ac", "aXcc"]);
         assert_matches_interpreter("[^x]+", &["abc", "x", "abxc", "", "xxx"]);
         assert_matches_interpreter("[a-c]+", &["abc", "abcd", "d", "cba"]);
+    }
+
+    /// Unanchored tier: the JIT must match the interpreter's single-pass scan
+    /// (`.*?`-prefixed automaton) — leftmost match, with the start read from the
+    /// stamped `FULL_MATCH_START` mark — for capture-free and capturing patterns.
+    #[test]
+    fn jit_unanchored_vs_interpreter() {
+        let patterns = [
+            "\\w+", "[0-9]+", "(\\w+)", "(\\d+)-(\\d+)", "foo(\\d+)", "a+b",
+            "(ab)+", "(\\w)(\\w)",
+        ];
+        let inputs = [
+            "", "xx ab12 cd", "  123-456 ", "fooo foo7", "aaab", "ababab x",
+            "no digits", "a1b2c3", "   ", "12-34-56",
+        ];
+        for pat in patterns {
+            let tdfa = unanchored_tdfa(pat);
+            let Ok(jit) = JittedTdfa::compile(&tdfa) else {
+                continue; // outside the supported tier (e.g. conditionals)
+            };
+            let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
+            for input in inputs {
+                let bytes = input.as_bytes();
+                for start in 0..=bytes.len() {
+                    let want = tdfa_backend::execute(&tdfa, bytes, start);
+                    let got = jit.run(&tdfa, bytes, start, &mut scratch);
+                    assert_eq!(
+                        want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        "pattern {pat:?} input {input:?} start {start}",
+                    );
+                }
+            }
+        }
     }
 
     /// Throughput smoke check (run with `--ignored --nocapture`): compare the
