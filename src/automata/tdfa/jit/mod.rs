@@ -540,6 +540,7 @@ const JIT_MAX_MARK_LANES: usize = 4095;
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 #[allow(clippy::needless_range_loop)] // state id indexes several parallel arrays
 fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<(Vec<u8>, usize), JitError> {
+    use std::collections::HashMap;
     // Works for both anchored (fixed start) and unanchored (start stamped by the
     // `.*?` prefix's handoff transition, read back by `finalize`) automata; the
     // leftmost-start rule reduces to last-accept-wins without conditionals.
@@ -582,14 +583,34 @@ fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<(Vec<u8>, usize), JitError>
     let done = asm.fresh_label();
     let block: Vec<Label> = (0..num_states).map(|_| asm.fresh_label()).collect();
     let jt: Vec<Label> = (0..num_states).map(|_| asm.fresh_label()).collect();
-    // A move stub label per edge whose transition has a non-empty move sequence.
+    // A move stub per edge with a non-empty move sequence — but deduplicated:
+    // edges sharing the same (moves, target) point at one shared stub. Many do,
+    // especially the unanchored `.*?` handoffs that all stamp the start mark and
+    // jump to the same state. `stub_reps` keeps one representative edge per
+    // unique stub, in deterministic insertion order, for emission below.
     let mut stub: Vec<Option<Label>> = vec![None; num_states * nc];
+    let mut stub_map: HashMap<(Vec<(u16, u16)>, u32), Label> = HashMap::new();
+    let mut stub_reps: Vec<(Label, usize)> = Vec::new();
     for s in 0..num_states {
         for c in 0..nc {
             let idx = s * nc + c;
-            if transitions[idx] != TDFA_DEAD_STATE && !trans_moves[idx].is_empty() {
-                stub[idx] = Some(asm.fresh_label());
+            let t = transitions[idx];
+            if t == TDFA_DEAD_STATE || trans_moves[idx].is_empty() {
+                continue;
             }
+            let key = (
+                trans_moves[idx].iter().map(|m| (m.dst, m.src)).collect::<Vec<_>>(),
+                t,
+            );
+            let lbl = if let Some(&lbl) = stub_map.get(&key) {
+                lbl
+            } else {
+                let lbl = asm.fresh_label();
+                stub_reps.push((lbl, idx));
+                stub_map.insert(key, lbl);
+                lbl
+            };
+            stub[idx] = Some(lbl);
         }
     }
 
@@ -627,18 +648,14 @@ fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<(Vec<u8>, usize), JitError>
     asm.bind(done);
     asm.cap_done();
 
-    // Move stubs: stamp current pos, apply the edge's moves, jump to the target.
+    // Move stubs (one per unique (moves, target)): stamp current pos, apply the
+    // edge's moves, jump to the target.
     let mut mvs: Vec<(u16, u16)> = Vec::new();
-    for s in 0..num_states {
-        for c in 0..nc {
-            let idx = s * nc + c;
-            if let Some(lbl) = stub[idx] {
-                asm.bind(lbl);
-                mvs.clear();
-                mvs.extend(trans_moves[idx].iter().map(|m| (m.dst, m.src)));
-                asm.cap_move_stub(curpos_idx, &mvs, block[transitions[idx] as usize]);
-            }
-        }
+    for &(lbl, idx) in &stub_reps {
+        asm.bind(lbl);
+        mvs.clear();
+        mvs.extend(trans_moves[idx].iter().map(|m| (m.dst, m.src)));
+        asm.cap_move_stub(curpos_idx, &mvs, block[transitions[idx] as usize]);
     }
 
     // Data: shared class table, then one jump table per state. A slot routes to
