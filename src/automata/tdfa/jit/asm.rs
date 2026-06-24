@@ -93,11 +93,26 @@ pub(crate) trait Assembler {
     /// If `pos >= end`, branch to `done` (end of input — stop scanning).
     fn eoi_check(&mut self, done: Label);
 
-    /// Load `byte = input[pos]`, advance `pos`, then `class = classtab[byte]`.
-    fn fetch_and_classify(&mut self);
+    /// Load `byte = input[pos]` and advance `pos`. (No class lookup — the
+    /// byte-range dispatch tests the raw byte; only the jump-table path needs
+    /// [`classify`](Self::classify).)
+    fn fetch_byte(&mut self);
 
-    /// Indirect-branch to the target block via `jump_table[class]`. A dead
-    /// transition's slot points at `done`.
+    /// `class = classtab[byte]` (overwrites the byte register). Only emitted
+    /// before a jump-table [`dispatch`](Self::dispatch).
+    fn classify(&mut self);
+
+    /// Unconditional branch to `target`.
+    fn branch(&mut self, target: Label);
+
+    /// Compare-chain dispatch on the loaded byte (sparse states): for each
+    /// `(lo, hi, target)` run, branch to `target` when `lo <= byte <= hi`;
+    /// otherwise fall through to `default`. Skips the class table entirely.
+    fn dispatch_byte_ranges(&mut self, runs: &[(u8, u8, Label)], default: Label);
+
+    /// Indirect-branch to the target block via `jump_table[class]` (dense
+    /// states). A dead transition's slot points at `done`. Requires a preceding
+    /// [`classify`](Self::classify).
     fn dispatch(&mut self, jump_table: Label);
 
     /// The `done` block body: return `acc` (in the ABI return register) and

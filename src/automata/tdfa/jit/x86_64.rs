@@ -101,13 +101,45 @@ impl Assembler for X86_64Asm {
         self.emit_rel32(done);
     }
 
-    fn fetch_and_classify(&mut self) {
+    fn fetch_byte(&mut self) {
         // movzx eax, byte [rdi + rdx]               0F B6 04 17
         self.emit(&[0x0F, 0xB6, 0x04, 0x17]);
         // inc rdx                                   48 FF C2
         self.emit(&[0x48, 0xFF, 0xC2]);
+    }
+
+    fn classify(&mut self) {
         // movzx eax, byte [r8 + rax]                41 0F B6 04 00
         self.emit(&[0x41, 0x0F, 0xB6, 0x04, 0x00]);
+    }
+
+    fn branch(&mut self, target: Label) {
+        // jmp target                                E9 <rel32>
+        self.emit(&[0xE9]);
+        self.emit_rel32(target);
+    }
+
+    fn dispatch_byte_ranges(&mut self, runs: &[(u8, u8, Label)], default: Label) {
+        for &(lo, hi, target) in runs {
+            if lo == hi {
+                // cmp al, lo ; je target            3C <lo> ; 0F 84 <rel32>
+                self.emit(&[0x3C, lo]);
+                self.emit(&[0x0F, 0x84]);
+                self.emit_rel32(target);
+            } else {
+                // tmp = byte - lo ; if tmp <= hi-lo (unsigned) -> target
+                self.emit(&[0x41, 0x89, 0xC3]); // mov r11d, eax
+                self.emit(&[0x41, 0x81, 0xEB]); // sub r11d, imm32
+                self.emit_u32(lo as u32);
+                self.emit(&[0x41, 0x81, 0xFB]); // cmp r11d, imm32
+                self.emit_u32((hi - lo) as u32);
+                self.emit(&[0x0F, 0x86]); // jbe target
+                self.emit_rel32(target);
+            }
+        }
+        // jmp default                               E9 <rel32>
+        self.emit(&[0xE9]);
+        self.emit_rel32(default);
     }
 
     fn dispatch(&mut self, jump_table: Label) {

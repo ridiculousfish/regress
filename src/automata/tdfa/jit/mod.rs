@@ -203,10 +203,100 @@ fn lower<A: Assembler>(tdfa: &Tdfa, tier: Tier) -> Result<Vec<u8>, JitError> {
     }
 }
 
+/// Max number of byte-range compares before a state prefers the jump table.
+/// Below this, a compare-chain on the raw byte (no class table, no jump-table
+/// memory access) is cheaper; above it, the table's constant cost wins. Tunable.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+const RANGE_DISPATCH_THRESHOLD: usize = 8;
+
+/// How a state dispatches on the next input byte.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+enum Dispatch {
+    /// Every byte dead-ends — branch straight to `done`, skipping the fetch.
+    AllDone,
+    /// Sparse: a compare-chain on raw byte ranges, falling through to `default`.
+    Ranges {
+        runs: Vec<(u8, u8, Label)>,
+        default: Label,
+    },
+    /// Dense: load the byte class and indirect-branch through the jump table.
+    Table,
+}
+
+/// Decide how a state dispatches. `target_of(class)` resolves a byte class to
+/// the label it branches to (a state block, a capture move stub, or `done`).
+/// Coalesces the per-byte targets into runs, picks the most-covered target as
+/// the fall-through `default` (so e.g. `[^x]` tests only `x`), and chooses the
+/// compare-chain when there are few enough runs, else the jump table.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn analyze_dispatch(
+    byte_to_class: &[u8; 256],
+    done: Label,
+    target_of: impl Fn(usize) -> Label,
+) -> Dispatch {
+    let byte_target: Vec<Label> =
+        (0..256).map(|b| target_of(byte_to_class[b] as usize)).collect();
+    // Coalesce contiguous equal labels into runs.
+    let mut runs: Vec<(u8, u8, Label)> = Vec::new();
+    let mut i = 0usize;
+    while i < 256 {
+        let lbl = byte_target[i];
+        let lo = i;
+        while i + 1 < 256 && byte_target[i + 1] == lbl {
+            i += 1;
+        }
+        runs.push((lo as u8, i as u8, lbl));
+        i += 1;
+    }
+    // Most-covered label becomes the fall-through default (fewest compares).
+    let mut coverage: Vec<(Label, usize)> = Vec::new();
+    for &(lo, hi, lbl) in &runs {
+        let width = hi as usize - lo as usize + 1;
+        match coverage.iter_mut().find(|(l, _)| *l == lbl) {
+            Some(e) => e.1 += width,
+            None => coverage.push((lbl, width)),
+        }
+    }
+    let default = coverage
+        .iter()
+        .max_by_key(|(_, bytes)| *bytes)
+        .map_or(done, |(l, _)| *l);
+    let nondefault: Vec<(u8, u8, Label)> =
+        runs.into_iter().filter(|&(_, _, l)| l != default).collect();
+    if nondefault.is_empty() && default == done {
+        Dispatch::AllDone
+    } else if nondefault.len() <= RANGE_DISPATCH_THRESHOLD {
+        Dispatch::Ranges {
+            runs: nondefault,
+            default,
+        }
+    } else {
+        Dispatch::Table
+    }
+}
+
+/// Emit one state's per-byte dispatch through `A` given its [`Dispatch`] plan.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn emit_dispatch<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, done: Label) {
+    match plan {
+        Dispatch::AllDone => asm.branch(done),
+        Dispatch::Ranges { runs, default } => {
+            asm.fetch_byte();
+            asm.dispatch_byte_ranges(runs, *default);
+        }
+        Dispatch::Table => {
+            asm.fetch_byte();
+            asm.classify();
+            asm.dispatch(jt);
+        }
+    }
+}
+
 /// The arch-independent codegen driver: walk `tdfa` and emit the capture-free
 /// state machine through `A`. Each state becomes a code block (accept-on-entry,
-/// EOI check, byte fetch, then jump-table dispatch); a shared class table and
-/// per-state jump tables follow the code. Dead transitions route to `done`.
+/// EOI check, then per-state dispatch — a compare-chain on the raw byte for
+/// sparse states, a jump table for dense ones). Dead transitions route to
+/// `done`. Jump tables are emitted only for the states that use them.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 #[allow(clippy::needless_range_loop)] // state id indexes several parallel arrays
 fn emit_capture_free<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
@@ -240,6 +330,21 @@ fn emit_capture_free<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
     let block: Vec<Label> = (0..num_states).map(|_| asm.fresh_label()).collect();
     let jt: Vec<Label> = (0..num_states).map(|_| asm.fresh_label()).collect();
 
+    // Decide each state's dispatch up front (also tells us which states need a
+    // jump table).
+    let plans: Vec<Dispatch> = (0..num_states)
+        .map(|s| {
+            analyze_dispatch(byte_to_class, done, |c| {
+                let t = transitions[s * nc + c];
+                if t == TDFA_DEAD_STATE {
+                    done
+                } else {
+                    block[t as usize]
+                }
+            })
+        })
+        .collect();
+
     // Prologue + per-state code blocks.
     asm.prologue(classtab, block[start_anchored], block[start_unanchored]);
     for s in 0..num_states {
@@ -248,16 +353,18 @@ fn emit_capture_free<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
             asm.record_accept();
         }
         asm.eoi_check(done);
-        asm.fetch_and_classify();
-        asm.dispatch(jt[s]);
+        emit_dispatch(&mut asm, &plans[s], jt[s], done);
     }
     asm.bind(done);
     asm.ret_done();
 
-    // Data: shared class table, then one jump table per state.
+    // Data: shared class table, then a jump table for each dense state only.
     asm.class_table(classtab, byte_to_class);
     let mut entries: Vec<Label> = Vec::with_capacity(nc);
     for s in 0..num_states {
+        if !matches!(plans[s], Dispatch::Table) {
+            continue;
+        }
         entries.clear();
         let row = &transitions[s * nc..s * nc + nc];
         for &t in row {
@@ -348,6 +455,23 @@ fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
         }
     }
 
+    // Dispatch plan per state (a move-edge resolves to its stub label).
+    let plans: Vec<Dispatch> = (0..num_states)
+        .map(|s| {
+            analyze_dispatch(byte_to_class, done, |c| {
+                let idx = s * nc + c;
+                let t = transitions[idx];
+                if t == TDFA_DEAD_STATE {
+                    done
+                } else if let Some(lbl) = stub[idx] {
+                    lbl
+                } else {
+                    block[t as usize]
+                }
+            })
+        })
+        .collect();
+
     asm.cap_prologue(classtab, block[start_anchored], block[start_unanchored]);
     for s in 0..num_states {
         asm.bind(block[s]);
@@ -355,8 +479,7 @@ fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
             asm.cap_record_accept(s as u32);
         }
         asm.eoi_check(done);
-        asm.fetch_and_classify();
-        asm.dispatch(jt[s]);
+        emit_dispatch(&mut asm, &plans[s], jt[s], done);
     }
     asm.bind(done);
     asm.cap_done();
@@ -381,6 +504,9 @@ fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
     asm.class_table(classtab, byte_to_class);
     let mut entries: Vec<Label> = Vec::with_capacity(nc);
     for s in 0..num_states {
+        if !matches!(plans[s], Dispatch::Table) {
+            continue;
+        }
         entries.clear();
         for c in 0..nc {
             let idx = s * nc + c;

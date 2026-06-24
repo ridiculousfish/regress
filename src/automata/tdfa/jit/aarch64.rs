@@ -42,6 +42,10 @@ const MOVE_TMP: u32 = 7; // shared with OFF; only used in move stubs
 
 const XZR: u32 = 31;
 
+// AArch64 condition codes.
+const COND_EQ: u32 = 0;
+const COND_LS: u32 = 9; // unsigned lower or same (<=)
+
 /// A pending patch applied in [`finish`] once every label is bound.
 enum Fixup {
     /// `adrp`/`add` pair at `at` / `at+4` loading `label`'s address.
@@ -172,11 +176,28 @@ impl Aarch64Asm {
         self.emit_u32(0x3100_0000 | (1 << 10) | (rn << 5) | XZR);
     }
 
+    /// `B.<cond> label`.
+    fn b_cond(&mut self, cond: u32, label: Label) {
+        let at = self.here();
+        self.emit_u32(0x5400_0000 | cond);
+        self.fixups.push(Fixup::Cond19 { at, label });
+    }
+
     /// `B.EQ label`.
     fn b_eq(&mut self, label: Label) {
-        let at = self.here();
-        self.emit_u32(0x5400_0000); // cond = EQ = 0
-        self.fixups.push(Fixup::Cond19 { at, label });
+        self.b_cond(COND_EQ, label);
+    }
+
+    /// `CMP Wn, #imm12` (SUBS WZR, Wn, #imm).
+    fn cmp_imm_w(&mut self, rn: u32, imm12: u32) {
+        debug_assert!(imm12 < 0x1000);
+        self.emit_u32(0x7100_0000 | (imm12 << 10) | (rn << 5) | XZR);
+    }
+
+    /// `SUB Wd, Wn, #imm12`.
+    fn sub_imm_w(&mut self, rd: u32, rn: u32, imm12: u32) {
+        debug_assert!(imm12 < 0x1000);
+        self.emit_u32(0x5100_0000 | (imm12 << 10) | (rn << 5) | rd);
     }
 
     /// `ORR Xd, Xn, Xm, LSL #32`.
@@ -229,10 +250,31 @@ impl Assembler for Aarch64Asm {
         self.b_hs(done); // pos >= end -> done
     }
 
-    fn fetch_and_classify(&mut self) {
+    fn fetch_byte(&mut self) {
         self.ldrb(BYTE, INPUT, POS); // byte = input[pos]
         self.add_imm(POS, POS, 1); // pos += 1
+    }
+
+    fn classify(&mut self) {
         self.ldrb(BYTE, CLASSTAB, BYTE); // class = classtab[byte]
+    }
+
+    fn branch(&mut self, target: Label) {
+        self.b(target);
+    }
+
+    fn dispatch_byte_ranges(&mut self, runs: &[(u8, u8, Label)], default: Label) {
+        for &(lo, hi, target) in runs {
+            if lo == hi {
+                self.cmp_imm_w(BYTE, lo as u32); // cmp byte, lo
+                self.b_cond(COND_EQ, target); // b.eq target
+            } else {
+                self.sub_imm_w(MOVE_TMP, BYTE, lo as u32); // tmp = byte - lo
+                self.cmp_imm_w(MOVE_TMP, (hi - lo) as u32); // cmp tmp, hi-lo
+                self.b_cond(COND_LS, target); // b.ls target (unsigned <=)
+            }
+        }
+        self.b(default);
     }
 
     fn dispatch(&mut self, jump_table: Label) {
