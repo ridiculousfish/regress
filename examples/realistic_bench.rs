@@ -24,6 +24,8 @@ use regress::backends::{
     self, BacktrackExecutor, CompiledRegex, Nfa, NfaExecutor, PikeVMExecutor, TdfaExecutor,
     TdfaProgram,
 };
+#[cfg(feature = "tdfa-jit")]
+use regress::backends::{TdfaJitExecutor, TdfaJitProgram};
 use std::collections::HashMap;
 use std::hint::black_box;
 use std::time::{Duration, Instant};
@@ -52,6 +54,35 @@ fn throughput(input_len: usize, mut scan: impl FnMut() -> usize) -> f64 {
 
 fn cell(mbps: Option<f64>) -> String {
     match mbps {
+        Some(v) => format!("{:.0}", v),
+        None => "-".to_string(),
+    }
+}
+
+/// The `tdfa-jit` column header segment (`" {:>10}"`), or empty when the feature
+/// is off. Keeps the table layout identical when the JIT isn't compiled in.
+fn jit_header_seg() -> String {
+    #[cfg(feature = "tdfa-jit")]
+    {
+        format!(" {:>10}", "tdfa-jit")
+    }
+    #[cfg(not(feature = "tdfa-jit"))]
+    {
+        String::new()
+    }
+}
+
+/// Width of the separator rule, widened for the extra JIT column when present.
+fn rule_width() -> usize {
+    105 + jit_header_seg().len()
+}
+
+/// Format a `tdfa-jit` cell. A trailing `*` marks that native code actually ran
+/// (vs. an interpreter fallback for a pattern outside the JIT's supported tier).
+#[cfg(feature = "tdfa-jit")]
+fn jit_cell(mbps: Option<f64>, active: bool) -> String {
+    match mbps {
+        Some(v) if active => format!("{:.0}*", v),
         Some(v) => format!("{:.0}", v),
         None => "-".to_string(),
     }
@@ -156,10 +187,10 @@ fn main() {
 
     println!("Sherlock corpus ({} bytes), throughput (MB/s), higher is better:\n", haystack.len());
     println!(
-        "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}",
-        "case", "states", "marks", "backtrack", "pikevm", "nfa", "tdfa", "regex"
+        "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}{}",
+        "case", "states", "marks", "backtrack", "pikevm", "nfa", "tdfa", "regex", jit_header_seg()
     );
-    println!("{}", "-".repeat(105));
+    println!("{}", "-".repeat(rule_width()));
 
     for &(name, pattern, flags_str) in suite {
         if !selected(name) {
@@ -238,8 +269,27 @@ fn main() {
             })
         });
 
+        // tdfa-jit column (native-code TDFA where the pattern is in a supported
+        // tier; interpreter fallback otherwise). `check` also verifies its count.
+        #[cfg(feature = "tdfa-jit")]
+        let jit_seg = {
+            let prog = TdfaJitProgram::try_from_ir(&ire).ok();
+            if let Some(p) = &prog {
+                check(backends::find::<TdfaJitExecutor>(p, haystack, 0).count());
+            }
+            let mbps = prog.as_ref().map(|p| {
+                throughput(haystack.len(), || {
+                    backends::find::<TdfaJitExecutor>(p, haystack, 0).count()
+                })
+            });
+            let active = prog.as_ref().is_some_and(|p| p.jit_active());
+            format!(" {:>10}", jit_cell(mbps, active))
+        };
+        #[cfg(not(feature = "tdfa-jit"))]
+        let jit_seg = String::new();
+
         println!(
-            "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}{}",
+            "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}{}{}",
             name,
             states,
             marks,
@@ -248,6 +298,7 @@ fn main() {
             cell(nfa_mbps),
             cell(tdfa_mbps),
             cell(rx_mbps),
+            jit_seg,
             if agree { "" } else { "   ! counts disagree" },
         );
     }
@@ -291,10 +342,10 @@ fn capture_showcase(haystack: &str, selected: &impl Fn(&str) -> bool) {
 
     println!("\nCapturing groups — every backend materializes capture groups per match (MB/s):\n");
     println!(
-        "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}",
-        "case", "states", "marks", "backtrack", "pikevm", "nfa", "tdfa", "regex"
+        "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}{}",
+        "case", "states", "marks", "backtrack", "pikevm", "nfa", "tdfa", "regex", jit_header_seg()
     );
-    println!("{}", "-".repeat(105));
+    println!("{}", "-".repeat(rule_width()));
 
     for &(name, pattern, flags_str) in suite {
         if !selected(name) {
@@ -373,8 +424,32 @@ fn capture_showcase(haystack: &str, selected: &impl Fn(&str) -> bool) {
             })
         });
 
+        // tdfa-jit column, materializing captures (cap_sum), same as the others.
+        #[cfg(feature = "tdfa-jit")]
+        let jit_seg = {
+            let prog = TdfaJitProgram::try_from_ir(&ire).ok();
+            if let Some(p) = &prog {
+                check(
+                    backends::find::<TdfaJitExecutor>(p, haystack, 0)
+                        .map(|m| cap_sum(&m))
+                        .sum(),
+                );
+            }
+            let mbps = prog.as_ref().map(|p| {
+                throughput(haystack.len(), || {
+                    backends::find::<TdfaJitExecutor>(p, haystack, 0)
+                        .map(|m| cap_sum(&m))
+                        .sum()
+                })
+            });
+            let active = prog.as_ref().is_some_and(|p| p.jit_active());
+            format!(" {:>10}", jit_cell(mbps, active))
+        };
+        #[cfg(not(feature = "tdfa-jit"))]
+        let jit_seg = String::new();
+
         println!(
-            "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}{}",
+            "{:<28} {:>7} {:>6} {:>10} {:>10} {:>10} {:>10} {:>10}{}{}",
             name,
             states,
             marks,
@@ -383,6 +458,7 @@ fn capture_showcase(haystack: &str, selected: &impl Fn(&str) -> bool) {
             cell(nfa_mbps),
             cell(tdfa_mbps),
             cell(rx_mbps),
+            jit_seg,
             if agree { "" } else { "   ! capture checksums disagree" },
         );
     }
