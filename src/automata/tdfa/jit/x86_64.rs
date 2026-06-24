@@ -225,16 +225,20 @@ impl Assembler for X86_64Asm {
     }
 
     fn cap_move_stub(&mut self, curpos_idx: u32, moves: &[(u16, u16)], target: Label) {
-        // mov [rcx + curpos_idx*4], edx              89 91 <disp32>
-        self.emit(&[0x89, 0x91]);
-        self.emit_u32(curpos_idx * 4);
         for &(dst, src) in moves {
-            // mov eax, [rcx + src*4]                 8B 81 <disp32>
-            self.emit(&[0x8B, 0x81]);
-            self.emit_u32(src as u32 * 4);
-            // mov [rcx + dst*4], eax                 89 81 <disp32>
-            self.emit(&[0x89, 0x81]);
-            self.emit_u32(dst as u32 * 4);
+            if src as u32 == curpos_idx {
+                // CurrentPos write: marks[dst] = pos (edx), directly.
+                // mov [rcx + dst*4], edx                 89 91 <disp32>
+                self.emit(&[0x89, 0x91]);
+                self.emit_u32(dst as u32 * 4);
+            } else {
+                // mov eax, [rcx + src*4]                 8B 81 <disp32>
+                self.emit(&[0x8B, 0x81]);
+                self.emit_u32(src as u32 * 4);
+                // mov [rcx + dst*4], eax                 89 81 <disp32>
+                self.emit(&[0x89, 0x81]);
+                self.emit_u32(dst as u32 * 4);
+            }
         }
         // jmp target                                 E9 <rel32>
         self.emit(&[0xE9]);

@@ -365,11 +365,14 @@ impl Assembler for Aarch64Asm {
     }
 
     fn cap_move_stub(&mut self, curpos_idx: u32, moves: &[(u16, u16)], target: Label) {
-        // Stamp current position into the curpos lane, then apply the moves.
-        self.str_w(POS, MARKS, curpos_idx);
         for &(dst, src) in moves {
-            self.ldr_w(MOVE_TMP, MARKS, src as u32);
-            self.str_w(MOVE_TMP, MARKS, dst as u32);
+            if src as u32 == curpos_idx {
+                // CurrentPos write: marks[dst] = pos, directly (no curpos lane).
+                self.str_w(POS, MARKS, dst as u32);
+            } else {
+                self.ldr_w(MOVE_TMP, MARKS, src as u32);
+                self.str_w(MOVE_TMP, MARKS, dst as u32);
+            }
         }
         self.b(target);
     }
