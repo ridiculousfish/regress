@@ -91,6 +91,8 @@ enum Backend {
     PikeVm,
     Tnfa,
     Tdfa,
+    #[cfg(feature = "tdfa-jit")]
+    TdfaJit,
 }
 
 impl Backend {
@@ -100,6 +102,8 @@ impl Backend {
             "pikevm" => Some(Backend::PikeVm),
             "tnfa" => Some(Backend::Tnfa),
             "tdfa" => Some(Backend::Tdfa),
+            #[cfg(feature = "tdfa-jit")]
+            "tdfa-jit" => Some(Backend::TdfaJit),
             _ => None,
         }
     }
@@ -248,9 +252,13 @@ fn main() -> Result<(), Error> {
         backends_list.push(Backend::Bt);
     }
 
-    let wants_nfa = backends_list
-        .iter()
-        .any(|b| matches!(b, Backend::Tnfa | Backend::Tdfa))
+    let wants_nfa = backends_list.iter().any(|b| {
+        #[cfg(feature = "tdfa-jit")]
+        let is_jit = matches!(b, Backend::TdfaJit);
+        #[cfg(not(feature = "tdfa-jit"))]
+        let is_jit = false;
+        matches!(b, Backend::Tnfa | Backend::Tdfa) || is_jit
+    })
         || args.dump_nfa
         || args.dump_nfa_dot
         || args.dump_dfa
@@ -442,6 +450,33 @@ fn main() -> Result<(), Error> {
                         }
                         #[cfg(not(feature = "nfa"))]
                         println!("tdfa:  not available (compile with --features nfa)");
+                    }
+                    #[cfg(feature = "tdfa-jit")]
+                    Backend::TdfaJit => {
+                        use regress::backends::{self, TdfaJitExecutor, TdfaJitProgram};
+                        // `ire` is optimized above (wants_nfa includes TdfaJit).
+                        match TdfaJitProgram::try_from_ir(&ire) {
+                            Ok(program) => {
+                                let label = if program.jit_active() {
+                                    "tdfa-jit"
+                                } else {
+                                    "tdfa-jit(interp)"
+                                };
+                                let mut matches =
+                                    backends::find::<TdfaJitExecutor>(&program, input, 0);
+                                if let Some(res) = matches.next() {
+                                    let count = 1 + matches.count();
+                                    println!(
+                                        "{label}: Match: {}, total: {}",
+                                        format_match(&res.range, &res.captures, input),
+                                        count
+                                    );
+                                } else {
+                                    println!("{label}: No match");
+                                }
+                            }
+                            Err(e) => println!("tdfa-jit: build failed: {:?}", e),
+                        }
                     }
                 }
             }

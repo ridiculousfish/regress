@@ -11,6 +11,8 @@ default-run = "regress-tool"
 default = ["nfa", "backend-pikevm"]
 nfa = ["regress/nfa"]
 backend-pikevm = ["regress/backend-pikevm"]
+# Enables the `--exec tdfa-jit` backend (native-code TDFA).
+tdfa-jit = ["nfa", "regress/tdfa-jit"]
 
 [dependencies]
 structopt = "0.3"

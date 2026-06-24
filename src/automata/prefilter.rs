@@ -42,6 +42,15 @@ use smallvec::SmallVec;
 pub struct TdfaProgram {
     strategy: Strategy,
     group_names: Box<[Box<str>]>,
+    /// Optional native-code compilation of the strategy's anchored verify
+    /// automaton (the capture-free tier). `None` for the plain interpreter
+    /// program; populated by [`enable_jit`](Self::enable_jit) for the
+    /// `tdfa-jit` backend, and left `None` when the automaton isn't JIT-able
+    /// (the interpreter then runs). The compiled automaton corresponds to the
+    /// strategy's single anchored verify automaton (`Prefix.anchored`,
+    /// `CaseFoldLiteral.forward`, or `ReverseInner.forward`).
+    #[cfg(feature = "tdfa-jit")]
+    jit: Option<crate::automata::tdfa::jit::JittedTdfa>,
 }
 
 #[derive(Debug)]
@@ -306,16 +315,28 @@ impl TdfaProgram {
     /// optimizer is what lowers `Cat`-of-`Char` runs into `ByteSequence` /
     /// `ByteSet` literals; without it a literal like `Sherlock` stays a chain of
     /// `Char` nodes and yields no prefilter.
+    /// Assemble a program from its parts, leaving the optional JIT compilation
+    /// off (the default interpreter program). The `tdfa-jit` backend enables it
+    /// afterwards with [`enable_jit`](Self::enable_jit).
+    fn from_parts(strategy: Strategy, group_names: Box<[Box<str>]>) -> Self {
+        Self {
+            strategy,
+            group_names,
+            #[cfg(feature = "tdfa-jit")]
+            jit: None,
+        }
+    }
+
     pub fn try_from_ir(re: &ir::Regex) -> Result<Self, BuildError> {
         // Fastest path: a bare literal needs no automaton — the `memmem` span is
         // the whole match.
         if let Some(bytes) = whole_literal(re) {
             let len = bytes.len();
             let literal = Box::new(memmem::Finder::new(&bytes).into_owned());
-            return Ok(Self {
-                strategy: Strategy::WholeLiteral { literal, len },
-                group_names: Box::new([]),
-            });
+            return Ok(Self::from_parts(
+                Strategy::WholeLiteral { literal, len },
+                Box::new([]),
+            ));
         }
 
         // Case-insensitive literal (per-character case sets): search its longest
@@ -328,15 +349,15 @@ impl TdfaProgram {
                 let mut forward = Tdfa::try_from(&nfa)?;
                 forward.optimize();
                 let group_names = forward.group_names().to_vec().into_boxed_slice();
-                return Ok(Self {
-                    strategy: Strategy::CaseFoldLiteral {
+                return Ok(Self::from_parts(
+                    Strategy::CaseFoldLiteral {
                         forward,
                         searcher,
                         prefix_lo: run.prefix_lo,
                         prefix_hi: run.prefix_hi,
                     },
                     group_names,
-                });
+                ));
             }
         }
 
@@ -358,14 +379,14 @@ impl TdfaProgram {
                 _ => None,
             };
             let group_names = anchored.group_names().to_vec().into_boxed_slice();
-            return Ok(Self {
-                strategy: Strategy::Prefix {
+            return Ok(Self::from_parts(
+                Strategy::Prefix {
                     anchored,
                     prefilter: pred,
                     skip,
                 },
                 group_names,
-            });
+            ));
         }
 
         // No usable prefix. If the regex ends in a required literal, try the
@@ -383,10 +404,10 @@ impl TdfaProgram {
         let mut unanchored = Tdfa::try_from(&nfa)?;
         unanchored.optimize();
         let group_names = unanchored.group_names().to_vec().into_boxed_slice();
-        Ok(Self {
-            strategy: Strategy::Scan { unanchored },
+        Ok(Self::from_parts(
+            Strategy::Scan { unanchored },
             group_names,
-        })
+        ))
     }
 
     /// Try to build a [`Strategy::ReverseInner`] for a regex ending in the
@@ -408,15 +429,15 @@ impl TdfaProgram {
         let group_names = forward.group_names().to_vec().into_boxed_slice();
         let lit_len = suffix.len();
         let literal = Box::new(memmem::Finder::new(&suffix).into_owned());
-        Ok(Some(Self {
-            strategy: Strategy::ReverseInner {
+        Ok(Some(Self::from_parts(
+            Strategy::ReverseInner {
                 forward,
                 reverse,
                 literal,
                 lit_len,
             },
             group_names,
-        }))
+        )))
     }
 
     /// Wrap an already-built (unanchored) TDFA as a plain linear-scan program,
@@ -424,10 +445,55 @@ impl TdfaProgram {
     /// automaton in isolation.
     pub fn scan(unanchored: Tdfa) -> Self {
         let group_names = unanchored.group_names().to_vec().into_boxed_slice();
-        Self {
-            strategy: Strategy::Scan { unanchored },
-            group_names,
+        Self::from_parts(Strategy::Scan { unanchored }, group_names)
+    }
+
+    /// Like [`try_from_ir`](Self::try_from_ir), but additionally JIT-compiles
+    /// the strategy's anchored verify automaton when possible (the `tdfa-jit`
+    /// backend). Falls back to the interpreter for any automaton the JIT can't
+    /// yet handle, so this never fails for a JIT reason.
+    #[cfg(feature = "tdfa-jit")]
+    pub fn try_from_ir_jit(re: &ir::Regex) -> Result<Self, BuildError> {
+        let mut prog = Self::try_from_ir(re)?;
+        prog.enable_jit();
+        Ok(prog)
+    }
+
+    /// Compile the strategy's single anchored verify automaton to native code,
+    /// storing it in `self.jit`. A no-op (leaving the interpreter path) when the
+    /// strategy has no such automaton or it isn't JIT-able.
+    #[cfg(feature = "tdfa-jit")]
+    fn enable_jit(&mut self) {
+        use crate::automata::tdfa::jit::JittedTdfa;
+        let anchored = match &self.strategy {
+            Strategy::Prefix { anchored, .. } => Some(anchored),
+            Strategy::CaseFoldLiteral { forward, .. } => Some(forward),
+            Strategy::ReverseInner { forward, .. } => Some(forward),
+            // Whole-literal needs no automaton; the unanchored Scan isn't the
+            // capture-free tier the JIT compiles.
+            Strategy::WholeLiteral { .. } | Strategy::Scan { .. } => None,
+        };
+        if let Some(tdfa) = anchored {
+            self.jit = JittedTdfa::compile(tdfa).ok();
         }
+    }
+
+    /// Anchored verify at `s`: native code when this program was JIT-compiled,
+    /// else the interpreter. `tdfa` is always the strategy's anchored verify
+    /// automaton — the same one `enable_jit` compiled — so the two paths agree.
+    #[inline]
+    fn verify_at(
+        &self,
+        tdfa: &Tdfa,
+        bytes: &[u8],
+        s: usize,
+        scratch: &mut Scratch<u32>,
+    ) -> Option<NfaMatch> {
+        #[cfg(feature = "tdfa-jit")]
+        if let Some(jit) = &self.jit {
+            return jit.run(bytes, s);
+        }
+        tdfa_backend::execute_reuse(tdfa, bytes, s, scratch)
     }
 
     /// Find the leftmost match at or after byte `offset`, returning the raw
@@ -468,8 +534,7 @@ impl TdfaProgram {
                         let s_lo = j.saturating_sub(*prefix_hi).max(offset);
                         let mut s = s_lo;
                         while s <= s_hi {
-                            if let Some(m) = tdfa_backend::execute_reuse(forward, bytes, s, scratch)
-                            {
+                            if let Some(m) = self.verify_at(forward, bytes, s, scratch) {
                                 return Some(m);
                             }
                             s += 1;
@@ -485,9 +550,25 @@ impl TdfaProgram {
                 anchored,
                 prefilter,
                 skip,
-            } => tdfa_backend::execute_prefiltered_reuse(
-                anchored, bytes, offset, prefilter, scratch, *skip,
-            ),
+            } => {
+                // JIT path: verify each prefilter candidate with native code.
+                // (The warm-start `skip` is an interpreter-only optimization, so
+                // the JIT re-scans the literal prefix — still correct.)
+                #[cfg(feature = "tdfa-jit")]
+                if let Some(jit) = &self.jit {
+                    let mut pos = offset;
+                    loop {
+                        let cand = prefilter.find_from(bytes, pos)?;
+                        if let Some(m) = jit.run(bytes, cand) {
+                            return Some(m);
+                        }
+                        pos = cand + 1;
+                    }
+                }
+                tdfa_backend::execute_prefiltered_reuse(
+                    anchored, bytes, offset, prefilter, scratch, *skip,
+                )
+            }
             Strategy::ReverseInner {
                 forward,
                 reverse,
@@ -504,7 +585,7 @@ impl TdfaProgram {
                     // (it fixes a greedy end and produces captures); the reverse
                     // only locates the start.
                     if let Some(s) = reverse::reverse_find_start(reverse, bytes, end, offset) {
-                        if let Some(m) = tdfa_backend::execute_reuse(forward, bytes, s, scratch) {
+                        if let Some(m) = self.verify_at(forward, bytes, s, scratch) {
                             return Some(m);
                         }
                     }
@@ -561,5 +642,65 @@ impl TdfaProgram {
             Strategy::CaseFoldLiteral { forward, .. } => forward.stats(),
             Strategy::ReverseInner { forward, .. } => forward.stats(),
         }
+    }
+
+    /// Whether the strategy's anchored verify automaton was successfully
+    /// JIT-compiled (so `find_at` runs native code). `false` means the
+    /// interpreter is used — either because the JIT wasn't enabled, or because
+    /// the automaton isn't in the supported tier.
+    #[cfg(feature = "tdfa-jit")]
+    pub fn jit_active(&self) -> bool {
+        self.jit.is_some()
+    }
+}
+
+/// The `tdfa-jit` backend's program: a [`TdfaProgram`] with its anchored verify
+/// automaton JIT-compiled to native code where possible. A distinct type so it
+/// is selected explicitly (its own `Executor`, its own `--exec tdfa-jit` name,
+/// its own benchmark column) — but it reuses all of `TdfaProgram`'s strategy
+/// selection and prefilter machinery. Falls back to the interpreter for any
+/// automaton outside the supported JIT tier, so it matches `TdfaProgram`'s
+/// results exactly. This is the `Source` consumed by `TdfaJitExecutor`.
+#[cfg(feature = "tdfa-jit")]
+#[derive(Debug)]
+pub struct TdfaJitProgram(TdfaProgram);
+
+#[cfg(feature = "tdfa-jit")]
+impl TdfaJitProgram {
+    /// Build from IR, JIT-compiling where possible. Errors only for the same
+    /// automaton-build reasons as [`TdfaProgram::try_from_ir`] (never for a JIT
+    /// reason — an un-JIT-able automaton just keeps the interpreter).
+    pub fn try_from_ir(re: &ir::Regex) -> Result<Self, BuildError> {
+        Ok(Self(TdfaProgram::try_from_ir_jit(re)?))
+    }
+
+    /// See [`TdfaProgram::find_at`].
+    pub(crate) fn find_at(
+        &self,
+        bytes: &[u8],
+        offset: usize,
+        scratch: &mut Scratch<u32>,
+    ) -> Option<NfaMatch> {
+        self.0.find_at(bytes, offset, scratch)
+    }
+
+    /// See [`TdfaProgram::mark_width`].
+    pub(crate) fn mark_width(&self) -> usize {
+        self.0.mark_width()
+    }
+
+    /// See [`TdfaProgram::group_names`].
+    pub fn group_names(&self) -> &[Box<str>] {
+        self.0.group_names()
+    }
+
+    /// Whether native code is actually in use (vs. interpreter fallback).
+    pub fn jit_active(&self) -> bool {
+        self.0.jit_active()
+    }
+
+    /// Stats of the underlying automaton (for the benchmarks' size columns).
+    pub fn stats(&self) -> TdfaStats {
+        self.0.stats()
     }
 }

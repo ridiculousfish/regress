@@ -118,8 +118,8 @@ fn compile_capture_free(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
 }
 
 /// The arch-independent codegen driver: walk `tdfa` and emit the capture-free
-/// state machine through `A`. Each state becomes a code block (accept-on-entry
-/// + EOI check + byte fetch + jump-table dispatch); a shared class table and
+/// state machine through `A`. Each state becomes a code block (accept-on-entry,
+/// EOI check, byte fetch, then jump-table dispatch); a shared class table and
 /// per-state jump tables follow the code. Dead transitions route to `done`.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 fn emit<A: Assembler>(tdfa: &Tdfa) -> Result<Vec<u8>, JitError> {
@@ -240,6 +240,49 @@ mod tests {
         assert_matches_interpreter("a|bc", &["a", "bc", "b", "abc", ""]);
         assert_matches_interpreter("(?:ab)+", &["ab", "abab", "aba", "a", ""]);
         assert_matches_interpreter("(?:foo|bar)+", &["foobar", "foo", "barbar", "baz"]);
+    }
+
+    /// End-to-end through the public backend: the `TdfaJitExecutor` must yield
+    /// the same matches as the interpreter `TdfaExecutor` over a real
+    /// `find_iter`, and actually run native code for a prefix-literal pattern.
+    #[test]
+    fn jit_backend_matches_interpreter() {
+        use crate::automata::prefilter::{TdfaJitProgram, TdfaProgram};
+        use crate::backends::{self, TdfaExecutor, TdfaJitExecutor};
+
+        // `expect_jit`: `Some(true)` patterns must run native code (a rare
+        // literal prefix + tail → anchored verify); `Some(false)` must stay
+        // interpreted (a bare literal is the memmem-only whole-literal path; a
+        // common-first-byte pattern like `a+b` has no selective prefilter and
+        // takes the unanchored `Scan`, outside the capture-free tier). `None`
+        // is selection-dependent — only correctness is checked.
+        let cases: &[(&str, &str, Option<bool>)] = &[
+            ("abc", "xx abc yy abcabc zz", Some(false)),
+            ("foo[0-9]+", "foo12 foobar foo3 foo", Some(true)),
+            ("a+b", "aaab ab cab b aaa", Some(false)),
+            ("(?:cat|dog)s?", "cats dog doghouse ca dogs", None),
+            ("xyz[a-z]*", "xyzabc xy xyz xyzzz", Some(true)),
+        ];
+        for &(pat, hay, expect_jit) in cases {
+            let flags = crate::api::Flags::default();
+            let mut re = backends::try_parse(pat.chars().map(u32::from), flags).expect("parse");
+            // `try_from_ir` expects optimized IR (it's what lowers a literal run
+            // into a `ByteSequence` the prefilter can use).
+            backends::optimize(&mut re);
+            let interp = TdfaProgram::try_from_ir(&re).expect("interp program");
+            let jit = TdfaJitProgram::try_from_ir(&re).expect("jit program");
+
+            let want: Vec<_> = backends::find::<TdfaExecutor>(&interp, hay, 0)
+                .map(|m| (m.range.clone(), m.captures.clone()))
+                .collect();
+            let got: Vec<_> = backends::find::<TdfaJitExecutor>(&jit, hay, 0)
+                .map(|m| (m.range.clone(), m.captures.clone()))
+                .collect();
+            assert_eq!(want, got, "pattern {pat:?} over {hay:?}");
+            if let Some(want_jit) = expect_jit {
+                assert_eq!(jit.jit_active(), want_jit, "jit activation for {pat:?}");
+            }
+        }
     }
 
     #[test]

@@ -139,7 +139,7 @@ impl Aarch64Asm {
     /// already 4-aligned; this guards data tables emitted after odd-length runs
     /// (there are none today, but keeps jump tables naturally aligned).
     fn align4(&mut self) {
-        while self.code.len() % 4 != 0 {
+        while !self.code.len().is_multiple_of(4) {
             self.code.push(0);
         }
     }

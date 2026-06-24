@@ -913,10 +913,16 @@ pub mod backends {
     pub use crate::automata::dfa::Dfa;
     #[cfg(feature = "nfa")]
     pub use crate::automata::executors::{NfaExecutor, TdfaExecutor};
+    #[cfg(feature = "tdfa-jit")]
+    pub use crate::automata::executors::TdfaJitExecutor;
     #[cfg(feature = "nfa")]
     pub use crate::automata::nfa::{Error as NfaError, Nfa};
     #[cfg(feature = "nfa")]
     pub use crate::automata::prefilter::TdfaProgram;
+    #[cfg(feature = "tdfa-jit")]
+    pub use crate::automata::prefilter::TdfaJitProgram;
+    #[cfg(feature = "tdfa-jit")]
+    pub use crate::automata::tdfa::jit::{JitError, JittedTdfa};
     #[cfg(feature = "nfa")]
     pub use crate::automata::tdfa::{Tdfa, TdfaStats};
     pub use crate::emit::emit;

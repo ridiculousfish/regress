@@ -156,3 +156,51 @@ impl<'r, 't> Executor<'r, 't> for TdfaExecutor<'r, 't> {
         }
     }
 }
+
+/// TDFA-JIT-backed executor. Source = [`TdfaJitProgram`] (a `TdfaProgram` whose
+/// anchored verify automaton is compiled to native code where supported, and
+/// interpreted otherwise). A sibling backend to [`TdfaExecutor`], selected
+/// explicitly; the iteration adapter is identical.
+#[cfg(feature = "tdfa-jit")]
+#[derive(Debug)]
+pub struct TdfaJitExecutor<'r, 't> {
+    program: &'r crate::automata::prefilter::TdfaJitProgram,
+    input: Utf8Input<'t>,
+    scratch: Scratch<u32>,
+}
+
+#[cfg(feature = "tdfa-jit")]
+impl<'r, 't> MatchProducer for TdfaJitExecutor<'r, 't> {
+    type Position = <Utf8Input<'t> as InputIndexer>::Position;
+
+    fn initial_position(&self, offset: usize) -> Option<Self::Position> {
+        self.input.try_move_right(self.input.left_end(), offset)
+    }
+
+    fn next_match(
+        &mut self,
+        pos: Self::Position,
+        next_start: &mut Option<Self::Position>,
+    ) -> Option<Match> {
+        let program = self.program;
+        let names = program.group_names();
+        let scratch = &mut self.scratch;
+        next_match_single_pass(self.input, names, pos, next_start, |full, start| {
+            program.find_at(full, start, scratch)
+        })
+    }
+}
+
+#[cfg(feature = "tdfa-jit")]
+impl<'r, 't> Executor<'r, 't> for TdfaJitExecutor<'r, 't> {
+    type Source = crate::automata::prefilter::TdfaJitProgram;
+    type AsAscii = TdfaJitExecutor<'r, 't>;
+
+    fn new(source: &'r Self::Source, text: &'t str) -> Self {
+        Self {
+            program: source,
+            input: Utf8Input::new(text, /* unicode */ true),
+            scratch: Scratch::new(source.mark_width()),
+        }
+    }
+}
