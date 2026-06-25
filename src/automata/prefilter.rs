@@ -557,6 +557,22 @@ fn build_teddy(patterns: &[Vec<u8>]) -> Option<aho_corasick::packed::Searcher> {
         .build()
 }
 
+/// Whether Teddy is the right tool for this needle set, vs. a single-byte
+/// `memchr`. Teddy scans ~2x slower per byte than `memchr`, so when *every*
+/// needle shares one **rare** first byte (e.g. `Sherlock|Street` → both `S`), a
+/// `memchr` on that byte plus a cheap verify (the byte is rare, so few hits)
+/// wins — let the generic `Prefix` strategy handle it. With diverse or common
+/// first bytes, Teddy's selective multi-byte scan earns back its slower throughput.
+#[cfg(feature = "prefilter-teddy")]
+fn teddy_preferred(needles: &[Vec<u8>]) -> bool {
+    let Some(&first) = needles.first().and_then(|n| n.first()) else {
+        return false;
+    };
+    let shared_rare_prefix =
+        !byte_is_common(first) && needles.iter().all(|n| n.first() == Some(&first));
+    !shared_rare_prefix
+}
+
 /// Bytes that are too common in typical (prose) text for a single-byte-class
 /// prefilter to be worth it: skipping to every one of them and running an
 /// anchored verify that fails immediately costs more than a straight scan.
@@ -626,11 +642,14 @@ impl TdfaProgram {
         // strategy's union-of-first-bytes predicate. Skipped if Teddy declines.
         #[cfg(feature = "prefilter-teddy")]
         if let Some(lits) = literal_alternation(re) {
-            if let Some(searcher) = build_teddy(&lits) {
-                return Ok(Self::from_parts(
-                    Strategy::MultiLiteral { searcher },
-                    Box::new([]),
-                ));
+            // Skip when a single rare `memchr` byte beats Teddy (→ generic Prefix).
+            if teddy_preferred(&lits) {
+                if let Some(searcher) = build_teddy(&lits) {
+                    return Ok(Self::from_parts(
+                        Strategy::MultiLiteral { searcher },
+                        Box::new([]),
+                    ));
+                }
             }
         }
 
@@ -669,15 +688,18 @@ impl TdfaProgram {
         // union-of-first-bytes predicate (or a plain `Scan` under `/i`).
         #[cfg(feature = "prefilter-teddy")]
         if let Some(needles) = alternation_prefix_variants(re) {
-            if let Some(teddy) = build_teddy(&needles) {
-                let nfa = Nfa::try_from(re)?;
-                let mut forward = Tdfa::try_from(&nfa)?;
-                forward.optimize();
-                let group_names = forward.group_names().to_vec().into_boxed_slice();
-                return Ok(Self::from_parts(
-                    Strategy::AltPrefix { forward, teddy },
-                    group_names,
-                ));
+            // Skip when a single rare `memchr` byte beats Teddy (→ generic Prefix).
+            if teddy_preferred(&needles) {
+                if let Some(teddy) = build_teddy(&needles) {
+                    let nfa = Nfa::try_from(re)?;
+                    let mut forward = Tdfa::try_from(&nfa)?;
+                    forward.optimize();
+                    let group_names = forward.group_names().to_vec().into_boxed_slice();
+                    return Ok(Self::from_parts(
+                        Strategy::AltPrefix { forward, teddy },
+                        group_names,
+                    ));
+                }
             }
         }
 
