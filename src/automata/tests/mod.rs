@@ -11,6 +11,10 @@
 mod casefold;
 mod dfa;
 mod empty_loop;
+// `MultiLiteral` is a `prefilter-teddy`-only strategy keyed off `ByteSequence`
+// IR nodes (UTF-8-only, like `casefold`/`reverse`).
+#[cfg(all(feature = "prefilter-teddy", not(feature = "utf16")))]
+mod multiliteral;
 mod nfa_backend;
 #[cfg(not(feature = "utf16"))]
 mod reverse;
