@@ -200,15 +200,21 @@ pub(crate) fn compact_marks(t: &mut Tdfa) {
     register_allocate(t);
 }
 
-/// Mark count at/under which the register allocator is skipped: a handful of
-/// marks has essentially nothing to coalesce, so RA isn't worth even its (small)
-/// cost. This was historically 256 (the since-removed gather-eligibility cap),
-/// but that wrongly skipped RA for the *moderate* mark files where it matters
-/// most — e.g. an unanchored alternation, whose per-state private register sets
-/// blow up to ~O(n²) (n = arms) and coalesce back to O(1) once RA runs. RA over
-/// the whole transition graph is cheap and bounded (see `MAX_RA_*`), so keep the
-/// skip tiny.
-const RA_SKIP_MARKS: usize = 4;
+/// Marks of redundancy (above the `num_tags` floor) below which RA is skipped.
+///
+/// RA can't shrink the mark file below the number of tags that are
+/// simultaneously live, and every accept reads *all* live tags into the result
+/// at once — so `num_tags` is the floor. When `num_marks` is already within this
+/// slack of `num_tags` there's essentially no over-minting to coalesce, and RA's
+/// (automaton-size-proportional) liveness fixpoint would just confirm the count,
+/// so we skip it. Tying the gate to `num_tags` rather than an absolute mark
+/// count is what makes it scale: a many-capture pattern with no redundancy
+/// (`num_marks ≈ num_tags`) is skipped regardless of its absolute mark count,
+/// while an unanchored alternation's per-state private sets — which blow up to
+/// ~O(n²) above the floor — run RA and coalesce back to O(1). (Historically this
+/// was an absolute cap of 256, from a since-removed gather executor; that
+/// wrongly skipped exactly the moderate-redundancy automata where RA pays off.)
+const RA_REDUNDANCY_SLACK: usize = 2;
 
 /// Largest densely-numbered mark count for which we run the register allocator.
 /// Above this we keep the (already dead-eliminated, densely renumbered) mark
@@ -441,12 +447,12 @@ fn bits_to_vec(bits: &[u64], out: &mut Vec<u32>) {
 
 fn register_allocate(t: &mut Tdfa) {
     let m = t.num_marks;
-    // Skip when the mark file is already at/under the gather cap: such automata
-    // are already gather-eligible and RA would only marginally shrink the
-    // buffer, so it isn't worth the per-call cost (this covers the vast majority
-    // of patterns). Also skip absurdly large mark files to bound the liveness
-    // fixpoint — those can't shrink below the cap and use the scalar fallback.
-    if m <= RA_SKIP_MARKS || m > MAX_RA_MARKS {
+    // Skip when the mark file has no redundancy to coalesce — within a small
+    // slack of the `num_tags` floor (see `RA_REDUNDANCY_SLACK`) — so RA's
+    // size-proportional liveness fixpoint isn't spent confirming the count. Also
+    // skip absurdly large mark files to bound the fixpoint; those can't shrink
+    // below the cap and use the scalar fallback.
+    if m <= t.num_tags + RA_REDUNDANCY_SLACK || m > MAX_RA_MARKS {
         return;
     }
     let n = t.accepting.len();
