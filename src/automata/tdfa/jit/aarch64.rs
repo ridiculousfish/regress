@@ -301,6 +301,7 @@ impl Assembler for Aarch64Asm {
                 self.cmp_imm_w(BYTE, lo as u32); // cmp byte, lo
                 self.b_cond(COND_EQ, target); // b.eq target
             } else if lo == 0 {
+                // `[0..=hi]` needs no normalization: `byte <= hi` is enough.
                 self.cmp_imm_w(BYTE, hi as u32); // cmp byte, hi
                 self.b_cond(COND_LS, target); // b.ls target (unsigned <=)
             } else {
