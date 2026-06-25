@@ -102,6 +102,17 @@ enum Strategy {
         #[cfg(feature = "prefilter-teddy")]
         teddy: Option<aho_corasick::packed::Searcher>,
     },
+    /// An *alternation whose every branch has a leading literal prefix* (e.g.
+    /// `Sher[a-z]+|Hol[a-z]+`, with or without `/i`). A Teddy searcher over the
+    /// union of the branches' leading case cross-products locates candidates;
+    /// the anchored `forward` TDFA verifies the full branch (tail + captures)
+    /// from each candidate start. Unlike `MultiLiteral` the literals are only a
+    /// prefix, so the automaton verify is required.
+    #[cfg(feature = "prefilter-teddy")]
+    AltPrefix {
+        forward: Tdfa,
+        teddy: aho_corasick::packed::Searcher,
+    },
     /// Required *suffix* literal, no usable prefix (e.g. `\w+\s+Holmes`). Find
     /// the literal with `memmem`, drive the `reverse` DFA leftward from its end
     /// to the leftmost match start, then run the `forward` anchored TDFA there
@@ -413,10 +424,23 @@ fn casefold_prefix_variants(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
         Node::Cat(n) => n,
         _ => return None,
     };
+    leading_fold_variants(nodes, MAX_PREFIX_POSITIONS, MAX_PATTERNS)
+}
 
-    // Per-position alternative byte-strings, in literal order (1 byte for ASCII
-    // folds, 1–2 for a `CharSet`'s non-ASCII fold like ſ). Stop at the first
-    // non-literal node: the prefix up to it is still a sound, required Teddy key.
+/// Concrete byte-strings for the leading literal positions of `nodes` — the case
+/// cross-product, 1 byte for an ASCII fold position, 1–2 for a `CharSet`'s
+/// non-ASCII fold (ſ). Reads the fold alternatives straight off the optimized-IR
+/// nodes the automaton matches, so the set is exhaustive for the covered
+/// positions. Stops at the first non-literal node (the prefix up to it is still
+/// a required key) and at the position/pattern caps. `None` if fewer than 2
+/// positions are usable (too short to be a selective Teddy key).
+#[cfg(feature = "prefilter-teddy")]
+fn leading_fold_variants(
+    nodes: &[ir::Node],
+    max_positions: usize,
+    max_patterns: usize,
+) -> Option<Vec<Vec<u8>>> {
+    use ir::Node;
     let mut posalts: Vec<Vec<Vec<u8>>> = Vec::new();
     'outer: for n in nodes {
         match n {
@@ -455,7 +479,7 @@ fn casefold_prefix_variants(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
     let mut variants: Vec<Vec<u8>> = vec![Vec::new()];
     let mut used = 0;
     for alts in &posalts {
-        if used >= MAX_PREFIX_POSITIONS || variants.len() * alts.len() > MAX_PATTERNS {
+        if used >= max_positions || variants.len() * alts.len() > max_patterns {
             break;
         }
         variants = variants
@@ -470,10 +494,86 @@ fn casefold_prefix_variants(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
             .collect();
         used += 1;
     }
-    if used < 2 {
+    (used >= 2).then_some(variants)
+}
+
+/// Teddy needles for an *alternation whose every branch has a leading literal
+/// prefix* (e.g. `Sher[a-z]+|Hol[a-z]+`, with or without `/i`, or a
+/// case-insensitive literal alternation `Sherlock|Holmes`/i): the union of each
+/// branch's leading case cross-product. Every match of the alternation begins
+/// with one of these byte-strings, so they form a complete candidate filter; the
+/// anchored automaton then verifies the full branch (tail + captures) from each
+/// candidate start.
+///
+/// `None` unless there are ≥2 branches and *every* branch yields a usable prefix
+/// (a branch with no leading literal couldn't be prefiltered without missing its
+/// matches). When the full-length union would exceed the cap, the prefix length
+/// is shortened (down to 2 positions) so more branches still fit — shorter keys
+/// are less selective but keep Teddy in its fast regime.
+#[cfg(feature = "prefilter-teddy")]
+fn alternation_prefix_variants(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
+    use ir::Node;
+    // Per-branch prefix length, and a union cap kept near Teddy's fast ceiling.
+    const MAX_BRANCH_POSITIONS: usize = 4;
+    const MIN_BRANCH_POSITIONS: usize = 2;
+    const MAX_BRANCH_PATTERNS: usize = 32;
+    const MAX_TOTAL_PATTERNS: usize = 48;
+
+    // Unwrap the optimizer's `Cat([Alt, Goal])` wrapper to the bare `Alt`.
+    let mut node = &re.node;
+    if let Node::Cat(nodes) = node {
+        let mut inner = None;
+        for n in nodes {
+            match n {
+                Node::Goal | Node::Empty => {}
+                other if inner.is_none() => inner = Some(other),
+                _ => return None,
+            }
+        }
+        node = inner?;
+    }
+    if !matches!(node, Node::Alt(..)) {
         return None;
     }
-    Some(variants)
+
+    // Flatten the right-nested `Alt` into its branch subtrees (not recursing into
+    // a branch's own `Cat`).
+    fn branches<'a>(node: &'a Node, out: &mut Vec<&'a Node>) {
+        match node {
+            Node::Alt(a, b) => {
+                branches(a, out);
+                branches(b, out);
+            }
+            other => out.push(other),
+        }
+    }
+    let mut leaves = Vec::new();
+    branches(node, &mut leaves);
+    if leaves.len() < 2 {
+        return None;
+    }
+
+    // Longest prefix length whose union fits the cap (more branches → shorter
+    // keys). Bail if any branch has no usable prefix at all (can't prefilter it).
+    for max_pos in (MIN_BRANCH_POSITIONS..=MAX_BRANCH_POSITIONS).rev() {
+        let mut needles: Vec<Vec<u8>> = Vec::new();
+        for leaf in &leaves {
+            // A branch is a `Cat` of positions, or a single literal node.
+            let branch_nodes: &[Node] = match leaf {
+                Node::Cat(n) => n,
+                other => core::slice::from_ref(other),
+            };
+            // A branch with no usable prefix can never be prefiltered — give up.
+            let mut v = leading_fold_variants(branch_nodes, max_pos, MAX_BRANCH_PATTERNS)?;
+            needles.append(&mut v);
+        }
+        needles.sort();
+        needles.dedup();
+        if needles.len() <= MAX_TOTAL_PATTERNS {
+            return Some(needles);
+        }
+    }
+    None
 }
 
 /// Build an aho-corasick Teddy (SIMD multi-substring) searcher over the case
@@ -595,6 +695,25 @@ impl TdfaProgram {
             }
         }
 
+        // An alternation whose every branch has a leading literal prefix
+        // (`Sher[a-z]+|Hol[a-z]+`, incl. `/i`): a Teddy searcher over the union
+        // of the branches' leading case cross-products locates candidates, then
+        // the anchored automaton verifies. Replaces the generic strategy's leaky
+        // union-of-first-bytes predicate (or a plain `Scan` under `/i`).
+        #[cfg(feature = "prefilter-teddy")]
+        if let Some(needles) = alternation_prefix_variants(re) {
+            if let Some(teddy) = build_teddy(&needles) {
+                let nfa = Nfa::try_from(re)?;
+                let mut forward = Tdfa::try_from(&nfa)?;
+                forward.optimize();
+                let group_names = forward.group_names().to_vec().into_boxed_slice();
+                return Ok(Self::from_parts(
+                    Strategy::AltPrefix { forward, teddy },
+                    group_names,
+                ));
+            }
+        }
+
         let pred = startpredicate::predicate_for_re(re);
         if should_prefilter(&pred) {
             // Anchored automaton: matches only at the offset handed to
@@ -699,6 +818,8 @@ impl TdfaProgram {
         let automaton = match &self.strategy {
             Strategy::Prefix { anchored, .. } => Some(anchored),
             Strategy::CaseFoldLiteral { forward, .. } => Some(forward),
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::AltPrefix { forward, .. } => Some(forward),
             Strategy::ReverseInner { forward, .. } => Some(forward),
             // The unanchored single-pass scan: the JIT's capture tier handles
             // its `.*?`-stamped start.
@@ -759,6 +880,19 @@ impl TdfaProgram {
                     range: m.start()..m.end(),
                     captures: Vec::new(),
                 })
+            }
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::AltPrefix { forward, teddy } => {
+                // Each Teddy hit is a branch prefix start; the automaton verifies
+                // the full branch (tail + captures) from there.
+                let mut pos = offset;
+                loop {
+                    let m = teddy.find_in(bytes, aho_corasick::Span::from(pos..bytes.len()))?;
+                    if let Some(found) = self.verify_at(forward, bytes, m.start(), scratch) {
+                        return Some(found);
+                    }
+                    pos = m.start() + 1;
+                }
             }
             Strategy::CaseFoldLiteral {
                 forward,
@@ -875,6 +1009,8 @@ impl TdfaProgram {
             Strategy::Scan { .. } => "scan",
             Strategy::Prefix { .. } => "prefix",
             Strategy::CaseFoldLiteral { .. } => "casefold-literal",
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::AltPrefix { .. } => "alt-prefix",
             Strategy::ReverseInner { .. } => "reverse-inner",
         }
     }
@@ -938,6 +1074,26 @@ impl TdfaProgram {
                     range: m.start()..m.end(),
                     captures: Vec::new(),
                 })
+            }
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::AltPrefix { forward, teddy } => {
+                let mut pos = offset;
+                loop {
+                    diag.search_calls += 1;
+                    let start = std::time::Instant::now();
+                    let found = teddy.find_in(bytes, aho_corasick::Span::from(pos..bytes.len()));
+                    diag.search_time += start.elapsed();
+                    let m = found?;
+                    diag.search_hits += 1;
+                    diag.verify_calls += 1;
+                    let start = std::time::Instant::now();
+                    let v = self.verify_at(forward, bytes, m.start(), scratch);
+                    diag.verify_time += start.elapsed();
+                    if v.is_some() {
+                        return v;
+                    }
+                    pos = m.start() + 1;
+                }
             }
             Strategy::CaseFoldLiteral {
                 forward,
@@ -1067,6 +1223,8 @@ impl TdfaProgram {
             Strategy::Scan { unanchored } => unanchored,
             Strategy::Prefix { anchored, .. } => anchored,
             Strategy::CaseFoldLiteral { forward, .. } => forward,
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::AltPrefix { forward, .. } => forward,
             Strategy::ReverseInner { forward, .. } => forward,
         };
         tdfa_backend::mark_file_width(tdfa)
@@ -1107,6 +1265,13 @@ impl TdfaProgram {
         matches!(self.strategy, Strategy::MultiLiteral { .. })
     }
 
+    /// Test-only: whether this program uses the alternation-prefix (Teddy +
+    /// automaton verify) strategy.
+    #[cfg(all(test, feature = "prefilter-teddy"))]
+    pub(crate) fn is_alt_prefix(&self) -> bool {
+        matches!(self.strategy, Strategy::AltPrefix { .. })
+    }
+
     /// Stats of the underlying automaton (for the benchmarks' size columns).
     pub fn stats(&self) -> TdfaStats {
         match &self.strategy {
@@ -1129,6 +1294,8 @@ impl TdfaProgram {
             Strategy::Scan { unanchored } => unanchored.stats(),
             Strategy::Prefix { anchored, .. } => anchored.stats(),
             Strategy::CaseFoldLiteral { forward, .. } => forward.stats(),
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::AltPrefix { forward, .. } => forward.stats(),
             Strategy::ReverseInner { forward, .. } => forward.stats(),
         }
     }
