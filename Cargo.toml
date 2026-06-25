@@ -51,10 +51,20 @@ tdfa-jit = ["nfa", "std", "dep:region"]
 # A development aid only; off by default.
 tdfa-jit-dump = ["tdfa-jit", "dep:capstone"]
 
+# Uses an aho-corasick Teddy (SIMD multi-substring) prefilter for
+# case-insensitive literals (e.g. `Sherlock`/i) instead of the single-rare-byte
+# `memchr` scan. Requires `std` (Teddy uses runtime CPU-feature detection) and
+# is incompatible with `prohibit-unsafe` (Teddy uses `unsafe` SIMD). When off,
+# the `CaseFoldSearcher` path is unchanged; when on, it remains the fallback for
+# patterns Teddy declines or unsupported targets. x86-64 + aarch64 only.
+prefilter-teddy = ["nfa", "std", "dep:aho-corasick"]
+
 [dependencies]
 hashbrown = { version = ">=0.16, <0.18", optional = true }
 memchr = { version = "2.4.0", default-features = false }
 smallvec = { version = "1.13", optional = true }
+# SIMD multi-substring (Teddy) prefilter for the `prefilter-teddy` feature only.
+aho-corasick = { version = "1.1", optional = true, default-features = false, features = ["std", "perf-literal"] }
 # Cross-platform executable-memory protection for the `tdfa-jit` backend only.
 region = { version = "3", optional = true }
 # Disassembler for `tdfa-jit-dump` (--dump-jit) only.

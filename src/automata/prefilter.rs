@@ -84,6 +84,12 @@ enum Strategy {
         /// Min/max byte width of the literal portion before the clean run.
         prefix_lo: usize,
         prefix_hi: usize,
+        /// SIMD multi-substring (Teddy) prefilter over the case cross-product of
+        /// a bounded leading prefix (e.g. `Sherl`/`ſherl`/…). When `Some`, it
+        /// replaces the `searcher` scan: far more selective than a single rare
+        /// byte. `None` (Teddy declined / unsupported target) keeps `searcher`.
+        #[cfg(feature = "prefilter-teddy")]
+        teddy: Option<aho_corasick::packed::Searcher>,
     },
     /// Required *suffix* literal, no usable prefix (e.g. `\w+\s+Holmes`). Find
     /// the literal with `memmem`, drive the `reverse` DFA leftward from its end
@@ -278,6 +284,112 @@ fn casefold_clean_run(re: &ir::Regex) -> Option<CleanRunInfo> {
     })
 }
 
+/// Bounded case cross-product of the literal's leading positions, for the
+/// `prefilter-teddy` Teddy prefilter — e.g. `Sherlock`/i → `{Sherl, sherl,
+/// ſherl, …}`. The per-position alternatives are read straight off the same
+/// optimized-IR fold sets the automaton matches (`ByteSet`/`Char` = clean ASCII,
+/// `CharSet` = includes the non-ASCII ſ fold), so the set is *exhaustive* for the
+/// covered positions: every real match begins with one of these byte-strings, so
+/// using them as the candidate filter misses nothing. The anchored automaton
+/// still verifies the full pattern (and captures) from each candidate start, so
+/// false positives are harmless.
+///
+/// Returns `None` when the pattern can't yield ≥2 usable leading positions, or
+/// the cross-product would exceed the caps — the caller then keeps the
+/// single-byte `CaseFoldSearcher`.
+#[cfg(feature = "prefilter-teddy")]
+fn casefold_prefix_variants(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
+    use ir::Node;
+    // Teddy is fastest with a *small* literal set: its packed buckets stay
+    // selective up to ~32 needles, past which it spills into a slower verify
+    // path (measured: a 24-needle 4-byte prefix scans ~13 GB/s, but 48 needles
+    // drop to ~8 GB/s — slower than the single-byte memchr it replaces). So cap
+    // at a 4-position prefix (mirroring the regex crate's choice) and 32 needles;
+    // the `CaseFoldSearcher` fallback covers anything past that.
+    const MAX_PATTERNS: usize = 32;
+    const MAX_PREFIX_POSITIONS: usize = 4;
+
+    let nodes: &[Node] = match &re.node {
+        Node::Cat(n) => n,
+        _ => return None,
+    };
+
+    // Per-position alternative byte-strings, in literal order (1 byte for ASCII
+    // folds, 1–2 for a `CharSet`'s non-ASCII fold like ſ). Stop at the first
+    // non-literal node: the prefix up to it is still a sound, required Teddy key.
+    let mut posalts: Vec<Vec<Vec<u8>>> = Vec::new();
+    'outer: for n in nodes {
+        match n {
+            Node::Goal | Node::Empty => {}
+            Node::ByteSet(bytes) => {
+                if bytes.iter().any(|&b| b >= 0x80) {
+                    break;
+                }
+                posalts.push(bytes.iter().map(|&b| vec![b]).collect());
+            }
+            Node::ByteSequence(bytes) => {
+                for &b in bytes {
+                    if b >= 0x80 {
+                        break 'outer;
+                    }
+                    posalts.push(vec![vec![b]]);
+                }
+            }
+            Node::Char { c } if *c < 0x80 => {
+                posalts.push(vec![vec![*c as u8]]);
+            }
+            Node::CharSet(chars) => {
+                let mut alts: Vec<Vec<u8>> = Vec::with_capacity(chars.len());
+                for &c in chars.iter() {
+                    let ch = char::from_u32(c)?;
+                    let mut buf = [0u8; 4];
+                    alts.push(ch.encode_utf8(&mut buf).as_bytes().to_vec());
+                }
+                posalts.push(alts);
+            }
+            _ => break,
+        }
+    }
+
+    // Cross-product the leading positions under both caps.
+    let mut variants: Vec<Vec<u8>> = vec![Vec::new()];
+    let mut used = 0;
+    for alts in &posalts {
+        if used >= MAX_PREFIX_POSITIONS || variants.len() * alts.len() > MAX_PATTERNS {
+            break;
+        }
+        variants = variants
+            .iter()
+            .flat_map(|prefix| {
+                alts.iter().map(move |a| {
+                    let mut v = prefix.clone();
+                    v.extend_from_slice(a);
+                    v
+                })
+            })
+            .collect();
+        used += 1;
+    }
+    if used < 2 {
+        return None;
+    }
+    Some(variants)
+}
+
+/// Build an aho-corasick Teddy (SIMD multi-substring) searcher over the case
+/// cross-product. `None` when packed search isn't applicable (an unsupported
+/// target, or the literal set declines) — the caller falls back to
+/// `CaseFoldSearcher`.
+#[cfg(feature = "prefilter-teddy")]
+fn build_teddy(patterns: &[Vec<u8>]) -> Option<aho_corasick::packed::Searcher> {
+    use aho_corasick::packed::{Config, MatchKind};
+    Config::new()
+        .match_kind(MatchKind::LeftmostFirst)
+        .builder()
+        .extend(patterns.iter())
+        .build()
+}
+
 /// Bytes that are too common in typical (prose) text for a single-byte-class
 /// prefilter to be worth it: skipping to every one of them and running an
 /// anchored verify that fails immediately costs more than a straight scan.
@@ -351,12 +463,18 @@ impl TdfaProgram {
                 let mut forward = Tdfa::try_from(&nfa)?;
                 forward.optimize();
                 let group_names = forward.group_names().to_vec().into_boxed_slice();
+                // A Teddy SIMD prefilter over the leading case cross-product,
+                // when the pattern admits one; else `None` keeps `searcher`.
+                #[cfg(feature = "prefilter-teddy")]
+                let teddy = casefold_prefix_variants(re).and_then(|pats| build_teddy(&pats));
                 return Ok(Self::from_parts(
                     Strategy::CaseFoldLiteral {
                         forward,
                         searcher,
                         prefix_lo: run.prefix_lo,
                         prefix_hi: run.prefix_hi,
+                        #[cfg(feature = "prefilter-teddy")]
+                        teddy,
                     },
                     group_names,
                 ));
@@ -522,7 +640,24 @@ impl TdfaProgram {
                 searcher,
                 prefix_lo,
                 prefix_hi,
+                #[cfg(feature = "prefilter-teddy")]
+                teddy,
             } => {
+                // Teddy path: each hit is the concrete literal start (the leading
+                // ſ/S/s is part of the matched needle), so there's no prefix-width
+                // window — verify the full pattern straight from `m.start()`.
+                #[cfg(feature = "prefilter-teddy")]
+                if let Some(teddy) = teddy {
+                    use aho_corasick::Span;
+                    let mut pos = offset;
+                    loop {
+                        let m = teddy.find_in(bytes, Span::from(pos..bytes.len()))?;
+                        if let Some(found) = self.verify_at(forward, bytes, m.start(), scratch) {
+                            return Some(found);
+                        }
+                        pos = m.start() + 1;
+                    }
+                }
                 let mut pos = offset;
                 loop {
                     let j = searcher.find(bytes, pos)?; // clean-run start
@@ -623,6 +758,17 @@ impl TdfaProgram {
     #[cfg(test)]
     pub(crate) fn is_casefold_literal(&self) -> bool {
         matches!(self.strategy, Strategy::CaseFoldLiteral { .. })
+    }
+
+    /// Test-only: whether the case-fold-literal strategy is driving candidates
+    /// with the Teddy prefilter (vs. the `CaseFoldSearcher` fallback). Guards
+    /// against a silent fallback regression when `prefilter-teddy` is on.
+    #[cfg(all(test, feature = "prefilter-teddy"))]
+    pub(crate) fn uses_teddy(&self) -> bool {
+        matches!(
+            self.strategy,
+            Strategy::CaseFoldLiteral { teddy: Some(_), .. }
+        )
     }
 
     /// Stats of the underlying automaton (for the benchmarks' size columns).
