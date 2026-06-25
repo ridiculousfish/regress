@@ -300,7 +300,9 @@ fn should_prefilter(pred: &StartPredicate) -> bool {
         StartPredicate::ByteSet1(bs) => !bs.iter().any(|&b| byte_is_common(b)),
         StartPredicate::ByteSet2(bs) => !bs.iter().any(|&b| byte_is_common(b)),
         StartPredicate::ByteSet3(bs) => !bs.iter().any(|&b| byte_is_common(b)),
-        StartPredicate::ByteBracket(bm) => !(0..=255u8).any(|b| byte_is_common(b) && bm.contains(b)),
+        StartPredicate::ByteBracket(bm) => {
+            !(0..=255u8).any(|b| byte_is_common(b) && bm.contains(b))
+        }
         StartPredicate::Arbitrary | StartPredicate::StartAnchored => false,
     }
 }
@@ -404,10 +406,7 @@ impl TdfaProgram {
         let mut unanchored = Tdfa::try_from(&nfa)?;
         unanchored.optimize();
         let group_names = unanchored.group_names().to_vec().into_boxed_slice();
-        Ok(Self::from_parts(
-            Strategy::Scan { unanchored },
-            group_names,
-        ))
+        Ok(Self::from_parts(Strategy::Scan { unanchored }, group_names))
     }
 
     /// Try to build a [`Strategy::ReverseInner`] for a regex ending in the
