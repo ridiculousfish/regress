@@ -1,10 +1,12 @@
-//! Reverse automaton for required-suffix-literal search.
+//! Reverse automaton for required interior/suffix-literal search.
 //!
 //! Some patterns have no usable *prefix* literal (so the Phase-1 prefilter
-//! can't help) but do end in a required literal — e.g. `\w+\s+Holmes`. For
-//! those we find the literal with `memmem`, then **drive the automaton
-//! backwards** from the literal's end to locate the match start, and finally run
-//! the forward (tagged) TDFA from that start for the real extent and captures.
+//! can't help) but do contain a required literal — at the end (`\w+\s+Holmes`)
+//! or interior (`(\w+)'(\w+)`). For those we find the literal with `memmem`,
+//! then **drive a reverse automaton of the pattern *before* the literal**
+//! backwards from the literal's start to locate the match start, and finally run
+//! the forward (tagged) TDFA from that start for the real extent and captures
+//! (the part after the literal, if any, is matched by the forward run).
 //!
 //! The backward driver is a plain DFA built from the **reversed** NFA graph
 //! (tag-free): edges flipped, the old goal becomes the start and the old start

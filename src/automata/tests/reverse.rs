@@ -1,9 +1,11 @@
-//! Reverse-automaton (required-suffix-literal) strategy tests.
+//! Reverse-automaton (required interior/suffix literal) strategy tests.
 //!
-//! Each case drives the `ReverseInner` strategy (memmem the suffix, walk the
-//! reverse DFA back to the start, forward-verify) and checks it against the
-//! classical backtracker — the reference engine — over adversarial inputs that
-//! stress leftmost-match selection across multiple literal occurrences.
+//! Each case drives the `ReverseInner` strategy (memmem the literal, walk the
+//! reversed *prefix* DFA back to the start, forward-verify) and checks it against
+//! the classical backtracker — the reference engine — over adversarial inputs
+//! that stress leftmost-match selection across multiple literal occurrences. The
+//! literal may be interior (`(\w+)'(\w+)`), with the part after it verified by
+//! the forward run, not just a suffix.
 
 use crate::Flags;
 use crate::automata::executors::TdfaExecutor;
@@ -115,4 +117,31 @@ fn charclass_run_before_literal() {
 fn multichar_overlapping_suffix() {
     // Overlapping occurrences of the suffix literal ("aa" in "aaa").
     check(r"x+aa", &["xaa", "xaaa", "xaaaa", "aa", "xxaa yaa", "xaaxaa"]);
+}
+
+#[test]
+fn inner_literal_contraction() {
+    // The motivating interior-literal case: a single-byte `'` between two word
+    // runs, with the part *after* the literal verified by the forward run.
+    check(
+        r"(\w+)'(\w+)",
+        &[
+            "",
+            "don't",
+            "it's a can't won't",
+            "'leading",       // no word before — no match
+            "trailing'",      // no word after — no match
+            "a'b'c",          // overlapping candidates around adjacent quotes
+            "say it's, y'all",
+        ],
+    );
+}
+
+#[test]
+fn inner_literal_with_tail() {
+    // Interior literal `@`, then a non-trivial suffix the forward run must match.
+    check(
+        r"\w+@\w+\.\w+",
+        &["a@b.co", "x y@z.org w", "no-at-here", "u@v", "p@q.r s@t.uv"],
+    );
 }
