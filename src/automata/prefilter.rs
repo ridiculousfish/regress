@@ -62,6 +62,17 @@ enum Strategy {
         literal: Box<memmem::Finder<'static>>,
         len: usize,
     },
+    /// The whole regex is exactly an *alternation of literals* (e.g.
+    /// `Sherlock|Holmes|Watson`) — no captures, tail, or assertions. An
+    /// aho-corasick Teddy (SIMD multi-substring) searcher matches all of them at
+    /// once, and the matched needle's span IS the match, so like `WholeLiteral`
+    /// there's no automaton. This is the regex crate's multi-literal path; it
+    /// replaces the leaky "union of first bytes" start predicate the generic
+    /// `Prefix` strategy would otherwise use for a literal alternation.
+    #[cfg(feature = "prefilter-teddy")]
+    MultiLiteral {
+        searcher: aho_corasick::packed::Searcher,
+    },
     /// No usable literal: one linear pass over the unanchored automaton.
     Scan { unanchored: Tdfa },
     /// Prefix literal / byte set: skip to candidates, anchored TDFA verifies.
@@ -184,6 +195,62 @@ fn whole_literal(re: &ir::Regex) -> Option<Vec<u8>> {
         }
     }
     lit(&re.node)
+}
+
+/// If the regex is *exactly* an alternation of literal byte sequences — no
+/// captures, tail, or assertions (e.g. `Sherlock|Holmes|Watson`) — return the
+/// alternatives in source (priority) order. Each is then a whole match, so a
+/// Teddy multi-substring searcher's span IS the match and no automaton is needed
+/// (the multi-literal analogue of [`whole_literal`]).
+///
+/// `None` unless there are 2–`MAX_LITERALS` non-empty literal alternatives and
+/// nothing else: the structural whitelist (`Alt`/`ByteSequence`, plus trailing
+/// zero-width `Goal`/`Empty`) guarantees no capture groups or anchors, so the
+/// matched needle's `start..end` is the exact ECMAScript leftmost-first match.
+#[cfg(feature = "prefilter-teddy")]
+fn literal_alternation(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
+    use ir::Node;
+    // Past this many literals Teddy spills to its slower verify path; the
+    // generic strategy is then no worse. (Practical alternations are small.)
+    const MAX_LITERALS: usize = 64;
+
+    // The optimizer wraps the top-level `Alt` in a `Cat` with a trailing `Goal`.
+    let mut node = &re.node;
+    if let Node::Cat(nodes) = node {
+        let mut lit = None;
+        for n in nodes {
+            match n {
+                Node::Goal | Node::Empty => {}
+                other if lit.is_none() => lit = Some(other),
+                _ => return None, // a second consuming node — not a bare alternation
+            }
+        }
+        node = lit?;
+    }
+
+    // Flatten the right-nested `Alt(a, Alt(b, …))` into its literal leaves, in
+    // left-to-right priority order. Any non-literal leaf disqualifies the whole
+    // pattern (fall back to the generic strategy).
+    fn collect(node: &Node, out: &mut Vec<Vec<u8>>) -> Option<()> {
+        match node {
+            Node::Alt(a, b) => {
+                collect(a, out)?;
+                collect(b, out)?;
+                Some(())
+            }
+            Node::ByteSequence(b) if !b.is_empty() => {
+                out.push(b.clone());
+                Some(())
+            }
+            _ => None,
+        }
+    }
+    let mut lits = Vec::new();
+    collect(node, &mut lits)?;
+    if lits.len() < 2 || lits.len() > MAX_LITERALS {
+        return None;
+    }
+    Some(lits)
 }
 
 /// The fold-clean run extracted from a case-insensitive literal: the run's
@@ -486,6 +553,20 @@ impl TdfaProgram {
             ));
         }
 
+        // A literal alternation (`Sherlock|Holmes|…`): a Teddy multi-substring
+        // searcher matches every alternative at once and the span is the match —
+        // no automaton, and far more selective than the generic `Prefix`
+        // strategy's union-of-first-bytes predicate. Skipped if Teddy declines.
+        #[cfg(feature = "prefilter-teddy")]
+        if let Some(lits) = literal_alternation(re) {
+            if let Some(searcher) = build_teddy(&lits) {
+                return Ok(Self::from_parts(
+                    Strategy::MultiLiteral { searcher },
+                    Box::new([]),
+                ));
+            }
+        }
+
         // Case-insensitive literal (per-character case sets): search its longest
         // fold-clean ASCII run and verify the full pattern with the anchored
         // automaton. Tried before the start-predicate gate, which would reject
@@ -622,8 +703,10 @@ impl TdfaProgram {
             // The unanchored single-pass scan: the JIT's capture tier handles
             // its `.*?`-stamped start.
             Strategy::Scan { unanchored } => Some(unanchored),
-            // Whole-literal needs no automaton.
+            // Whole-literal / multi-literal need no automaton.
             Strategy::WholeLiteral { .. } => None,
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::MultiLiteral { .. } => None,
         };
         if let Some(tdfa) = automaton {
             self.jit = JittedTdfa::compile(tdfa).ok();
@@ -665,6 +748,15 @@ impl TdfaProgram {
                 // The literal is the entire match: no captures, no automaton.
                 Some(NfaMatch {
                     range: i..i + len,
+                    captures: Vec::new(),
+                })
+            }
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::MultiLiteral { searcher } => {
+                // The matched needle (leftmost-first) is the entire match.
+                let m = searcher.find_in(bytes, aho_corasick::Span::from(offset..bytes.len()))?;
+                Some(NfaMatch {
+                    range: m.start()..m.end(),
                     captures: Vec::new(),
                 })
             }
@@ -778,6 +870,8 @@ impl TdfaProgram {
     fn strategy_name(&self) -> &'static str {
         match &self.strategy {
             Strategy::WholeLiteral { .. } => "whole-literal",
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::MultiLiteral { .. } => "multi-literal",
             Strategy::Scan { .. } => "scan",
             Strategy::Prefix { .. } => "prefix",
             Strategy::CaseFoldLiteral { .. } => "casefold-literal",
@@ -829,6 +923,19 @@ impl TdfaProgram {
                 diag.search_hits += 1;
                 Some(NfaMatch {
                     range: i..i + len,
+                    captures: Vec::new(),
+                })
+            }
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::MultiLiteral { searcher } => {
+                diag.search_calls += 1;
+                let start = std::time::Instant::now();
+                let m = searcher.find_in(bytes, aho_corasick::Span::from(offset..bytes.len()));
+                diag.search_time += start.elapsed();
+                let m = m?;
+                diag.search_hits += 1;
+                Some(NfaMatch {
+                    range: m.start()..m.end(),
                     captures: Vec::new(),
                 })
             }
@@ -955,6 +1062,8 @@ impl TdfaProgram {
             // No automaton; the executor's scratch is never touched. Any
             // non-zero width is fine.
             Strategy::WholeLiteral { .. } => return 3,
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::MultiLiteral { .. } => return 3,
             Strategy::Scan { unanchored } => unanchored,
             Strategy::Prefix { anchored, .. } => anchored,
             Strategy::CaseFoldLiteral { forward, .. } => forward,
@@ -991,11 +1100,26 @@ impl TdfaProgram {
         )
     }
 
+    /// Test-only: whether this program uses the multi-literal (Teddy
+    /// alternation) strategy.
+    #[cfg(all(test, feature = "prefilter-teddy"))]
+    pub(crate) fn is_multi_literal(&self) -> bool {
+        matches!(self.strategy, Strategy::MultiLiteral { .. })
+    }
+
     /// Stats of the underlying automaton (for the benchmarks' size columns).
     pub fn stats(&self) -> TdfaStats {
         match &self.strategy {
             // No automaton was built.
             Strategy::WholeLiteral { .. } => TdfaStats {
+                num_states: 0,
+                num_marks: 0,
+                total_commands: 0,
+                copy_commands: 0,
+                currentpos_commands: 0,
+            },
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::MultiLiteral { .. } => TdfaStats {
                 num_states: 0,
                 num_marks: 0,
                 total_commands: 0,
