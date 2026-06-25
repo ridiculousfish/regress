@@ -45,7 +45,9 @@ nfa = ["smallvec"]
 # specializes a built TDFA into machine code. Requires `std` (executable memory)
 # and `nfa` (the TDFA itself), and is incompatible with `prohibit-unsafe`
 # (codegen + calling generated code is inherently unsafe). aarch64 + x86-64 only.
-tdfa-jit = ["nfa", "std", "dep:region"]
+# Pulls in `prefilter-teddy`: the JIT path already requires std + unsafe, so the
+# Teddy case-insensitive prefilter comes along automatically.
+tdfa-jit = ["nfa", "std", "dep:region", "prefilter-teddy"]
 
 # Adds `--dump-jit` disassembly of the generated TDFA-JIT code (via capstone).
 # A development aid only; off by default.
