@@ -116,3 +116,31 @@ fn width_changing_unicode_folds() {
     // 'k'→Kelvin: only relevant if regress folds it; either way match the oracle.
     check("milk", &["MILK", "miﬀ no", "the milk"]);
 }
+
+#[test]
+fn teddy_dense_near_misses() {
+    // Adversarial for the Teddy prefilter: many partial prefixes (`Sh`, `She`,
+    // `Sher`) that share the first bytes but don't complete, plus offset and
+    // long-s (ſ, mid- and start-of-word) folds. Cross-checked against the oracle
+    // so it validates whichever candidate finder is compiled in.
+    check(
+        "Sherlock",
+        &[
+            "she shed sheer sherbet sherlock shelf",
+            "ſherlock sherlocſ Sherlock", // ſ leads one real match, garbles another
+            "sherlocksherlocksherlock",
+            "SHERSHERSHERLOCK",
+            "no sherl ock here",
+        ],
+    );
+}
+
+/// With `prefilter-teddy` on, the canonical `Sherlock`/i pattern must actually
+/// drive candidates through Teddy (not silently fall back to `CaseFoldSearcher`).
+#[cfg(feature = "prefilter-teddy")]
+#[test]
+fn teddy_is_active_for_sherlock() {
+    let re = parse_ir("Sherlock", "i");
+    let prog = TdfaProgram::try_from_ir(&re).expect("program build failed");
+    assert!(prog.uses_teddy(), "Sherlock/i should use the Teddy prefilter");
+}

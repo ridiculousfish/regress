@@ -181,6 +181,11 @@ fn main() {
         ("the_upper", r"The", ""),
         ("the_nocase", r"the", "i"),
         ("the_whitespace", r"the\s+\w+", ""),
+        // Case-insensitive literal whose letters are *all* common (no rare fold
+        // byte to anchor `memchr` on) — the case where the single-byte casefold
+        // scan stops constantly and the Teddy 4-byte-prefix prefilter (feature
+        // `prefilter-teddy`) pulls furthest ahead.
+        ("there_nocase", r"there", "i"),
         // Scan-heavy.
         ("words", r"\w+", ""),
         ("ing_suffix", r"[a-zA-Z]+ing", ""),
