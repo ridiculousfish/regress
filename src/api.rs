@@ -917,6 +917,8 @@ pub mod backends {
     pub use crate::automata::executors::TdfaJitExecutor;
     #[cfg(feature = "nfa")]
     pub use crate::automata::nfa::{Error as NfaError, Nfa};
+    #[cfg(all(feature = "nfa", feature = "std"))]
+    pub use crate::automata::prefilter::TdfaDiagnostics;
     #[cfg(feature = "nfa")]
     pub use crate::automata::prefilter::TdfaProgram;
     #[cfg(feature = "tdfa-jit")]

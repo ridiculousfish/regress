@@ -105,6 +105,39 @@ pub enum BuildError {
     Tdfa(tdfa::Error),
 }
 
+/// Timing/counter breakdown for one `find_iter`-style pass through a
+/// [`TdfaProgram`]. Intended for backend diagnostics and benchmark triage.
+#[cfg(feature = "std")]
+#[derive(Debug, Clone)]
+pub struct TdfaDiagnostics {
+    pub strategy: &'static str,
+    pub jit_active: bool,
+    pub matches: usize,
+    pub search_calls: usize,
+    pub search_hits: usize,
+    pub verify_calls: usize,
+    pub search_time: std::time::Duration,
+    pub verify_time: std::time::Duration,
+    pub total_time: std::time::Duration,
+}
+
+#[cfg(feature = "std")]
+impl TdfaDiagnostics {
+    fn new(strategy: &'static str, jit_active: bool) -> Self {
+        Self {
+            strategy,
+            jit_active,
+            matches: 0,
+            search_calls: 0,
+            search_hits: 0,
+            verify_calls: 0,
+            search_time: std::time::Duration::ZERO,
+            verify_time: std::time::Duration::ZERO,
+            total_time: std::time::Duration::ZERO,
+        }
+    }
+}
+
 impl From<crate::automata::nfa::Error> for BuildError {
     fn from(e: crate::automata::nfa::Error) -> Self {
         BuildError::Nfa(e)
@@ -300,7 +333,9 @@ fn should_prefilter(pred: &StartPredicate) -> bool {
         StartPredicate::ByteSet1(bs) => !bs.iter().any(|&b| byte_is_common(b)),
         StartPredicate::ByteSet2(bs) => !bs.iter().any(|&b| byte_is_common(b)),
         StartPredicate::ByteSet3(bs) => !bs.iter().any(|&b| byte_is_common(b)),
-        StartPredicate::ByteBracket(bm) => !(0..=255u8).any(|b| byte_is_common(b) && bm.contains(b)),
+        StartPredicate::ByteBracket(bm) => {
+            !(0..=255u8).any(|b| byte_is_common(b) && bm.contains(b))
+        }
         StartPredicate::Arbitrary | StartPredicate::StartAnchored => false,
     }
 }
@@ -404,10 +439,7 @@ impl TdfaProgram {
         let mut unanchored = Tdfa::try_from(&nfa)?;
         unanchored.optimize();
         let group_names = unanchored.group_names().to_vec().into_boxed_slice();
-        Ok(Self::from_parts(
-            Strategy::Scan { unanchored },
-            group_names,
-        ))
+        Ok(Self::from_parts(Strategy::Scan { unanchored }, group_names))
     }
 
     /// Try to build a [`Strategy::ReverseInner`] for a regex ending in the
@@ -595,6 +627,170 @@ impl TdfaProgram {
         }
     }
 
+    #[cfg(feature = "std")]
+    fn jit_is_active(&self) -> bool {
+        #[cfg(feature = "tdfa-jit")]
+        {
+            self.jit.is_some()
+        }
+        #[cfg(not(feature = "tdfa-jit"))]
+        {
+            false
+        }
+    }
+
+    #[cfg(feature = "std")]
+    fn strategy_name(&self) -> &'static str {
+        match &self.strategy {
+            Strategy::WholeLiteral { .. } => "whole-literal",
+            Strategy::Scan { .. } => "scan",
+            Strategy::Prefix { .. } => "prefix",
+            Strategy::CaseFoldLiteral { .. } => "casefold-literal",
+            Strategy::ReverseInner { .. } => "reverse-inner",
+        }
+    }
+
+    /// Run a complete `find_iter`-style pass and return a phase breakdown.
+    /// Normal matching paths are unchanged; this is only called by benchmarks or
+    /// tools that explicitly ask for diagnostics.
+    #[cfg(feature = "std")]
+    pub fn diagnostics(&self, text: &str) -> TdfaDiagnostics {
+        let bytes = text.as_bytes();
+        let mut scratch = Scratch::new(self.mark_width());
+        let mut diag = TdfaDiagnostics::new(self.strategy_name(), self.jit_is_active());
+        let mut offset = 0usize;
+        while offset <= bytes.len() {
+            let start = std::time::Instant::now();
+            let m = self.find_at_diagnostic(bytes, offset, &mut scratch, &mut diag);
+            diag.total_time += start.elapsed();
+            let Some(m) = m else {
+                break;
+            };
+            diag.matches += 1;
+            if m.range.end == m.range.start {
+                offset = next_utf8_offset(text, m.range.end);
+            } else {
+                offset = m.range.end;
+            }
+        }
+        diag
+    }
+
+    #[cfg(feature = "std")]
+    fn find_at_diagnostic(
+        &self,
+        bytes: &[u8],
+        offset: usize,
+        scratch: &mut Scratch<u32>,
+        diag: &mut TdfaDiagnostics,
+    ) -> Option<NfaMatch> {
+        match &self.strategy {
+            Strategy::WholeLiteral { literal, len } => {
+                diag.search_calls += 1;
+                let start = std::time::Instant::now();
+                let i = literal.find(&bytes[offset..]).map(|k| offset + k);
+                diag.search_time += start.elapsed();
+                let i = i?;
+                diag.search_hits += 1;
+                Some(NfaMatch {
+                    range: i..i + len,
+                    captures: Vec::new(),
+                })
+            }
+            Strategy::CaseFoldLiteral {
+                forward,
+                searcher,
+                prefix_lo,
+                prefix_hi,
+            } => {
+                let mut pos = offset;
+                loop {
+                    diag.search_calls += 1;
+                    let start = std::time::Instant::now();
+                    let found = searcher.find(bytes, pos);
+                    diag.search_time += start.elapsed();
+                    let j = found?;
+                    diag.search_hits += 1;
+                    if let Some(s_hi) = j.checked_sub(*prefix_lo) {
+                        let s_lo = j.saturating_sub(*prefix_hi).max(offset);
+                        let mut s = s_lo;
+                        while s <= s_hi {
+                            diag.verify_calls += 1;
+                            let start = std::time::Instant::now();
+                            let m = self.verify_at(forward, bytes, s, scratch);
+                            diag.verify_time += start.elapsed();
+                            if m.is_some() {
+                                return m;
+                            }
+                            s += 1;
+                        }
+                    }
+                    pos = j + 1;
+                }
+            }
+            Strategy::Scan { unanchored } => {
+                diag.verify_calls += 1;
+                let start = std::time::Instant::now();
+                let m = self.verify_at(unanchored, bytes, offset, scratch);
+                diag.verify_time += start.elapsed();
+                m
+            }
+            Strategy::Prefix {
+                anchored,
+                prefilter,
+                ..
+            } => {
+                let mut pos = offset;
+                loop {
+                    diag.search_calls += 1;
+                    let start = std::time::Instant::now();
+                    let cand = prefilter.find_from(bytes, pos);
+                    diag.search_time += start.elapsed();
+                    let cand = cand?;
+                    diag.search_hits += 1;
+                    diag.verify_calls += 1;
+                    let start = std::time::Instant::now();
+                    let m = self.verify_at(anchored, bytes, cand, scratch);
+                    diag.verify_time += start.elapsed();
+                    if m.is_some() {
+                        return m;
+                    }
+                    pos = cand + 1;
+                }
+            }
+            Strategy::ReverseInner {
+                forward,
+                reverse,
+                literal,
+                lit_len,
+            } => {
+                let mut pos = offset;
+                loop {
+                    diag.search_calls += 1;
+                    let start = std::time::Instant::now();
+                    let i = literal.find(&bytes[pos..]).map(|k| pos + k);
+                    diag.search_time += start.elapsed();
+                    let i = i?;
+                    diag.search_hits += 1;
+                    let end = i + lit_len;
+                    let start = std::time::Instant::now();
+                    let s = reverse::reverse_find_start(reverse, bytes, end, offset);
+                    diag.search_time += start.elapsed();
+                    if let Some(s) = s {
+                        diag.verify_calls += 1;
+                        let start = std::time::Instant::now();
+                        let m = self.verify_at(forward, bytes, s, scratch);
+                        diag.verify_time += start.elapsed();
+                        if m.is_some() {
+                            return m;
+                        }
+                    }
+                    pos = i + 1;
+                }
+            }
+        }
+    }
+
     /// The mark-file width a reused [`Scratch`] for this program must have.
     pub(crate) fn mark_width(&self) -> usize {
         let tdfa = match &self.strategy {
@@ -654,6 +850,18 @@ impl TdfaProgram {
     }
 }
 
+#[cfg(feature = "std")]
+fn next_utf8_offset(text: &str, offset: usize) -> usize {
+    if offset >= text.len() {
+        return text.len() + 1;
+    }
+    let mut next = offset + 1;
+    while next < text.len() && !text.is_char_boundary(next) {
+        next += 1;
+    }
+    next
+}
+
 /// The `tdfa-jit` backend's program: a [`TdfaProgram`] with its anchored verify
 /// automaton JIT-compiled to native code where possible. A distinct type so it
 /// is selected explicitly (its own `Executor`, its own `--exec tdfa-jit` name,
@@ -692,6 +900,12 @@ impl TdfaJitProgram {
     /// See [`TdfaProgram::group_names`].
     pub fn group_names(&self) -> &[Box<str>] {
         self.0.group_names()
+    }
+
+    /// See [`TdfaProgram::diagnostics`].
+    #[cfg(feature = "std")]
+    pub fn diagnostics(&self, text: &str) -> TdfaDiagnostics {
+        self.0.diagnostics(text)
     }
 
     /// Whether native code is actually in use (vs. interpreter fallback).

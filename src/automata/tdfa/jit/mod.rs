@@ -203,7 +203,17 @@ fn compile_code(tdfa: &Tdfa) -> Result<(Tier, Vec<u8>, usize), JitError> {
     #[cfg(target_arch = "aarch64")]
     let (code, data_start) = lower::<aarch64::Aarch64Asm>(tdfa, tier)?;
     #[cfg(target_arch = "x86_64")]
-    let (code, data_start) = lower::<x86_64::X86_64Asm>(tdfa, tier)?;
+    let (code, data_start) = {
+        if matches!(tier, Tier::CaptureFree) {
+            if let Some(compiled) = x86_64::try_compile_literal_chain(tdfa) {
+                compiled
+            } else {
+                lower::<x86_64::X86_64Asm>(tdfa, tier)?
+            }
+        } else {
+            lower::<x86_64::X86_64Asm>(tdfa, tier)?
+        }
+    };
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     let (code, data_start) = {
         let _ = (tdfa, tier);

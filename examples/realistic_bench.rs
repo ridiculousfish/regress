@@ -52,6 +52,25 @@ fn throughput(input_len: usize, mut scan: impl FnMut() -> usize) -> f64 {
     (input_len * ITERS) as f64 / dt.as_secs_f64() / 1e6
 }
 
+fn ms(d: Duration) -> f64 {
+    d.as_secs_f64() * 1000.0
+}
+
+fn print_tdfa_diag(case: &str, label: &str, diag: &regress::backends::TdfaDiagnostics) {
+    println!(
+        "diag {case} {label}: strategy={} jit={} matches={} search_calls={} search_hits={} verify_calls={} total_ms={:.3} search_ms={:.3} verify_ms={:.3}",
+        diag.strategy,
+        diag.jit_active,
+        diag.matches,
+        diag.search_calls,
+        diag.search_hits,
+        diag.verify_calls,
+        ms(diag.total_time),
+        ms(diag.search_time),
+        ms(diag.verify_time),
+    );
+}
+
 fn cell(mbps: Option<f64>) -> String {
     match mbps {
         Some(v) => format!("{:.0}", v),
@@ -184,6 +203,7 @@ fn main() {
     // substring, e.g. `cargo run --release --example realistic_bench -- everything_greedy_nl`.
     let filters: Vec<String> = std::env::args().skip(1).collect();
     let selected = |name: &str| filters.is_empty() || filters.iter().any(|f| name.contains(f));
+    let diag_enabled = std::env::var_os("REGRESS_TDFA_DIAG").is_some();
 
     println!("Sherlock corpus ({} bytes), throughput (MB/s), higher is better:\n", haystack.len());
     println!(
@@ -259,6 +279,11 @@ fn main() {
                 backends::find::<TdfaExecutor>(t, haystack, 0).count()
             })
         });
+        if diag_enabled {
+            if let Some(t) = &tdfa {
+                print_tdfa_diag(name, "tdfa", &t.diagnostics(haystack));
+            }
+        }
         let rx_mbps = rx.as_ref().map(|r| {
             throughput(haystack.len(), || {
                 let mut groups = 0usize;
@@ -282,6 +307,11 @@ fn main() {
                     backends::find::<TdfaJitExecutor>(p, haystack, 0).count()
                 })
             });
+            if diag_enabled {
+                if let Some(p) = &prog {
+                    print_tdfa_diag(name, "tdfa-jit", &p.diagnostics(haystack));
+                }
+            }
             let active = prog.as_ref().is_some_and(|p| p.jit_active());
             format!(" {:>10}", jit_cell(mbps, active))
         };
