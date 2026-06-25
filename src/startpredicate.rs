@@ -233,26 +233,43 @@ pub(crate) fn anchored_to_start(re: &ir::Regex) -> bool {
 /// capture group) whose **last** node is a `ByteSequence` qualifies. A pattern
 /// that is itself a pure prefix/whole literal is left to the Phase-1 prefilter
 /// (it has a usable prefix predicate, so this path isn't reached for it).
-pub(crate) fn required_suffix_literal(re: &ir::Regex) -> Option<Vec<u8>> {
-    fn of_node(n: &Node) -> Option<Vec<u8>> {
+pub(crate) fn required_inner_literal(re: &ir::Regex) -> Option<(Vec<Node>, Vec<u8>)> {
+    // A single-byte literal is only worth scanning for if it's uncommon (an
+    // apostrophe, `@`, `/`…); a common one (space, lowercase letter) stops too
+    // often. Multi-byte literals are always selective (memmem). Mirrors
+    // `prefilter::byte_is_common`.
+    fn worth_scanning(bytes: &[u8]) -> bool {
+        match *bytes {
+            [b] => !(b == b' ' || b.is_ascii_lowercase()),
+            _ => bytes.len() >= 2,
+        }
+    }
+    fn of_node(n: &Node) -> Option<(Vec<Node>, Vec<u8>)> {
         match n {
             Node::Cat(nodes) => {
-                // The optimizer appends a zero-width `Goal` (and sometimes
-                // `Empty`) marker; the real suffix is the last *consuming* node.
-                let mut rev = nodes
-                    .iter()
-                    .rev()
-                    .skip_while(|n| matches!(n, Node::Goal | Node::Empty));
-                let last = rev.next()?;
-                if let Node::ByteSequence(bytes) = last {
-                    // Require something consuming before the literal, so this is
-                    // a genuine *suffix* (not a whole/prefix literal that the
-                    // Phase-1 prefilter already handles).
-                    if bytes.len() >= 2 && rev.next().is_some() {
-                        return Some(bytes.clone());
+                // Pick the most selective (longest) `ByteSequence` that has at
+                // least one consuming node before it, so the reversed *prefix*
+                // (everything before the literal) can be searched leftward to
+                // the match start. The part after the literal — possibly nothing,
+                // the suffix case — is left to the forward verify.
+                let mut best: Option<(usize, &Vec<u8>)> = None;
+                let mut have_prefix_node = false;
+                for (k, node) in nodes.iter().enumerate() {
+                    match node {
+                        Node::Goal | Node::Empty => {}
+                        Node::ByteSequence(bytes)
+                            if have_prefix_node && worth_scanning(bytes) =>
+                        {
+                            if best.is_none_or(|(_, b)| bytes.len() > b.len()) {
+                                best = Some((k, bytes));
+                            }
+                            have_prefix_node = true;
+                        }
+                        _ => have_prefix_node = true,
                     }
                 }
-                None
+                let (k, lit) = best?;
+                Some((nodes[..k].to_vec(), lit.clone()))
             }
             Node::CaptureGroup { contents, .. } => of_node(contents),
             _ => None,

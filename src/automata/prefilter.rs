@@ -113,15 +113,16 @@ enum Strategy {
         forward: Tdfa,
         teddy: aho_corasick::packed::Searcher,
     },
-    /// Required *suffix* literal, no usable prefix (e.g. `\w+\s+Holmes`). Find
-    /// the literal with `memmem`, drive the `reverse` DFA leftward from its end
-    /// to the leftmost match start, then run the `forward` anchored TDFA there
-    /// for the real extent and captures.
+    /// A required *interior or suffix* literal, with no usable prefix (e.g.
+    /// `\w+\s+Holmes`, `(\w+)'(\w+)`). Find the literal with `memmem`, drive the
+    /// `reverse` DFA (of the pattern *before* the literal) leftward from the
+    /// literal's start to the leftmost match start, then run the `forward`
+    /// anchored TDFA there for the real extent and captures (the part after the
+    /// literal is verified forward).
     ReverseInner {
         forward: Tdfa,
         reverse: Dfa,
         literal: Box<memmem::Finder<'static>>,
-        lit_len: usize,
     },
 }
 
@@ -764,13 +765,13 @@ impl TdfaProgram {
             ));
         }
 
-        // No usable prefix. If the regex ends in a required literal, try the
-        // reverse-automaton strategy (find the suffix, walk backwards to the
-        // start, forward-verify). Falls back to a plain scan when that isn't
-        // applicable (e.g. zero-width assertions defeat the tag-free reverse
-        // DFA — see `reverse::reverse_nfa`).
-        if let Some(suffix) = startpredicate::required_suffix_literal(re) {
-            if let Some(program) = Self::try_reverse_inner(re, suffix)? {
+        // No usable prefix. If the regex has a required interior/suffix literal,
+        // try the reverse-automaton strategy (find the literal, walk the reversed
+        // prefix backwards to the start, forward-verify). Falls back to a plain
+        // scan when that isn't applicable (e.g. zero-width assertions defeat the
+        // tag-free reverse DFA — see `reverse::reverse_nfa`).
+        if let Some((prefix, literal)) = startpredicate::required_inner_literal(re) {
+            if let Some(program) = Self::try_reverse_inner(re, prefix, literal)? {
                 return Ok(program);
             }
         }
@@ -782,31 +783,46 @@ impl TdfaProgram {
         Ok(Self::from_parts(Strategy::Scan { unanchored }, group_names))
     }
 
-    /// Try to build a [`Strategy::ReverseInner`] for a regex ending in the
-    /// required `suffix` literal. Returns `Ok(None)` (caller falls back to a
-    /// scan) when the reverse automaton can't be built — currently when the
-    /// pattern has zero-width assertions, which the tag-free reverse DFA can't
-    /// honor, or when the reverse DFA exceeds its state budget. NFA/TDFA build
-    /// failures propagate as `Err`.
-    fn try_reverse_inner(re: &ir::Regex, suffix: Vec<u8>) -> Result<Option<Self>, BuildError> {
-        let anchored_nfa = Nfa::try_from(re)?;
-        let Some(reverse_nfa) = reverse::reverse_nfa(&anchored_nfa) else {
+    /// Try to build a [`Strategy::ReverseInner`] for a regex with a required
+    /// `literal` whose preceding `prefix` nodes are searched in reverse. Returns
+    /// `Ok(None)` (caller falls back to a scan) when the reverse automaton can't
+    /// be built — when the prefix has zero-width assertions the tag-free reverse
+    /// DFA can't honor, when the reverse DFA exceeds its state budget, or when
+    /// the prefix sub-pattern doesn't form a buildable NFA. NFA/TDFA build
+    /// failures for the *whole* pattern propagate as `Err`.
+    fn try_reverse_inner(
+        re: &ir::Regex,
+        prefix: Vec<ir::Node>,
+        literal: Vec<u8>,
+    ) -> Result<Option<Self>, BuildError> {
+        // Reverse DFA of the pattern *before* the literal (captures irrelevant —
+        // the reverse is tag-free), used to walk leftward to the match start.
+        // Re-append the `Goal` terminator the slice dropped (the NFA builder
+        // requires a pattern to end in it).
+        let mut prefix = prefix;
+        prefix.push(ir::Node::Goal);
+        let prefix_re = ir::Regex {
+            node: ir::Node::Cat(prefix),
+            flags: re.flags,
+        };
+        let Ok(prefix_nfa) = Nfa::try_from(&prefix_re) else {
+            return Ok(None);
+        };
+        let Some(reverse_nfa) = reverse::reverse_nfa(&prefix_nfa) else {
             return Ok(None);
         };
         let Ok(reverse) = Dfa::try_from(&reverse_nfa) else {
             return Ok(None);
         };
-        let mut forward = Tdfa::try_from(&anchored_nfa)?;
+        let mut forward = Tdfa::try_from(&Nfa::try_from(re)?)?;
         forward.optimize();
         let group_names = forward.group_names().to_vec().into_boxed_slice();
-        let lit_len = suffix.len();
-        let literal = Box::new(memmem::Finder::new(&suffix).into_owned());
+        let literal = Box::new(memmem::Finder::new(&literal).into_owned());
         Ok(Some(Self::from_parts(
             Strategy::ReverseInner {
                 forward,
                 reverse,
                 literal,
-                lit_len,
             },
             group_names,
         )))
@@ -988,18 +1004,17 @@ impl TdfaProgram {
                 forward,
                 reverse,
                 literal,
-                lit_len,
             } => {
                 let mut pos = offset;
                 loop {
                     let i = literal.find(&bytes[pos..]).map(|k| pos + k)?;
-                    let end = i + lit_len;
-                    // Walk the reverse DFA back from the literal end to the
-                    // leftmost start, then forward-verify there for the real
-                    // extent + captures. The forward run is the source of truth
-                    // (it fixes a greedy end and produces captures); the reverse
-                    // only locates the start.
-                    if let Some(s) = reverse::reverse_find_start(reverse, bytes, end, offset) {
+                    // Walk the reversed prefix back from the literal's start to
+                    // the leftmost match start, then forward-verify there for the
+                    // real extent + captures. The forward run is the source of
+                    // truth (it fixes a greedy end, matches the part after the
+                    // literal, and produces captures); the reverse only locates
+                    // the start.
+                    if let Some(s) = reverse::reverse_find_start(reverse, bytes, i, offset) {
                         if let Some(m) = self.verify_at(forward, bytes, s, scratch) {
                             return Some(m);
                         }
@@ -1205,7 +1220,6 @@ impl TdfaProgram {
                 forward,
                 reverse,
                 literal,
-                lit_len,
             } => {
                 let mut pos = offset;
                 loop {
@@ -1215,9 +1229,8 @@ impl TdfaProgram {
                     diag.search_time += start.elapsed();
                     let i = i?;
                     diag.search_hits += 1;
-                    let end = i + lit_len;
                     let start = std::time::Instant::now();
-                    let s = reverse::reverse_find_start(reverse, bytes, end, offset);
+                    let s = reverse::reverse_find_start(reverse, bytes, i, offset);
                     diag.search_time += start.elapsed();
                     if let Some(s) = s {
                         diag.verify_calls += 1;
