@@ -5,9 +5,10 @@
 //! `optimize` here) applies them as a separate, skippable step. As a child
 //! module of `tdfa`, this file accesses `Tdfa`'s private fields directly.
 //!
-//! Pipeline order (RA last; see the module docs): state minimization, then
-//! `compact_marks` (the register cleanup: copy fold + dead-mark elimination +
-//! dense renumbering).
+//! Pipeline order: `compact_marks` first (copy fold + dead-mark elimination +
+//! dense renumbering + register allocation), then state minimization. Running
+//! register cleanup first empties tag-free transition command lists, making more
+//! equivalent states byte-identical for minimization.
 
 use super::{
     FinalCommand, InputMark, MarkValue, TDFA_DEAD_STATE, TagCommand, TagCommandList, Tdfa,

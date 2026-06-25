@@ -1340,13 +1340,15 @@ impl Tdfa {
     /// correctly without it; this only shrinks the automaton.
     pub fn optimize(&mut self) {
         opt::optimize(self);
-        // `optimize` renumbers marks and rewrites the command lists, so the
-        // precompiled move sequences must be rebuilt from the new state.
-        self.compile_moves_all();
         // State minimization can remove anchor-alt-bearing states, so refresh
         // the precomputed flags the executor's dispatcher reads.
         self.has_anchor_alts = self.anchor_alts.iter().any(|alts| !alts.is_empty());
         self.has_conditionals = self.anchor_conditionals.iter().any(|cs| !cs.is_empty());
+        // `optimize` renumbers marks and rewrites the command lists, so the
+        // precompiled move sequences must be rebuilt from the new state. The
+        // capture-free fast table built there also depends on the refreshed
+        // dispatcher flags above.
+        self.compile_moves_all();
         self.accept_fallback =
             compute_accept_fallback(&self.accepting, &self.transitions, self.num_classes);
     }
