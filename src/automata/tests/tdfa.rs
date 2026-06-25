@@ -4,7 +4,7 @@ use crate::Flags;
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::nfa_backend::execute as execute_nfa_inner;
-use crate::automata::tdfa::Tdfa;
+use crate::automata::tdfa::{MarkValue, Tdfa};
 use crate::automata::tdfa_backend::execute as execute_tdfa_inner;
 
 fn execute_nfa(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
@@ -295,6 +295,36 @@ fn unanchored_alternation_marks_stay_bounded() {
         t2.num_marks(),
         t12.num_marks(),
     );
+}
+
+#[test]
+fn optimized_commands_fold_post_ra_stamped_temporaries() {
+    let mut t = make_tdfa("(?:(a)|(b)|(c))*");
+    t.optimize();
+
+    for cmds in t.transition_commands() {
+        let copy_sources: Vec<_> = cmds
+            .iter()
+            .filter_map(|cmd| match cmd.src {
+                MarkValue::Copy(src) => Some(src),
+                MarkValue::CurrentPos => None,
+            })
+            .collect();
+        for cmd in cmds {
+            let MarkValue::Copy(src) = cmd.src else {
+                continue;
+            };
+            if copy_sources.contains(&cmd.dst) {
+                continue;
+            }
+            assert!(
+                !cmds
+                    .iter()
+                    .any(|stamp| stamp.dst == src && matches!(stamp.src, MarkValue::CurrentPos)),
+                "optimized command list still copies from a mark stamped in the same list: {cmds:?}",
+            );
+        }
+    }
 }
 
 // ===== Unanchored single-pass search =====

@@ -199,6 +199,9 @@ pub(crate) fn compact_marks(t: &mut Tdfa) {
     eliminate_dead_marks(t);
     renumber_marks(t);
     register_allocate(t);
+    fold_currentpos_copies(t);
+    eliminate_dead_marks(t);
+    renumber_marks(t);
 }
 
 /// Marks of redundancy (above the `num_tags` floor) below which RA is skipped.
@@ -231,80 +234,31 @@ const MAX_RA_MARKS: usize = 1 << 14;
 const MAX_RA_INTERFERENCE: u128 = 8_000_000;
 
 /// Fold `r := CurrentPos` (phase 1) + `c := Copy(r)` (phase 2) into
-/// `c := CurrentPos`, collapsing the raw→canonical indirection for a
-/// freshly-stamped position. The freed `r` becomes dead (cleaned up by
-/// `eliminate_dead_marks`). Guarded to stay correct under the simultaneous
-/// command semantics:
+/// `c := CurrentPos`, collapsing raw→canonical indirections for freshly stamped
+/// positions. If `r` has no remaining reads, `eliminate_dead_marks` removes the
+/// now-dead stamp. If `r` is still read elsewhere, keeping `r := CurrentPos`
+/// preserves that value.
 ///
-/// - `r` must be read globally exactly once (this copy) and written by a
-///   `CurrentPos` in this same list (so moving the stamp is value-equal);
-/// - `c` must not be a `Copy` source within this same list — otherwise
-///   moving `c`'s write from phase 2 to phase 1 would change what a sibling
-///   copy reads from `c` (the parallel-shift case; those marks stay).
+/// Guarded to stay correct under the simultaneous command semantics: `c` must
+/// not be a `Copy` source within this same list, otherwise moving `c`'s write
+/// from phase 2 to phase 1 would change what a sibling copy reads from `c` (the
+/// parallel-shift case; those marks stay).
 fn fold_currentpos_copies(t: &mut Tdfa) {
-    let src_count = global_src_counts(t);
-    fold_list(&mut t.entry_commands_anchored, &src_count);
-    fold_list(&mut t.entry_commands_unanchored, &src_count);
+    fold_list(&mut t.entry_commands_anchored);
+    fold_list(&mut t.entry_commands_unanchored);
     for cmds in t.transition_commands.iter_mut() {
-        fold_list(cmds, &src_count);
+        fold_list(cmds);
     }
     for conds in t.anchor_conditionals.iter_mut() {
         for ac in conds.iter_mut() {
-            fold_list(&mut ac.commands, &src_count);
+            fold_list(&mut ac.commands);
         }
     }
     for alts in t.anchor_alts.iter_mut() {
         for alt in alts.iter_mut() {
-            fold_list(&mut alt.commands, &src_count);
+            fold_list(&mut alt.commands);
         }
     }
-}
-
-/// Per-mark count of reads (`Copy` sources in commands + `FinalCommand`
-/// sources) across the whole automaton.
-fn global_src_counts(t: &Tdfa) -> Vec<u32> {
-    // Indexed by mark id (all `< num_marks`); array indexing avoids hashing a
-    // mark for every `Copy` source across the whole automaton.
-    let mut counts = vec![0u32; t.num_marks];
-    let mut bump_cmds = |cmds: &[TagCommand]| {
-        for c in cmds {
-            if let MarkValue::Copy(m) = c.src {
-                counts[m.0 as usize] += 1;
-            }
-        }
-    };
-    bump_cmds(&t.entry_commands_anchored);
-    bump_cmds(&t.entry_commands_unanchored);
-    for cmds in t.transition_commands.iter() {
-        bump_cmds(cmds);
-    }
-    for conds in t.anchor_conditionals.iter() {
-        for ac in conds {
-            bump_cmds(&ac.commands);
-        }
-    }
-    for alts in t.anchor_alts.iter() {
-        for alt in alts {
-            bump_cmds(&alt.commands);
-        }
-    }
-    // Final sources count as reads too.
-    let mut bump_finals = |finals: &[FinalCommand]| {
-        for fc in finals {
-            if let MarkValue::Copy(m) = fc.src {
-                counts[m.0 as usize] += 1;
-            }
-        }
-    };
-    for fs in t.finals.iter() {
-        bump_finals(fs);
-    }
-    for conds in t.anchor_conditionals.iter() {
-        for ac in conds {
-            bump_finals(&ac.finals);
-        }
-    }
-    counts
 }
 
 /// Dead-mark elimination to a fixpoint: a command whose destination is read
@@ -700,9 +654,9 @@ fn drop_identity_copies(t: &mut Tdfa) {
 }
 
 /// Fold `c := Copy(r)` into `c := CurrentPos` within one command list when `r`
-/// is a once-read mark stamped by a `CurrentPos` in this list and `c` is not
-/// itself a `Copy` source here. See `fold_currentpos_copies` for why.
-fn fold_list(cmds: &mut TagCommandList, src_count: &[u32]) {
+/// is stamped by a `CurrentPos` in this list and `c` is not itself a `Copy`
+/// source here. See `fold_currentpos_copies` for why.
+fn fold_list(cmds: &mut TagCommandList) {
     // Command lists are tiny (typically ≤ a handful), so inline `SmallVec`s with
     // linear membership beat per-call `HashSet` allocations.
     let mut stamped_here: SmallVec<[InputMark; 8]> = SmallVec::new();
@@ -723,10 +677,7 @@ fn fold_list(cmds: &mut TagCommandList, src_count: &[u32]) {
     }
     for c in cmds.iter_mut() {
         if let MarkValue::Copy(r) = c.src {
-            if stamped_here.contains(&r)
-                && src_count[r.0 as usize] == 1
-                && !copy_src_here.contains(&c.dst)
-            {
+            if stamped_here.contains(&r) && !copy_src_here.contains(&c.dst) {
                 c.src = MarkValue::CurrentPos;
             }
         }

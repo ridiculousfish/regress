@@ -63,7 +63,11 @@ enum Fixup {
     /// 26-bit `b` displacement at `at`.
     Branch26 { at: u32, label: Label },
     /// A 32-bit jump-table word at `at`: `label_off - table_off`.
-    TableWord { at: u32, label: Label, table_off: u32 },
+    TableWord {
+        at: u32,
+        label: Label,
+        table_off: u32,
+    },
 }
 
 pub(crate) struct Aarch64Asm {
@@ -296,6 +300,9 @@ impl Assembler for Aarch64Asm {
             if lo == hi {
                 self.cmp_imm_w(BYTE, lo as u32); // cmp byte, lo
                 self.b_cond(COND_EQ, target); // b.eq target
+            } else if lo == 0 {
+                self.cmp_imm_w(BYTE, hi as u32); // cmp byte, hi
+                self.b_cond(COND_LS, target); // b.ls target (unsigned <=)
             } else {
                 self.sub_imm_w(MOVE_TMP, BYTE, lo as u32); // tmp = byte - lo
                 self.cmp_imm_w(MOVE_TMP, (hi - lo) as u32); // cmp tmp, hi-lo
@@ -449,4 +456,23 @@ fn read_u32(code: &[u8], at: u32) -> u32 {
 fn write_u32(code: &mut [u8], at: u32, val: u32) {
     let at = at as usize;
     code[at..at + 4].copy_from_slice(&val.to_le_bytes());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::asm::Assembler;
+    use super::*;
+
+    #[test]
+    fn zero_based_byte_range_dispatch_skips_subtract() {
+        let mut asm = Aarch64Asm::new();
+        let target = asm.fresh_label();
+        let default = asm.fresh_label();
+        asm.dispatch_byte_ranges(&[(0, 10, target)], default);
+        asm.bind(target);
+        asm.bind(default);
+        let code = asm.finish();
+
+        assert_eq!(code.len(), 12);
+    }
 }
