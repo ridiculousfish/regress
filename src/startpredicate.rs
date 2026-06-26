@@ -244,38 +244,46 @@ pub(crate) fn required_inner_literal(re: &ir::Regex) -> Option<(Vec<Node>, Vec<u
             _ => bytes.len() >= 2,
         }
     }
-    fn of_node(n: &Node) -> Option<(Vec<Node>, Vec<u8>)> {
+    // Flatten nested `Cat` nodes into one atom sequence — concatenation is
+    // associative, so a literal buried in `(?:…){n}`-unrolled sub-`Cat`s (e.g.
+    // the `.` in `(?:[0-9]{1,3}\.){3}…`) is exposed at the top level. Everything
+    // that isn't a `Cat` (brackets, loops, groups, literals) is an opaque atom.
+    fn flatten<'a>(n: &'a Node, out: &mut Vec<&'a Node>) {
         match n {
-            Node::Cat(nodes) => {
-                // Pick the most selective (longest) `ByteSequence` that has at
-                // least one consuming node before it, so the reversed *prefix*
-                // (everything before the literal) can be searched leftward to
-                // the match start. The part after the literal — possibly nothing,
-                // the suffix case — is left to the forward verify.
-                let mut best: Option<(usize, &Vec<u8>)> = None;
-                let mut have_prefix_node = false;
-                for (k, node) in nodes.iter().enumerate() {
-                    match node {
-                        Node::Goal | Node::Empty => {}
-                        Node::ByteSequence(bytes)
-                            if have_prefix_node && worth_scanning(bytes) =>
-                        {
-                            if best.is_none_or(|(_, b)| bytes.len() > b.len()) {
-                                best = Some((k, bytes));
-                            }
-                            have_prefix_node = true;
-                        }
-                        _ => have_prefix_node = true,
-                    }
-                }
-                let (k, lit) = best?;
-                Some((nodes[..k].to_vec(), lit.clone()))
-            }
-            Node::CaptureGroup { contents, .. } => of_node(contents),
-            _ => None,
+            Node::Cat(nodes) => nodes.iter().for_each(|c| flatten(c, out)),
+            other => out.push(other),
         }
     }
-    of_node(&re.node)
+
+    // Unwrap a whole-pattern capture group, then flatten.
+    let mut node = &re.node;
+    while let Node::CaptureGroup { contents, .. } = node {
+        node = contents;
+    }
+    let mut atoms = Vec::new();
+    flatten(node, &mut atoms);
+
+    // Pick the most selective (longest) `ByteSequence` that has at least one
+    // consuming atom before it, so the reversed *prefix* (everything before the
+    // literal) can be searched leftward to the match start. The part after the
+    // literal — possibly nothing, the suffix case — is left to the forward verify.
+    let mut best: Option<(usize, &Vec<u8>)> = None;
+    let mut have_prefix_atom = false;
+    for (k, atom) in atoms.iter().enumerate() {
+        match atom {
+            Node::Goal | Node::Empty => {}
+            Node::ByteSequence(bytes) if have_prefix_atom && worth_scanning(bytes) => {
+                if best.is_none_or(|(_, b)| bytes.len() > b.len()) {
+                    best = Some((k, bytes));
+                }
+                have_prefix_atom = true;
+            }
+            _ => have_prefix_atom = true,
+        }
+    }
+    let (k, lit) = best?;
+    let prefix = atoms[..k].iter().map(|n| (*n).clone()).collect();
+    Some((prefix, lit.clone()))
 }
 
 /// \return the start predicate for a Regex.

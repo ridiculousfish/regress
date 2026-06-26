@@ -738,42 +738,29 @@ impl TdfaProgram {
         }
 
         let pred = startpredicate::predicate_for_re(re);
-        if should_prefilter(&pred) {
-            // Anchored automaton: matches only at the offset handed to
-            // `execute`, so a candidate that fails to match dies fast (no `.*?`
-            // skip) and we advance to the next candidate.
-            let nfa = Nfa::try_from(re)?;
-            let mut anchored = Tdfa::try_from(&nfa)?;
-            anchored.optimize();
-            // For an exact literal prefix, precompute a warm start that skips
-            // re-scanning it through the automaton (a no-op for byte-set/bracket
-            // prefixes, which have no fixed literal).
-            let skip = match &pred {
-                StartPredicate::ByteSeq(finder) => {
-                    tdfa_backend::compute_prefix_skip(&anchored, finder.needle())
-                }
-                _ => None,
-            };
-            let group_names = anchored.group_names().to_vec().into_boxed_slice();
-            return Ok(Self::from_parts(
-                Strategy::Prefix {
-                    anchored,
-                    prefilter: pred,
-                    skip,
-                },
-                group_names,
-            ));
+        // A multi-byte `ByteBracket` start predicate (e.g. `[0-9]`) has no SIMD
+        // `memchr` and scans scalar; a required interior/suffix literal (single
+        // rare byte via `memchr`, or `memmem`) beats it. `ByteSeq`/`ByteSet1..3`
+        // *do* use SIMD memchr, so they stay ahead of the reverse-inner search.
+        let weak_pred = !should_prefilter(&pred) || matches!(pred, StartPredicate::ByteBracket(_));
+        if !weak_pred {
+            return Self::build_prefix(re, pred);
         }
 
-        // No usable prefix. If the regex has a required interior/suffix literal,
-        // try the reverse-automaton strategy (find the literal, walk the reversed
-        // prefix backwards to the start, forward-verify). Falls back to a plain
-        // scan when that isn't applicable (e.g. zero-width assertions defeat the
-        // tag-free reverse DFA — see `reverse::reverse_nfa`).
+        // No fast prefix prefilter. If the regex has a required interior/suffix
+        // literal, try the reverse-automaton strategy (find the literal, walk the
+        // reversed prefix backwards to the start, forward-verify). Falls back when
+        // that isn't applicable (e.g. zero-width assertions defeat the tag-free
+        // reverse DFA — see `reverse::reverse_nfa`).
         if let Some((prefix, literal)) = startpredicate::required_inner_literal(re) {
             if let Some(program) = Self::try_reverse_inner(re, prefix, literal)? {
                 return Ok(program);
             }
+        }
+
+        // A usable (if scalar) byte-class predicate still beats a full scan.
+        if should_prefilter(&pred) {
+            return Self::build_prefix(re, pred);
         }
 
         let nfa = Nfa::try_from_unanchored(re)?;
@@ -781,6 +768,33 @@ impl TdfaProgram {
         unanchored.optimize();
         let group_names = unanchored.group_names().to_vec().into_boxed_slice();
         Ok(Self::from_parts(Strategy::Scan { unanchored }, group_names))
+    }
+
+    /// Build a [`Strategy::Prefix`] program: an anchored verify automaton driven
+    /// by the start-predicate prefilter. For an exact literal prefix it also
+    /// precomputes a warm start that skips re-scanning the literal through the
+    /// automaton (a no-op for byte-set/bracket prefixes, which have no fixed
+    /// literal). The anchored automaton matches only at the offset handed to
+    /// `execute`, so a candidate that fails dies fast and we advance.
+    fn build_prefix(re: &ir::Regex, pred: StartPredicate) -> Result<Self, BuildError> {
+        let nfa = Nfa::try_from(re)?;
+        let mut anchored = Tdfa::try_from(&nfa)?;
+        anchored.optimize();
+        let skip = match &pred {
+            StartPredicate::ByteSeq(finder) => {
+                tdfa_backend::compute_prefix_skip(&anchored, finder.needle())
+            }
+            _ => None,
+        };
+        let group_names = anchored.group_names().to_vec().into_boxed_slice();
+        Ok(Self::from_parts(
+            Strategy::Prefix {
+                anchored,
+                prefilter: pred,
+                skip,
+            },
+            group_names,
+        ))
     }
 
     /// Try to build a [`Strategy::ReverseInner`] for a regex with a required
