@@ -705,12 +705,10 @@ impl TdfaProgram {
         }
 
         let pred = startpredicate::predicate_for_re(re);
-        // A multi-byte `ByteBracket` start predicate (e.g. `[0-9]`) has no SIMD
-        // `memchr` and scans scalar; a required interior/suffix literal (single
-        // rare byte via `memchr`, or `memmem`) beats it. `ByteSeq`/`ByteSet1..3`
-        // *do* use SIMD memchr, so they stay ahead of the reverse-inner search.
-        let weak_pred = !should_prefilter(&pred) || matches!(pred, StartPredicate::ByteBracket(_));
-        if !weak_pred {
+        // A selective start predicate is a fast prefilter: `ByteSeq`/`ByteSet1..3`
+        // via SIMD memchr, and a `ByteBracket` (e.g. `[0-9]`) via the SIMD nibble
+        // classifier (`ByteBitmap::find_in`). Use it directly.
+        if should_prefilter(&pred) {
             return Self::build_prefix(re, pred);
         }
 
@@ -723,11 +721,6 @@ impl TdfaProgram {
             if let Some(program) = Self::try_reverse_inner(re, prefix, literal)? {
                 return Ok(program);
             }
-        }
-
-        // A usable (if scalar) byte-class predicate still beats a full scan.
-        if should_prefilter(&pred) {
-            return Self::build_prefix(re, pred);
         }
 
         let nfa = Nfa::try_from_unanchored(re)?;
