@@ -205,6 +205,25 @@ pub(crate) fn execute_reuse(
     }
 }
 
+/// Like [`execute_reuse`], but warm-starts past a prefilter-matched prefix when
+/// `skip` is set (the literal/byte-class the prefilter already confirmed at
+/// `start`). The match still begins at `start`; only the byte loop resumes at
+/// `start + skip.len` from `skip.post_state`. `skip == None` is identical to
+/// [`execute_reuse`].
+pub(crate) fn execute_reuse_warm(
+    tdfa: &Tdfa,
+    input: &[u8],
+    start: usize,
+    scratch: &mut Scratch<u32>,
+    skip: Option<PrefixSkip>,
+) -> Option<NfaMatch> {
+    if needs_wide_marks(input) {
+        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(mark_file_width(tdfa)), skip)
+    } else {
+        run_anchored_dyn::<u32>(tdfa, input, start, scratch, skip)
+    }
+}
+
 /// Execute an **anchored** TDFA driven by a literal prefilter, reusing the
 /// caller-owned `u32` `scratch`. `skip` warm-starts each verify past the matched
 /// literal (see [`PrefixSkip`]).
@@ -318,8 +337,10 @@ impl<T: MarkElem> Scratch<T> {
 /// dead-ends, so the match is produced with no transition-table work at all.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PrefixSkip {
-    post_state: u32,
-    len: usize,
+    /// The state to resume the byte loop in, after the prefix is skipped.
+    pub(crate) post_state: u32,
+    /// How many bytes the prefilter-matched prefix spans.
+    pub(crate) len: usize,
 }
 
 /// Try to build a [`PrefixSkip`] for `literal` (the prefilter's exact byte
@@ -373,6 +394,59 @@ pub(crate) fn compute_prefix_skip(tdfa: &Tdfa, literal: &[u8]) -> Option<PrefixS
         post_state: state,
         len: literal.len(),
     })
+}
+
+/// Like [`compute_prefix_skip`] but for a single-byte-class prefilter (e.g.
+/// `[0-9]`, where the prefilter matches exactly one byte that may be any of
+/// `first_bytes`). The warm start is sound only when *every* admissible first
+/// byte takes the **same** non-dead, **mark-free** transition out of the start
+/// state — then one `post_state` serves them all and the skipped byte writes no
+/// marks to reconstruct. Returns `None` (→ a cold anchored run from `P`) on any
+/// divergence, mark write, dead transition, or the same automaton conditions
+/// `compute_prefix_skip` rejects.
+pub(crate) fn compute_byteclass_skip(
+    tdfa: &Tdfa,
+    first_bytes: impl Iterator<Item = u8>,
+) -> Option<PrefixSkip> {
+    if tdfa.has_anchor_alts() || tdfa.has_conditionals() || !tdfa.has_moves() {
+        return None;
+    }
+    // `^` makes the offset-0 start state differ from the general start; one
+    // `post_state` can't serve both, so bail and stay offset-independent.
+    if tdfa.start(0) != tdfa.start(1) {
+        return None;
+    }
+
+    let byte_to_class = tdfa.byte_to_class();
+    let transitions = tdfa.transitions();
+    let trans_moves = tdfa.transition_moves();
+    let num_classes = tdfa.num_classes();
+    let start = tdfa.start(1) as usize;
+
+    let mut post: Option<u32> = None;
+    for b in first_bytes {
+        let class = *byte_to_class.iat(b as usize) as usize;
+        let idx = start * num_classes + class;
+        // Skipping the byte must not drop a mark write (no capture opening on
+        // the leading byte), mirroring `compute_prefix_skip`.
+        if !trans_moves.iat(idx).is_empty() {
+            return None;
+        }
+        let next = *transitions.iat(idx);
+        if next == TDFA_DEAD_STATE {
+            return None;
+        }
+        match post {
+            None => post = Some(next),
+            Some(p) if p == next => {}
+            // Two admissible bytes lead to different post-states; one warm start
+            // can't serve both, so fall back to a cold run.
+            Some(_) => return None,
+        }
+    }
+    // `post` is `None` only for an empty class (no admissible byte) — nothing to
+    // warm-start from, so the `?` correctly declines.
+    Some(PrefixSkip { post_state: post?, len: 1 })
 }
 
 /// One anchored attempt: run the automaton from byte offset `start`, reusing the

@@ -350,11 +350,17 @@ impl Assembler for X86_64Asm {
         self.labels.bind(l, off);
     }
 
-    fn prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label) {
+    fn prologue(
+        &mut self,
+        classtab: Label,
+        start_anchored: Label,
+        start_unanchored: Label,
+        warm: Option<(Label, usize)>,
+    ) {
         // mov r9, -1            (acc = usize::MAX)  49 C7 C1 FF FF FF FF
         self.emit(&[0x49, 0xC7, 0xC1, 0xFF, 0xFF, 0xFF, 0xFF]);
         self.load_classtab(classtab);
-        self.start_dispatch(start_anchored, start_unanchored);
+        self.warm_or_start(warm, start_anchored, start_unanchored);
     }
 
     fn record_accept(&mut self) {
@@ -476,14 +482,20 @@ impl Assembler for X86_64Asm {
         }
     }
 
-    fn cap_prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label) {
+    fn cap_prologue(
+        &mut self,
+        classtab: Label,
+        start_anchored: Label,
+        start_unanchored: Label,
+        warm: Option<(Label, usize)>,
+    ) {
         // best_snap (arg 4 = r8) lives in callee-saved rbx for the whole run.
         self.emit(&[0x53]); // push rbx
         self.emit(&[0x4C, 0x89, 0xC3]); // mov rbx, r8   (best_snap, before r8 reused)
         // mov r9d, -1          (acc_end = 0xFFFF_FFFF)  41 B9 FF FF FF FF
         self.emit(&[0x41, 0xB9, 0xFF, 0xFF, 0xFF, 0xFF]);
         self.load_classtab(classtab); // overwrites r8 with the class table
-        self.start_dispatch(start_anchored, start_unanchored);
+        self.warm_or_start(warm, start_anchored, start_unanchored);
     }
 
     fn cap_record_accept(&mut self, state_id: u32, is_fallback: bool) {
@@ -594,6 +606,29 @@ impl X86_64Asm {
         self.emit_rel32(start_anchored);
         self.emit(&[0xE9]); // jmp start_unanchored
         self.emit_rel32(start_unanchored);
+    }
+
+    /// Tail of both prologues: either warm-start past the prefilter-matched
+    /// prefix (`add rdx, len; jmp post_block`) or the normal start dispatch.
+    fn warm_or_start(
+        &mut self,
+        warm: Option<(Label, usize)>,
+        start_anchored: Label,
+        start_unanchored: Label,
+    ) {
+        match warm {
+            Some((post, len)) => {
+                if len < 128 {
+                    self.emit(&[0x48, 0x83, 0xC2, len as u8]); // add rdx, imm8
+                } else {
+                    self.emit(&[0x48, 0x81, 0xC2]); // add rdx, imm32
+                    self.emit_u32(len as u32);
+                }
+                self.emit(&[0xE9]); // jmp post_block
+                self.emit_rel32(post);
+            }
+            None => self.start_dispatch(start_anchored, start_unanchored),
+        }
     }
 }
 

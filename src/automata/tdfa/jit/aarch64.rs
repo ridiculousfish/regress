@@ -265,12 +265,23 @@ impl Assembler for Aarch64Asm {
         self.labels.bind(l, off);
     }
 
-    fn prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label) {
+    fn prologue(
+        &mut self,
+        classtab: Label,
+        start_anchored: Label,
+        start_unanchored: Label,
+        warm: Option<(Label, usize)>,
+    ) {
         self.movn_zero(ACC); // acc = usize::MAX
         self.adr_addr(CLASSTAB, classtab); // classtab = &table
-        // start == 0 ? anchored : unanchored
-        self.cbz(POS, start_anchored);
-        self.b(start_unanchored);
+        if let Some((post, len)) = warm {
+            self.add_imm(POS, POS, len as u32); // pos += len (skip the prefix)
+            self.b(post); // resume in the post-prefix state
+        } else {
+            // start == 0 ? anchored : unanchored
+            self.cbz(POS, start_anchored);
+            self.b(start_unanchored);
+        }
     }
 
     fn record_accept(&mut self) {
@@ -346,12 +357,23 @@ impl Assembler for Aarch64Asm {
         }
     }
 
-    fn cap_prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label) {
+    fn cap_prologue(
+        &mut self,
+        classtab: Label,
+        start_anchored: Label,
+        start_unanchored: Label,
+        warm: Option<(Label, usize)>,
+    ) {
         self.mov_reg(BEST_SNAP, ARG4); // best_snap = arg4 (x4), before x4 is reused
         self.movn_w_zero(ACC_END); // acc_end = 0xFFFF_FFFF (no accept)
         self.adr_addr(CLASSTAB, classtab); // overwrites x4 with the class table
-        self.cbz(POS, start_anchored);
-        self.b(start_unanchored);
+        if let Some((post, len)) = warm {
+            self.add_imm(POS, POS, len as u32); // pos += len (skip the prefix)
+            self.b(post); // resume in the post-prefix state
+        } else {
+            self.cbz(POS, start_anchored);
+            self.b(start_unanchored);
+        }
     }
 
     fn cap_record_accept(&mut self, state_id: u32, is_fallback: bool) {
