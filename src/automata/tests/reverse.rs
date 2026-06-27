@@ -105,12 +105,28 @@ fn greedy_dotstar_before_literal_takes_last() {
 
 #[test]
 fn charclass_run_before_literal() {
-    // Lowercase prefix is unselective, so this routes to reverse-inner (a
-    // selective prefix like `[0-9]+` would correctly use the Phase-1 prefilter).
+    // Lowercase prefix is unselective (`should_prefilter` rejects it), so this
+    // routes to reverse-inner on the suffix literal.
     check(
         r"[a-z]+99",
         &["ab99", "x99 yy99", "99", "abc 3099 def z99", "aa99bb99"],
     );
+}
+
+#[test]
+fn selective_charclass_run_before_literal() {
+    // Even a *selective* leading class (`[0-9]` passes `should_prefilter`) defers
+    // to reverse-inner when a required multi-byte literal exists: a `ByteBracket`
+    // overlapping the leading `+` loop makes every byte of a run a candidate
+    // (O(n²) on a class-heavy input), whereas `memmem` on the literal stays
+    // selective. A single-byte interior literal (the `.` in a dotted quad) does
+    // *not* trigger this — it's no better than the class scan — so those keep the
+    // prefix strategy (covered in `prefix_skip` / `litwindow`).
+    check(
+        r"[0-9]+foo",
+        &["12foo", "x9foo 7foo", "foo", "000foo bar 99foo", "1foo2foo"],
+    );
+    check(r"[0-9]+99", &["12399", "9999", "x1299 y99", "99"]);
 }
 
 #[test]

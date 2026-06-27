@@ -830,6 +830,24 @@ impl TdfaProgram {
         // via SIMD memchr, and a `ByteBracket` (e.g. `[0-9]`) via the SIMD nibble
         // classifier (`ByteBitmap::find_in`). Use it directly.
         if should_prefilter(&pred) {
+            // Exception: a `ByteBracket` (a character *class*, not a specific
+            // byte) overlapping a leading loop is a poor prefilter — every byte
+            // of a run becomes a candidate, so a dead run costs O(n²) (e.g.
+            // `[0-9]+foo` over digit-heavy input). A required multi-byte literal
+            // elsewhere is a `memmem` prefilter that stays selective on *any*
+            // input, so prefer the reverse-inner strategy when one exists and
+            // builds. (A single-byte interior literal like the `.` in `ip` is no
+            // better than the class scan, so the `len >= 2` gate keeps those on
+            // the prefix path.)
+            if matches!(pred, StartPredicate::ByteBracket(_)) {
+                if let Some((prefix, literal)) = startpredicate::required_inner_literal(re) {
+                    if literal.len() >= 2 {
+                        if let Some(program) = Self::try_reverse_inner(re, prefix, literal)? {
+                            return Ok(program);
+                        }
+                    }
+                }
+            }
             return Self::build_prefix(re, pred);
         }
 
