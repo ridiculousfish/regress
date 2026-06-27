@@ -181,6 +181,11 @@ fn main() {
         ("before_holmes", r"\w+\s+Holmes", ""),
         ("holmes_cochar_watson", r"Holmes.{0,25}Watson|Watson.{0,25}Holmes", ""),
         ("line_boundary", r"^Sherlock Holmes|Sherlock Holmes$", "m"),
+        // Non-multiline `$`: an end-of-input anchor, lifted off the per-byte
+        // conditional path (fast loop + JIT eligible) by stage 1 of the
+        // zero-width simplification.
+        ("end_anchor", r"Holmes$", ""),
+        ("end_anchor_alt", r"Holmes$|Watson$", ""),
         // Large capture-free automaton (transition-table cache stressor).
         ("dictionary64", dict.as_str(), ""),
     ];

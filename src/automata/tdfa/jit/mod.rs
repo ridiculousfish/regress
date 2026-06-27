@@ -480,11 +480,15 @@ fn emit_capture_free<A: Assembler>(
     if !tdfa.start_fixed() {
         return Err(JitError::Unsupported("unanchored / start not fixed"));
     }
-    if tdfa.has_conditionals() {
-        return Err(JitError::Unsupported("$-conditionals"));
-    }
     if tdfa.has_anchor_alts() {
         return Err(JitError::Unsupported("multiline-^ anchor alts"));
+    }
+    // Any `$` conditional (multiline per-byte, or non-multiline at EOI) needs an
+    // accept the codegen doesn't yet emit. TODO(stage 1b): emit the EOI accept
+    // inline at `eoi_check` (for non-multiline `$`) and narrow this back to the
+    // per-byte (multiline) case.
+    if tdfa.has_eoi_conditionals() {
+        return Err(JitError::Unsupported("$-conditionals"));
     }
 
     let nc = tdfa.num_classes();
@@ -581,11 +585,15 @@ fn emit_capture<A: Assembler>(
     // Works for both anchored (fixed start) and unanchored (start stamped by the
     // `.*?` prefix's handoff transition, read back by `finalize`) automata; the
     // leftmost-start rule reduces to last-accept-wins without conditionals.
-    if tdfa.has_conditionals() {
-        return Err(JitError::Unsupported("$-conditionals"));
-    }
     if tdfa.has_anchor_alts() {
         return Err(JitError::Unsupported("multiline-^ anchor alts"));
+    }
+    // Any `$` conditional (multiline per-byte, or non-multiline at EOI) needs an
+    // accept the codegen doesn't yet emit. TODO(stage 1b): emit the EOI accept
+    // inline at `eoi_check` (for non-multiline `$`) and narrow this back to the
+    // per-byte (multiline) case.
+    if tdfa.has_eoi_conditionals() {
+        return Err(JitError::Unsupported("$-conditionals"));
     }
     // We apply marks via the precompiled `MoveOp` sequences; the interpreter's
     // scalar fallback (huge mark files) isn't lowered.

@@ -71,18 +71,22 @@ pub(crate) trait TdfaExecConfig {
     /// Some state carries a forward-branching anchor alt. When false, the
     /// per-byte + entry `maybe_switch_anchor_alt` calls are not emitted.
     const HAS_ANCHOR_ALTS: bool;
-    /// Some state carries a `$`-style accept conditional. When false, the
-    /// entry + per-byte + EOI `record_conditionals` calls are not emitted.
-    const HAS_CONDITIONALS: bool;
+    /// Some state carries a `$`-style accept conditional that must be evaluated
+    /// *per byte* — i.e. a multiline `$`, which can fire mid-input before a line
+    /// terminator. When false, the entry + per-byte `record_conditionals` calls
+    /// are not emitted. Non-multiline `$` does NOT set this (it fires only at
+    /// end-of-input); the once-per-run EOI pass handles it via the runtime
+    /// `Tdfa::has_eoi_conditionals` check instead.
+    const HAS_PERBYTE_CONDITIONALS: bool;
 }
 
 /// Config marker parameterized directly on its flag bits, so adding a flag is a
 /// new `const` param rather than a new named type per combination.
-pub(crate) struct ExecConfig<const HAS_ANCHOR_ALTS: bool, const HAS_CONDITIONALS: bool>;
+pub(crate) struct ExecConfig<const HAS_ANCHOR_ALTS: bool, const HAS_PERBYTE_CONDITIONALS: bool>;
 
 impl<const A: bool, const C: bool> TdfaExecConfig for ExecConfig<A, C> {
     const HAS_ANCHOR_ALTS: bool = A;
-    const HAS_CONDITIONALS: bool = C;
+    const HAS_PERBYTE_CONDITIONALS: bool = C;
 }
 
 /// A recorded accept candidate: `(match end, finalization commands, match
@@ -117,7 +121,7 @@ pub(crate) fn mark_file_width(tdfa: &Tdfa) -> usize {
     tdfa.num_marks() + 3
 }
 
-/// Pick the config-flag monomorphization (`HAS_ANCHOR_ALTS` × `HAS_CONDITIONALS`)
+/// Pick the config-flag monomorphization (`HAS_ANCHOR_ALTS` × `HAS_PERBYTE_CONDITIONALS`)
 /// from the automaton's contents and run one anchored attempt. The flag check is
 /// once per attempt; the const generic still drops the per-byte branches inside
 /// `run_anchored`.
@@ -128,7 +132,7 @@ fn run_anchored_dyn<T: MarkElem>(
     scratch: &mut Scratch<T>,
     warm: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
-    match (tdfa.has_anchor_alts(), tdfa.has_conditionals()) {
+    match (tdfa.has_anchor_alts(), tdfa.has_perbyte_conditionals()) {
         (false, false) => {
             run_anchored::<T, ExecConfig<false, false>>(tdfa, input, start, scratch, warm)
         }
@@ -352,7 +356,10 @@ pub(crate) struct PrefixSkip {
 /// offset-0 start differ, or a literal byte that dead-ends (shouldn't happen for
 /// a genuine mandatory prefix).
 pub(crate) fn compute_prefix_skip(tdfa: &Tdfa, literal: &[u8]) -> Option<PrefixSkip> {
-    if literal.is_empty() || tdfa.has_anchor_alts() || tdfa.has_conditionals() || !tdfa.has_moves()
+    if literal.is_empty()
+        || tdfa.has_anchor_alts()
+        || tdfa.has_eoi_conditionals()
+        || !tdfa.has_moves()
     {
         return None;
     }
@@ -408,7 +415,7 @@ pub(crate) fn compute_byteclass_skip(
     tdfa: &Tdfa,
     first_bytes: impl Iterator<Item = u8>,
 ) -> Option<PrefixSkip> {
-    if tdfa.has_anchor_alts() || tdfa.has_conditionals() || !tdfa.has_moves() {
+    if tdfa.has_anchor_alts() || tdfa.has_eoi_conditionals() || !tdfa.has_moves() {
         return None;
     }
     // `^` makes the offset-0 start state differ from the general start; one
@@ -526,11 +533,11 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             src_buf,
             tdfa.finals().iat(state as usize),
             has_captures,
-            C::HAS_CONDITIONALS || *accept_fallback.iat(state as usize),
+            C::HAS_PERBYTE_CONDITIONALS || *accept_fallback.iat(state as usize),
             &mut read_live,
         );
     }
-    if C::HAS_CONDITIONALS {
+    if C::HAS_PERBYTE_CONDITIONALS {
         record_conditionals::<T>(
             tdfa,
             state,
@@ -574,13 +581,18 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     // conditionals or anchor alts). The match always starts at `start`, so accepts
     // record that directly.
     let use_fast = skip_marks
-        && !C::HAS_CONDITIONALS
+        && !C::HAS_PERBYTE_CONDITIONALS
         && !C::HAS_ANCHOR_ALTS
         && !tdfa.exec_transitions().is_empty();
 
     // Position where `state` was last actually entered (see the long-standing
     // note below: EOI conditionals evaluate against this, not `input.len()`).
     let mut live_position = loop_start;
+
+    // Whether the byte loop consumed the whole input (vs. breaking on a dead
+    // transition). When true, `state` is the live state at `input.len()`, which
+    // is what the EOI pass needs for non-multiline `$` (it fires only there).
+    let mut completed = true;
 
     if use_fast {
         // `state` is premultiplied here; `estate + class` indexes the table with a
@@ -592,6 +604,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             let class = *byte_to_class.iat(byte as usize) as u32;
             let raw = *exec_trans.iat((estate + class) as usize);
             if raw == TDFA_DEAD_STATE {
+                completed = false;
                 break;
             }
             estate = raw & EXEC_STATE_MASK;
@@ -601,6 +614,8 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
                 read_live = false;
             }
         }
+        // Recover the (non-premultiplied) final state for the EOI pass below.
+        state = estate / num_classes as u32;
     } else {
     for (i, &byte) in input[loop_start..].iter().enumerate() {
         let pos = loop_start + i;
@@ -608,6 +623,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
         let idx = state as usize * num_classes + class;
         let next = *transitions.iat(idx);
         if next == TDFA_DEAD_STATE {
+            completed = false;
             break;
         }
         // Apply the transition's mark update in place. An empty move sequence is
@@ -631,7 +647,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
         state = next;
         // `live_position` only feeds the EOI conditional pass below, so the
         // per-byte store is dead weight unless this run has conditionals.
-        if C::HAS_CONDITIONALS {
+        if C::HAS_PERBYTE_CONDITIONALS {
             live_position = pos + 1;
         }
         // Forward-branching anchor switch (mid-input multiline `^`). Guard on the
@@ -648,11 +664,11 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
                 src_buf,
                 tdfa.finals().iat(state as usize),
                 has_captures,
-                C::HAS_CONDITIONALS || *accept_fallback.iat(state as usize),
+                C::HAS_PERBYTE_CONDITIONALS || *accept_fallback.iat(state as usize),
                 &mut read_live,
             );
         }
-        if C::HAS_CONDITIONALS && !tdfa.anchor_conditionals(state).is_empty() {
+        if C::HAS_PERBYTE_CONDITIONALS && !tdfa.anchor_conditionals(state).is_empty() {
             record_conditionals::<T>(
                 tdfa,
                 state,
@@ -669,16 +685,36 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     }
     }
 
-    // EOI pass — `$` non-multiline naturally fires here; multiline `$` fires
-    // here too if the previous-byte side of the predicate is satisfied. We use
-    // `live_position` (not `input.len()`) so a state abandoned mid-input doesn't
-    // falsely accept just because `pos == input.len()` satisfies `$`.
-    if C::HAS_CONDITIONALS {
+    // EOI pass. Two cases:
+    //
+    // * Per-byte (multiline) `$` — `C::HAS_PERBYTE_CONDITIONALS`. Multiline `$` can fire
+    //   mid-input, so we evaluate at `live_position` (not `input.len()`): a state
+    //   abandoned mid-input must not falsely accept just because `input.len()`
+    //   satisfies `$`. `live_position` is maintained in the slow loop above.
+    //
+    // * EOI-only (non-multiline) `$` — not on the per-byte path, so `state`/
+    //   `live_position` weren't tracked per byte. It fires solely at
+    //   `input.len()`, which the run reached iff the loop `completed`; gate on
+    //   that and evaluate at `input.len()`. Covers both fast and slow loops.
+    if C::HAS_PERBYTE_CONDITIONALS {
         record_conditionals::<T>(
             tdfa,
             state,
             input,
             live_position,
+            src_buf,
+            cond_buf,
+            &mut last_accept,
+            best_snap,
+            has_captures,
+            &mut read_live,
+        );
+    } else if completed && tdfa.has_eoi_conditionals() {
+        record_conditionals::<T>(
+            tdfa,
+            state,
+            input,
+            input.len(),
             src_buf,
             cond_buf,
             &mut last_accept,
