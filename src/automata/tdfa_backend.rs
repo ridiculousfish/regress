@@ -12,6 +12,7 @@
 //! element type: `u32` (the fast path; haystacks ≤ 4 GiB) or `usize` (the
 //! fallback for larger inputs) — so the per-byte loop carries no dispatch.
 
+use crate::automata::anchors::boundary_signature;
 use crate::automata::dfa::{DEAD_STATE, Dfa};
 use crate::automata::nfa::{FULL_MATCH_END, FULL_MATCH_START, TEXT_POS_NO_MATCH, TextPos};
 use crate::automata::nfa_backend::{NfaMatch, tags_to_captures};
@@ -68,25 +69,21 @@ impl MarkElem for usize {
 /// from the [`Tdfa`]'s contents, so the guarded branches const-fold away and
 /// the hot loop carries no runtime check.
 pub(crate) trait TdfaExecConfig {
-    /// Some state carries a forward-branching anchor alt. When false, the
-    /// per-byte + entry `maybe_switch_anchor_alt` calls are not emitted.
-    const HAS_ANCHOR_ALTS: bool;
-    /// Some state carries a `$`-style accept conditional that must be evaluated
-    /// *per byte* — i.e. a multiline `$`, which can fire mid-input before a line
-    /// terminator. When false, the entry + per-byte `record_conditionals` calls
-    /// are not emitted. Non-multiline `$` does NOT set this (it fires only at
-    /// end-of-input); the once-per-run EOI pass handles it via the runtime
-    /// `Tdfa::has_eoi_conditionals` check instead.
-    const HAS_PERBYTE_CONDITIONALS: bool;
+    /// Some state carries a zero-width guard that must be evaluated *per byte*:
+    /// any `switch` (multiline `^`, `\b`/`\B`) or any `accept` that can fire
+    /// mid-input (multiline `$`). When false, the entry + per-byte `apply_guards`
+    /// calls are not emitted, and the capture-free fast loop is eligible.
+    /// Non-multiline `$` accepts do NOT set this — they fire only at EOI, handled
+    /// by the once-per-run pass via the runtime `Tdfa::has_eoi_accepts` check.
+    const HAS_PERBYTE_GUARDS: bool;
 }
 
 /// Config marker parameterized directly on its flag bits, so adding a flag is a
 /// new `const` param rather than a new named type per combination.
-pub(crate) struct ExecConfig<const HAS_ANCHOR_ALTS: bool, const HAS_PERBYTE_CONDITIONALS: bool>;
+pub(crate) struct ExecConfig<const HAS_PERBYTE_GUARDS: bool>;
 
-impl<const A: bool, const C: bool> TdfaExecConfig for ExecConfig<A, C> {
-    const HAS_ANCHOR_ALTS: bool = A;
-    const HAS_PERBYTE_CONDITIONALS: bool = C;
+impl<const G: bool> TdfaExecConfig for ExecConfig<G> {
+    const HAS_PERBYTE_GUARDS: bool = G;
 }
 
 /// A recorded accept candidate: `(match end, finalization commands, match
@@ -121,9 +118,9 @@ pub(crate) fn mark_file_width(tdfa: &Tdfa) -> usize {
     tdfa.num_marks() + 3
 }
 
-/// Pick the config-flag monomorphization (`HAS_ANCHOR_ALTS` × `HAS_PERBYTE_CONDITIONALS`)
-/// from the automaton's contents and run one anchored attempt. The flag check is
-/// once per attempt; the const generic still drops the per-byte branches inside
+/// Pick the config-flag monomorphization (`HAS_PERBYTE_GUARDS`) from the
+/// automaton's contents and run one anchored attempt. The flag check is once per
+/// attempt; the const generic still drops the per-byte branches inside
 /// `run_anchored`.
 fn run_anchored_dyn<T: MarkElem>(
     tdfa: &Tdfa,
@@ -132,17 +129,10 @@ fn run_anchored_dyn<T: MarkElem>(
     scratch: &mut Scratch<T>,
     warm: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
-    match (tdfa.has_anchor_alts(), tdfa.has_perbyte_conditionals()) {
-        (false, false) => {
-            run_anchored::<T, ExecConfig<false, false>>(tdfa, input, start, scratch, warm)
-        }
-        (true, false) => {
-            run_anchored::<T, ExecConfig<true, false>>(tdfa, input, start, scratch, warm)
-        }
-        (false, true) => {
-            run_anchored::<T, ExecConfig<false, true>>(tdfa, input, start, scratch, warm)
-        }
-        (true, true) => run_anchored::<T, ExecConfig<true, true>>(tdfa, input, start, scratch, warm),
+    if tdfa.has_perbyte_guards() {
+        run_anchored::<T, ExecConfig<true>>(tdfa, input, start, scratch, warm)
+    } else {
+        run_anchored::<T, ExecConfig<false>>(tdfa, input, start, scratch, warm)
     }
 }
 
@@ -357,8 +347,8 @@ pub(crate) struct PrefixSkip {
 /// a genuine mandatory prefix).
 pub(crate) fn compute_prefix_skip(tdfa: &Tdfa, literal: &[u8]) -> Option<PrefixSkip> {
     if literal.is_empty()
-        || tdfa.has_anchor_alts()
-        || tdfa.has_eoi_conditionals()
+        || tdfa.has_perbyte_guards()
+        || tdfa.has_eoi_accepts()
         || !tdfa.has_moves()
     {
         return None;
@@ -415,7 +405,7 @@ pub(crate) fn compute_byteclass_skip(
     tdfa: &Tdfa,
     first_bytes: impl Iterator<Item = u8>,
 ) -> Option<PrefixSkip> {
-    if tdfa.has_anchor_alts() || tdfa.has_eoi_conditionals() || !tdfa.has_moves() {
+    if tdfa.has_perbyte_guards() || tdfa.has_eoi_accepts() || !tdfa.has_moves() {
         return None;
     }
     // `^` makes the offset-0 start state differ from the general start; one
@@ -517,13 +507,16 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     if state == TDFA_DEAD_STATE {
         return None;
     }
+    // Word-char widening (regex-global `iu`) for the boundary signature.
+    let word_icase = tdfa.word_icase();
     // Initial position checks at `loop_start`. Cold path (`loop_start == start`):
-    // multiline-`^` switch and the start-state empty-match accept. Warm path:
+    // multiline-`^`/`\b` switch and the start-state empty-match accept. Warm path:
     // the boundary accept right after the literal (the interior accept checks it
-    // skipped can't fire — see `compute_prefix_skip`); anchor-alt / conditional
-    // branches are statically dead since warm is only set when neither exists.
-    if C::HAS_ANCHOR_ALTS {
-        maybe_switch_anchor_alt::<T>(tdfa, &mut state, src_buf, input, loop_start);
+    // skipped can't fire — see `compute_prefix_skip`); the guard branches are
+    // statically dead since warm is only set when there are no per-byte guards.
+    if C::HAS_PERBYTE_GUARDS && !tdfa.guards(state).switches.is_empty() {
+        let sig = boundary_signature(input, loop_start, word_icase);
+        apply_switches::<T>(tdfa, &mut state, src_buf, sig, loop_start);
     }
     if *tdfa.accepting().iat(state as usize) {
         record_accept::<T>(
@@ -533,15 +526,16 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             src_buf,
             tdfa.finals().iat(state as usize),
             has_captures,
-            C::HAS_PERBYTE_CONDITIONALS || *accept_fallback.iat(state as usize),
+            C::HAS_PERBYTE_GUARDS || *accept_fallback.iat(state as usize),
             &mut read_live,
         );
     }
-    if C::HAS_PERBYTE_CONDITIONALS {
-        record_conditionals::<T>(
+    if C::HAS_PERBYTE_GUARDS && !tdfa.guards(state).accepts.is_empty() {
+        let sig = boundary_signature(input, loop_start, word_icase);
+        record_accepts::<T>(
             tdfa,
             state,
-            input,
+            sig,
             loop_start,
             src_buf,
             cond_buf,
@@ -580,10 +574,8 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     // `start_fixed`, and — guaranteed by the dispatcher's const flags — no
     // conditionals or anchor alts). The match always starts at `start`, so accepts
     // record that directly.
-    let use_fast = skip_marks
-        && !C::HAS_PERBYTE_CONDITIONALS
-        && !C::HAS_ANCHOR_ALTS
-        && !tdfa.exec_transitions().is_empty();
+    let use_fast =
+        skip_marks && !C::HAS_PERBYTE_GUARDS && !tdfa.exec_transitions().is_empty();
 
     // Position where `state` was last actually entered (see the long-standing
     // note below: EOI conditionals evaluate against this, not `input.len()`).
@@ -645,16 +637,18 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             }
         }
         state = next;
-        // `live_position` only feeds the EOI conditional pass below, so the
-        // per-byte store is dead weight unless this run has conditionals.
-        if C::HAS_PERBYTE_CONDITIONALS {
+        // `live_position` only feeds the EOI accept pass below, so the per-byte
+        // store is dead weight unless this run has per-byte guards.
+        if C::HAS_PERBYTE_GUARDS {
             live_position = pos + 1;
-        }
-        // Forward-branching anchor switch (mid-input multiline `^`). Guard on the
-        // per-state list so the common (no-alt) state skips the call — most states
-        // on a literal-verify path carry neither an alt nor a conditional.
-        if C::HAS_ANCHOR_ALTS && !tdfa.anchor_alts(state).is_empty() {
-            maybe_switch_anchor_alt::<T>(tdfa, &mut state, src_buf, input, pos + 1);
+            // Forward-branching switch (mid-input multiline `^` / `\b`). Guard on
+            // the per-state list so the common (guard-free) state skips it. The
+            // boundary signature is position-only, so compute it lazily and reuse
+            // it for the accept pass below.
+            if !tdfa.guards(state).switches.is_empty() {
+                let sig = boundary_signature(input, pos + 1, word_icase);
+                apply_switches::<T>(tdfa, &mut state, src_buf, sig, pos + 1);
+            }
         }
         if *accepting.iat(state as usize) {
             record_accept::<T>(
@@ -664,15 +658,16 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
                 src_buf,
                 tdfa.finals().iat(state as usize),
                 has_captures,
-                C::HAS_PERBYTE_CONDITIONALS || *accept_fallback.iat(state as usize),
+                C::HAS_PERBYTE_GUARDS || *accept_fallback.iat(state as usize),
                 &mut read_live,
             );
         }
-        if C::HAS_PERBYTE_CONDITIONALS && !tdfa.anchor_conditionals(state).is_empty() {
-            record_conditionals::<T>(
+        if C::HAS_PERBYTE_GUARDS && !tdfa.guards(state).accepts.is_empty() {
+            let sig = boundary_signature(input, pos + 1, word_icase);
+            record_accepts::<T>(
                 tdfa,
                 state,
-                input,
+                sig,
                 pos + 1,
                 src_buf,
                 cond_buf,
@@ -685,22 +680,24 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     }
     }
 
-    // EOI pass. Two cases:
+    // EOI accept pass. Two cases:
     //
-    // * Per-byte (multiline) `$` — `C::HAS_PERBYTE_CONDITIONALS`. Multiline `$` can fire
-    //   mid-input, so we evaluate at `live_position` (not `input.len()`): a state
-    //   abandoned mid-input must not falsely accept just because `input.len()`
-    //   satisfies `$`. `live_position` is maintained in the slow loop above.
+    // * Per-byte run (`C::HAS_PERBYTE_GUARDS`) — `state`/`live_position` were
+    //   tracked per byte. Evaluate accepts at `live_position` (not `input.len()`):
+    //   a state abandoned mid-input must not falsely accept just because
+    //   `input.len()` satisfies `$`. This handles multiline `$` (fires at a line
+    //   terminator or end) and non-multiline `$` (its `holds_sig` is true only
+    //   when `live_position == input.len()`, i.e. the run completed).
     //
-    // * EOI-only (non-multiline) `$` — not on the per-byte path, so `state`/
-    //   `live_position` weren't tracked per byte. It fires solely at
-    //   `input.len()`, which the run reached iff the loop `completed`; gate on
-    //   that and evaluate at `input.len()`. Covers both fast and slow loops.
-    if C::HAS_PERBYTE_CONDITIONALS {
-        record_conditionals::<T>(
+    // * Non-per-byte run — only EOI-only (non-multiline) `$` accepts are possible
+    //   and `live_position` wasn't tracked. They fire solely at `input.len()`,
+    //   reached iff the loop `completed`; evaluate there. Covers the fast loop.
+    if C::HAS_PERBYTE_GUARDS {
+        let sig = boundary_signature(input, live_position, word_icase);
+        record_accepts::<T>(
             tdfa,
             state,
-            input,
+            sig,
             live_position,
             src_buf,
             cond_buf,
@@ -709,11 +706,12 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             has_captures,
             &mut read_live,
         );
-    } else if completed && tdfa.has_eoi_conditionals() {
-        record_conditionals::<T>(
+    } else if completed && tdfa.has_eoi_accepts() {
+        let sig = boundary_signature(input, input.len(), word_icase);
+        record_accepts::<T>(
             tdfa,
             state,
-            input,
+            sig,
             input.len(),
             src_buf,
             cond_buf,
@@ -746,34 +744,29 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     }
 }
 
-/// If `state` has an anchor alt and its predicate holds at `pos`, apply the
-/// alt's switch commands to `buf` (scalar, in place) and swap `state` to the
-/// alt id. Cold: anchor alts are rare.
-fn maybe_switch_anchor_alt<T: MarkElem>(
-    tdfa: &Tdfa,
-    state: &mut u32,
-    buf: &mut [T],
-    input: &[u8],
-    pos: usize,
-) {
-    for alt in tdfa.anchor_alts(*state) {
-        if alt.cond.holds(input, pos, &[]) {
-            apply_cmds_scalar::<T>(buf, &alt.commands, T::from_pos(pos));
-            *state = alt.alt;
+/// If `state` has a switch guard whose predicate holds at the position's
+/// boundary signature `sig`, apply its commands to `buf` (scalar, in place) and
+/// swap `state` to the alt id (first match wins). Cold: switches are rare, and
+/// the caller already checked the list is non-empty.
+fn apply_switches<T: MarkElem>(tdfa: &Tdfa, state: &mut u32, buf: &mut [T], sig: u8, pos: usize) {
+    for sw in &tdfa.guards(*state).switches {
+        if sw.cond.holds_sig(sig) {
+            apply_cmds_scalar::<T>(buf, &sw.commands, T::from_pos(pos));
+            *state = sw.alt;
             return;
         }
     }
 }
 
-/// For each `$`-style conditional attached to `state`, evaluate its predicate at
-/// `pos`; on a hit, snapshot the marks into `cond_buf`, apply the conditional's
-/// commands, and treat it as a new accept candidate. Cold: most states carry no
-/// conditionals (the early-out covers the hot path).
+/// For each `$`-style accept on `state` whose predicate holds at the position's
+/// boundary signature `sig`, snapshot the marks into `cond_buf`, apply the
+/// accept's commands, and treat it as a new accept candidate. The caller already
+/// checked the accept list is non-empty.
 #[allow(clippy::too_many_arguments)]
-fn record_conditionals<'a, T: MarkElem>(
+fn record_accepts<'a, T: MarkElem>(
     tdfa: &'a Tdfa,
     state: u32,
-    input: &[u8],
+    sig: u8,
     pos: usize,
     marks: &[T],
     cond_buf: &mut [T],
@@ -782,12 +775,8 @@ fn record_conditionals<'a, T: MarkElem>(
     has_captures: bool,
     read_live: &mut bool,
 ) {
-    let conds = tdfa.anchor_conditionals(state);
-    if conds.is_empty() {
-        return;
-    }
-    for ac in conds {
-        if !ac.cond.holds(input, pos, &[]) {
+    for ac in &tdfa.guards(state).accepts {
+        if !ac.cond.holds_sig(sig) {
             continue;
         }
         cond_buf.copy_from_slice(marks);
