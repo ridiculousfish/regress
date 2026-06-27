@@ -11,7 +11,8 @@
 //! equivalent states byte-identical for minimization.
 
 use super::{
-    FinalCommand, InputMark, MarkValue, TDFA_DEAD_STATE, TagCommand, TagCommandList, Tdfa,
+    FinalCommand, InputMark, MarkValue, StateGuards, TDFA_DEAD_STATE, TagCommand, TagCommandList,
+    Tdfa,
 };
 use smallvec::SmallVec;
 use std::collections::HashMap;
@@ -66,7 +67,7 @@ pub(crate) fn minimize(t: &mut Tdfa) {
     {
         let mut out_intern: HashMap<(bool, Vec<FinalCommand>), u32> = HashMap::new();
         for s in 0..n {
-            let pinned = !t.anchor_conditionals[s].is_empty() || !t.anchor_alts[s].is_empty();
+            let pinned = !t.guards[s].is_empty();
             block[s] = if pinned {
                 let b = num_blocks;
                 num_blocks += 1;
@@ -161,19 +162,17 @@ pub(crate) fn minimize(t: &mut Tdfa) {
     // transition targets and anchor-alt targets to the new ids.
     let mut accepting = vec![false; nn];
     let mut finals: Vec<SmallVec<[FinalCommand; 4]>> = vec![SmallVec::new(); nn];
-    let mut conds = vec![SmallVec::new(); nn];
-    let mut alts = vec![SmallVec::new(); nn];
+    let mut guards = vec![StateGuards::default(); nn];
     let mut transitions = vec![TDFA_DEAD_STATE; nn * k];
     let mut transition_commands: Vec<TagCommandList> = vec![SmallVec::new(); nn * k];
     for (nid, &r) in rep.iter().enumerate() {
         accepting[nid] = t.accepting[r];
         finals[nid] = t.finals[r].clone();
-        conds[nid] = t.anchor_conditionals[r].clone();
-        let mut a = t.anchor_alts[r].clone();
-        for alt in a.iter_mut() {
-            alt.alt = old_to_new[alt.alt as usize];
+        let mut g = t.guards[r].clone();
+        for sw in g.switches.iter_mut() {
+            sw.alt = old_to_new[sw.alt as usize];
         }
-        alts[nid] = a;
+        guards[nid] = g;
         for c in 0..k {
             transitions[nid * k + c] = old_to_new[t.transitions[r * k + c] as usize];
             transition_commands[nid * k + c] = t.transition_commands[r * k + c].clone();
@@ -182,8 +181,7 @@ pub(crate) fn minimize(t: &mut Tdfa) {
 
     t.accepting = accepting.into_boxed_slice();
     t.finals = finals.into_boxed_slice();
-    t.anchor_conditionals = conds.into_boxed_slice();
-    t.anchor_alts = alts.into_boxed_slice();
+    t.guards = guards.into_boxed_slice();
     t.transitions = transitions.into_boxed_slice();
     t.transition_commands = transition_commands.into_boxed_slice();
     t.start_anchored = old_to_new[t.start_anchored as usize];
@@ -249,14 +247,12 @@ fn fold_currentpos_copies(t: &mut Tdfa) {
     for cmds in t.transition_commands.iter_mut() {
         fold_list(cmds);
     }
-    for conds in t.anchor_conditionals.iter_mut() {
-        for ac in conds.iter_mut() {
-            fold_list(&mut ac.commands);
+    for g in t.guards.iter_mut() {
+        for sw in g.switches.iter_mut() {
+            fold_list(&mut sw.commands);
         }
-    }
-    for alts in t.anchor_alts.iter_mut() {
-        for alt in alts.iter_mut() {
-            fold_list(&mut alt.commands);
+        for ac in g.accepts.iter_mut() {
+            fold_list(&mut ac.commands);
         }
     }
 }
@@ -280,14 +276,12 @@ fn eliminate_dead_marks(t: &mut Tdfa) {
         for cmds in t.transition_commands.iter_mut() {
             prune(cmds);
         }
-        for conds in t.anchor_conditionals.iter_mut() {
-            for ac in conds.iter_mut() {
-                prune(&mut ac.commands);
+        for g in t.guards.iter_mut() {
+            for sw in g.switches.iter_mut() {
+                prune(&mut sw.commands);
             }
-        }
-        for alts in t.anchor_alts.iter_mut() {
-            for alt in alts.iter_mut() {
-                prune(&mut alt.commands);
+            for ac in g.accepts.iter_mut() {
+                prune(&mut ac.commands);
             }
         }
         if !changed {
@@ -309,15 +303,13 @@ fn read_marks(t: &Tdfa, used: &mut [bool]) {
     for fs in t.finals.iter() {
         collect_final_srcs(fs, used);
     }
-    for conds in t.anchor_conditionals.iter() {
-        for ac in conds {
+    for g in t.guards.iter() {
+        for sw in &g.switches {
+            collect_cmd_srcs(&sw.commands, used);
+        }
+        for ac in &g.accepts {
             collect_cmd_srcs(&ac.commands, used);
             collect_final_srcs(&ac.finals, used);
-        }
-    }
-    for alts in t.anchor_alts.iter() {
-        for alt in alts {
-            collect_cmd_srcs(&alt.commands, used);
         }
     }
 }
@@ -333,15 +325,13 @@ fn for_each_mark_mut(t: &mut Tdfa, mut f: impl FnMut(&mut InputMark)) {
     for fs in t.finals.iter_mut() {
         visit_final_marks(fs, &mut f);
     }
-    for conds in t.anchor_conditionals.iter_mut() {
-        for ac in conds.iter_mut() {
+    for g in t.guards.iter_mut() {
+        for sw in g.switches.iter_mut() {
+            visit_cmd_marks(&mut sw.commands, &mut f);
+        }
+        for ac in g.accepts.iter_mut() {
             visit_cmd_marks(&mut ac.commands, &mut f);
             visit_final_marks(&mut ac.finals, &mut f);
-        }
-    }
-    for alts in t.anchor_alts.iter_mut() {
-        for alt in alts.iter_mut() {
-            visit_cmd_marks(&mut alt.commands, &mut f);
         }
     }
 }
@@ -426,7 +416,14 @@ fn register_allocate(t: &mut Tdfa) {
                 bs_set(r, mk.0);
             }
         }
-        for ac in &t.anchor_conditionals[s] {
+        for sw in &t.guards[s].switches {
+            for c in &sw.commands {
+                if let MarkValue::Copy(mk) = c.src {
+                    bs_set(r, mk.0);
+                }
+            }
+        }
+        for ac in &t.guards[s].accepts {
             for c in &ac.commands {
                 if let MarkValue::Copy(mk) = c.src {
                     bs_set(r, mk.0);
@@ -434,13 +431,6 @@ fn register_allocate(t: &mut Tdfa) {
             }
             for fc in &ac.finals {
                 if let MarkValue::Copy(mk) = fc.src {
-                    bs_set(r, mk.0);
-                }
-            }
-        }
-        for alt in &t.anchor_alts[s] {
-            for c in &alt.commands {
-                if let MarkValue::Copy(mk) = c.src {
                     bs_set(r, mk.0);
                 }
             }
@@ -552,7 +542,15 @@ fn register_allocate(t: &mut Tdfa) {
                 bs_set(&mut edgeset, mk.0);
             }
         }
-        for ac in &t.anchor_conditionals[s] {
+        for sw in &t.guards[s].switches {
+            for c in &sw.commands {
+                bs_set(&mut edgeset, c.dst.0);
+                if let MarkValue::Copy(mk) = c.src {
+                    bs_set(&mut edgeset, mk.0);
+                }
+            }
+        }
+        for ac in &t.guards[s].accepts {
             for c in &ac.commands {
                 bs_set(&mut edgeset, c.dst.0);
                 if let MarkValue::Copy(mk) = c.src {
@@ -561,14 +559,6 @@ fn register_allocate(t: &mut Tdfa) {
             }
             for fc in &ac.finals {
                 if let MarkValue::Copy(mk) = fc.src {
-                    bs_set(&mut edgeset, mk.0);
-                }
-            }
-        }
-        for alt in &t.anchor_alts[s] {
-            for c in &alt.commands {
-                bs_set(&mut edgeset, c.dst.0);
-                if let MarkValue::Copy(mk) = c.src {
                     bs_set(&mut edgeset, mk.0);
                 }
             }
@@ -641,14 +631,12 @@ fn drop_identity_copies(t: &mut Tdfa) {
     for cmds in t.transition_commands.iter_mut() {
         prune(cmds);
     }
-    for conds in t.anchor_conditionals.iter_mut() {
-        for ac in conds.iter_mut() {
-            prune(&mut ac.commands);
+    for g in t.guards.iter_mut() {
+        for sw in g.switches.iter_mut() {
+            prune(&mut sw.commands);
         }
-    }
-    for alts in t.anchor_alts.iter_mut() {
-        for alt in alts.iter_mut() {
-            prune(&mut alt.commands);
+        for ac in g.accepts.iter_mut() {
+            prune(&mut ac.commands);
         }
     }
 }

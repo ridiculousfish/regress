@@ -286,15 +286,39 @@ pub struct AnchorConditional {
     pub finals: SmallVec<[FinalCommand; 4]>,
 }
 
-/// Whether a `$`-style conditional must be checked at every byte (`true`) or
-/// only once at end-of-input (`false`). Only multiline `$`
+/// Whether a `$`-style accept must be checked at every byte (`true`) or only
+/// once at end-of-input (`false`). Only multiline `$`
 /// (`EndOfLine { multiline: true }`) can fire mid-input, right before a line
 /// terminator; non-multiline `$` fires solely at `pos == input.len()`, so it
 /// needs no per-byte work — one check in the EOI pass suffices. Lifting it out
-/// keeps `has_perbyte_conditionals` (and thus the capture-free fast path and the JIT)
+/// keeps `has_perbyte_guards` (and thus the capture-free fast path and the JIT)
 /// off for the common `…$` / `^…$` family.
 fn conditional_needs_perbyte(c: &AnchorConditional) -> bool {
     !matches!(c.cond, EpsCondition::EndOfLine { multiline: false })
+}
+
+/// Whether a state's guards require the per-byte guard pass: any `switch`
+/// (multiline `^`, `\b`/`\B`) or any `accept` that can fire mid-input
+/// (multiline `$`). See [`Tdfa::has_perbyte_guards`].
+fn state_guards_need_perbyte(g: &StateGuards) -> bool {
+    !g.switches.is_empty() || g.accepts.iter().any(conditional_needs_perbyte)
+}
+
+/// Whether any `\b`/`\B` switch widens its word-char test with the icase folds
+/// (ſ / Kelvin). This is the regex-global `iu` property, so it is uniform across
+/// the automaton; OR-ing is just a robust way to read it off the built guards.
+fn guards_word_icase(guards: &[StateGuards]) -> bool {
+    guards.iter().any(|g| {
+        g.switches.iter().any(|sw| {
+            matches!(
+                sw.cond,
+                EpsCondition::WordBoundary {
+                    unicode_icase: true,
+                    ..
+                }
+            )
+        })
+    })
 }
 
 /// One member of a TDFA configuration: an NFA state plus the per-tag version
@@ -1024,41 +1048,30 @@ pub struct Tdfa {
     // state's mark snapshot.
     finals: Box<[SmallVec<[FinalCommand; 4]>]>,
 
-    // Per-state list of `$`-style accept conditionals. Indexed by state ID.
-    // The executor evaluates `cond` per step + at EOI; if true, applies the
-    // entry's commands and uses its finals to produce a match candidate.
-    anchor_conditionals: Box<[SmallVec<[AnchorConditional; 1]>]>,
+    // Per-state zero-width guards: the unified table for `^ $ \b \B`, indexed by
+    // state ID. Each [`StateGuards`] holds the state's `switches` (multiline `^`,
+    // `\b`/`\B` — change state and keep matching) and `accepts` (`$` — record a
+    // match candidate without changing state). The executor decodes each guard's
+    // `cond` from the position's `boundary_signature` (see `anchors.rs`).
+    guards: Box<[StateGuards]>,
 
-    // Per-state forward-branching anchor alt. Indexed by state ID. `Some`
-    // only when the state's subset can be enlarged by a multiline `^`
-    // firing — the executor checks the predicate after each byte step;
-    // when it holds, applies `commands` (a mix of Copy and CurrentPos
-    // writes that rearranges the marks array from this state's layout to
-    // the alt's) and switches to `alt`.
-    anchor_alts: Box<[SmallVec<[AnchorAlt; 1]>]>,
+    // Whether `\b`/`^`/`$` word-char tests should widen with the icase folds
+    // (ſ / Kelvin) — the regex-global `iu` property. Lets the executor compute a
+    // position's `boundary_signature` once with the correct word bits.
+    word_icase: bool,
 
-    // Whether any state carries a forward-branching anchor alt. Precomputed
-    // (rather than re-scanned per `execute`) so the executor's dispatcher can
-    // cheaply pick a monomorphization that drops the per-byte
-    // `maybe_switch_anchor_alt` call when there are none. Recomputed after
-    // `optimize`, which can remove states.
-    has_anchor_alts: bool,
+    // Whether any state carries a guard that must be evaluated *per byte*: any
+    // `switch` (multiline `^`, `\b`/`\B`) or any `accept` whose predicate can
+    // fire mid-input (multiline `$`). Non-multiline `$` accepts fire only at EOI
+    // and do NOT set this, so the capture-free fast path and the JIT stay
+    // available for the common `…$` / `^…$` family. Drives the executor's
+    // monomorphization and the fast-path / JIT gates. Recomputed after `optimize`.
+    has_perbyte_guards: bool,
 
-    // Whether any state carries a `$`-style accept conditional that must be
-    // evaluated *per byte* — i.e. a multiline `$`, which can fire mid-input
-    // before a line terminator. Non-multiline `$` fires only at end-of-input
-    // and is handled by the EOI pass alone (see `has_eoi_conditionals`), so it
-    // does NOT set this flag. Precomputed (like `has_anchor_alts`) so the
-    // executor's dispatcher can drop the per-byte `record_conditionals` call —
-    // and so the capture-free fast path and the JIT stay available for the
-    // common `…$` / `^…$` family. Recomputed after `optimize`.
-    has_perbyte_conditionals: bool,
-
-    // Whether any state carries any `$`-style accept conditional at all
-    // (multiline or not). Drives the once-per-run EOI conditional pass and the
-    // warm-start gating. A superset of `has_perbyte_conditionals`: a non-multiline `$`
-    // sets this but not `has_perbyte_conditionals`. Recomputed after `optimize`.
-    has_eoi_conditionals: bool,
+    // Whether any state carries any `$`-style accept guard at all (multiline or
+    // not). Drives the once-per-run EOI accept pass and warm-start gating.
+    // Recomputed after `optimize`.
+    has_eoi_accepts: bool,
 
     // Whether the `FULL_MATCH_START` mark is fixed at entry — i.e. no transition
     // ever writes the mark(s) that accepting states read back as
@@ -1085,6 +1098,27 @@ pub struct AnchorAlt {
     pub cond: EpsCondition,
     pub alt: TdfaStateId,
     pub commands: TagCommandList,
+}
+
+/// The zero-width guards on one TDFA state — the unified replacement for the old
+/// parallel `anchor_alts` / `anchor_conditionals` tables. At a guarded position
+/// the executor computes the `boundary_signature` once, takes the first matching
+/// `switch` (changing state), then records every matching `accept`.
+#[derive(Debug, Clone, Default)]
+pub struct StateGuards {
+    /// Multiline `^` and `\b`/`\B`: when the predicate holds, rearrange marks
+    /// (`commands`) and switch the live state to `alt`, continuing to match.
+    /// Priority order — the first whose predicate holds wins.
+    pub switches: SmallVec<[AnchorAlt; 1]>,
+    /// `$`: when the predicate holds, record a match candidate via `finals`
+    /// without changing state. All matching accepts are considered.
+    pub accepts: SmallVec<[AnchorConditional; 1]>,
+}
+
+impl StateGuards {
+    fn is_empty(&self) -> bool {
+        self.switches.is_empty() && self.accepts.is_empty()
+    }
 }
 
 /// Static size metrics for a built `Tdfa`. Captures the cost of the current
@@ -1225,6 +1259,18 @@ impl Tdfa {
         let accept_fallback =
             compute_accept_fallback(&build.accepting, &build.transitions, num_classes);
 
+        // Fuse the two per-state construction lists into the unified guard table
+        // (switches = alts, accepts = conditionals), one entry per state.
+        let guards: Box<[StateGuards]> = build
+            .anchor_alts
+            .into_iter()
+            .zip(build.anchor_conditionals)
+            .map(|(switches, accepts)| StateGuards { switches, accepts })
+            .collect();
+        let word_icase = guards_word_icase(&guards);
+        let has_perbyte_guards = guards.iter().any(state_guards_need_perbyte);
+        let has_eoi_accepts = guards.iter().any(|g| !g.accepts.is_empty());
+
         let mut tdfa = Tdfa {
             start_anchored,
             start_unanchored,
@@ -1242,15 +1288,10 @@ impl Tdfa {
             transition_commands: build.transition_commands.into_boxed_slice(),
             transition_moves: Box::default(),
             finals: build.finals.into_boxed_slice(),
-            has_perbyte_conditionals: build
-                .anchor_conditionals
-                .iter()
-                .flatten()
-                .any(conditional_needs_perbyte),
-            has_eoi_conditionals: build.anchor_conditionals.iter().any(|cs| !cs.is_empty()),
-            anchor_conditionals: build.anchor_conditionals.into_boxed_slice(),
-            has_anchor_alts: build.anchor_alts.iter().any(|alts| !alts.is_empty()),
-            anchor_alts: build.anchor_alts.into_boxed_slice(),
+            guards,
+            word_icase,
+            has_perbyte_guards,
+            has_eoi_accepts,
             start_fixed: false,
             exec_transitions: Box::default(),
         };
@@ -1287,10 +1328,7 @@ impl Tdfa {
     /// fast loop can actually run, so it's gated on the same conditions the
     /// executor's dispatcher checks; otherwise the table is left empty.
     fn build_exec_transitions(&mut self) {
-        let fast_ok = !self.has_captures
-            && self.start_fixed
-            && !self.has_perbyte_conditionals
-            && !self.has_anchor_alts;
+        let fast_ok = !self.has_captures && self.start_fixed && !self.has_perbyte_guards;
         if !fast_ok {
             self.exec_transitions = Box::default();
             return;
@@ -1366,15 +1404,11 @@ impl Tdfa {
     /// correctly without it; this only shrinks the automaton.
     pub fn optimize(&mut self) {
         opt::optimize(self);
-        // State minimization can remove anchor-alt-bearing states, so refresh
-        // the precomputed flags the executor's dispatcher reads.
-        self.has_anchor_alts = self.anchor_alts.iter().any(|alts| !alts.is_empty());
-        self.has_perbyte_conditionals = self
-            .anchor_conditionals
-            .iter()
-            .flatten()
-            .any(conditional_needs_perbyte);
-        self.has_eoi_conditionals = self.anchor_conditionals.iter().any(|cs| !cs.is_empty());
+        // State minimization can remove guard-bearing states, so refresh the
+        // precomputed flags the executor's dispatcher reads.
+        self.has_perbyte_guards = self.guards.iter().any(state_guards_need_perbyte);
+        self.has_eoi_accepts = self.guards.iter().any(|g| !g.accepts.is_empty());
+        self.word_icase = guards_word_icase(&self.guards);
         // `optimize` renumbers marks and rewrites the command lists, so the
         // precompiled move sequences must be rebuilt from the new state. The
         // capture-free fast table built there also depends on the refreshed
@@ -1384,38 +1418,31 @@ impl Tdfa {
             compute_accept_fallback(&self.accepting, &self.transitions, self.num_classes);
     }
 
-    /// `$`-style accept conditionals for `state`. Empty for most states.
-    pub fn anchor_conditionals(&self, state: TdfaStateId) -> &[AnchorConditional] {
-        &self.anchor_conditionals[state as usize]
+    /// The zero-width guards for `state` (switches + accepts). Empty for most
+    /// states.
+    pub(crate) fn guards(&self, state: TdfaStateId) -> &StateGuards {
+        &self.guards[state as usize]
     }
 
-    /// Forward-branching anchor alt for `state` (multiline `^`). `None`
-    /// for most states. The executor evaluates the predicate after each
-    /// byte step; on a hit, applies the carried `commands` to rearrange
-    /// the marks array to the alt's layout and switches to the alt id.
-    pub(crate) fn anchor_alts(&self, state: TdfaStateId) -> &[AnchorAlt] {
-        &self.anchor_alts[state as usize]
+    /// Whether `\b`/`^`/`$` word tests widen with the icase folds (regex-global
+    /// `iu`). Passed to `boundary_signature` so word bits are computed correctly.
+    pub(crate) fn word_icase(&self) -> bool {
+        self.word_icase
     }
 
-    /// Whether any state carries a forward-branching anchor alt. Drives the
-    /// executor's choice of monomorphization (see `TdfaExecConfig`).
-    pub(crate) fn has_anchor_alts(&self) -> bool {
-        self.has_anchor_alts
-    }
-
-    /// Whether any state carries a `$`-style accept conditional that must be
-    /// evaluated per byte (multiline `$`). Drives the executor's choice of
+    /// Whether any state carries a guard that must be evaluated per byte (any
+    /// switch, or a multiline-`$` accept). Drives the executor's choice of
     /// monomorphization (see `TdfaExecConfig`), the capture-free fast-path gate,
-    /// and JIT eligibility. Non-multiline `$` does not set this — see
-    /// [`has_eoi_conditionals`](Self::has_eoi_conditionals).
-    pub(crate) fn has_perbyte_conditionals(&self) -> bool {
-        self.has_perbyte_conditionals
+    /// and JIT eligibility. A pure non-multiline `$` does not set this — see
+    /// [`has_eoi_accepts`](Self::has_eoi_accepts).
+    pub(crate) fn has_perbyte_guards(&self) -> bool {
+        self.has_perbyte_guards
     }
 
-    /// Whether any state carries any `$`-style accept conditional (multiline or
-    /// not). Drives the once-per-run EOI conditional pass and warm-start gating.
-    pub(crate) fn has_eoi_conditionals(&self) -> bool {
-        self.has_eoi_conditionals
+    /// Whether any state carries any `$`-style accept (multiline or not). Drives
+    /// the once-per-run EOI accept pass and warm-start gating.
+    pub(crate) fn has_eoi_accepts(&self) -> bool {
+        self.has_eoi_accepts
     }
 
     /// Whether the pattern has user capture groups (beyond the full match).
@@ -1462,14 +1489,12 @@ impl Tdfa {
         for cmds in self.transition_commands.iter() {
             tally(cmds);
         }
-        for conds in self.anchor_conditionals.iter() {
-            for ac in conds {
-                tally(&ac.commands);
+        for g in self.guards.iter() {
+            for sw in &g.switches {
+                tally(&sw.commands);
             }
-        }
-        for alts in self.anchor_alts.iter() {
-            for alt in alts {
-                tally(&alt.commands);
+            for ac in &g.accepts {
+                tally(&ac.commands);
             }
         }
         TdfaStats {

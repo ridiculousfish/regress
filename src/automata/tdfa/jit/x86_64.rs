@@ -41,8 +41,8 @@ struct LiteralPos {
 pub(crate) fn try_compile_literal_chain(tdfa: &Tdfa) -> Option<(Vec<u8>, usize)> {
     if tdfa.has_captures()
         || !tdfa.start_fixed()
-        || tdfa.has_eoi_conditionals()
-        || tdfa.has_anchor_alts()
+        || tdfa.has_perbyte_guards()
+        || tdfa.has_eoi_accepts()
         || tdfa.start(0) != tdfa.start(1)
     {
         return None;
