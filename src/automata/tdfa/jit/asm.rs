@@ -87,8 +87,18 @@ pub(crate) trait Assembler {
 
     /// Function prologue: initialize `acc = usize::MAX`, load `classtab`'s
     /// address, then branch to the start state — `start_anchored` when the
-    /// `start` argument is 0, else `start_unanchored`.
-    fn prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label);
+    /// `start` argument is 0, else `start_unanchored`. When `warm` is
+    /// `Some((post_block, len))`, instead warm-start a prefilter-matched prefix:
+    /// advance `pos` by `len` and branch straight to `post_block` (sound only
+    /// when the anchored and unanchored starts coincide, which the caller
+    /// guarantees via `compute_prefix_skip`).
+    fn prologue(
+        &mut self,
+        classtab: Label,
+        start_anchored: Label,
+        start_unanchored: Label,
+        warm: Option<(Label, usize)>,
+    );
 
     /// Record an accept at the current position: `acc = pos`. Emitted at the
     /// top of accepting state blocks only.
@@ -146,8 +156,17 @@ pub(crate) trait Assembler {
 
     /// Capture-tier prologue: stash the `best_snap` pointer (arg 4), initialize
     /// the accept-end sentinel, load `classtab`, then branch to the start state
-    /// (anchored when `start == 0`).
-    fn cap_prologue(&mut self, classtab: Label, start_anchored: Label, start_unanchored: Label);
+    /// (anchored when `start == 0`). `warm` warm-starts a prefilter-matched
+    /// prefix exactly as in [`prologue`](Self::prologue) — the skipped prefix
+    /// writes no marks (caller-guaranteed), so the prepared mark file stays
+    /// valid.
+    fn cap_prologue(
+        &mut self,
+        classtab: Label,
+        start_anchored: Label,
+        start_unanchored: Label,
+        warm: Option<(Label, usize)>,
+    );
 
     /// Record an accept at the current position in state `state_id`:
     /// `acc_end = pos`, `acc_state = state_id`. When `is_fallback`, the winning

@@ -82,6 +82,10 @@ enum Strategy {
         anchored: Tdfa,
         prefilter: StartPredicate,
         skip: Option<PrefixSkip>,
+        /// Optional cheap secondary filter: a byte that *must* occur within a
+        /// bounded offset window of any match start. Rejects most prefilter
+        /// candidates before paying the per-candidate verify call.
+        lit_window: Option<LitWindow>,
     },
     /// Case-insensitive literal (e.g. `Sherlock`/i) — a chain of per-character
     /// case sets, so no fixed `ByteSequence` and the first set has a common byte.
@@ -603,6 +607,123 @@ fn should_prefilter(pred: &StartPredicate) -> bool {
     }
 }
 
+/// A required literal byte that must occur within `[lo, hi]` bytes of any match
+/// start — a cheap secondary filter for an unselective prefix prefilter.
+#[derive(Debug, Clone, Copy)]
+struct LitWindow {
+    byte: u8,
+    lo: usize,
+    hi: usize,
+}
+
+impl LitWindow {
+    /// Sound necessary condition: a match starting at `start` must have `byte`
+    /// somewhere in `bytes[start+lo ..= start+hi]`. Returns `false` (reject)
+    /// only when the byte is provably absent from that window.
+    #[inline(always)]
+    fn admits(&self, bytes: &[u8], start: usize) -> bool {
+        let from = start + self.lo;
+        if from >= bytes.len() {
+            return false;
+        }
+        let to = (start + self.hi + 1).min(bytes.len());
+        // The window is tiny (<= MAX_WINDOW), so a scalar scan beats `memchr`'s
+        // per-call SIMD setup.
+        bytes[from..to].contains(&self.byte)
+    }
+}
+
+/// Min/max byte width of `node`, or `None` if unbounded (`*`/`+`) or unknown
+/// (backref/stringset). Upper bound is conservative (never under-estimates), so
+/// it is safe to use for a sound offset window.
+fn node_width(node: &ir::Node) -> Option<(usize, usize)> {
+    use ir::Node::*;
+    let mb = |cps_ascii: bool| if cps_ascii { (1, 1) } else { (1, 4) };
+    Some(match node {
+        Empty | Goal | Anchor { .. } | WordBoundary { .. } | LookaroundAssertion { .. } => (0, 0),
+        Char { c } => mb(*c < 0x80),
+        ByteSequence(b) => (b.len(), b.len()),
+        ByteSet(_) => (1, 1),
+        CharSet(cs) => mb(cs.iter().all(|&c| c < 0x80)),
+        Bracket(bc) => mb(bracket_is_ascii(bc)),
+        MatchAny | MatchAnyExceptLineTerminator => (1, 4),
+        Cat(nodes) => {
+            let (mut lo, mut hi) = (0usize, 0usize);
+            for n in nodes {
+                let (a, b) = node_width(n)?;
+                lo += a;
+                hi += b;
+            }
+            (lo, hi)
+        }
+        Alt(a, b) => {
+            let (alo, ahi) = node_width(a)?;
+            let (blo, bhi) = node_width(b)?;
+            (alo.min(blo), ahi.max(bhi))
+        }
+        CaptureGroup { contents, .. } => node_width(contents)?,
+        Loop { loopee, quant, .. } | Loop1CharBody { loopee, quant } => {
+            let (blo, bhi) = node_width(loopee)?;
+            let max = quant.max?; // unbounded → no usable window
+            (quant.min * blo, max * bhi)
+        }
+        BackRef { .. } | StringSet { .. } => return None,
+    })
+}
+
+fn bracket_is_ascii(bc: &crate::types::BracketContents) -> bool {
+    !bc.invert && bc.cps.intervals().iter().all(|iv| iv.last < 0x80)
+}
+
+/// The first *mandatory* literal byte in `node` and its offset window `[lo, hi]`
+/// from the node's start. Walks past fixed/bounded prefixes (digit runs, etc.),
+/// accumulating their widths. Returns `None` when no mandatory literal is
+/// reachable within a bounded distance.
+fn first_required_byte(node: &ir::Node) -> Option<(u8, usize, usize)> {
+    use ir::Node::*;
+    match node {
+        ByteSequence(b) => b.first().map(|&x| (x, 0, 0)),
+        Char { c } if *c < 0x80 => Some((*c as u8, 0, 0)),
+        Cat(nodes) => {
+            let (mut lo, mut hi) = (0usize, 0usize);
+            for n in nodes {
+                if let Some((byte, blo, bhi)) = first_required_byte(n) {
+                    return Some((byte, lo + blo, hi + bhi));
+                }
+                let (wlo, whi) = node_width(n)?;
+                lo += wlo;
+                hi += whi;
+            }
+            None
+        }
+        CaptureGroup { contents, .. } => first_required_byte(contents),
+        // A loop runs its body at least `min` times; if `min >= 1` its first
+        // (mandatory) iteration may carry the literal.
+        Loop { loopee, quant, .. } | Loop1CharBody { loopee, quant } if quant.min >= 1 => {
+            first_required_byte(loopee)
+        }
+        _ => None,
+    }
+}
+
+/// Top-level: a required interior literal byte at a bounded, non-zero offset,
+/// usable as a cheap secondary filter behind an unselective prefix prefilter.
+fn leading_required_byte(re: &ir::Regex) -> Option<LitWindow> {
+    // The cap keeps the inline window scan short; `hi >= 1` ensures the literal
+    // is past the prefilter's own first byte (offset 0).
+    const MAX_WINDOW: usize = 16;
+    let mut node = &re.node;
+    while let ir::Node::CaptureGroup { contents, .. } = node {
+        node = contents;
+    }
+    let (byte, lo, hi) = first_required_byte(node)?;
+    if hi >= 1 && hi <= MAX_WINDOW {
+        Some(LitWindow { byte, lo, hi })
+    } else {
+        None
+    }
+}
+
 impl TdfaProgram {
     /// Build a program from the IR, choosing a prefilter strategy when the
     /// regex's match must begin with a literal/byte set, else falling back to
@@ -731,11 +852,12 @@ impl TdfaProgram {
     }
 
     /// Build a [`Strategy::Prefix`] program: an anchored verify automaton driven
-    /// by the start-predicate prefilter. For an exact literal prefix it also
-    /// precomputes a warm start that skips re-scanning the literal through the
-    /// automaton (a no-op for byte-set/bracket prefixes, which have no fixed
-    /// literal). The anchored automaton matches only at the offset handed to
-    /// `execute`, so a candidate that fails dies fast and we advance.
+    /// by the start-predicate prefilter. It also precomputes a warm start that
+    /// skips re-scanning the prefilter-matched prefix through the automaton — an
+    /// exact literal (`ByteSeq`), or a single byte class such as `[0-9]` (always
+    /// one byte) — when doing so writes no marks. The anchored automaton matches
+    /// only at the offset handed to `execute`, so a candidate that fails dies fast
+    /// and we advance.
     fn build_prefix(re: &ir::Regex, pred: StartPredicate) -> Result<Self, BuildError> {
         let nfa = Nfa::try_from(re)?;
         let mut anchored = Tdfa::try_from(&nfa)?;
@@ -744,7 +866,29 @@ impl TdfaProgram {
             StartPredicate::ByteSeq(finder) => {
                 tdfa_backend::compute_prefix_skip(&anchored, finder.needle())
             }
-            _ => None,
+            // A byte-class prefilter matches exactly one byte; warm-start past it
+            // when every admissible byte shares one mark-free start transition.
+            StartPredicate::ByteSet1(bs) => {
+                tdfa_backend::compute_byteclass_skip(&anchored, bs.iter().copied())
+            }
+            StartPredicate::ByteSet2(bs) => {
+                tdfa_backend::compute_byteclass_skip(&anchored, bs.iter().copied())
+            }
+            StartPredicate::ByteSet3(bs) => {
+                tdfa_backend::compute_byteclass_skip(&anchored, bs.iter().copied())
+            }
+            StartPredicate::ByteBracket(bm) => {
+                tdfa_backend::compute_byteclass_skip(&anchored, bm.iter())
+            }
+            StartPredicate::Arbitrary | StartPredicate::StartAnchored => None,
+        };
+        // A non-`ByteSeq` prefilter (a byte set/bracket like `[0-9]`) is often
+        // unselective; a required interior literal at a bounded distance (the `.`
+        // in `(?:[0-9]{1,3}\.){3}…`) lets us reject most candidates with a cheap
+        // inline window scan before the per-candidate verify call.
+        let lit_window = match &pred {
+            StartPredicate::ByteSeq(_) => None,
+            _ => leading_required_byte(re),
         };
         let group_names = anchored.group_names().to_vec().into_boxed_slice();
         Ok(Self::from_parts(
@@ -752,6 +896,7 @@ impl TdfaProgram {
                 anchored,
                 prefilter: pred,
                 skip,
+                lit_window,
             },
             group_names,
         ))
@@ -827,22 +972,25 @@ impl TdfaProgram {
     #[cfg(feature = "tdfa-jit")]
     fn enable_jit(&mut self) {
         use crate::automata::tdfa::jit::JittedTdfa;
-        let automaton = match &self.strategy {
-            Strategy::Prefix { anchored, .. } => Some(anchored),
-            Strategy::CaseFoldLiteral { forward, .. } => Some(forward),
+        // The verify automaton plus, for the `Prefix` strategy, the prefix-skip
+        // baked into the compiled prologue (warm-start past the prefilter-matched
+        // prefix). Other strategies have no such skip.
+        let target = match &self.strategy {
+            Strategy::Prefix { anchored, skip, .. } => Some((anchored, *skip)),
+            Strategy::CaseFoldLiteral { forward, .. } => Some((forward, None)),
             #[cfg(feature = "prefilter-teddy")]
-            Strategy::AltPrefix { forward, .. } => Some(forward),
-            Strategy::ReverseInner { forward, .. } => Some(forward),
+            Strategy::AltPrefix { forward, .. } => Some((forward, None)),
+            Strategy::ReverseInner { forward, .. } => Some((forward, None)),
             // The unanchored single-pass scan: the JIT's capture tier handles
             // its `.*?`-stamped start.
-            Strategy::Scan { unanchored } => Some(unanchored),
+            Strategy::Scan { unanchored } => Some((unanchored, None)),
             // Whole-literal / multi-literal need no automaton.
             Strategy::WholeLiteral { .. } => None,
             #[cfg(feature = "prefilter-teddy")]
             Strategy::MultiLiteral { .. } => None,
         };
-        if let Some(tdfa) = automaton {
-            self.jit = JittedTdfa::compile(tdfa).ok();
+        if let Some((tdfa, skip)) = target {
+            self.jit = JittedTdfa::compile(tdfa, skip).ok();
         }
     }
 
@@ -955,17 +1103,36 @@ impl TdfaProgram {
                 anchored,
                 prefilter,
                 skip,
+                lit_window,
             } => {
                 // JIT path: verify each prefilter candidate with native code.
-                // (The warm-start `skip` is an interpreter-only optimization, so
-                // the JIT re-scans the literal prefix — still correct.)
+                // The warm-start `skip` is baked into the compiled prologue, so
+                // `jit.run` resumes past the matched prefix automatically.
                 #[cfg(feature = "tdfa-jit")]
                 if let Some(jit) = &self.jit {
                     let mut pos = offset;
                     loop {
                         let cand = prefilter.find_from(bytes, pos)?;
-                        if let Some(m) = jit.run(anchored, bytes, cand, scratch) {
-                            return Some(m);
+                        // Cheap secondary filter: skip the verify call when the
+                        // required interior literal can't be in range.
+                        if lit_window.is_none_or(|w| w.admits(bytes, cand)) {
+                            if let Some(m) = jit.run(anchored, bytes, cand, scratch) {
+                                return Some(m);
+                            }
+                        }
+                        pos = cand + 1;
+                    }
+                }
+                if let Some(w) = lit_window {
+                    let mut pos = offset;
+                    loop {
+                        let cand = prefilter.find_from(bytes, pos)?;
+                        if w.admits(bytes, cand) {
+                            if let Some(m) = tdfa_backend::execute_reuse_warm(
+                                anchored, bytes, cand, scratch, *skip,
+                            ) {
+                                return Some(m);
+                            }
                         }
                         pos = cand + 1;
                     }

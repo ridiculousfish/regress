@@ -29,7 +29,7 @@ mod x86_64;
 
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{TDFA_DEAD_STATE, Tdfa};
-use crate::automata::tdfa_backend::{self, Scratch};
+use crate::automata::tdfa_backend::{self, PrefixSkip, Scratch};
 use asm::{Assembler, Label};
 use mem::ExecBuffer;
 #[cfg(not(feature = "std"))]
@@ -118,8 +118,8 @@ impl JittedTdfa {
     /// it can't be (so the caller falls back to the interpreter). Supported:
     /// the capture-free tier and the anchored capture tier (no conditionals /
     /// anchor alts / fallback accepts).
-    pub fn compile(tdfa: &Tdfa) -> Result<Self, JitError> {
-        let (tier, code, _data_start) = compile_code(tdfa)?;
+    pub(crate) fn compile(tdfa: &Tdfa, skip: Option<PrefixSkip>) -> Result<Self, JitError> {
+        let (tier, code, _data_start) = compile_code(tdfa, skip)?;
         let buf = ExecBuffer::new(&code)?;
         // SAFETY: `buf` is kept alive in the returned struct; the generated code
         // implements exactly the ABI selected by `tier` (see `asm` register map).
@@ -194,29 +194,32 @@ impl JittedTdfa {
 /// shape isn't a fixed `start..end`: user captures, *or* an unanchored automaton
 /// whose `.*?` prefix stamps `FULL_MATCH_START` mid-scan (`!start_fixed`). The
 /// capture-free tier is reserved for anchored, capture-free automata.
-fn compile_code(tdfa: &Tdfa) -> Result<(Tier, Vec<u8>, usize), JitError> {
+fn compile_code(tdfa: &Tdfa, skip: Option<PrefixSkip>) -> Result<(Tier, Vec<u8>, usize), JitError> {
     let tier = if tdfa.has_captures() || !tdfa.start_fixed() {
         Tier::Capture
     } else {
         Tier::CaptureFree
     };
     #[cfg(target_arch = "aarch64")]
-    let (code, data_start) = lower::<aarch64::Aarch64Asm>(tdfa, tier)?;
+    let (code, data_start) = lower::<aarch64::Aarch64Asm>(tdfa, tier, skip)?;
     #[cfg(target_arch = "x86_64")]
     let (code, data_start) = {
-        if matches!(tier, Tier::CaptureFree) {
+        // The fully-literal fast path has no warm-start variant; a prefix skip
+        // (rare on a literal-chain automaton anyway) routes through the general
+        // lowerer instead.
+        if matches!(tier, Tier::CaptureFree) && skip.is_none() {
             if let Some(compiled) = x86_64::try_compile_literal_chain(tdfa) {
                 compiled
             } else {
-                lower::<x86_64::X86_64Asm>(tdfa, tier)?
+                lower::<x86_64::X86_64Asm>(tdfa, tier, skip)?
             }
         } else {
-            lower::<x86_64::X86_64Asm>(tdfa, tier)?
+            lower::<x86_64::X86_64Asm>(tdfa, tier, skip)?
         }
     };
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     let (code, data_start) = {
-        let _ = (tdfa, tier);
+        let _ = (tdfa, tier, skip);
         return Err(JitError::UnsupportedArch);
     };
     #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
@@ -348,10 +351,23 @@ fn host_capstone() -> Result<capstone::Capstone, JitError> {
 
 /// Dispatch to the tier's codegen driver.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-fn lower<A: Assembler>(tdfa: &Tdfa, tier: Tier) -> Result<(Vec<u8>, usize), JitError> {
+/// Resolve a [`PrefixSkip`] into the prologue's warm-entry `(post_block, len)`.
+/// Declines (keeps the cold start) when `len` won't fit the prologue's `add`
+/// immediate (12 bits) — real prefilter prefixes are far smaller, so this never
+/// fires in practice; it's a guard against an oversize literal.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn warm_entry(skip: Option<PrefixSkip>, block: &[Label]) -> Option<(Label, usize)> {
+    skip.filter(|s| s.len < 0x1000).map(|s| (block[s.post_state as usize], s.len))
+}
+
+fn lower<A: Assembler>(
+    tdfa: &Tdfa,
+    tier: Tier,
+    skip: Option<PrefixSkip>,
+) -> Result<(Vec<u8>, usize), JitError> {
     match tier {
-        Tier::CaptureFree => emit_capture_free::<A>(tdfa),
-        Tier::Capture => emit_capture::<A>(tdfa),
+        Tier::CaptureFree => emit_capture_free::<A>(tdfa, skip),
+        Tier::Capture => emit_capture::<A>(tdfa, skip),
     }
 }
 
@@ -451,7 +467,10 @@ fn emit_dispatch<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, done: La
 /// `done`. Jump tables are emitted only for the states that use them.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 #[allow(clippy::needless_range_loop)] // state id indexes several parallel arrays
-fn emit_capture_free<A: Assembler>(tdfa: &Tdfa) -> Result<(Vec<u8>, usize), JitError> {
+fn emit_capture_free<A: Assembler>(
+    tdfa: &Tdfa,
+    skip: Option<PrefixSkip>,
+) -> Result<(Vec<u8>, usize), JitError> {
     // Capture-free tier only: the conditions under which `exec_transitions`
     // exists (no marks read back per byte, fixed start, no `$`-conditionals or
     // multiline-`^` alts).
@@ -497,8 +516,13 @@ fn emit_capture_free<A: Assembler>(tdfa: &Tdfa) -> Result<(Vec<u8>, usize), JitE
         })
         .collect();
 
-    // Prologue + per-state code blocks.
-    asm.prologue(classtab, block[start_anchored], block[start_unanchored]);
+    // Prologue + per-state code blocks. A prefix skip warm-starts past the
+    // prefilter-matched prefix: resume in `post_state` at `pos + len` instead of
+    // dispatching on the start state. `len` must fit the prologue's `add`
+    // immediate (12 bits); real prefixes are tiny, so an oversize one just keeps
+    // the cold start.
+    let warm = warm_entry(skip, &block);
+    asm.prologue(classtab, block[start_anchored], block[start_unanchored], warm);
     for s in 0..num_states {
         asm.bind(block[s]);
         if accepting[s] {
@@ -549,7 +573,10 @@ const JIT_MAX_MARK_LANES: usize = 4095;
 /// file (see gating).
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 #[allow(clippy::needless_range_loop)] // state id indexes several parallel arrays
-fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<(Vec<u8>, usize), JitError> {
+fn emit_capture<A: Assembler>(
+    tdfa: &Tdfa,
+    skip: Option<PrefixSkip>,
+) -> Result<(Vec<u8>, usize), JitError> {
     use std::collections::HashMap;
     // Works for both anchored (fixed start) and unanchored (start stamped by the
     // `.*?` prefix's handoff transition, read back by `finalize`) automata; the
@@ -641,7 +668,8 @@ fn emit_capture<A: Assembler>(tdfa: &Tdfa) -> Result<(Vec<u8>, usize), JitError>
         })
         .collect();
 
-    asm.cap_prologue(classtab, block[start_anchored], block[start_unanchored]);
+    let warm = warm_entry(skip, &block);
+    asm.cap_prologue(classtab, block[start_anchored], block[start_unanchored], warm);
     for s in 0..num_states {
         asm.bind(block[s]);
         if accepting[s] {
@@ -740,7 +768,7 @@ mod tests {
     /// oracle) for every (input, start) pair.
     fn assert_matches_interpreter(pattern: &str, inputs: &[&str]) {
         let tdfa = anchored_tdfa(pattern);
-        let jit = JittedTdfa::compile(&tdfa)
+        let jit = JittedTdfa::compile(&tdfa, None)
             .unwrap_or_else(|e| panic!("compile {pattern:?}: {e}"));
         let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
         for input in inputs {
@@ -840,7 +868,7 @@ mod tests {
         ];
         for pat in patterns {
             let tdfa = unanchored_tdfa(pat);
-            let Ok(jit) = JittedTdfa::compile(&tdfa) else {
+            let Ok(jit) = JittedTdfa::compile(&tdfa, None) else {
                 continue; // outside the supported tier (e.g. conditionals)
             };
             let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
@@ -869,7 +897,7 @@ mod tests {
         // A capture-free scan and a capture scan (group marks stamped per byte).
         for pattern in ["[a-z]+", "([a-z]+)"] {
             let tdfa = anchored_tdfa(pattern);
-            let jit = JittedTdfa::compile(&tdfa).expect("compile");
+            let jit = JittedTdfa::compile(&tdfa, None).expect("compile");
             let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
             let input = vec![b'a'; 4 * 1024 * 1024];
             let iters = 200;
@@ -915,7 +943,7 @@ mod tests {
 
         for pat in patterns {
             let tdfa = anchored_tdfa(pat);
-            let Ok(jit) = JittedTdfa::compile(&tdfa) else {
+            let Ok(jit) = JittedTdfa::compile(&tdfa, None) else {
                 continue; // legitimately unsupported tier; backend falls back
             };
             let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
@@ -958,7 +986,7 @@ mod tests {
         for pat in patterns {
             let tdfa = anchored_tdfa(pat);
             // The capture tier must actually compile for these.
-            let jit = JittedTdfa::compile(&tdfa)
+            let jit = JittedTdfa::compile(&tdfa, None)
                 .unwrap_or_else(|e| panic!("compile {pat:?}: {e}"));
             assert!(
                 matches!(jit.compiled, Compiled::Capture(_)),
