@@ -286,6 +286,17 @@ pub struct AnchorConditional {
     pub finals: SmallVec<[FinalCommand; 4]>,
 }
 
+/// Whether a `$`-style conditional must be checked at every byte (`true`) or
+/// only once at end-of-input (`false`). Only multiline `$`
+/// (`EndOfLine { multiline: true }`) can fire mid-input, right before a line
+/// terminator; non-multiline `$` fires solely at `pos == input.len()`, so it
+/// needs no per-byte work — one check in the EOI pass suffices. Lifting it out
+/// keeps `has_perbyte_conditionals` (and thus the capture-free fast path and the JIT)
+/// off for the common `…$` / `^…$` family.
+fn conditional_needs_perbyte(c: &AnchorConditional) -> bool {
+    !matches!(c.cond, EpsCondition::EndOfLine { multiline: false })
+}
+
 /// One member of a TDFA configuration: an NFA state plus the per-tag version
 /// map recording which `InputMark` currently holds each tag's value in this
 /// entry.
@@ -1033,11 +1044,21 @@ pub struct Tdfa {
     // `optimize`, which can remove states.
     has_anchor_alts: bool,
 
-    // Whether any state carries a `$`-style accept conditional. Precomputed
-    // (like `has_anchor_alts`) so the executor's dispatcher can drop the
-    // per-byte `record_conditionals` call when there are none. Recomputed
-    // after `optimize`.
-    has_conditionals: bool,
+    // Whether any state carries a `$`-style accept conditional that must be
+    // evaluated *per byte* — i.e. a multiline `$`, which can fire mid-input
+    // before a line terminator. Non-multiline `$` fires only at end-of-input
+    // and is handled by the EOI pass alone (see `has_eoi_conditionals`), so it
+    // does NOT set this flag. Precomputed (like `has_anchor_alts`) so the
+    // executor's dispatcher can drop the per-byte `record_conditionals` call —
+    // and so the capture-free fast path and the JIT stay available for the
+    // common `…$` / `^…$` family. Recomputed after `optimize`.
+    has_perbyte_conditionals: bool,
+
+    // Whether any state carries any `$`-style accept conditional at all
+    // (multiline or not). Drives the once-per-run EOI conditional pass and the
+    // warm-start gating. A superset of `has_perbyte_conditionals`: a non-multiline `$`
+    // sets this but not `has_perbyte_conditionals`. Recomputed after `optimize`.
+    has_eoi_conditionals: bool,
 
     // Whether the `FULL_MATCH_START` mark is fixed at entry — i.e. no transition
     // ever writes the mark(s) that accepting states read back as
@@ -1221,7 +1242,12 @@ impl Tdfa {
             transition_commands: build.transition_commands.into_boxed_slice(),
             transition_moves: Box::default(),
             finals: build.finals.into_boxed_slice(),
-            has_conditionals: build.anchor_conditionals.iter().any(|cs| !cs.is_empty()),
+            has_perbyte_conditionals: build
+                .anchor_conditionals
+                .iter()
+                .flatten()
+                .any(conditional_needs_perbyte),
+            has_eoi_conditionals: build.anchor_conditionals.iter().any(|cs| !cs.is_empty()),
             anchor_conditionals: build.anchor_conditionals.into_boxed_slice(),
             has_anchor_alts: build.anchor_alts.iter().any(|alts| !alts.is_empty()),
             anchor_alts: build.anchor_alts.into_boxed_slice(),
@@ -1263,7 +1289,7 @@ impl Tdfa {
     fn build_exec_transitions(&mut self) {
         let fast_ok = !self.has_captures
             && self.start_fixed
-            && !self.has_conditionals
+            && !self.has_perbyte_conditionals
             && !self.has_anchor_alts;
         if !fast_ok {
             self.exec_transitions = Box::default();
@@ -1343,7 +1369,12 @@ impl Tdfa {
         // State minimization can remove anchor-alt-bearing states, so refresh
         // the precomputed flags the executor's dispatcher reads.
         self.has_anchor_alts = self.anchor_alts.iter().any(|alts| !alts.is_empty());
-        self.has_conditionals = self.anchor_conditionals.iter().any(|cs| !cs.is_empty());
+        self.has_perbyte_conditionals = self
+            .anchor_conditionals
+            .iter()
+            .flatten()
+            .any(conditional_needs_perbyte);
+        self.has_eoi_conditionals = self.anchor_conditionals.iter().any(|cs| !cs.is_empty());
         // `optimize` renumbers marks and rewrites the command lists, so the
         // precompiled move sequences must be rebuilt from the new state. The
         // capture-free fast table built there also depends on the refreshed
@@ -1372,10 +1403,19 @@ impl Tdfa {
         self.has_anchor_alts
     }
 
-    /// Whether any state carries a `$`-style accept conditional. Drives the
-    /// executor's choice of monomorphization (see `TdfaExecConfig`).
-    pub(crate) fn has_conditionals(&self) -> bool {
-        self.has_conditionals
+    /// Whether any state carries a `$`-style accept conditional that must be
+    /// evaluated per byte (multiline `$`). Drives the executor's choice of
+    /// monomorphization (see `TdfaExecConfig`), the capture-free fast-path gate,
+    /// and JIT eligibility. Non-multiline `$` does not set this — see
+    /// [`has_eoi_conditionals`](Self::has_eoi_conditionals).
+    pub(crate) fn has_perbyte_conditionals(&self) -> bool {
+        self.has_perbyte_conditionals
+    }
+
+    /// Whether any state carries any `$`-style accept conditional (multiline or
+    /// not). Drives the once-per-run EOI conditional pass and warm-start gating.
+    pub(crate) fn has_eoi_conditionals(&self) -> bool {
+        self.has_eoi_conditionals
     }
 
     /// Whether the pattern has user capture groups (beyond the full match).
