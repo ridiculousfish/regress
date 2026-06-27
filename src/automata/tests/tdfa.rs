@@ -379,6 +379,19 @@ fn unanchored_dollar_takes_leftmost() {
 }
 
 #[test]
+fn multiple_accepts_take_highest_priority() {
+    // Two alternation branches reach `$` at the same position with different
+    // captures, so the state carries >1 accept. Leftmost-first must keep the
+    // earlier branch (group 1), not the last-iterated (lowest-priority) one.
+    // Regression for a consider_accept tie-break bug on equal (start, end).
+    let t = make_tdfa("(a)$|(a)$");
+    let m = execute_tdfa(&t, b"a").expect("should match");
+    assert_eq!(m.range, 0..1);
+    assert_eq!(m.captures[0], Some(0..1), "group 1 (first branch) must win");
+    assert_eq!(m.captures[1], None, "group 2 (second branch) unmatched");
+}
+
+#[test]
 fn unanchored_word_boundary() {
     let t = make_tdfa_unanchored(r"\bcat\b");
     assert_eq!(execute_tdfa(&t, b"a cat!").map(|m| m.range), Some(2..5));

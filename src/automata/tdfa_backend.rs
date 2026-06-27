@@ -872,8 +872,13 @@ fn consider_accept<'a, T: MarkElem>(
     read_live: &mut bool,
 ) {
     let new_start = snapshot_match_start(finals, marks);
-    if let Some((_, _, best_start)) = last_accept {
-        if new_start > *best_start {
+    if let Some((best_end, _, best_start)) = last_accept {
+        // Leftmost start wins; ties broken by longest end, then by priority.
+        // Candidates are offered in priority order (highest first), so a later
+        // candidate with the *same* start and end must not displace the one
+        // already recorded — that would pick the lower-priority alternative (e.g.
+        // two branches reaching `$` at one position with different captures).
+        if new_start > *best_start || (new_start == *best_start && end <= *best_end) {
             return;
         }
     }
