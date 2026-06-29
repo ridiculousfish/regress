@@ -423,13 +423,35 @@ impl Assembler for X86_64Asm {
                 self.emit(&[0x3C, lo]);
                 self.emit(&[0x0F, 0x84]);
                 self.emit_rel32(target);
+            } else if lo == 0 {
+                // `[0..=hi]` needs no normalization: test the raw byte. eax is
+                // left intact so later runs in the chain still see it.
+                emit_cmp_eax_imm(self, hi as u32);
+                self.emit(&[0x0F, 0x86]); // jbe target
+                self.emit_rel32(target);
             } else {
-                // tmp = byte - lo ; if tmp <= hi-lo (unsigned) -> target
-                self.emit(&[0x41, 0x89, 0xC3]); // mov r11d, eax
-                self.emit(&[0x41, 0x81, 0xEB]); // sub r11d, imm32
-                self.emit_u32(lo as u32);
-                self.emit(&[0x41, 0x81, 0xFB]); // cmp r11d, imm32
-                self.emit_u32((hi - lo) as u32);
+                // r11d = byte - lo, then `r11d <= hi-lo` (unsigned) -> target.
+                // The `lea` folds the register copy and the subtract into one
+                // op (shorter dependency chain than mov+sub+cmp) and leaves eax
+                // intact for later runs.
+                let disp = -(lo as i32);
+                if (-128..=127).contains(&disp) {
+                    // lea r11d, [rax + disp8]        44 8D 58 <disp8>
+                    self.emit(&[0x44, 0x8D, 0x58, disp as i8 as u8]);
+                } else {
+                    // lea r11d, [rax + disp32]       44 8D 98 <disp32>
+                    self.emit(&[0x44, 0x8D, 0x98]);
+                    self.emit_u32(disp as u32);
+                }
+                let span = (hi - lo) as u32;
+                if span <= 127 {
+                    // cmp r11d, imm8                 41 83 FB <imm8>
+                    self.emit(&[0x41, 0x83, 0xFB, span as u8]);
+                } else {
+                    // cmp r11d, imm32                41 81 FB <imm32>
+                    self.emit(&[0x41, 0x81, 0xFB]);
+                    self.emit_u32(span);
+                }
                 self.emit(&[0x0F, 0x86]); // jbe target
                 self.emit_rel32(target);
             }
@@ -629,6 +651,18 @@ impl X86_64Asm {
             }
             None => self.start_dispatch(start_anchored, start_unanchored),
         }
+    }
+}
+
+/// `cmp eax, imm`, using the 3-byte imm8 form when `imm` fits an unsigned byte
+/// compare (≤ 127, so the sign-extension is harmless) and the 5-byte `eax`-form
+/// imm32 otherwise. eax is not modified.
+fn emit_cmp_eax_imm(asm: &mut X86_64Asm, imm: u32) {
+    if imm <= 127 {
+        asm.emit(&[0x83, 0xF8, imm as u8]); // cmp eax, imm8
+    } else {
+        asm.emit(&[0x3D]); // cmp eax, imm32
+        asm.emit_u32(imm);
     }
 }
 
