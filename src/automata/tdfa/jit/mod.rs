@@ -207,20 +207,7 @@ fn compile_code(tdfa: &Tdfa, skip: Option<PrefixSkip>) -> Result<(Tier, Vec<u8>,
     #[cfg(target_arch = "aarch64")]
     let (code, data_start) = lower::<aarch64::Aarch64Asm>(tdfa, tier, skip)?;
     #[cfg(target_arch = "x86_64")]
-    let (code, data_start) = {
-        // The fully-literal fast path has no warm-start variant; a prefix skip
-        // (rare on a literal-chain automaton anyway) routes through the general
-        // lowerer instead.
-        if matches!(tier, Tier::CaptureFree) && skip.is_none() {
-            if let Some(compiled) = x86_64::try_compile_literal_chain(tdfa) {
-                compiled
-            } else {
-                lower::<x86_64::X86_64Asm>(tdfa, tier, skip)?
-            }
-        } else {
-            lower::<x86_64::X86_64Asm>(tdfa, tier, skip)?
-        }
-    };
+    let (code, data_start) = lower::<x86_64::X86_64Asm>(tdfa, tier, skip)?;
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     let (code, data_start) = {
         let _ = (tdfa, tier, skip);
