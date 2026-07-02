@@ -308,15 +308,31 @@ pub(crate) struct X86_64Asm {
     code: Vec<u8>,
     labels: Labels,
     fixups: Vec<Fixup>,
+    /// The most recently emitted unconditional `jmp` — `(offset of the E9 byte,
+    /// target)` — set only while it's the last thing emitted (any other emission
+    /// clears it). Lets [`bind`](Self::bind) elide a branch to the next
+    /// instruction (fall-through).
+    pending_jmp: Option<(usize, Label)>,
 }
 
 impl X86_64Asm {
     fn emit(&mut self, bytes: &[u8]) {
+        self.pending_jmp = None;
         self.code.extend_from_slice(bytes);
     }
 
     fn emit_u32(&mut self, v: u32) {
+        self.pending_jmp = None;
         self.code.extend_from_slice(&v.to_le_bytes());
+    }
+
+    /// `jmp target`, remembered so a following `bind(target)` can drop it as a
+    /// jump to the next instruction. Every unconditional branch routes through
+    /// here.
+    fn jmp(&mut self, target: Label) {
+        self.emit(&[0xE9]);
+        self.emit_rel32(target);
+        self.pending_jmp = Some((self.code.len() - 5, target));
     }
 
     /// Append a 4-byte placeholder and record a `Rel32` fixup over it (the
@@ -334,6 +350,7 @@ impl Assembler for X86_64Asm {
             code: Vec::new(),
             labels: Labels::new(),
             fixups: Vec::new(),
+            pending_jmp: None,
         }
     }
 
@@ -346,6 +363,14 @@ impl Assembler for X86_64Asm {
     }
 
     fn bind(&mut self, l: Label) {
+        // If the last thing emitted was `jmp l`, it's a jump to the next
+        // instruction — drop it and let control fall through.
+        if let Some((at, target)) = self.pending_jmp.take() {
+            if target == l && at + 5 == self.code.len() {
+                self.code.truncate(at);
+                self.fixups.pop(); // the jmp's Rel32, pushed last
+            }
+        }
         let off = self.code.len();
         self.labels.bind(l, off);
     }
@@ -389,9 +414,7 @@ impl Assembler for X86_64Asm {
     }
 
     fn branch(&mut self, target: Label) {
-        // jmp target                                E9 <rel32>
-        self.emit(&[0xE9]);
-        self.emit_rel32(target);
+        self.jmp(target); // E9 <rel32>
     }
 
     fn dispatch_byte_ranges(&mut self, runs: &[(u8, u8, Label)], default: Label) {
@@ -457,9 +480,7 @@ impl Assembler for X86_64Asm {
             }
             i += 1;
         }
-        // jmp default                               E9 <rel32>
-        self.emit(&[0xE9]);
-        self.emit_rel32(default);
+        self.jmp(default); // E9 <rel32>
     }
 
     fn dispatch(&mut self, jump_table: Label) {
@@ -566,9 +587,7 @@ impl Assembler for X86_64Asm {
                 self.emit_u32(dst as u32 * 4);
             }
         }
-        // jmp target                                 E9 <rel32>
-        self.emit(&[0xE9]);
-        self.emit_rel32(target);
+        self.jmp(target); // E9 <rel32>
     }
 
     fn cap_done(&mut self) {
@@ -622,12 +641,17 @@ impl X86_64Asm {
     }
 
     /// `test rdx, rdx; jz anchored; jmp unanchored` — shared by both prologues.
+    /// When the two starts coincide the `start` test is dead, so emit a single
+    /// unconditional `jmp`.
     fn start_dispatch(&mut self, start_anchored: Label, start_unanchored: Label) {
+        if start_anchored == start_unanchored {
+            self.jmp(start_anchored);
+            return;
+        }
         self.emit(&[0x48, 0x85, 0xD2]); // test rdx, rdx
         self.emit(&[0x0F, 0x84]); // jz start_anchored
         self.emit_rel32(start_anchored);
-        self.emit(&[0xE9]); // jmp start_unanchored
-        self.emit_rel32(start_unanchored);
+        self.jmp(start_unanchored);
     }
 
     /// Tail of both prologues: either warm-start past the prefilter-matched
@@ -646,8 +670,7 @@ impl X86_64Asm {
                     self.emit(&[0x48, 0x81, 0xC2]); // add rdx, imm32
                     self.emit_u32(len as u32);
                 }
-                self.emit(&[0xE9]); // jmp post_block
-                self.emit_rel32(post);
+                self.jmp(post); // jmp post_block
             }
             None => self.start_dispatch(start_anchored, start_unanchored),
         }

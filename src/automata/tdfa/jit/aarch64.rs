@@ -74,10 +74,16 @@ pub(crate) struct Aarch64Asm {
     code: Vec<u8>,
     labels: Labels,
     fixups: Vec<Fixup>,
+    /// The most recently emitted unconditional `b` — `(offset of the insn,
+    /// target)` — set only while it's the last thing emitted (any other emission
+    /// clears it). Lets [`bind`](Self::bind) elide a branch to the next
+    /// instruction (fall-through).
+    pending_b: Option<(u32, Label)>,
 }
 
 impl Aarch64Asm {
     fn emit_u32(&mut self, insn: u32) {
+        self.pending_b = None;
         self.code.extend_from_slice(&insn.to_le_bytes());
     }
 
@@ -110,11 +116,25 @@ impl Aarch64Asm {
         self.fixups.push(Fixup::Cond19 { at, label });
     }
 
-    /// `B label`.
+    /// `B label`, remembered so a following `bind(label)` can drop it as a
+    /// branch to the next instruction. The only unconditional-branch site.
     fn b(&mut self, label: Label) {
         let at = self.here();
         self.emit_u32(0x1400_0000);
         self.fixups.push(Fixup::Branch26 { at, label });
+        self.pending_b = Some((at, label));
+    }
+
+    /// Branch to the start state: `cbz pos, anchored; b unanchored` (start == 0 ?
+    /// anchored : unanchored). When the two coincide the `start` test is dead, so
+    /// emit a single unconditional `b`. Shared by both prologues.
+    fn start_dispatch(&mut self, start_anchored: Label, start_unanchored: Label) {
+        if start_anchored == start_unanchored {
+            self.b(start_anchored);
+        } else {
+            self.cbz(POS, start_anchored);
+            self.b(start_unanchored);
+        }
     }
 
     /// `B.HS label` (unsigned ≥, condition code `0b0010`).
@@ -249,6 +269,7 @@ impl Assembler for Aarch64Asm {
             code: Vec::new(),
             labels: Labels::new(),
             fixups: Vec::new(),
+            pending_b: None,
         }
     }
 
@@ -261,6 +282,14 @@ impl Assembler for Aarch64Asm {
     }
 
     fn bind(&mut self, l: Label) {
+        // If the last thing emitted was `b l`, it's a branch to the next
+        // instruction — drop it and let control fall through.
+        if let Some((at, target)) = self.pending_b.take() {
+            if target == l && at as usize + 4 == self.code.len() {
+                self.code.truncate(at as usize);
+                self.fixups.pop(); // the b's Branch26, pushed last
+            }
+        }
         let off = self.code.len();
         self.labels.bind(l, off);
     }
@@ -278,9 +307,7 @@ impl Assembler for Aarch64Asm {
             self.add_imm(POS, POS, len as u32); // pos += len (skip the prefix)
             self.b(post); // resume in the post-prefix state
         } else {
-            // start == 0 ? anchored : unanchored
-            self.cbz(POS, start_anchored);
-            self.b(start_unanchored);
+            self.start_dispatch(start_anchored, start_unanchored);
         }
     }
 
@@ -371,8 +398,7 @@ impl Assembler for Aarch64Asm {
             self.add_imm(POS, POS, len as u32); // pos += len (skip the prefix)
             self.b(post); // resume in the post-prefix state
         } else {
-            self.cbz(POS, start_anchored);
-            self.b(start_unanchored);
+            self.start_dispatch(start_anchored, start_unanchored);
         }
     }
 

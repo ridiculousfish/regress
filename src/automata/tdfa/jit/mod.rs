@@ -186,20 +186,24 @@ impl JittedTdfa {
     }
 }
 
-/// Lower `tdfa` to machine code, picking the tier and dispatching to the
-/// host-arch encoder. Errors with [`JitError::UnsupportedArch`] on
-/// architectures without an encoder.
-///
-/// The capture tier (mark application + finalize) is used whenever the match
-/// shape isn't a fixed `start..end`: user captures, *or* an unanchored automaton
-/// whose `.*?` prefix stamps `FULL_MATCH_START` mid-scan (`!start_fixed`). The
-/// capture-free tier is reserved for anchored, capture-free automata.
-fn compile_code(tdfa: &Tdfa, skip: Option<PrefixSkip>) -> Result<(Tier, Vec<u8>, usize), JitError> {
-    let tier = if tdfa.has_captures() || !tdfa.start_fixed() {
+/// Pick the tier a `Tdfa` compiles to. The capture tier (mark application +
+/// finalize) is used whenever the match shape isn't a fixed `start..end`: user
+/// captures, *or* an unanchored automaton whose `.*?` prefix stamps
+/// `FULL_MATCH_START` mid-scan (`!start_fixed`). The capture-free tier is
+/// reserved for anchored, capture-free automata.
+fn select_tier(tdfa: &Tdfa) -> Tier {
+    if tdfa.has_captures() || !tdfa.start_fixed() {
         Tier::Capture
     } else {
         Tier::CaptureFree
-    };
+    }
+}
+
+/// Lower `tdfa` to machine code, picking the tier and dispatching to the
+/// host-arch encoder. Errors with [`JitError::UnsupportedArch`] on
+/// architectures without an encoder.
+fn compile_code(tdfa: &Tdfa, skip: Option<PrefixSkip>) -> Result<(Tier, Vec<u8>, usize), JitError> {
+    let tier = select_tier(tdfa);
     #[cfg(target_arch = "aarch64")]
     let (code, data_start) = lower::<aarch64::Aarch64Asm>(tdfa, tier, skip)?;
     #[cfg(target_arch = "x86_64")]
@@ -260,7 +264,7 @@ pub fn disassemble(tdfa: &Tdfa) -> Result<String, JitError> {
     use core::fmt::Write as _;
     use std::collections::BTreeSet;
 
-    let (tier, code, data_start) = compile_code(tdfa)?;
+    let (tier, code, data_start) = compile_code(tdfa, None)?;
     let cs = host_capstone()?;
     let insns = cs
         .disasm_all(&code[..data_start], 0)
@@ -444,20 +448,56 @@ fn analyze_dispatch(
 }
 
 /// Emit one state's per-byte dispatch through `A` given its [`Dispatch`] plan.
+/// The EOI check guards the `fetch_byte` fall-through, so it's emitted only by
+/// the fetching plans — an `AllDone` state branches straight to `done` regardless
+/// of `pos`, making a preceding bounds check dead.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 fn emit_dispatch<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, done: Label) {
     match plan {
         Dispatch::AllDone => asm.branch(done),
         Dispatch::Ranges { runs, default } => {
+            asm.eoi_check(done);
             asm.fetch_byte();
             asm.dispatch_byte_ranges(runs, *default);
         }
         Dispatch::Table => {
+            asm.eoi_check(done);
             asm.fetch_byte();
             asm.classify();
             asm.dispatch(jt);
         }
     }
+}
+
+/// States reachable from the automaton's entry points, following live (non-dead)
+/// transitions. Unreachable state blocks are pointed at by nothing, so the
+/// driver skips emitting them. Seeds from both starts, plus `extra_seed` — the
+/// warm-start `post_state` the prologue can branch straight into, which the cold
+/// starts might not reach.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn reachable_states(tdfa: &Tdfa, extra_seed: Option<usize>) -> Vec<bool> {
+    let nc = tdfa.num_classes();
+    let num_states = tdfa.num_states();
+    let transitions = tdfa.transitions();
+    let mut seen = vec![false; num_states];
+    let mut stack: Vec<usize> = Vec::new();
+    let seeds = [Some(tdfa.start(0) as usize), Some(tdfa.start(1) as usize), extra_seed];
+    for s in seeds.into_iter().flatten() {
+        if s < num_states && !seen[s] {
+            seen[s] = true;
+            stack.push(s);
+        }
+    }
+    while let Some(s) = stack.pop() {
+        for &t in &transitions[s * nc..s * nc + nc] {
+            let t = t as usize;
+            if t != TDFA_DEAD_STATE as usize && t < num_states && !seen[t] {
+                seen[t] = true;
+                stack.push(t);
+            }
+        }
+    }
+    seen
 }
 
 /// The arch-independent codegen driver: walk `tdfa` and emit the capture-free
@@ -521,14 +561,19 @@ fn emit_capture_free<A: Assembler>(
     // dispatching on the start state. `len` must fit the prologue's `add`
     // immediate (12 bits); real prefixes are tiny, so an oversize one just keeps
     // the cold start.
+    // Only emit blocks reachable from the entry points (incl. the warm-start
+    // post_state); unreachable state blocks are referenced by nothing.
+    let reachable = reachable_states(tdfa, skip.map(|s| s.post_state as usize));
     let warm = warm_entry(skip, &block);
     asm.prologue(classtab, block[start_anchored], block[start_unanchored], warm);
     for s in 0..num_states {
+        if !reachable[s] {
+            continue;
+        }
         asm.bind(block[s]);
         if accepting[s] {
             asm.record_accept();
         }
-        asm.eoi_check(done);
         emit_dispatch(&mut asm, &plans[s], jt[s], done);
     }
     asm.bind(done);
@@ -539,7 +584,7 @@ fn emit_capture_free<A: Assembler>(
     asm.class_table(classtab, byte_to_class);
     let mut entries: Vec<Label> = Vec::with_capacity(nc);
     for s in 0..num_states {
-        if !matches!(plans[s], Dispatch::Table) {
+        if !reachable[s] || !matches!(plans[s], Dispatch::Table) {
             continue;
         }
         entries.clear();
@@ -577,7 +622,7 @@ fn emit_capture<A: Assembler>(
     tdfa: &Tdfa,
     skip: Option<PrefixSkip>,
 ) -> Result<(Vec<u8>, usize), JitError> {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     // Works for both anchored (fixed start) and unanchored (start stamped by the
     // `.*?` prefix's handoff transition, read back by `finalize`) automata; the
     // leftmost-start rule reduces to last-accept-wins without conditionals.
@@ -668,9 +713,28 @@ fn emit_capture<A: Assembler>(
         })
         .collect();
 
+    // Only emit blocks reachable from the entry points (incl. the warm-start
+    // post_state). A stub is emitted only when a reachable state points at it;
+    // its target is then reachable too, so `block[target]` below is always bound.
+    let reachable = reachable_states(tdfa, skip.map(|s| s.post_state as usize));
+    let mut referenced_stubs: HashSet<u32> = HashSet::new();
+    for s in 0..num_states {
+        if !reachable[s] {
+            continue;
+        }
+        for c in 0..nc {
+            if let Some(lbl) = stub[s * nc + c] {
+                referenced_stubs.insert(lbl.0);
+            }
+        }
+    }
+
     let warm = warm_entry(skip, &block);
     asm.cap_prologue(classtab, block[start_anchored], block[start_unanchored], warm);
     for s in 0..num_states {
+        if !reachable[s] {
+            continue;
+        }
         asm.bind(block[s]);
         if accepting[s] {
             // Record the accept; for a fallback accept also snapshot the live
@@ -680,16 +744,18 @@ fn emit_capture<A: Assembler>(
                 asm.cap_snapshot(mark_width);
             }
         }
-        asm.eoi_check(done);
         emit_dispatch(&mut asm, &plans[s], jt[s], done);
     }
     asm.bind(done);
     asm.cap_done();
 
     // Move stubs (one per unique (moves, target)): stamp current pos, apply the
-    // edge's moves, jump to the target.
+    // edge's moves, jump to the target. Only those a reachable state references.
     let mut mvs: Vec<(u16, u16)> = Vec::new();
     for &(lbl, idx) in &stub_reps {
+        if !referenced_stubs.contains(&lbl.0) {
+            continue;
+        }
         asm.bind(lbl);
         mvs.clear();
         mvs.extend(trans_moves[idx].iter().map(|m| (m.dst, m.src)));
@@ -703,7 +769,7 @@ fn emit_capture<A: Assembler>(
     asm.class_table(classtab, byte_to_class);
     let mut entries: Vec<Label> = Vec::with_capacity(nc);
     for s in 0..num_states {
-        if !matches!(plans[s], Dispatch::Table) {
+        if !reachable[s] || !matches!(plans[s], Dispatch::Table) {
             continue;
         }
         entries.clear();
