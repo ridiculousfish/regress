@@ -435,20 +435,28 @@ fn analyze_dispatch(
 }
 
 /// Emit one state's per-byte dispatch through `A` given its [`Dispatch`] plan.
-/// The EOI check guards the `fetch_byte` fall-through, so it's emitted only by
-/// the fetching plans — an `AllDone` state branches straight to `done` regardless
-/// of `pos`, making a preceding bounds check dead.
+/// `eoi` is where the state jumps when input is exhausted: normally the shared
+/// `done`, but a state carrying a non-multiline `$` accept points at its own
+/// landing pad (which records the accept before falling into `done`). The EOI
+/// check guards the `fetch_byte` fall-through, so the fetching plans always emit
+/// it; an `AllDone` state branches straight to `done` and needs the check only
+/// when it has a `$` accept to record (`eoi != done`).
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-fn emit_dispatch<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, done: Label) {
+fn emit_dispatch<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, done: Label, eoi: Label) {
     match plan {
-        Dispatch::AllDone => asm.branch(done),
+        Dispatch::AllDone => {
+            if eoi != done {
+                asm.eoi_check(eoi);
+            }
+            asm.branch(done);
+        }
         Dispatch::Ranges { runs, default } => {
-            asm.eoi_check(done);
+            asm.eoi_check(eoi);
             asm.fetch_byte();
             asm.dispatch_byte_ranges(runs, *default);
         }
         Dispatch::Table => {
-            asm.eoi_check(done);
+            asm.eoi_check(eoi);
             asm.fetch_byte();
             asm.classify();
             asm.dispatch(jt);
@@ -498,20 +506,23 @@ fn emit_capture_free<A: Assembler>(
     tdfa: &Tdfa,
     skip: Option<PrefixSkip>,
 ) -> Result<(Vec<u8>, usize), JitError> {
-    // Capture-free tier only: the conditions under which `exec_transitions`
-    // exists (no marks read back per byte, fixed start, no `$`-conditionals or
-    // multiline-`^` alts).
+    // Capture-free tier only: no marks read back per byte, fixed start, and no
+    // per-byte guards (multiline `^`/`$`, `\b`/`\B`). Non-multiline `$` accepts
+    // are allowed and handled via the EOI landing pads below.
     if tdfa.has_captures() {
         return Err(JitError::Unsupported("captures"));
     }
     if !tdfa.start_fixed() {
         return Err(JitError::Unsupported("unanchored / start not fixed"));
     }
-    // Per-byte guards (multiline `^`/`$`, `\b`/`\B`) and any `$` accept need
-    // boundary-signature evaluation / an EOI accept the codegen doesn't yet emit.
+    // Per-byte guards (multiline `^`/`$`, `\b`/`\B`) still need inline
+    // boundary-signature evaluation the codegen doesn't yet emit.
     // TODO(stage 4): compute the signature inline and emit the guard branches.
-    if tdfa.has_perbyte_guards() || tdfa.has_eoi_accepts() {
-        return Err(JitError::Unsupported("zero-width guards"));
+    // Non-multiline `$` accepts (`has_eoi_accepts` without `has_perbyte_guards`)
+    // *are* handled below: they fire only at EOI, where their predicate is
+    // trivially true, so each such state gets an EOI landing pad.
+    if tdfa.has_perbyte_guards() {
+        return Err(JitError::Unsupported("per-byte zero-width guards"));
     }
 
     let nc = tdfa.num_classes();
@@ -527,6 +538,15 @@ fn emit_capture_free<A: Assembler>(
     let done = asm.fresh_label();
     let block: Vec<Label> = (0..num_states).map(|_| asm.fresh_label()).collect();
     let jt: Vec<Label> = (0..num_states).map(|_| asm.fresh_label()).collect();
+
+    // A state carrying a non-multiline `$` accept (all `accepts` are exactly that
+    // here, since `has_perbyte_guards` is false) needs an EOI landing pad: on
+    // reaching end-of-input in this state, record the accept, then fall into
+    // `done`. States without a `$` accept jump straight to `done` at EOI.
+    let eoi_stub: Vec<Option<Label>> = (0..num_states)
+        .map(|s| (!tdfa.guards(s as u32).accepts.is_empty()).then(|| asm.fresh_label()))
+        .collect();
+    let eoi_target = |s: usize| eoi_stub[s].unwrap_or(done);
 
     // Decide each state's dispatch up front (also tells us which states need a
     // jump table).
@@ -561,7 +581,17 @@ fn emit_capture_free<A: Assembler>(
         if accepting[s] {
             asm.record_accept();
         }
-        emit_dispatch(&mut asm, &plans[s], jt[s], done);
+        emit_dispatch(&mut asm, &plans[s], jt[s], done, eoi_target(s));
+    }
+    // EOI landing pads: a `$`-accept state records the accept (`acc = pos`, which
+    // at EOI is the match end) and falls into `done`. Only reachable states'
+    // dispatch references these, so unreachable pads are dead — skip them.
+    for s in 0..num_states {
+        if let Some(stub) = eoi_stub[s].filter(|_| reachable[s]) {
+            asm.bind(stub);
+            asm.record_accept();
+            asm.branch(done);
+        }
     }
     asm.bind(done);
     asm.ret_done();
@@ -731,7 +761,9 @@ fn emit_capture<A: Assembler>(
                 asm.cap_snapshot(mark_width);
             }
         }
-        emit_dispatch(&mut asm, &plans[s], jt[s], done);
+        // The capture tier still declines `has_eoi_accepts`, so every state's
+        // EOI target is the shared `done`.
+        emit_dispatch(&mut asm, &plans[s], jt[s], done, done);
     }
     asm.bind(done);
     asm.cap_done();
@@ -906,6 +938,28 @@ mod tests {
         assert_matches_interpreter("[a-c]+", &["abc", "abcd", "d", "cba"]);
     }
 
+    /// Non-multiline `$` accepts: the capture-free tier records the accept at an
+    /// EOI landing pad. Ranges/Table states retarget their `eoi_check`; the
+    /// dead-end `$` state (`AllDone`, e.g. after `foo`) gains an `eoi_check` it
+    /// otherwise skips. Must match the interpreter at every start, including
+    /// inputs that stop short of EOI (`"foox"`, `"xfoo"`).
+    #[test]
+    fn jit_end_anchor_vs_interpreter() {
+        // `foo$` must land on the capture-free tier now (was declined before).
+        let tdfa = anchored_tdfa("foo$");
+        let jit = JittedTdfa::compile(&tdfa, None).expect("foo$ should compile");
+        assert!(
+            matches!(jit.compiled, Compiled::CaptureFree(_)),
+            "foo$ should use the capture-free tier",
+        );
+
+        assert_matches_interpreter("foo$", &["foo", "foox", "xfoo", "fo", "", "foofoo"]);
+        assert_matches_interpreter("^foo$", &["foo", "foox", "xfoo", ""]);
+        assert_matches_interpreter("[a-z]+$", &["abc", "abc1", "1abc", "", "a"]);
+        assert_matches_interpreter("foo$|bar$", &["foo", "bar", "foobar", "barx", ""]);
+        assert_matches_interpreter("ab*c$", &["ac", "abbc", "abbcx", "abb", ""]);
+    }
+
     /// Unanchored tier: the JIT must match the interpreter's single-pass scan
     /// (`.*?`-prefixed automaton) — leftmost match, with the start read from the
     /// stamped `FULL_MATCH_START` mark — for capture-free and capturing patterns.
@@ -990,6 +1044,8 @@ mod tests {
         let patterns = [
             "a+b+", "(?:ab|cd)+", "[0-9]+", "[a-c]*z", "x.y", "[^ab]+",
             "foo", "a?b?c?", "(?:a|b|c)+d",
+            // Non-multiline `$` accepts (EOI landing pads).
+            "a+b$", "[a-c]*z$", "foo$|bar$", "x.y$", "ab*c$",
         ];
         let alphabet = b"abcdz019x";
         let mut rng = SmallRng::seed_from_u64(0xC0DA_F00D);

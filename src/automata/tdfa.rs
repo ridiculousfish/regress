@@ -1365,8 +1365,13 @@ impl Tdfa {
     /// Conservatively `false` if no accepting state names a start mark.
     fn compute_start_fixed(&self) -> bool {
         let mut start_marks: SmallVec<[u32; 4]> = SmallVec::new();
-        for finals in self.finals.iter() {
-            for cmd in finals.iter() {
+        // Plain accepting-state finals, plus the `$`-conditional accept finals
+        // (`Holmes$`) — a `$` accept reads the start mark back through its own
+        // finals, not the state's plain finals, so both must be scanned for an
+        // anchored `…$` pattern to be recognized as start-fixed.
+        let cond_finals = self.guards.iter().flat_map(|g| g.accepts.iter().map(|ac| &ac.finals));
+        for finals in self.finals.iter().map(|f| f.as_slice()).chain(cond_finals.map(|f| f.as_slice())) {
+            for cmd in finals {
                 if cmd.tag == FULL_MATCH_START {
                     if let MarkValue::Copy(m) = cmd.src {
                         if !start_marks.contains(&m.0) {
