@@ -1102,8 +1102,9 @@ pub struct AnchorAlt {
 
 /// The zero-width guards on one TDFA state — the unified replacement for the old
 /// parallel `anchor_alts` / `anchor_conditionals` tables. At a guarded position
-/// the executor computes the `boundary_signature` once, takes the first matching
-/// `switch` (changing state), then records every matching `accept`.
+/// the executor computes the `boundary_signature` once, follows matching
+/// `switch` entries to a fixpoint (changing state), then records every matching
+/// `accept`.
 #[derive(Debug, Clone, Default)]
 pub struct StateGuards {
     /// Multiline `^` and `\b`/`\B`: when the predicate holds, rearrange marks

@@ -483,6 +483,28 @@ fn multiline_caret_keeps_prefix() {
 }
 
 #[test]
+fn overlapping_multiline_caret_and_word_boundary_switches_compose() {
+    // At the position after '\n', multiline ^ and exactly one of \b / \B hold.
+    // The ^ branch has higher priority but fails on the following byte, so the
+    // simultaneously enabled word-boundary branch must remain in the subset.
+    for (pattern, input) in [(r"^x|\by", b"\ny".as_slice()), (r"^x|\B!", b"\n!")] {
+        let mut t = make_tdfa_unanchored_ml(pattern);
+        assert_eq!(
+            execute_tdfa(&t, input).map(|m| m.range),
+            Some(1..2),
+            "unoptimized pattern={pattern:?}"
+        );
+
+        t.optimize();
+        assert_eq!(
+            execute_tdfa(&t, input).map(|m| m.range),
+            Some(1..2),
+            "optimized pattern={pattern:?}"
+        );
+    }
+}
+
+#[test]
 fn top_level_alt_not_anchored() {
     // `^a|b` is an Alt at top level: the `b` arm is unanchored, so the prefix is
     // kept and `b` matches mid-string.

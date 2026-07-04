@@ -744,18 +744,36 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     }
 }
 
-/// If `state` has a switch guard whose predicate holds at the position's
-/// boundary signature `sig`, apply its commands to `buf` (scalar, in place) and
-/// swap `state` to the alt id (first match wins). Cold: switches are rare, and
-/// the caller already checked the list is non-empty.
+/// Follow switch guards that hold at this position until no further state
+/// change applies. Alternate closures are built independently, so overlapping
+/// predicates (multiline `^` with `\b` or `\B`) compose by switching through
+/// successively enlarged closures: at each hop we take the first (highest NFA
+/// priority) matching guard, land in a strictly larger subset that carries the
+/// remaining predicates as its own switches, and repeat until none fire. The
+/// chain converges because every switch enlarges the subset, so no state
+/// repeats and `num_states()` bounds the iterations.
 fn apply_switches<T: MarkElem>(tdfa: &Tdfa, state: &mut u32, buf: &mut [T], sig: u8, pos: usize) {
-    for sw in &tdfa.guards(*state).switches {
-        if sw.cond.holds_sig(sig) {
-            apply_cmds_scalar::<T>(buf, &sw.commands, T::from_pos(pos));
-            *state = sw.alt;
+    for _ in 0..tdfa.num_states() {
+        let Some(sw) = tdfa
+            .guards(*state)
+            .switches
+            .iter()
+            .find(|sw| sw.cond.holds_sig(sig))
+        else {
             return;
-        }
+        };
+        apply_cmds_scalar::<T>(buf, &sw.commands, T::from_pos(pos));
+        *state = sw.alt;
     }
+
+    debug_assert!(
+        !tdfa
+            .guards(*state)
+            .switches
+            .iter()
+            .any(|sw| sw.cond.holds_sig(sig)),
+        "zero-width switch cycle"
+    );
 }
 
 /// For each `$`-style accept on `state` whose predicate holds at the position's
