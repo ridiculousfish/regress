@@ -4,7 +4,7 @@ use crate::Flags;
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::nfa_backend::execute as execute_nfa_inner;
-use crate::automata::tdfa::{MarkValue, Tdfa};
+use crate::automata::tdfa::{MarkValue, TDFA_DEAD_STATE, Tdfa};
 use crate::automata::tdfa_backend::execute as execute_tdfa_inner;
 
 fn execute_nfa(nfa: &Nfa, input: &[u8]) -> Option<NfaMatch> {
@@ -629,5 +629,70 @@ fn minimize_shrinks_and_preserves_matches() {
                 );
             }
         }
+    }
+}
+
+/// The precise `accept_fallback` analysis must never flag a state the structural
+/// over-approximation wouldn't (soundness: subset), and here it must clear at
+/// least one — the accepting state after group 1 of `(\w+)(\s+\w+)?`, whose only
+/// live non-accepting successor writes group 2's registers, not the ones group
+/// 1's accept reads.
+#[test]
+fn accept_fallback_precise_beats_structural() {
+    let t = make_tdfa(r"(\w+)(\s+\w+)?");
+    let k = t.num_classes();
+    let acc = t.accepting();
+    let trans = t.transitions();
+    let precise = t.accept_fallback();
+
+    // Structural over-approximation: any accepting state with a live,
+    // non-accepting successor.
+    let structural: Vec<bool> = (0..acc.len())
+        .map(|s| {
+            acc[s]
+                && trans[s * k..(s + 1) * k]
+                    .iter()
+                    .any(|&d| d != TDFA_DEAD_STATE && !acc[d as usize])
+        })
+        .collect();
+
+    // Subset: precise never adds a snapshot the structural check didn't demand.
+    for s in 0..acc.len() {
+        assert!(
+            !precise[s] || structural[s],
+            "state {s}: precise flagged a fallback the structural check did not",
+        );
+    }
+    // Strict: the refinement actually fires for this pattern.
+    assert!(
+        (0..acc.len()).any(|s| structural[s] && !precise[s]),
+        "expected the precise analysis to clear at least one structural fallback",
+    );
+}
+
+/// Group 1's captures must be correct whether or not the optional group 2
+/// matches — including the case where the tail is attempted (writing group 2's
+/// registers) and then fails, which is exactly what the eager snapshot used to
+/// guard against. Run on both the raw and optimized (register-allocated) TDFA so
+/// the coalescing pass is covered.
+#[test]
+fn optional_tail_captures_survive_read_live() {
+    let raw = make_tdfa(r"(\w+)(\s+\w+)?");
+    let mut opt = make_tdfa(r"(\w+)(\s+\w+)?");
+    opt.optimize();
+    for t in [&raw, &opt] {
+        let m = execute_tdfa(t, b"foo bar").expect("match");
+        assert_eq!(m.range, 0..7);
+        assert_eq!(m.captures, vec![Some(0..3), Some(3..7)]);
+
+        let m = execute_tdfa(t, b"foo").expect("match");
+        assert_eq!(m.range, 0..3);
+        assert_eq!(m.captures, vec![Some(0..3), None]);
+
+        // Trailing space, no following word: the optional tail is attempted then
+        // fails, so group 1 must be intact and group 2 unmatched.
+        let m = execute_tdfa(t, b"foo ").expect("match");
+        assert_eq!(m.range, 0..3);
+        assert_eq!(m.captures, vec![Some(0..3), None]);
     }
 }
