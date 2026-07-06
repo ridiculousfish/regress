@@ -159,9 +159,9 @@ pub fn fold(cu: u32) -> u32 {
     });
     if let Ok(index) = searched {
         let fr: &FoldRange = if cfg!(feature = "prohibit-unsafe") {
-            unsafe { FOLDS.get_unchecked(index) }
-        } else {
             FOLDS.get(index).expect("Invalid index")
+        } else {
+            unsafe { FOLDS.get_unchecked(index) }
         };
         fr.apply(cu)
     } else {

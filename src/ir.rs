@@ -97,7 +97,7 @@ pub enum Node {
         icase: bool,
     },
 
-    /// A lookaround assertions like (?:) or (?!).
+    /// A lookaround assertions like (?=...) or (?!...).
     LookaroundAssertion {
         negate: bool,
         backwards: bool,
