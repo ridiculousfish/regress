@@ -15,7 +15,7 @@ use crate::{
     unicodetables::{id_continue_ranges, id_start_ranges},
     util::to_char_sat,
 };
-use core::{fmt, iter::Peekable};
+use core::{fmt, iter::Peekable, mem};
 #[cfg(feature = "std")]
 use std::collections::HashMap;
 #[cfg(all(not(feature = "std"), feature = "alloc"))]
@@ -1203,7 +1203,7 @@ where
                                 Some(0x7C /* | */) => {
                                     self.consume('|');
                                     if !alternative.is_empty() {
-                                        let alternative = std::mem::take(&mut alternative).into_boxed_slice();
+                                        let alternative = mem::take(&mut alternative).into_boxed_slice();
                                         alternatives.push(alternative);
 
                                     }

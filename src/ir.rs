@@ -3,7 +3,7 @@
 use crate::api;
 use crate::types::{BracketContents, CaptureGroupID, CaptureGroupName};
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::ToString, vec::Vec};
+use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 #[derive(Debug, Copy, Clone)]

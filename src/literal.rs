@@ -3,6 +3,8 @@
 use crate::insn::MAX_CHAR_SET_LENGTH;
 use crate::ir::Node;
 use crate::unicode;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Piece {
