@@ -1015,7 +1015,8 @@ where
     }
 
     // CharacterClass :: ClassContents :: ClassSetExpression
-    fn consume_class_set_expression(&mut self, negate_set: bool) -> Result<ClassSet, Error> {
+    // `in_negated_class` forbids string operands. It does not invert the result.
+    fn consume_class_set_expression(&mut self, in_negated_class: bool) -> Result<ClassSet, Error> {
         let mut result = ClassSet::new();
 
         let first = match self.peek() {
@@ -1023,7 +1024,7 @@ where
                 self.consume(']');
                 return Ok(result);
             }
-            Some(_) => self.consume_class_set_operand(negate_set)?,
+            Some(_) => self.consume_class_set_operand(in_negated_class)?,
             None => {
                 return error("Unbalanced class set bracket");
             }
@@ -1062,7 +1063,7 @@ where
                     match first {
                         ClassSetOperand::ClassSetCharacter(first) => {
                             let ClassSetOperand::ClassSetCharacter(last) =
-                                self.consume_class_set_operand(negate_set)?
+                                self.consume_class_set_operand(in_negated_class)?
                             else {
                                 return error("Invalid class set range");
                             };
@@ -1095,7 +1096,7 @@ where
                             self.consume(']');
                             return Ok(result);
                         }
-                        Some(_) => self.consume_class_set_operand(negate_set)?,
+                        Some(_) => self.consume_class_set_operand(in_negated_class)?,
                         None => return error("Unbalanced class set bracket"),
                     };
                     if self.peek() == Some(0x2D /* - */) {
@@ -1103,7 +1104,7 @@ where
                         match operand {
                             ClassSetOperand::ClassSetCharacter(first) => {
                                 let ClassSetOperand::ClassSetCharacter(last) =
-                                    self.consume_class_set_operand(negate_set)?
+                                    self.consume_class_set_operand(in_negated_class)?
                                 else {
                                     return error("Invalid class set range");
                                 };
@@ -1124,7 +1125,7 @@ where
             // ClassIntersection :: ClassSetOperand && [lookahead ≠ &]
             ClassSetOperator::Intersection => {
                 loop {
-                    let operand = self.consume_class_set_operand(negate_set)?;
+                    let operand = self.consume_class_set_operand(in_negated_class)?;
                     result.intersect_operand(operand);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
@@ -1140,7 +1141,7 @@ where
             // ClassSubtraction :: ClassSubtraction -- ClassSetOperand
             ClassSetOperator::Subtraction => {
                 loop {
-                    let operand = self.consume_class_set_operand(negate_set)?;
+                    let operand = self.consume_class_set_operand(in_negated_class)?;
                     result.subtract_operand(operand);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
@@ -1156,7 +1157,10 @@ where
         }
     }
 
-    fn consume_class_set_operand(&mut self, negate_set: bool) -> Result<ClassSetOperand, Error> {
+    fn consume_class_set_operand(
+        &mut self,
+        in_negated_class: bool,
+    ) -> Result<ClassSetOperand, Error> {
         use ClassSetOperand::*;
         let Some(cp) = self.peek() else {
             return error("Empty class set operand");
@@ -1167,9 +1171,9 @@ where
             0x5B /* [ */ => {
                 self.consume('[');
                 let negate_set = self.try_consume('^');
-                let result = self.consume_class_set_expression(negate_set)?;
+                let mut result = self.consume_class_set_expression(negate_set)?;
                 if negate_set {
-                    result.codepoints.inverted();
+                    result.codepoints = result.codepoints.inverted();
                 }
                 Ok(Class(result))
             }
@@ -1257,7 +1261,7 @@ where
                                     intervals.to_vec(),
                                 )))
                             }
-                            PropertyEscapeKind::StringSet(_) if negate_set => error("Invalid character escape"),
+                            PropertyEscapeKind::StringSet(_) if in_negated_class => error("Invalid character escape"),
                             PropertyEscapeKind::StringSet(strings) => {
                                 Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| Box::from(*s)).collect())))
                             }

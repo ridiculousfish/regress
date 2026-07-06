@@ -249,6 +249,7 @@ impl CodePointSet {
 
     /// \return an inverted set: a set containing every code point NOT in the
     /// receiver.
+    #[must_use]
     pub fn inverted(&self) -> CodePointSet {
         // The intervals we collect.
         let mut inverted_ivs = Vec::new();

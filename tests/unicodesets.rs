@@ -3184,3 +3184,31 @@ fn unicode_sets_qstring_longest_first() {
         assert_eq!(tc.compilef(r"[\q{ab|ba}]", "v").match1f("ab"), "ab");
     });
 }
+
+/// A negated *nested* class `[^...]` used as a set operand must have its code
+/// points inverted. Regression test: previously the inversion was dropped, so
+/// `[[^a]]` behaved like `[a]`.
+#[test]
+fn unicode_sets_negated_nested_class() {
+    test_with_configs(|tc| {
+        // Bare negated nested class: `[[^a]]` is "everything except a".
+        test_unicode_sets_matches(tc, "[[^a]]", &["b", "c", "0", "z"], &["a"]);
+        test_unicode_sets_matches(tc, "[^[^a]]", &["a"], &["b", "c", "0", "z"]);
+        // Negated nested class containing a character-class escape.
+        test_unicode_sets_matches(tc, r"[[^\d]]", &["a", "x", "_"], &["5", "0"]);
+        // Intersection: word characters except `_`.
+        test_unicode_sets_matches(tc, r"[\w&&[^_]]", &["a", "5", "Z"], &["_", " "]);
+        // Union: `a` unioned with "not b" is everything except `b`.
+        test_unicode_sets_matches(tc, "[a[^b]]", &["a", "c", "0"], &["b"]);
+        // Subtraction: lowercase letters minus the non-vowels leaves the vowels.
+        test_unicode_sets_matches(tc, "[[a-z]--[^aeiou]]", &["a", "e", "u"], &["b", "z"]);
+
+        // None of these should parse without the 'v' flag.
+        test_parse_fails_flags("[[^a]]", "u");
+        test_parse_fails_flags("[^[^a]]", "u");
+        test_parse_fails_flags(r"[[^\d]]", "u");
+        test_parse_fails_flags(r"[\w&&[^_]]", "u");
+        test_parse_fails_flags("[a[^b]]", "u");
+        test_parse_fails_flags("[[a-z]--[^aeiou]]", "u");
+    });
+}
