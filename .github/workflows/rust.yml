@@ -83,6 +83,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-features --verbose
 
+  test-big-endian:
+    name: Test (Big Endian)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - run: cross test --target s390x-unknown-linux-gnu --verbose
+
   doc:
     name: Documentation
     runs-on: ubuntu-latest
