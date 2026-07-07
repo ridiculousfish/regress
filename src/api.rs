@@ -450,8 +450,22 @@ impl Regex {
     ///   let t2 = re.find_from(text, 1).next().unwrap().range();
     ///   assert!(t2 == (1..2));
     ///   ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if `start` is not on a UTF-8 character boundary of `text`. An
+    /// out-of-range `start` (`start > text.len()`) is not an error and yields an
+    /// empty iterator, mirroring JavaScript's `lastIndex` semantics.
     #[inline]
     pub fn find_from<'r, 't>(&'r self, text: &'t str, start: usize) -> Matches<'r, 't> {
+        // A mid-character `start` would step the cursor into the middle of a
+        // multi-byte sequence and read past the end of `text`, so it is
+        // rejected. An out-of-range `start` is harmless: it simply produces no
+        // matches (see `try_move_right`), matching JavaScript's `lastIndex`.
+        assert!(
+            start >= text.len() || text.is_char_boundary(start),
+            "start index is not on a char boundary"
+        );
         backends::find(self, text, start)
     }
 
@@ -472,7 +486,7 @@ impl Regex {
     }
 
     /// Returns an iterator for matches found in 'text' starting at byte index
-    /// `start`.
+    /// `start`. An out-of-range `start` yields an empty iterator.
     #[inline]
     pub fn find_from_ascii<'r, 't>(&'r self, text: &'t str, start: usize) -> AsciiMatches<'r, 't> {
         backends::find(self, text, start)
