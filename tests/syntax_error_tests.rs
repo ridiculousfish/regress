@@ -93,3 +93,25 @@ fn test_syntax_errors() {
     test_1_error(r"\2(a)", "Invalid character escape");
     test_1_error("(?q:abc)", "Invalid group modifier");
 }
+
+#[test]
+fn test_invalid_hex_escape() {
+    // Regression test for #134
+    // In non-unicode mode, `\x` not followed by two hex digits is an identity
+    // escape for `x` alone.
+    let res = regress::Regex::with_flags(r"\1\x(", "");
+    assert!(res.is_err());
+    assert!(
+        res.err().unwrap().text.contains("Unbalanced parenthesis"),
+        "Expected the leftover '(' to be treated as an unterminated group"
+    );
+
+    // The hex digits are only consumed when they actually parse as hex.
+    let re = regress::Regex::with_flags(r"\x41", "").unwrap();
+    assert!(re.find("A").is_some());
+
+    // With just one valid hex digit, only `x` is the identity escape; the
+    // stray digit remains as a literal character.
+    let re = regress::Regex::with_flags(r"\xg1", "").unwrap();
+    assert!(re.find("xg1").is_some());
+}

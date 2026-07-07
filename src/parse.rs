@@ -1518,13 +1518,18 @@ where
             }
             // CharacterEscape :: HexEscapeSequence :: x HexDigit HexDigit
             'x' => {
+                let orig_input = self.input.clone();
                 let hex_to_digit = |c: char| c.to_digit(16);
                 let x1 = self.next().and_then(char::from_u32).and_then(hex_to_digit);
                 let x2 = self.next().and_then(char::from_u32).and_then(hex_to_digit);
                 match (x1, x2) {
                     (Some(x1), Some(x2)) => Ok(x1 * 16 + x2),
                     // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
-                    _ if !self.flags.unicode => Ok(c),
+                    // Not a valid HexEscapeSequence. Restore the input.
+                    _ if !self.flags.unicode => {
+                        self.input = orig_input;
+                        Ok(c)
+                    }
                     _ => error("Invalid character escape"),
                 }
             }
