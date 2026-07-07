@@ -4,6 +4,7 @@
 // Work around dead code warnings: rust-lang issue #46379
 pub mod common;
 use common::*;
+use regress::Regex;
 
 fn test_zero_length_matches_tc(tc: TestConfig) {
     tc.compile(".*?").match_all("a").test_eq(vec!["", ""]);
@@ -2458,4 +2459,19 @@ fn test_duplicate_named_groups_with_noncapturing_prefix() {
         re.test_fails("xy");
         re.test_fails("yx");
     })
+}
+
+// Regression test for #141.
+// Loop unrolling can be too aggressive.
+#[test]
+fn test_loop_unroll_overflow() {
+    let pattern = r"(?:(?:b(?:(?:(?:(?:(?:(?:h(?:(?:Ba){6}){3}){3,}){3,}){3}){3}){3,}){3}){3,}){3}";
+
+    // Test with optimizations.
+    let mut flags = regress::Flags::default();
+    Regex::with_flags(pattern, flags).expect("Should compile");
+
+    // Test without optimizations.
+    flags.no_opt = true;
+    Regex::with_flags(pattern, flags).expect("Should compile");
 }

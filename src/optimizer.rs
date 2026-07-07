@@ -9,6 +9,27 @@ use alloc::{boxed::Box, vec::Vec};
 /// When unrolling a loop, the largest minimum count we will unroll.
 const LOOP_UNROLL_THRESHOLD: usize = 5;
 
+/// How many nodes we will inspect in a loop body before refusing to unroll it.
+const UNROLL_BODY_BUDGET: usize = 256;
+
+/// Check whether the body of a loop can be unrolled.
+/// The 'budget' indicates the numbers of nodes remaining before we give up.
+/// We also skip loops with nested loops.
+fn is_unrollable(node: &Node, budget: &mut usize) -> bool {
+    if *budget == 0 {
+        return false;
+    }
+    *budget -= 1;
+    match node {
+        Node::Loop { .. } | Node::Loop1CharBody { .. } => false,
+        Node::Cat(nodes) => nodes.iter().all(|n| is_unrollable(n, budget)),
+        Node::Alt(left, right) => is_unrollable(left, budget) && is_unrollable(right, budget),
+        Node::CaptureGroup { contents, .. } => is_unrollable(contents, budget),
+        Node::LookaroundAssertion { contents, .. } => is_unrollable(contents, budget),
+        _ => true,
+    }
+}
+
 /// Things that a Pass may do.
 pub enum PassAction {
     // Do nothing to the given node.
@@ -284,14 +305,18 @@ fn unroll_loops(n: &mut Node, _w: &Walk) -> PassAction {
             quant,
             enclosed_groups,
         } => {
-            // TODO: consider ignoring loops with nested sub-loops?
-
             // Do not unroll loops with enclosed groups.
             if enclosed_groups.start < enclosed_groups.end {
                 return PassAction::Keep;
             }
             // Do not unroll large loops, or loops which may execute zero times.
             if quant.min == 0 || quant.min > LOOP_UNROLL_THRESHOLD {
+                return PassAction::Keep;
+            }
+            // Refuse to unroll a body containing nested loops or one too large to
+            // be worth duplicating; both would multiply loops (issue #141).
+            let mut budget = UNROLL_BODY_BUDGET;
+            if !is_unrollable(loopee, &mut budget) {
                 return PassAction::Keep;
             }
 
