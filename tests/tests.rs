@@ -2298,6 +2298,26 @@ fn test_duplicate_named_groups_same_alternative_rejected() {
     assert!(Regex::new(r"(?<a>x)(?:(?<a>y))").is_err());
 }
 
+// Allow nested brackets in v mode.
+#[test]
+fn test_v_mode_nested_class_scan() {
+    let re = regress::Regex::with_flags(r"^(?<n>[[0-9]\q{ab|cd}])$", "v").unwrap();
+    assert_eq!(re.find("5").unwrap().group(1), Some(0..1));
+    assert_eq!(re.find("ab").unwrap().group(1), Some(0..2));
+    assert_eq!(re.find("cd").unwrap().group(1), Some(0..2));
+    assert!(re.find("x").is_none());
+    assert!(re.find("12").is_none());
+
+    // The two `(?<x>)` groups share an alternative, so this is a duplicate name.
+    assert!(regress::Regex::with_flags(r"(?<x>1)[[a]\q{b|c}](?<x>2)", "v").is_err());
+
+    // Without `v`, classes don't nest: `[[a]]` is the class `[[a]` followed by a
+    // literal `]`, so the scan stops at the first `]`.
+    let re = regress::Regex::new(r"^[[a]]$").unwrap();
+    assert!(re.find("a]").is_some());
+    assert!(re.find("a").is_none());
+}
+
 #[test]
 fn test_ascii_unicode_icase_backref() {
     test_with_configs(|tc| {

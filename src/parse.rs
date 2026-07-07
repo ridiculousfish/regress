@@ -1916,6 +1916,29 @@ where
                     self.next();
                     continue;
                 }
+                Some('[') if self.flags.unicode_sets => {
+                    // In unicode_sets (`v`) mode character classes can nest,
+                    // e.g. `[[a][b]]`, so track bracket depth and stop only at
+                    // the matching `]`.
+                    let mut depth = 1usize;
+                    loop {
+                        match self.next().map(to_char_sat) {
+                            Some('\\') => {
+                                self.next();
+                                continue;
+                            }
+                            Some('[') => depth += 1,
+                            Some(']') => {
+                                depth -= 1;
+                                if depth == 0 {
+                                    break;
+                                }
+                            }
+                            Some(_) => continue,
+                            None => break,
+                        }
+                    }
+                }
                 Some('[') => loop {
                     match self.next().map(to_char_sat) {
                         Some('\\') => {
