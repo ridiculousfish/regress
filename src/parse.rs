@@ -7,7 +7,7 @@ use crate::{
     ir,
     types::{
         BracketContents, CaptureGroupID, CaptureGroupName, CharacterClassType, MAX_CAPTURE_GROUPS,
-        MAX_LOOPS,
+        MAX_LOOPS, MAX_NESTING_DEPTH,
     },
     unicode::{
         self, PropertyEscapeKind, unicode_property_from_str, unicode_property_name_from_str,
@@ -426,6 +426,9 @@ where
 
     /// Whether a lookbehind was encountered.
     has_lookbehind: bool,
+
+    /// Current recursion nesting depth.
+    depth: u32,
 }
 
 impl<I> Parser<I>
@@ -504,10 +507,15 @@ where
 
     /// ES6 21.2.2.3 Disjunction.
     fn consume_disjunction(&mut self) -> Result<ir::Node, Error> {
+        self.depth += 1;
+        if self.depth > MAX_NESTING_DEPTH {
+            return error("Regular expression is too deeply nested");
+        }
         let mut terms = vec![self.consume_term()?];
         while self.try_consume('|') {
             terms.push(self.consume_term()?)
         }
+        self.depth -= 1;
         Ok(make_alt(terms))
     }
 
@@ -1169,12 +1177,17 @@ where
             // ClassSetOperand :: NestedClass :: [ [lookahead ≠ ^] ClassContents[+UnicodeMode, +UnicodeSetsMode] ]
             // ClassSetOperand :: NestedClass :: [^ ClassContents[+UnicodeMode, +UnicodeSetsMode] ]
             0x5B /* [ */ => {
+                self.depth += 1;
+                if self.depth > MAX_NESTING_DEPTH {
+                    return error("Regular expression is too deeply nested");
+                }
                 self.consume('[');
                 let negate_set = self.try_consume('^');
                 let mut result = self.consume_class_set_expression(negate_set)?;
                 if negate_set {
                     result.codepoints = result.codepoints.inverted();
                 }
+                self.depth -= 1;
                 Ok(Class(result))
             }
             // ClassSetOperand :: NestedClass :: \ CharacterClassEscape
@@ -2102,6 +2115,7 @@ where
         named_group_indices: HashMap::new(),
         group_count_max: 0,
         has_lookbehind: false,
+        depth: 0,
     };
     p.try_parse()
 }

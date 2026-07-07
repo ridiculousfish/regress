@@ -28,6 +28,39 @@ fn test_excessive_capture_groups() {
 }
 
 #[test]
+fn test_excessive_nesting() {
+    // Deeply nested constructs must be rejected with an error rather than
+    // overflowing the parser's stack. See the MAX_NESTING_DEPTH limit.
+    let deep = 5000;
+
+    // Non-capturing groups: increment no other counter, so this is the purest
+    // unbounded-recursion vector.
+    let noncap = format!("{}a{}", "(?:".repeat(deep), ")".repeat(deep));
+    test_1_error(&noncap, "too deeply nested");
+
+    // Capturing groups.
+    let cap = format!("{}a{}", "(".repeat(deep), ")".repeat(deep));
+    test_1_error(&cap, "too deeply nested");
+
+    // Nested `v`-mode class-set expressions recurse on their own path.
+    let vclass = format!("{}a{}", "[".repeat(deep), "]".repeat(deep));
+    let res = regress::Regex::with_flags(&vclass, "v");
+    assert!(res.is_err(), "Deeply nested v-mode class should not parse");
+    assert!(
+        res.err().unwrap().text.contains("too deeply nested"),
+        "Expected nesting error for deeply nested v-mode class"
+    );
+
+    // A pattern nested well within the limit must still compile.
+    let shallow = 200;
+    let ok = format!("{}a{}", "(?:".repeat(shallow), ")".repeat(shallow));
+    assert!(
+        regress::Regex::with_flags(&ok, "u").is_ok(),
+        "Pattern nested within the limit should compile"
+    );
+}
+
+#[test]
 fn test_syntax_errors() {
     test_1_error(r"*", "Invalid atom character");
     test_1_error(r"x**", "Invalid atom character");

@@ -18,6 +18,10 @@ pub const MAX_CAPTURE_GROUPS: usize = 65535;
 pub const MAX_LOOPS: usize = 65535;
 pub type LoopID = u16;
 
+/// The maximum nesting depth of groups, lookarounds, and nested classes.
+/// This bounds parser recursion to prevent a stack overflow on adversarial input.
+pub const MAX_NESTING_DEPTH: u32 = 256;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CharacterClassType {
     Digits,
