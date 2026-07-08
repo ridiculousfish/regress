@@ -458,10 +458,6 @@ impl Regex {
     /// empty iterator, mirroring JavaScript's `lastIndex` semantics.
     #[inline]
     pub fn find_from<'r, 't>(&'r self, text: &'t str, start: usize) -> Matches<'r, 't> {
-        // A mid-character `start` would step the cursor into the middle of a
-        // multi-byte sequence and read past the end of `text`, so it is
-        // rejected. An out-of-range `start` is harmless: it simply produces no
-        // matches (see `try_move_right`), matching JavaScript's `lastIndex`.
         assert!(
             start >= text.len() || text.is_char_boundary(start),
             "start index is not on a char boundary"
