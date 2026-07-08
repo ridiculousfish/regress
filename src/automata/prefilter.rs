@@ -27,7 +27,7 @@ use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::reverse;
 use crate::automata::tdfa::{self, Tdfa, TdfaStats};
-use crate::automata::tdfa_backend::{self, MarkScratch, PrefixSkip};
+use crate::automata::tdfa_backend::{self, PrefixSkip, Scratch};
 use crate::insn::StartPredicate;
 use crate::ir;
 use crate::startpredicate;
@@ -1021,7 +1021,7 @@ impl TdfaProgram {
         tdfa: &Tdfa,
         bytes: &[u8],
         s: usize,
-        scratch: &mut MarkScratch,
+        scratch: &mut Scratch<usize>,
     ) -> Option<NfaMatch> {
         #[cfg(feature = "tdfa-jit")]
         if let Some(jit) = &self.jit {
@@ -1039,7 +1039,7 @@ impl TdfaProgram {
         &self,
         bytes: &[u8],
         offset: usize,
-        scratch: &mut MarkScratch,
+        scratch: &mut Scratch<usize>,
     ) -> Option<NfaMatch> {
         match &self.strategy {
             Strategy::WholeLiteral { literal, len } => {
@@ -1200,7 +1200,7 @@ impl TdfaProgram {
         }
     }
 
-    /// The mark-file width a reused [`MarkScratch`] for this program must have.
+    /// The mark-file width a reused [`Scratch`] for this program must have.
     /// The literal-only strategies never touch the scratch, so any non-zero
     /// width is fine (`3`, one lane per non-mark slot).
     pub(crate) fn mark_width(&self) -> usize {
@@ -1208,7 +1208,7 @@ impl TdfaProgram {
             .map_or(3, tdfa_backend::mark_file_width)
     }
 
-    /// The number of capture tags a reused [`MarkScratch`] for this program must
+    /// The number of capture tags a reused [`Scratch`] for this program must
     /// size its `finalize` buffer to. The literal-only strategies never call
     /// `finalize`; `2` (the `FULL_MATCH_*` sentinels) is a safe placeholder.
     pub(crate) fn num_tags(&self) -> usize {
@@ -1320,7 +1320,7 @@ impl TdfaJitProgram {
         &self,
         bytes: &[u8],
         offset: usize,
-        scratch: &mut MarkScratch,
+        scratch: &mut Scratch<usize>,
     ) -> Option<NfaMatch> {
         self.0.find_at(bytes, offset, scratch)
     }

@@ -270,8 +270,8 @@ impl Assembler for X86_64Asm {
         // best_snap (arg 4 = r8) lives in callee-saved rbx for the whole run.
         self.emit(&[0x53]); // push rbx
         self.emit(&[0x4C, 0x89, 0xC3]); // mov rbx, r8   (best_snap, before r8 reused)
-        // mov r9d, -1          (acc_end = 0xFFFF_FFFF)  41 B9 FF FF FF FF
-        self.emit(&[0x41, 0xB9, 0xFF, 0xFF, 0xFF, 0xFF]);
+        // mov r9, -1           (acc_end = u64::MAX sentinel)  49 C7 C1 FF FF FF FF
+        self.emit(&[0x49, 0xC7, 0xC1, 0xFF, 0xFF, 0xFF, 0xFF]);
         self.load_classtab(classtab); // overwrites r8 with the class table
         self.warm_or_start(warm, start_anchored, start_unanchored);
     }
@@ -290,11 +290,11 @@ impl Assembler for X86_64Asm {
     }
 
     fn cap_snapshot(&mut self, width: u32) {
-        // for i in 0..width { best_snap[i] = marks[i] }  (u32 lanes)
+        // for i in 0..width { best_snap[i] = marks[i] }  (u64 lanes)
         self.emit(&[0x31, 0xC0]); // xor eax, eax   (i = 0)
         let loop_top = self.code.len() as u32;
-        self.emit(&[0x44, 0x8B, 0x1C, 0x81]); // mov r11d, [rcx + rax*4]
-        self.emit(&[0x44, 0x89, 0x1C, 0x83]); // mov [rbx + rax*4], r11d
+        self.emit(&[0x4C, 0x8B, 0x1C, 0xC1]); // mov r11, [rcx + rax*8]
+        self.emit(&[0x4C, 0x89, 0x1C, 0xC3]); // mov [rbx + rax*8], r11
         self.emit(&[0xFF, 0xC0]); // inc eax
         self.emit(&[0x3D]); // cmp eax, imm32
         self.emit_u32(width);
@@ -307,40 +307,50 @@ impl Assembler for X86_64Asm {
     }
 
     fn cap_move_stub(&mut self, curpos_idx: u32, moves: &[(u16, u16)], target: Label) {
+        // u64 lanes (×8). A disp8 form (offset < 128, i.e. lanes 0..15) is a
+        // 4-byte instruction — smaller than the disp32 form (7 bytes) and than the
+        // former u32 disp32 mov (6 bytes) — which offsets the REX.W width cost and
+        // keeps the hot loop dense. `op` = 89 store / 8B load; `reg_bits` is the
+        // ModRM reg field already positioned (bits 5..3).
+        fn mark_mem(asm: &mut X86_64Asm, op: u8, reg_bits: u8, lane: u16) {
+            let off = lane as u32 * 8;
+            if off < 128 {
+                // REX.W op modrm(mod=01, reg, rm=rcx=001) disp8
+                asm.emit(&[0x48, op, 0x40 | reg_bits | 0x01, off as u8]);
+            } else {
+                // REX.W op modrm(mod=10, reg, rm=rcx=001) disp32
+                asm.emit(&[0x48, op, 0x80 | reg_bits | 0x01]);
+                asm.emit_u32(off);
+            }
+        }
         for &(dst, src) in moves {
             if src as u32 == curpos_idx {
-                // CurrentPos write: marks[dst] = pos (edx), directly.
-                // mov [rcx + dst*4], edx                 89 91 <disp32>
-                self.emit(&[0x89, 0x91]);
-                self.emit_u32(dst as u32 * 4);
+                mark_mem(self, 0x89, 0b010_000, dst); // marks[dst] = pos (rdx)
             } else {
-                // mov eax, [rcx + src*4]                 8B 81 <disp32>
-                self.emit(&[0x8B, 0x81]);
-                self.emit_u32(src as u32 * 4);
-                // mov [rcx + dst*4], eax                 89 81 <disp32>
-                self.emit(&[0x89, 0x81]);
-                self.emit_u32(dst as u32 * 4);
+                mark_mem(self, 0x8B, 0b000_000, src); // rax = marks[src]
+                mark_mem(self, 0x89, 0b000_000, dst); // marks[dst] = rax
             }
         }
         self.jmp(target); // E9 <rel32>
     }
 
     fn cap_done(&mut self) {
-        // cmp r9d, -1          (acc_end == 0xFFFF_FFFF?)  41 83 F9 FF
-        self.emit(&[0x41, 0x83, 0xF9, 0xFF]);
+        // Return CaptureResult { end: rax, meta: rdx }. acc_end (r9) is the full
+        // 64-bit match end; acc_state (r10) is the meta word (state + snapshot bit
+        // 31). No accept => acc_end still holds the -1 sentinel => meta = u64::MAX.
+        // cmp r9, -1          (acc_end == sentinel?)  49 83 F9 FF
+        self.emit(&[0x49, 0x83, 0xF9, 0xFF]);
         // je no_match                                0F 84 <rel32>
         let no_match = self.labels.fresh();
         self.emit(&[0x0F, 0x84]);
         self.emit_rel32(no_match);
-        // rax = (r10 << 32) | r9
-        self.emit(&[0x49, 0x8B, 0xC2]); // mov rax, r10
-        self.emit(&[0x48, 0xC1, 0xE0, 0x20]); // shl rax, 32
-        self.emit(&[0x49, 0x0B, 0xC1]); // or rax, r9
+        self.emit(&[0x4C, 0x89, 0xC8]); // mov rax, r9    (end)
+        self.emit(&[0x4C, 0x89, 0xD2]); // mov rdx, r10   (meta)
         self.emit(&[0x5B]); // pop rbx
         self.emit(&[0xC3]); // ret
-        // no_match: mov rax, -1 ; pop rbx ; ret
+        // no_match: mov rdx, -1 ; pop rbx ; ret   (rax is don't-care)
         self.bind(no_match);
-        self.emit(&[0x48, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF]);
+        self.emit(&[0x48, 0xC7, 0xC2, 0xFF, 0xFF, 0xFF, 0xFF]); // mov rdx, -1
         self.emit(&[0x5B]); // pop rbx
         self.emit(&[0xC3]);
     }

@@ -23,7 +23,7 @@ use crate::api::Match;
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend;
 use crate::automata::prefilter::TdfaProgram;
-use crate::automata::tdfa_backend::MarkScratch;
+use crate::automata::tdfa_backend::Scratch;
 use crate::exec::{Executor, MatchProducer};
 use crate::indexing::{InputIndexer, Utf8Input};
 #[cfg(not(feature = "std"))]
@@ -117,7 +117,7 @@ impl<'r, 't> Executor<'r, 't> for NfaExecutor<'r, 't> {
 pub struct TdfaExecutor<'r, 't> {
     program: &'r TdfaProgram,
     input: Utf8Input<'t>,
-    scratch: MarkScratch,
+    scratch: Scratch<usize>,
 }
 
 impl<'r, 't> MatchProducer for TdfaExecutor<'r, 't> {
@@ -152,7 +152,7 @@ impl<'r, 't> Executor<'r, 't> for TdfaExecutor<'r, 't> {
         Self {
             program: source,
             input: Utf8Input::new(text, /* unicode */ true),
-            scratch: MarkScratch::new(source.mark_width(), source.num_tags(), text.as_bytes()),
+            scratch: Scratch::new(source.mark_width(), source.num_tags()),
         }
     }
 }
@@ -166,7 +166,7 @@ impl<'r, 't> Executor<'r, 't> for TdfaExecutor<'r, 't> {
 pub struct TdfaJitExecutor<'r, 't> {
     program: &'r crate::automata::prefilter::TdfaJitProgram,
     input: Utf8Input<'t>,
-    scratch: MarkScratch,
+    scratch: Scratch<usize>,
 }
 
 #[cfg(feature = "tdfa-jit")]
@@ -200,7 +200,7 @@ impl<'r, 't> Executor<'r, 't> for TdfaJitExecutor<'r, 't> {
         Self {
             program: source,
             input: Utf8Input::new(text, /* unicode */ true),
-            scratch: MarkScratch::new(source.mark_width(), source.num_tags(), text.as_bytes()),
+            scratch: Scratch::new(source.mark_width(), source.num_tags()),
         }
     }
 }

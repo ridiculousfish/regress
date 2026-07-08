@@ -180,11 +180,6 @@ impl Aarch64Asm {
         self.emit_u32(0xD65F_03C0);
     }
 
-    /// `MOVN Wd, #0` → `Wd = 0xFFFF_FFFF` (zero-extended into Xd).
-    fn movn_w_zero(&mut self, rd: u32) {
-        self.emit_u32(0x1280_0000 | rd);
-    }
-
     /// `MOVZ Xd, #imm16` (LSL #0).
     fn movz_x(&mut self, rd: u32, imm16: u32) {
         debug_assert!(imm16 < 0x1_0000);
@@ -197,31 +192,31 @@ impl Aarch64Asm {
         self.emit_u32(0xF2A0_0000 | (imm16 << 5) | rd);
     }
 
-    /// `LDR Wt, [Xn, Xm, LSL #2]` (32-bit register offset).
-    fn ldr_w_idx(&mut self, rt: u32, rn: u32, rm: u32) {
-        self.emit_u32(0xB860_7800 | (rm << 16) | (rn << 5) | rt);
+    /// `CMN Xn, #1` (ADDS XZR, Xn, #1): sets Z iff `Xn == u64::MAX`.
+    fn cmn_x1(&mut self, rn: u32) {
+        self.emit_u32(0xB100_0000 | (1 << 10) | (rn << 5) | XZR);
     }
 
-    /// `STR Wt, [Xn, Xm, LSL #2]` (32-bit register offset).
-    fn str_w_idx(&mut self, rt: u32, rn: u32, rm: u32) {
-        self.emit_u32(0xB820_7800 | (rm << 16) | (rn << 5) | rt);
+    /// `LDR Xt, [Xn, Xm, LSL #3]` (64-bit register offset).
+    fn ldr_x_idx(&mut self, rt: u32, rn: u32, rm: u32) {
+        self.emit_u32(0xF860_7800 | (rm << 16) | (rn << 5) | rt);
     }
 
-    /// `STR Wt, [Xn, #imm12*4]` (32-bit, unsigned scaled offset).
-    fn str_w(&mut self, rt: u32, rn: u32, imm12: u32) {
+    /// `STR Xt, [Xn, Xm, LSL #3]` (64-bit register offset).
+    fn str_x_idx(&mut self, rt: u32, rn: u32, rm: u32) {
+        self.emit_u32(0xF820_7800 | (rm << 16) | (rn << 5) | rt);
+    }
+
+    /// `STR Xt, [Xn, #imm12*8]` (64-bit, unsigned scaled offset).
+    fn str_x(&mut self, rt: u32, rn: u32, imm12: u32) {
         debug_assert!(imm12 < 0x1000);
-        self.emit_u32(0xB900_0000 | (imm12 << 10) | (rn << 5) | rt);
+        self.emit_u32(0xF900_0000 | (imm12 << 10) | (rn << 5) | rt);
     }
 
-    /// `LDR Wt, [Xn, #imm12*4]` (32-bit, unsigned scaled offset).
-    fn ldr_w(&mut self, rt: u32, rn: u32, imm12: u32) {
+    /// `LDR Xt, [Xn, #imm12*8]` (64-bit, unsigned scaled offset).
+    fn ldr_x(&mut self, rt: u32, rn: u32, imm12: u32) {
         debug_assert!(imm12 < 0x1000);
-        self.emit_u32(0xB940_0000 | (imm12 << 10) | (rn << 5) | rt);
-    }
-
-    /// `CMN Wn, #1` (ADDS WZR, Wn, #1): sets Z iff `Wn == 0xFFFF_FFFF`.
-    fn cmn_w1(&mut self, rn: u32) {
-        self.emit_u32(0x3100_0000 | (1 << 10) | (rn << 5) | XZR);
+        self.emit_u32(0xF940_0000 | (imm12 << 10) | (rn << 5) | rt);
     }
 
     /// `B.<cond> label`.
@@ -246,11 +241,6 @@ impl Aarch64Asm {
     fn sub_imm_w(&mut self, rd: u32, rn: u32, imm12: u32) {
         debug_assert!(imm12 < 0x1000);
         self.emit_u32(0x5100_0000 | (imm12 << 10) | (rn << 5) | rd);
-    }
-
-    /// `ORR Xd, Xn, Xm, LSL #32`.
-    fn orr_lsl32(&mut self, rd: u32, rn: u32, rm: u32) {
-        self.emit_u32(0xAA00_0000 | (rm << 16) | (32 << 10) | (rn << 5) | rd);
     }
 
     /// Pad with zero bytes until the emission offset is 4-byte aligned. Code is
@@ -392,7 +382,7 @@ impl Assembler for Aarch64Asm {
         warm: Option<(Label, usize)>,
     ) {
         self.mov_reg(BEST_SNAP, ARG4); // best_snap = arg4 (x4), before x4 is reused
-        self.movn_w_zero(ACC_END); // acc_end = 0xFFFF_FFFF (no accept)
+        self.movn_zero(ACC_END); // acc_end = u64::MAX sentinel (no accept)
         self.adr_addr(CLASSTAB, classtab); // overwrites x4 with the class table
         if let Some((post, len)) = warm {
             self.add_imm(POS, POS, len as u32); // pos += len (skip the prefix)
@@ -412,11 +402,11 @@ impl Assembler for Aarch64Asm {
     }
 
     fn cap_snapshot(&mut self, width: u32) {
-        // for i in 0..width { best_snap[i] = marks[i] }  (u32 lanes)
+        // for i in 0..width { best_snap[i] = marks[i] }  (u64 lanes)
         self.movz_x(SNAP_CTR, 0); // i = 0
         let loop_top = self.code.len() as u32;
-        self.ldr_w_idx(MOVE_TMP, MARKS, SNAP_CTR); // tmp = marks[i]
-        self.str_w_idx(MOVE_TMP, BEST_SNAP, SNAP_CTR); // best_snap[i] = tmp
+        self.ldr_x_idx(MOVE_TMP, MARKS, SNAP_CTR); // tmp = marks[i]
+        self.str_x_idx(MOVE_TMP, BEST_SNAP, SNAP_CTR); // best_snap[i] = tmp
         self.add_imm(SNAP_CTR, SNAP_CTR, 1); // i += 1
         self.cmp_imm_w(SNAP_CTR, width); // cmp i, width
         // b.lo loop_top  (backward branch; compute the displacement directly)
@@ -426,28 +416,32 @@ impl Assembler for Aarch64Asm {
     }
 
     fn cap_move_stub(&mut self, curpos_idx: u32, moves: &[(u16, u16)], target: Label) {
+        // u64 lanes: STR/LDR (imm12) auto-scales the offset ×8, and lane counts
+        // (≤ 4095) fit the imm12 field, so no disp split is needed here.
         for &(dst, src) in moves {
             if src as u32 == curpos_idx {
                 // CurrentPos write: marks[dst] = pos, directly (no curpos lane).
-                self.str_w(POS, MARKS, dst as u32);
+                self.str_x(POS, MARKS, dst as u32);
             } else {
-                self.ldr_w(MOVE_TMP, MARKS, src as u32);
-                self.str_w(MOVE_TMP, MARKS, dst as u32);
+                self.ldr_x(MOVE_TMP, MARKS, src as u32);
+                self.str_x(MOVE_TMP, MARKS, dst as u32);
             }
         }
         self.b(target);
     }
 
     fn cap_done(&mut self) {
-        // if acc_end == 0xFFFF_FFFF (no accept) -> return u64::MAX
-        self.cmn_w1(ACC_END);
+        // Return CaptureResult { end: x0, meta: x1 }. acc_end (x9) is the full
+        // 64-bit match end; acc_state (x10) is the meta word (state + snapshot bit
+        // 31). No accept => acc_end still the sentinel => meta = u64::MAX.
+        self.cmn_x1(ACC_END);
         let no_match = self.labels.fresh();
         self.b_eq(no_match);
-        // x0 = (acc_state << 32) | acc_end
-        self.orr_lsl32(INPUT, ACC_END, ACC_STATE);
+        self.mov_reg(INPUT, ACC_END); // x0 = end
+        self.mov_reg(END, ACC_STATE); // x1 = meta
         self.ret();
         self.bind(no_match);
-        self.emit_u32(0x9280_0000); // MOVN x0, #0  -> x0 = u64::MAX
+        self.movn_zero(END); // x1 = u64::MAX (x0 is don't-care)
         self.ret();
     }
 

@@ -8,9 +8,8 @@
 //! simultaneous-assignment semantics hold while writing in place. Only the lanes
 //! that change are touched — no width-proportional copy, no double buffer.
 //!
-//! The scan is monomorphized once in [`execute`] over [`MarkElem`] — the mark
-//! element type: `u32` (the fast path; haystacks ≤ 4 GiB) or `usize` (the
-//! fallback for larger inputs) — so the per-byte loop carries no dispatch.
+//! Marks are `usize` byte offsets (via the single-impl [`MarkElem`]), so the
+//! per-byte loop carries no width dispatch and any haystack size is addressable.
 
 use crate::automata::anchors::boundary_signature;
 use crate::automata::dfa::{DEAD_STATE, Dfa};
@@ -25,30 +24,17 @@ use crate::util::DebugCheckIndex;
 use alloc::vec::Vec;
 use smallvec::SmallVec;
 
-/// A mark-file element. Marks hold byte offsets into the haystack (or the
-/// `NO_MATCH` sentinel). `u32` is the SIMD-friendly fast path used when the
-/// haystack fits in 4 GiB; `usize` is the fallback for larger inputs.
+/// A mark-file element: a `usize` byte offset into the haystack (or the
+/// `NO_MATCH` sentinel). Kept as a trait so the scan code reads offsets through
+/// named operations, but there is a single (`usize`) implementation.
 pub(crate) trait MarkElem: Copy + Ord {
     /// "Unset" sentinel — distinct from every valid offset.
     const NO_MATCH: Self;
-    /// A valid input offset as a mark value. `p` is `< NO_MATCH` by construction
-    /// (the dispatcher routes oversized inputs to a wider `MarkElem`).
+    /// A valid input offset as a mark value.
     fn from_pos(p: usize) -> Self;
     /// This mark as a `usize` offset. Only meaningful for non-`NO_MATCH` values;
     /// finalization maps the sentinel separately.
     fn to_pos(self) -> usize;
-}
-
-impl MarkElem for u32 {
-    const NO_MATCH: Self = u32::MAX;
-    #[inline]
-    fn from_pos(p: usize) -> Self {
-        p as u32
-    }
-    #[inline]
-    fn to_pos(self) -> usize {
-        self as usize
-    }
 }
 
 impl MarkElem for usize {
@@ -162,71 +148,24 @@ fn run_prefiltered_dyn<T: MarkElem>(
     }
 }
 
-/// `u32` marks can only address offsets `< u32::MAX` (reserving that value as the
-/// `NO_MATCH` sentinel); larger haystacks fall back to `usize`. The common path
-/// is `u32`, so [`execute_reuse`] lets a caller hand in a reused `u32` scratch.
-#[inline]
-fn needs_wide_marks(input: &[u8]) -> bool {
-    input.len() >= u32::MAX as usize
-}
-
 /// Execute the TDFA against `input`, allocating fresh buffers. Returns the first
 /// match (range + captures) or `None`. Used by tests and one-shot callers; the
 /// match-iteration hot path uses [`execute_reuse`] with a caller-owned scratch.
 pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
-    let width = mark_file_width(tdfa);
-    let num_tags = tdfa.num_tags();
-    if needs_wide_marks(input) {
-        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(width, num_tags), None)
-    } else {
-        run_anchored_dyn::<u32>(tdfa, input, start, &mut Scratch::new(width, num_tags), None)
-    }
+    let mut scratch = Scratch::<usize>::new(mark_file_width(tdfa), tdfa.num_tags());
+    run_anchored_dyn(tdfa, input, start, &mut scratch, None)
 }
 
-/// The reusable mark scratch, its element width chosen once from the haystack
-/// length (decided at executor construction, since the text is fixed for the
-/// executor's lifetime). `u32` marks address offsets `< u32::MAX` (reserving that
-/// value as `NO_MATCH`); haystacks `>= 4 GiB` need the `usize` lane. Keeping one
-/// buffer of the correct width lets a `find_iter` over *either* size stay
-/// allocation-free per match.
-#[derive(Debug)]
-pub(crate) enum MarkScratch {
-    Narrow(Scratch<u32>),
-    Wide(Scratch<usize>),
-}
-
-impl MarkScratch {
-    /// Reusable scratch (buffers sized to `width` = [`mark_file_width`],
-    /// `num_tags` capture slots), with the mark element width chosen from the
-    /// haystack — decided once (the executor's text is fixed for its lifetime).
-    pub(crate) fn new(width: usize, num_tags: usize, input: &[u8]) -> Self {
-        if needs_wide_marks(input) {
-            MarkScratch::Wide(Scratch::new(width, num_tags))
-        } else {
-            MarkScratch::Narrow(Scratch::new(width, num_tags))
-        }
-    }
-}
-
-/// Like [`execute`], but reuses the caller-owned [`MarkScratch`] (sized to
+/// Like [`execute`], but reuses the caller-owned `scratch` (sized to
 /// [`mark_file_width`]) instead of allocating — so a `find_iter` over many
-/// matches stays allocation-free per match, at either mark width.
+/// matches stays allocation-free per match.
 pub(crate) fn execute_reuse(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
-    scratch: &mut MarkScratch,
+    scratch: &mut Scratch<usize>,
 ) -> Option<NfaMatch> {
-    match scratch {
-        MarkScratch::Narrow(s) => {
-            debug_assert!(!needs_wide_marks(input));
-            run_anchored_dyn::<u32>(tdfa, input, start, s, None)
-        }
-        MarkScratch::Wide(s) => {
-            debug_assert!(needs_wide_marks(input));
-            run_anchored_dyn::<usize>(tdfa, input, start, s, None)
-        }
-    }
+    run_anchored_dyn(tdfa, input, start, scratch, None)
 }
 
 /// Like [`execute_reuse`], but warm-starts past a prefilter-matched prefix when
@@ -238,42 +177,24 @@ pub(crate) fn execute_reuse_warm(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
-    scratch: &mut MarkScratch,
+    scratch: &mut Scratch<usize>,
     skip: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
-    match scratch {
-        MarkScratch::Narrow(s) => {
-            debug_assert!(!needs_wide_marks(input));
-            run_anchored_dyn::<u32>(tdfa, input, start, s, skip)
-        }
-        MarkScratch::Wide(s) => {
-            debug_assert!(needs_wide_marks(input));
-            run_anchored_dyn::<usize>(tdfa, input, start, s, skip)
-        }
-    }
+    run_anchored_dyn(tdfa, input, start, scratch, skip)
 }
 
 /// Execute an **anchored** TDFA driven by a literal prefilter, reusing the
-/// caller-owned [`MarkScratch`]. `skip` warm-starts each verify past the matched
+/// caller-owned `scratch`. `skip` warm-starts each verify past the matched
 /// literal (see [`PrefixSkip`]).
 pub(crate) fn execute_prefiltered_reuse(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
     pred: &StartPredicate,
-    scratch: &mut MarkScratch,
+    scratch: &mut Scratch<usize>,
     skip: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
-    match scratch {
-        MarkScratch::Narrow(s) => {
-            debug_assert!(!needs_wide_marks(input));
-            run_prefiltered_dyn::<u32>(tdfa, input, start, pred, s, skip)
-        }
-        MarkScratch::Wide(s) => {
-            debug_assert!(needs_wide_marks(input));
-            run_prefiltered_dyn::<usize>(tdfa, input, start, pred, s, skip)
-        }
-    }
+    run_prefiltered_dyn(tdfa, input, start, pred, scratch, skip)
 }
 
 /// Apply a `TagCommandList` to a mark file in place (scalar, two-phase). Used
@@ -327,18 +248,18 @@ pub(crate) struct Scratch<T: MarkElem> {
 }
 
 #[cfg(feature = "tdfa-jit")]
-impl Scratch<u32> {
+impl<T: MarkElem> Scratch<T> {
     /// Raw pointer to the working mark file, handed to JIT-compiled capture
     /// code (which applies per-transition marks in place). Valid until the next
     /// mutation of `self`.
-    pub(crate) fn src_buf_mut_ptr(&mut self) -> *mut u32 {
+    pub(crate) fn src_buf_mut_ptr(&mut self) -> *mut T {
         self.src_buf.as_mut_ptr()
     }
 
     /// Raw pointer to the accept-snapshot buffer, handed to JIT-compiled capture
     /// code (which copies the live marks here on a fallback accept). Valid until
     /// the next mutation of `self`.
-    pub(crate) fn best_snap_mut_ptr(&mut self) -> *mut u32 {
+    pub(crate) fn best_snap_mut_ptr(&mut self) -> *mut T {
         self.best_snap.as_mut_ptr()
     }
 }
@@ -1008,13 +929,9 @@ fn finalize<T: MarkElem>(
 /// applies per-transition marks in place; [`jit_finalize`] reads them back. This
 /// mirrors `run_anchored`'s pre-loop `src_buf.fill` + entry-command application.
 #[cfg(feature = "tdfa-jit")]
-pub(crate) fn jit_prepare_marks(tdfa: &Tdfa, scratch: &mut Scratch<u32>, start: usize) {
-    scratch.src_buf.fill(<u32 as MarkElem>::NO_MATCH);
-    apply_cmds_scalar::<u32>(
-        &mut scratch.src_buf,
-        tdfa.entry_commands(start),
-        <u32 as MarkElem>::from_pos(start),
-    );
+pub(crate) fn jit_prepare_marks<T: MarkElem>(tdfa: &Tdfa, scratch: &mut Scratch<T>, start: usize) {
+    scratch.src_buf.fill(T::NO_MATCH);
+    apply_cmds_scalar::<T>(&mut scratch.src_buf, tdfa.entry_commands(start), T::from_pos(start));
 }
 
 /// JIT capture-path finalize: build the winning `NfaMatch` for the accept at
@@ -1023,19 +940,19 @@ pub(crate) fn jit_prepare_marks(tdfa: &Tdfa, scratch: &mut Scratch<u32>, start: 
 /// survive to scan end) or the eager `best_snap` taken at a fallback accept
 /// (Laurikari). Reuses the interpreter's [`finalize`].
 #[cfg(feature = "tdfa-jit")]
-pub(crate) fn jit_finalize(
+pub(crate) fn jit_finalize<T: MarkElem>(
     tdfa: &Tdfa,
     state: u32,
-    scratch: &mut Scratch<u32>,
+    scratch: &mut Scratch<T>,
     end: usize,
     read_live: bool,
 ) -> NfaMatch {
-    let marks: &[u32] = if read_live {
+    let marks: &[T] = if read_live {
         &scratch.src_buf
     } else {
         &scratch.best_snap
     };
-    finalize::<u32>(
+    finalize::<T>(
         &tdfa.finals()[state as usize],
         marks,
         end,

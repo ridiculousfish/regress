@@ -29,7 +29,7 @@ mod x86_64;
 
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{TDFA_DEAD_STATE, Tdfa};
-use crate::automata::tdfa_backend::{self, MarkScratch, PrefixSkip};
+use crate::automata::tdfa_backend::{self, PrefixSkip, Scratch};
 use asm::{Assembler, Label};
 use mem::ExecBuffer;
 #[cfg(not(feature = "std"))]
@@ -39,18 +39,32 @@ use alloc::vec::Vec;
 /// for no match`. The match is `start..end` with no captures.
 type CaptureFreeFn = extern "C" fn(*const u8, usize, usize) -> usize;
 
-/// Capture C ABI: `(input, len, start, marks, best_snap) -> packed result`. The
-/// mark file `marks` is prepared by the caller (reset + entry commands) and
-/// filled in place by the generated code; `best_snap` receives an eager copy of
-/// the marks on a fallback accept. The return is `u64::MAX` for no match, else
-/// `(read_live << 63) | (winning_state << 32) | match_end`, where the high bit
-/// is clear when the winner's marks are live in `marks` and set when they were
-/// snapshotted into `best_snap`.
-type CaptureFn = extern "C" fn(*const u8, usize, usize, *mut u32, *mut u32) -> u64;
+/// The capture tier's return value, in the ABI's two integer return registers
+/// (x86-64 `rax:rdx`, aarch64 `x0:x1`): a ≤16-byte all-integer `repr(C)` aggregate
+/// is returned in registers, no hidden `sret` pointer. Splitting `end` off into
+/// its own eightbyte is what lets the mark file (and `end`) be full `usize` width,
+/// so the capture tier is no longer capped at 4 GiB haystacks.
+#[repr(C)]
+struct CaptureResult {
+    /// Match end offset (only meaningful when `meta != u64::MAX`).
+    end: usize,
+    /// `u64::MAX` for no match; else the winning state id in the low bits with the
+    /// [`SNAPSHOT_FLAG`] snapshot bit.
+    meta: u64,
+}
 
-/// High bit of the capture return: set when the winning marks live in
-/// `best_snap` (a fallback accept), clear when live in `marks`.
-const SNAPSHOT_FLAG: u64 = 1 << 63;
+/// Capture C ABI: `(input, len, start, marks, best_snap) -> CaptureResult`. The
+/// mark file `marks` (u64 lanes) is prepared by the caller (reset + entry
+/// commands) and filled in place by the generated code; `best_snap` receives an
+/// eager copy of the marks on a fallback accept. See [`CaptureResult`] for the
+/// return encoding.
+type CaptureFn =
+    extern "C" fn(*const u8, usize, usize, *mut usize, *mut usize) -> CaptureResult;
+
+/// Bit of `CaptureResult::meta`: set when the winning marks live in `best_snap`
+/// (a fallback accept), clear when live in `marks`. Bit 31 (above every valid
+/// state id, which the codegen caps at `u16::MAX`).
+const SNAPSHOT_FLAG: u64 = 1 << 31;
 
 /// Which tier a `Tdfa` compiled to (picks the generated function's ABI).
 #[derive(Clone, Copy)]
@@ -149,7 +163,7 @@ impl JittedTdfa {
         tdfa: &Tdfa,
         input: &[u8],
         start: usize,
-        scratch: &mut MarkScratch,
+        scratch: &mut Scratch<usize>,
     ) -> Option<NfaMatch> {
         debug_assert!(start <= input.len());
         match self.compiled {
@@ -161,27 +175,22 @@ impl JittedTdfa {
                 })
             }
             Compiled::Capture(f) => {
-                // The capture tier emits u32 mark stores; the `Wide` (≥ 4 GiB)
-                // scratch has no u32 buffer, so those rare inputs fall back to
-                // the interpreter.
-                let MarkScratch::Narrow(s) = scratch else {
-                    return tdfa_backend::execute_reuse(tdfa, input, start, scratch);
-                };
-                tdfa_backend::jit_prepare_marks(tdfa, s, start);
-                let packed = f(
+                // The capture tier writes a u64 mark file and returns a full-width
+                // `end`, so it handles any haystack size (no width fallback).
+                tdfa_backend::jit_prepare_marks(tdfa, scratch, start);
+                let r = f(
                     input.as_ptr(),
                     input.len(),
                     start,
-                    s.src_buf_mut_ptr(),
-                    s.best_snap_mut_ptr(),
+                    scratch.src_buf_mut_ptr(),
+                    scratch.best_snap_mut_ptr(),
                 );
-                if packed == u64::MAX {
+                if r.meta == u64::MAX {
                     return None;
                 }
-                let read_live = packed & SNAPSHOT_FLAG == 0;
-                let end = (packed & 0xFFFF_FFFF) as usize;
-                let state = ((packed >> 32) as u32) & 0x7FFF_FFFF;
-                Some(tdfa_backend::jit_finalize(tdfa, state, s, end, read_live))
+                let read_live = r.meta & SNAPSHOT_FLAG == 0;
+                let state = (r.meta & 0x7FFF_FFFF) as u32;
+                Some(tdfa_backend::jit_finalize(tdfa, state, scratch, r.end, read_live))
             }
         }
     }
@@ -815,7 +824,7 @@ mod tests {
     use super::*;
     use super::mem::ExecBuffer;
     use crate::automata::nfa::Nfa;
-    use crate::automata::tdfa_backend::{self, MarkScratch};
+    use crate::automata::tdfa_backend::{self, Scratch};
 
     fn anchored_tdfa(pattern: &str) -> Tdfa {
         let flags = crate::api::Flags::default();
@@ -857,7 +866,7 @@ mod tests {
         let jit = JittedTdfa::compile(&tdfa, None)
             .unwrap_or_else(|e| panic!("compile {pattern:?}: {e}"));
         let mut scratch =
-            MarkScratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags(), b"");
+            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
         for input in inputs {
             let bytes = input.as_bytes();
             for start in 0..=bytes.len() {
@@ -981,7 +990,7 @@ mod tests {
                 continue; // outside the supported tier (e.g. conditionals)
             };
             let mut scratch =
-            MarkScratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags(), b"");
+            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
             for input in inputs {
                 let bytes = input.as_bytes();
                 for start in 0..=bytes.len() {
@@ -1009,7 +1018,7 @@ mod tests {
             let tdfa = anchored_tdfa(pattern);
             let jit = JittedTdfa::compile(&tdfa, None).expect("compile");
             let mut scratch =
-            MarkScratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags(), b"");
+            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
             let input = vec![b'a'; 4 * 1024 * 1024];
             let iters = 200;
 
@@ -1060,7 +1069,7 @@ mod tests {
                 continue; // legitimately unsupported tier; backend falls back
             };
             let mut scratch =
-            MarkScratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags(), b"");
+            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
             for _ in 0..200 {
                 let len = rng.gen_range(0..12);
                 let bytes: Vec<u8> =
@@ -1107,7 +1116,7 @@ mod tests {
                 "{pat:?} should use the capture tier",
             );
             let mut scratch =
-            MarkScratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags(), b"");
+            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
             let inputs = [
                 "foo123", "12-345", "aaabb", "xpq", "ababab", "9", "b7", "", "zzz", "abab",
                 "a b  c ", "1,2,3,", "ab a",
