@@ -175,27 +175,57 @@ fn needs_wide_marks(input: &[u8]) -> bool {
 /// match-iteration hot path uses [`execute_reuse`] with a caller-owned scratch.
 pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
     let width = mark_file_width(tdfa);
+    let num_tags = tdfa.num_tags();
     if needs_wide_marks(input) {
-        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(width), None)
+        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(width, num_tags), None)
     } else {
-        run_anchored_dyn::<u32>(tdfa, input, start, &mut Scratch::new(width), None)
+        run_anchored_dyn::<u32>(tdfa, input, start, &mut Scratch::new(width, num_tags), None)
     }
 }
 
-/// Like [`execute`], but reuses the caller-owned `u32` `scratch` (sized to
+/// The reusable mark scratch, its element width chosen once from the haystack
+/// length (decided at executor construction, since the text is fixed for the
+/// executor's lifetime). `u32` marks address offsets `< u32::MAX` (reserving that
+/// value as `NO_MATCH`); haystacks `>= 4 GiB` need the `usize` lane. Keeping one
+/// buffer of the correct width lets a `find_iter` over *either* size stay
+/// allocation-free per match.
+#[derive(Debug)]
+pub(crate) enum MarkScratch {
+    Narrow(Scratch<u32>),
+    Wide(Scratch<usize>),
+}
+
+impl MarkScratch {
+    /// Reusable scratch (buffers sized to `width` = [`mark_file_width`],
+    /// `num_tags` capture slots), with the mark element width chosen from the
+    /// haystack — decided once (the executor's text is fixed for its lifetime).
+    pub(crate) fn new(width: usize, num_tags: usize, input: &[u8]) -> Self {
+        if needs_wide_marks(input) {
+            MarkScratch::Wide(Scratch::new(width, num_tags))
+        } else {
+            MarkScratch::Narrow(Scratch::new(width, num_tags))
+        }
+    }
+}
+
+/// Like [`execute`], but reuses the caller-owned [`MarkScratch`] (sized to
 /// [`mark_file_width`]) instead of allocating — so a `find_iter` over many
-/// matches stays allocation-free per match. Oversized (`>= 4 GiB`) inputs are
-/// rare and still allocate a local `usize` scratch.
+/// matches stays allocation-free per match, at either mark width.
 pub(crate) fn execute_reuse(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
-    scratch: &mut Scratch<u32>,
+    scratch: &mut MarkScratch,
 ) -> Option<NfaMatch> {
-    if needs_wide_marks(input) {
-        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(mark_file_width(tdfa)), None)
-    } else {
-        run_anchored_dyn::<u32>(tdfa, input, start, scratch, None)
+    match scratch {
+        MarkScratch::Narrow(s) => {
+            debug_assert!(!needs_wide_marks(input));
+            run_anchored_dyn::<u32>(tdfa, input, start, s, None)
+        }
+        MarkScratch::Wide(s) => {
+            debug_assert!(needs_wide_marks(input));
+            run_anchored_dyn::<usize>(tdfa, input, start, s, None)
+        }
     }
 }
 
@@ -208,38 +238,41 @@ pub(crate) fn execute_reuse_warm(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
-    scratch: &mut Scratch<u32>,
+    scratch: &mut MarkScratch,
     skip: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
-    if needs_wide_marks(input) {
-        run_anchored_dyn::<usize>(tdfa, input, start, &mut Scratch::new(mark_file_width(tdfa)), skip)
-    } else {
-        run_anchored_dyn::<u32>(tdfa, input, start, scratch, skip)
+    match scratch {
+        MarkScratch::Narrow(s) => {
+            debug_assert!(!needs_wide_marks(input));
+            run_anchored_dyn::<u32>(tdfa, input, start, s, skip)
+        }
+        MarkScratch::Wide(s) => {
+            debug_assert!(needs_wide_marks(input));
+            run_anchored_dyn::<usize>(tdfa, input, start, s, skip)
+        }
     }
 }
 
 /// Execute an **anchored** TDFA driven by a literal prefilter, reusing the
-/// caller-owned `u32` `scratch`. `skip` warm-starts each verify past the matched
+/// caller-owned [`MarkScratch`]. `skip` warm-starts each verify past the matched
 /// literal (see [`PrefixSkip`]).
 pub(crate) fn execute_prefiltered_reuse(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
     pred: &StartPredicate,
-    scratch: &mut Scratch<u32>,
+    scratch: &mut MarkScratch,
     skip: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
-    if needs_wide_marks(input) {
-        run_prefiltered_dyn::<usize>(
-            tdfa,
-            input,
-            start,
-            pred,
-            &mut Scratch::new(mark_file_width(tdfa)),
-            skip,
-        )
-    } else {
-        run_prefiltered_dyn::<u32>(tdfa, input, start, pred, scratch, skip)
+    match scratch {
+        MarkScratch::Narrow(s) => {
+            debug_assert!(!needs_wide_marks(input));
+            run_prefiltered_dyn::<u32>(tdfa, input, start, pred, s, skip)
+        }
+        MarkScratch::Wide(s) => {
+            debug_assert!(needs_wide_marks(input));
+            run_prefiltered_dyn::<usize>(tdfa, input, start, pred, s, skip)
+        }
     }
 }
 
@@ -287,9 +320,10 @@ pub(crate) struct Scratch<T: MarkElem> {
     best_snap: Box<[T]>,
     /// Scratch for applying a `$`-conditional's commands before snapshotting.
     cond_buf: Box<[T]>,
-    /// Reusable per-tag value buffer for `finalize` (refilled each call). Holds
-    /// `usize` offsets regardless of `T`, so it's not width-typed.
-    tag_values: Vec<TextPos>,
+    /// Reusable per-tag value buffer for `finalize` (refilled each call), sized
+    /// to `num_tags`. Holds `usize` offsets regardless of `T`, so it's not
+    /// width-typed.
+    tag_values: Box<[TextPos]>,
 }
 
 #[cfg(feature = "tdfa-jit")]
@@ -311,13 +345,13 @@ impl Scratch<u32> {
 
 impl<T: MarkElem> Scratch<T> {
     /// `width` = `num_marks + 3` (real marks, then `clear`, `current_pos`,
-    /// `scratch`).
-    pub(crate) fn new(width: usize) -> Self {
+    /// `scratch`); `num_tags` sizes the `finalize` tag buffer.
+    pub(crate) fn new(width: usize, num_tags: usize) -> Self {
         Self {
             src_buf: vec![T::NO_MATCH; width].into_boxed_slice(),
             best_snap: vec![T::NO_MATCH; width].into_boxed_slice(),
             cond_buf: vec![T::NO_MATCH; width].into_boxed_slice(),
-            tag_values: Vec::new(),
+            tag_values: vec![TEXT_POS_NO_MATCH; num_tags].into_boxed_slice(),
         }
     }
 }
@@ -479,7 +513,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     let src_buf: &mut [T] = &mut scratch.src_buf;
     let best_snap: &mut [T] = &mut scratch.best_snap;
     let cond_buf: &mut [T] = &mut scratch.cond_buf;
-    let tag_values: &mut Vec<TextPos> = &mut scratch.tag_values;
+    let tag_values: &mut [TextPos] = &mut scratch.tag_values;
 
     // Reset the working mark file (it's reused across candidates). The `clear`
     // lane must stay `NO_MATCH`, which the fill restores. `best_snap`/`cond_buf`
@@ -929,11 +963,11 @@ fn finalize<T: MarkElem>(
     marks: &[T],
     end: usize,
     num_tags: usize,
-    tag_values: &mut Vec<TextPos>,
+    tag_values: &mut [TextPos],
 ) -> NfaMatch {
-    // Reused scratch: refill rather than allocate.
-    tag_values.clear();
-    tag_values.resize(num_tags, TEXT_POS_NO_MATCH);
+    // Reused scratch (already sized to `num_tags`): reset rather than allocate.
+    debug_assert_eq!(tag_values.len(), num_tags);
+    tag_values.fill(TEXT_POS_NO_MATCH);
     for cmd in finals {
         let val = match cmd.src {
             MarkValue::Copy(src) => marks[src.0 as usize],

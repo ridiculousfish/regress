@@ -27,7 +27,7 @@ use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::reverse;
 use crate::automata::tdfa::{self, Tdfa, TdfaStats};
-use crate::automata::tdfa_backend::{self, PrefixSkip, Scratch};
+use crate::automata::tdfa_backend::{self, MarkScratch, PrefixSkip};
 use crate::insn::StartPredicate;
 use crate::ir;
 use crate::startpredicate;
@@ -1021,7 +1021,7 @@ impl TdfaProgram {
         tdfa: &Tdfa,
         bytes: &[u8],
         s: usize,
-        scratch: &mut Scratch<u32>,
+        scratch: &mut MarkScratch,
     ) -> Option<NfaMatch> {
         #[cfg(feature = "tdfa-jit")]
         if let Some(jit) = &self.jit {
@@ -1039,7 +1039,7 @@ impl TdfaProgram {
         &self,
         bytes: &[u8],
         offset: usize,
-        scratch: &mut Scratch<u32>,
+        scratch: &mut MarkScratch,
     ) -> Option<NfaMatch> {
         match &self.strategy {
             Strategy::WholeLiteral { literal, len } => {
@@ -1184,22 +1184,35 @@ impl TdfaProgram {
         }
     }
 
-    /// The mark-file width a reused [`Scratch`] for this program must have.
+    /// The strategy's verify automaton, or `None` for the literal-only
+    /// strategies that never touch the executor's scratch.
+    fn verify_tdfa(&self) -> Option<&Tdfa> {
+        match &self.strategy {
+            Strategy::WholeLiteral { .. } => None,
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::MultiLiteral { .. } => None,
+            Strategy::Scan { unanchored } => Some(unanchored),
+            Strategy::Prefix { anchored, .. } => Some(anchored),
+            Strategy::CaseFoldLiteral { forward, .. } => Some(forward),
+            #[cfg(feature = "prefilter-teddy")]
+            Strategy::AltPrefix { forward, .. } => Some(forward),
+            Strategy::ReverseInner { forward, .. } => Some(forward),
+        }
+    }
+
+    /// The mark-file width a reused [`MarkScratch`] for this program must have.
+    /// The literal-only strategies never touch the scratch, so any non-zero
+    /// width is fine (`3`, one lane per non-mark slot).
     pub(crate) fn mark_width(&self) -> usize {
-        let tdfa = match &self.strategy {
-            // No automaton; the executor's scratch is never touched. Any
-            // non-zero width is fine.
-            Strategy::WholeLiteral { .. } => return 3,
-            #[cfg(feature = "prefilter-teddy")]
-            Strategy::MultiLiteral { .. } => return 3,
-            Strategy::Scan { unanchored } => unanchored,
-            Strategy::Prefix { anchored, .. } => anchored,
-            Strategy::CaseFoldLiteral { forward, .. } => forward,
-            #[cfg(feature = "prefilter-teddy")]
-            Strategy::AltPrefix { forward, .. } => forward,
-            Strategy::ReverseInner { forward, .. } => forward,
-        };
-        tdfa_backend::mark_file_width(tdfa)
+        self.verify_tdfa()
+            .map_or(3, tdfa_backend::mark_file_width)
+    }
+
+    /// The number of capture tags a reused [`MarkScratch`] for this program must
+    /// size its `finalize` buffer to. The literal-only strategies never call
+    /// `finalize`; `2` (the `FULL_MATCH_*` sentinels) is a safe placeholder.
+    pub(crate) fn num_tags(&self) -> usize {
+        self.verify_tdfa().map_or(2, Tdfa::num_tags)
     }
 
     /// Capture-group names, indexed by group id (see `Tdfa::group_names`).
@@ -1307,7 +1320,7 @@ impl TdfaJitProgram {
         &self,
         bytes: &[u8],
         offset: usize,
-        scratch: &mut Scratch<u32>,
+        scratch: &mut MarkScratch,
     ) -> Option<NfaMatch> {
         self.0.find_at(bytes, offset, scratch)
     }
@@ -1315,6 +1328,11 @@ impl TdfaJitProgram {
     /// See [`TdfaProgram::mark_width`].
     pub(crate) fn mark_width(&self) -> usize {
         self.0.mark_width()
+    }
+
+    /// See [`TdfaProgram::num_tags`].
+    pub(crate) fn num_tags(&self) -> usize {
+        self.0.num_tags()
     }
 
     /// See [`TdfaProgram::group_names`].

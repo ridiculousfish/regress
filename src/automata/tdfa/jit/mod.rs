@@ -29,7 +29,7 @@ mod x86_64;
 
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{TDFA_DEAD_STATE, Tdfa};
-use crate::automata::tdfa_backend::{self, PrefixSkip, Scratch};
+use crate::automata::tdfa_backend::{self, MarkScratch, PrefixSkip};
 use asm::{Assembler, Label};
 use mem::ExecBuffer;
 #[cfg(not(feature = "std"))]
@@ -149,7 +149,7 @@ impl JittedTdfa {
         tdfa: &Tdfa,
         input: &[u8],
         start: usize,
-        scratch: &mut Scratch<u32>,
+        scratch: &mut MarkScratch,
     ) -> Option<NfaMatch> {
         debug_assert!(start <= input.len());
         match self.compiled {
@@ -161,18 +161,19 @@ impl JittedTdfa {
                 })
             }
             Compiled::Capture(f) => {
-                // The capture tier uses a u32 mark file; oversized (≥ 4 GiB)
-                // inputs are rare — fall back to the interpreter for those.
-                if input.len() >= u32::MAX as usize {
+                // The capture tier emits u32 mark stores; the `Wide` (≥ 4 GiB)
+                // scratch has no u32 buffer, so those rare inputs fall back to
+                // the interpreter.
+                let MarkScratch::Narrow(s) = scratch else {
                     return tdfa_backend::execute_reuse(tdfa, input, start, scratch);
-                }
-                tdfa_backend::jit_prepare_marks(tdfa, scratch, start);
+                };
+                tdfa_backend::jit_prepare_marks(tdfa, s, start);
                 let packed = f(
                     input.as_ptr(),
                     input.len(),
                     start,
-                    scratch.src_buf_mut_ptr(),
-                    scratch.best_snap_mut_ptr(),
+                    s.src_buf_mut_ptr(),
+                    s.best_snap_mut_ptr(),
                 );
                 if packed == u64::MAX {
                     return None;
@@ -180,7 +181,7 @@ impl JittedTdfa {
                 let read_live = packed & SNAPSHOT_FLAG == 0;
                 let end = (packed & 0xFFFF_FFFF) as usize;
                 let state = ((packed >> 32) as u32) & 0x7FFF_FFFF;
-                Some(tdfa_backend::jit_finalize(tdfa, state, scratch, end, read_live))
+                Some(tdfa_backend::jit_finalize(tdfa, state, s, end, read_live))
             }
         }
     }
@@ -814,7 +815,7 @@ mod tests {
     use super::*;
     use super::mem::ExecBuffer;
     use crate::automata::nfa::Nfa;
-    use crate::automata::tdfa_backend::{self, Scratch};
+    use crate::automata::tdfa_backend::{self, MarkScratch};
 
     fn anchored_tdfa(pattern: &str) -> Tdfa {
         let flags = crate::api::Flags::default();
@@ -855,7 +856,8 @@ mod tests {
         let tdfa = anchored_tdfa(pattern);
         let jit = JittedTdfa::compile(&tdfa, None)
             .unwrap_or_else(|e| panic!("compile {pattern:?}: {e}"));
-        let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
+        let mut scratch =
+            MarkScratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags(), b"");
         for input in inputs {
             let bytes = input.as_bytes();
             for start in 0..=bytes.len() {
@@ -978,7 +980,8 @@ mod tests {
             let Ok(jit) = JittedTdfa::compile(&tdfa, None) else {
                 continue; // outside the supported tier (e.g. conditionals)
             };
-            let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
+            let mut scratch =
+            MarkScratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags(), b"");
             for input in inputs {
                 let bytes = input.as_bytes();
                 for start in 0..=bytes.len() {
@@ -1005,7 +1008,8 @@ mod tests {
         for pattern in ["[a-z]+", "([a-z]+)"] {
             let tdfa = anchored_tdfa(pattern);
             let jit = JittedTdfa::compile(&tdfa, None).expect("compile");
-            let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
+            let mut scratch =
+            MarkScratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags(), b"");
             let input = vec![b'a'; 4 * 1024 * 1024];
             let iters = 200;
 
@@ -1055,7 +1059,8 @@ mod tests {
             let Ok(jit) = JittedTdfa::compile(&tdfa, None) else {
                 continue; // legitimately unsupported tier; backend falls back
             };
-            let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
+            let mut scratch =
+            MarkScratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags(), b"");
             for _ in 0..200 {
                 let len = rng.gen_range(0..12);
                 let bytes: Vec<u8> =
@@ -1101,7 +1106,8 @@ mod tests {
                 matches!(jit.compiled, Compiled::Capture(_)),
                 "{pat:?} should use the capture tier",
             );
-            let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa));
+            let mut scratch =
+            MarkScratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags(), b"");
             let inputs = [
                 "foo123", "12-345", "aaabb", "xpq", "ababab", "9", "b7", "", "zzz", "abab",
                 "a b  c ", "1,2,3,", "ab a",
