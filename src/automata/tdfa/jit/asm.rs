@@ -151,6 +151,19 @@ pub(crate) trait Assembler {
     /// `ret`. The driver binds the `done` label immediately before calling this.
     fn ret_done(&mut self);
 
+    /// Emit a 16-byte SIMD fast-skip over the self-loop byte set `runs` at the
+    /// top of a peeled state, then fall through to `scalar_tail` (which handles
+    /// the final `< lane-width` bytes and the exit byte). Default: no-op — an
+    /// architecture without a SIMD path just uses the scalar peel, entering
+    /// `scalar_tail` directly. `runs` are the same self byte-ranges the scalar
+    /// peel tests.
+    fn simd_self_skip(&mut self, _runs: &[(u8, u8)], _scalar_tail: Label) {}
+
+    /// Emit any architecture-specific data pools (e.g. SIMD broadcast constants)
+    /// after the class/jump tables. Called once, at the end of data emission.
+    /// Default: no-op.
+    fn end_data(&mut self) {}
+
     /// Emit the shared 256-byte byte→class table at `l`.
     fn class_table(&mut self, l: Label, table: &[u8; 256]);
 

@@ -48,6 +48,10 @@ pub(crate) struct X86_64Asm {
     /// clears it). Lets [`bind`](Self::bind) elide a branch to the next
     /// instruction (fall-through).
     pending_jmp: Option<(usize, Label)>,
+    /// SIMD broadcast constants (a byte replicated to 16 lanes), deduplicated by
+    /// value. Emitted 16-byte aligned by [`end_data`](Assembler::end_data) so the
+    /// non-VEX SSE memory operands that reference them are aligned.
+    consts: Vec<(u8, Label)>,
 }
 
 impl X86_64Asm {
@@ -86,6 +90,7 @@ impl Assembler for X86_64Asm {
             labels: Labels::new(),
             fixups: Vec::new(),
             pending_jmp: None,
+            consts: Vec::new(),
         }
     }
 
@@ -252,6 +257,57 @@ impl Assembler for X86_64Asm {
         self.emit(&[0xC3]);
     }
 
+    fn simd_self_skip(&mut self, runs: &[(u8, u8)], scalar_tail: Label) {
+        // xmm0 = loaded bytes, xmm1 = zero, xmm2 = membership accumulator,
+        // xmm3/xmm4 = per-run scratch. All caller-saved (leaf function).
+        self.sse_rr(0xEF, 1, 1); // pxor xmm1, xmm1  (zero)
+        let simd_loop = self.labels.fresh();
+        self.bind(simd_loop);
+        // if pos + 16 > end -> scalar tail (not enough bytes for a full vector)
+        self.emit(&[0x48, 0x8D, 0x42, 0x10]); // lea rax, [rdx + 16]
+        self.emit(&[0x48, 0x39, 0xF0]); // cmp rax, rsi
+        self.emit(&[0x0F, 0x87]); // ja scalar_tail
+        self.emit_rel32(scalar_tail);
+        self.emit(&[0xF3, 0x0F, 0x6F, 0x04, 0x17]); // movdqu xmm0, [rdi + rdx]
+        // Build the membership mask in xmm2 (OR of each run's mask).
+        for (i, &(lo, hi)) in runs.iter().enumerate() {
+            self.simd_range_mask(lo, hi); // -> xmm3
+            if i == 0 {
+                self.sse_rr(0x6F, 2, 3); // movdqa xmm2, xmm3
+            } else {
+                self.sse_rr(0xEB, 2, 3); // por xmm2, xmm3
+            }
+        }
+        self.emit(&[0x66, 0x0F, 0xD7, 0xC2]); // pmovmskb eax, xmm2
+        self.emit(&[0x3D, 0xFF, 0xFF, 0x00, 0x00]); // cmp eax, 0xFFFF
+        let partial = self.labels.fresh();
+        self.emit(&[0x0F, 0x85]); // jne partial (some lane left the set)
+        self.emit_rel32(partial);
+        self.emit(&[0x48, 0x83, 0xC2, 0x10]); // add rdx, 16
+        self.jmp(simd_loop);
+        // partial: advance pos to the first out-of-set lane, then fall to scalar.
+        self.bind(partial);
+        self.emit(&[0xF7, 0xD0]); // not eax   (set bits = out-of-set lanes)
+        self.emit(&[0x0F, 0xBC, 0xC8]); // bsf ecx, eax  (first out-of-set lane; low 16 has a bit)
+        self.emit(&[0x48, 0x01, 0xCA]); // add rdx, rcx
+        // fall through to scalar_tail (bound by the caller)
+    }
+
+    fn end_data(&mut self) {
+        if self.consts.is_empty() {
+            return;
+        }
+        // 16-byte align so the non-VEX SSE memory operands are aligned.
+        while !self.code.len().is_multiple_of(16) {
+            self.code.push(0);
+        }
+        let consts = core::mem::take(&mut self.consts);
+        for (b, l) in consts {
+            self.bind(l);
+            self.code.extend_from_slice(&[b; 16]);
+        }
+    }
+
     fn class_table(&mut self, l: Label, table: &[u8; 256]) {
         self.bind(l);
         self.emit(table);
@@ -394,6 +450,61 @@ impl Assembler for X86_64Asm {
 }
 
 impl X86_64Asm {
+    /// Intern a broadcast constant (`b` in all 16 lanes), returning its data
+    /// label. Deduplicated by value; emitted by [`end_data`](Assembler::end_data).
+    fn broadcast(&mut self, b: u8) -> Label {
+        if let Some(&(_, l)) = self.consts.iter().find(|(v, _)| *v == b) {
+            return l;
+        }
+        let l = self.labels.fresh();
+        self.consts.push((b, l));
+        l
+    }
+
+    /// SSE reg-reg op: `66 0F <op> C0|(dst<<3)|src` (xmm0–7 only, no REX).
+    fn sse_rr(&mut self, op: u8, dst: u8, src: u8) {
+        self.emit(&[0x66, 0x0F, op, 0xC0 | (dst << 3) | src]);
+    }
+
+    /// SSE op with a RIP-relative memory operand: `66 0F <op> <modrm rip> <rel32>`,
+    /// the 16-byte broadcast constant `b` (xmm0–7 only).
+    fn sse_rip_const(&mut self, op: u8, xmm: u8, b: u8) {
+        let l = self.broadcast(b);
+        self.emit(&[0x66, 0x0F, op, (xmm << 3) | 0x05]); // mod=00 reg=xmm rm=101 (RIP)
+        self.emit_rel32(l);
+    }
+
+    /// Build a per-lane membership mask for one self-run `[lo, hi]` into `xmm3`,
+    /// using `xmm0` = loaded bytes, `xmm1` = zero, `xmm4` = scratch. Uses the
+    /// saturating-subtract trick: `psubusb(v, hi)==0` iff `v<=hi`,
+    /// `psubusb(lo, v)==0` iff `v>=lo`.
+    fn simd_range_mask(&mut self, lo: u8, hi: u8) {
+        const MOVDQA: u8 = 0x6F;
+        const PSUBUSB: u8 = 0xD8;
+        const PCMPEQB: u8 = 0x74;
+        const PAND: u8 = 0xDB;
+        if lo == hi {
+            self.sse_rr(MOVDQA, 3, 0); // xmm3 = v
+            self.sse_rip_const(PCMPEQB, 3, lo); // xmm3 = (v == lo)
+        } else if lo == 0 {
+            self.sse_rr(MOVDQA, 3, 0);
+            self.sse_rip_const(PSUBUSB, 3, hi); // xmm3 = max(0, v-hi)
+            self.sse_rr(PCMPEQB, 3, 1); // xmm3 = (v <= hi)
+        } else if hi == 0xff {
+            self.sse_rip_const(MOVDQA, 3, lo); // xmm3 = lo
+            self.sse_rr(PSUBUSB, 3, 0); // xmm3 = max(0, lo-v)
+            self.sse_rr(PCMPEQB, 3, 1); // xmm3 = (v >= lo)
+        } else {
+            self.sse_rr(MOVDQA, 3, 0);
+            self.sse_rip_const(PSUBUSB, 3, hi);
+            self.sse_rr(PCMPEQB, 3, 1); // xmm3 = (v <= hi)
+            self.sse_rip_const(MOVDQA, 4, lo);
+            self.sse_rr(PSUBUSB, 4, 0);
+            self.sse_rr(PCMPEQB, 4, 1); // xmm4 = (v >= lo)
+            self.sse_rr(PAND, 3, 4); // xmm3 = in [lo, hi]
+        }
+    }
+
     /// `lea r8, [rip + classtab]` — shared by both prologues.
     fn load_classtab(&mut self, classtab: Label) {
         self.emit(&[0x4C, 0x8D, 0x05]); // lea r8, [rip + disp32]

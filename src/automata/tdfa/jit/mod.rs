@@ -378,6 +378,13 @@ fn lower<A: Assembler>(
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const RANGE_DISPATCH_THRESHOLD: usize = 8;
 
+/// Max self-runs for which a peeled state gets the SIMD skip prelude. Bounds the
+/// inline per-vector membership test (each run is a few vector ops); above this,
+/// the scalar peel alone is used. Real wide self-loops (`.` `[^"]` `\w` `[a-z]`)
+/// are well under this.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+const SIMD_MAX_SELF_RUNS: usize = 4;
+
 /// How a state dispatches on the next input byte.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 enum Dispatch {
@@ -543,18 +550,31 @@ fn emit_peeled_self_loop<A: Assembler>(
     jt: Label,
     done: Label,
 ) {
+    // Optional SIMD prelude: fast-skip the self-run 16 bytes at a time, then hand
+    // off to the scalar loop for the last `< 16` bytes and the exit byte. Gated
+    // to a few runs so the inline membership stays small; the scalar peel is the
+    // fallback (and the whole thing is a no-op on arches without a SIMD path, in
+    // which case `scalar_tail == loop_top`). The scalar self-test then loops to
+    // `scalar_tail` rather than `loop_top`, so it doesn't re-run the SIMD prelude.
+    let simd = runs.len() <= SIMD_MAX_SELF_RUNS;
+    let scalar_tail = if simd { asm.fresh_label() } else { loop_top };
+    if simd {
+        asm.simd_self_skip(runs, scalar_tail);
+        asm.bind(scalar_tail);
+    }
     let eoi_pad = if accepting { asm.fresh_label() } else { done };
     asm.eoi_check(eoi_pad);
     asm.load_byte();
     asm.advance(1);
-    // Self bytes branch back to loop_top; others fall through. `dispatch_byte_ranges`
-    // appends a branch to its default, so bind `ft` right after to elide it.
+    // Self bytes branch back to the scalar loop; others fall through.
+    // `dispatch_byte_ranges` appends a branch to its default, so bind `ft` right
+    // after to elide it.
     let ft = asm.fresh_label();
     // Widest run first: the most common self byte then matches on the first
     // compare (e.g. `.`'s `[0x0e,0x7f]` covers letters/digits/space), instead of
     // falling through the narrow ranges first.
     let mut self_runs: Vec<(u8, u8, Label)> =
-        runs.iter().map(|&(lo, hi)| (lo, hi, loop_top)).collect();
+        runs.iter().map(|&(lo, hi)| (lo, hi, scalar_tail)).collect();
     self_runs.sort_by_key(|&(lo, hi, _)| core::cmp::Reverse(hi as u16 - lo as u16));
     asm.dispatch_byte_ranges(&self_runs, ft);
     asm.bind(ft);
@@ -756,6 +776,8 @@ fn emit_capture_free<A: Assembler>(
         }
         asm.jump_table(jt[s], &entries);
     }
+    // Arch-specific data pools (e.g. the SIMD skip's broadcast constants).
+    asm.end_data();
 
     Ok((asm.finish(), data_start))
 }
@@ -1110,6 +1132,49 @@ mod tests {
         ];
         for pat in patterns {
             assert_matches_interpreter(pat, &inputs);
+        }
+    }
+
+    /// The SIMD (16-byte) self-loop skip only engages when ≥16 self bytes remain,
+    /// so it needs long inputs to exercise at all. Drive it with runs well past a
+    /// vector width, with the exit (newline / quote / space / UTF-8 lead byte)
+    /// landing at many offsets — checking every start offset shifts the 16-byte
+    /// alignment relative to the exit, so the "first out-of-set lane" (`bsf`) is
+    /// hit at every lane and in the scalar tail. Oracle: the interpreter.
+    #[test]
+    fn jit_simd_self_skip_long_inputs() {
+        let long: Vec<String> = vec![
+            "a".repeat(64),                                    // long pure run to EOI
+            "abcdefghijklmnopqrstuvwxyz".repeat(3),            // 78 lowercase
+            format!("{}\n{}", "x".repeat(30), "y".repeat(30)), // newline mid-run
+            format!("{}\r\n{}", "p".repeat(17), "r".repeat(17)), // CRLF at a boundary
+            format!("{}\"{}", "z".repeat(20), "w".repeat(20)), // quote mid-run
+            format!("\"{}\"", "q".repeat(40)),                 // long quoted (for "[^"]*")
+            "café ".repeat(12),                                // repeated 2-byte UTF-8
+            format!("{} 日本語 tail", "word".repeat(8)),       // 3-byte UTF-8 after a run
+            format!("{}😀{}", "e".repeat(18), "f".repeat(18)), // 4-byte code point mid-run
+            format!("{} {}", "aaaa".repeat(9), "bbbb".repeat(9)), // space mid-run
+        ];
+        let patterns = [
+            ".*", ".+", "a.*b", "\"[^\"]*\"", "[^\"]+", "\\w+", "[a-zA-Z]+ing", "[a-z]*",
+        ];
+        for pat in patterns {
+            let tdfa = anchored_tdfa(pat);
+            let jit = JittedTdfa::compile(&tdfa, None)
+                .unwrap_or_else(|e| panic!("compile {pat:?}: {e}"));
+            let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
+            for input in &long {
+                let bytes = input.as_bytes();
+                for start in 0..=bytes.len() {
+                    let want = tdfa_backend::execute(&tdfa, bytes, start);
+                    let got = jit.run(&tdfa, bytes, start, &mut scratch);
+                    assert_eq!(
+                        want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        "pattern {pat:?} input {input:?} start {start}",
+                    );
+                }
+            }
         }
     }
 
