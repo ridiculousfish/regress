@@ -104,13 +104,31 @@ pub(crate) trait Assembler {
     /// top of accepting state blocks only.
     fn record_accept(&mut self);
 
+    /// Record an accept at the *previous* position: `acc = pos - 1`. Used by the
+    /// peeled self-loop exit path, where `pos` has already been advanced past the
+    /// byte that left the state, so the match ends one byte earlier.
+    fn record_accept_prev(&mut self);
+
     /// If `pos >= end`, branch to `done` (end of input — stop scanning).
     fn eoi_check(&mut self, done: Label);
 
     /// Load `byte = input[pos]` and advance `pos`. (No class lookup — the
     /// byte-range dispatch tests the raw byte; only the jump-table path needs
     /// [`classify`](Self::classify).)
-    fn fetch_byte(&mut self);
+    ///
+    /// Provided as `load_byte(); advance(1)`; the peeled self-loop path (which
+    /// must test the byte *before* advancing, so `pos` points at the exit byte
+    /// on the way out) and the SIMD skip path call the two halves separately.
+    fn fetch_byte(&mut self) {
+        self.load_byte();
+        self.advance(1);
+    }
+
+    /// Load `byte = input[pos]` without touching `pos`.
+    fn load_byte(&mut self);
+
+    /// `pos += n`.
+    fn advance(&mut self, n: u32);
 
     /// `class = classtab[byte]` (overwrites the byte register). Only emitted
     /// before a jump-table [`dispatch`](Self::dispatch).

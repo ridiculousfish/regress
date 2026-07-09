@@ -305,14 +305,24 @@ impl Assembler for Aarch64Asm {
         self.mov_reg(ACC, POS); // acc = pos
     }
 
+    fn record_accept_prev(&mut self) {
+        // SUB x3, x2, #1  (acc = pos - 1)
+        self.emit_u32(0xD100_0000 | (1 << 10) | (POS << 5) | ACC);
+    }
+
     fn eoi_check(&mut self, done: Label) {
         self.cmp(POS, END);
         self.b_hs(done); // pos >= end -> done
     }
 
-    fn fetch_byte(&mut self) {
+    fn load_byte(&mut self) {
         self.ldrb(BYTE, INPUT, POS); // byte = input[pos]
-        self.add_imm(POS, POS, 1); // pos += 1
+    }
+
+    fn advance(&mut self, n: u32) {
+        if n != 0 {
+            self.add_imm(POS, POS, n); // pos += n
+        }
     }
 
     fn classify(&mut self) {

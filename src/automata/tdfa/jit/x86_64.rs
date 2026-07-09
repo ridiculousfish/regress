@@ -128,6 +128,11 @@ impl Assembler for X86_64Asm {
         self.emit(&[0x49, 0x89, 0xD1]);
     }
 
+    fn record_accept_prev(&mut self) {
+        // lea r9, [rdx - 1]    (acc = pos - 1)      4C 8D 4A FF
+        self.emit(&[0x4C, 0x8D, 0x4A, 0xFF]);
+    }
+
     fn eoi_check(&mut self, done: Label) {
         // cmp rdx, rsi                              48 39 F2
         self.emit(&[0x48, 0x39, 0xF2]);
@@ -136,11 +141,21 @@ impl Assembler for X86_64Asm {
         self.emit_rel32(done);
     }
 
-    fn fetch_byte(&mut self) {
+    fn load_byte(&mut self) {
         // movzx eax, byte [rdi + rdx]               0F B6 04 17
         self.emit(&[0x0F, 0xB6, 0x04, 0x17]);
-        // inc rdx                                   48 FF C2
-        self.emit(&[0x48, 0xFF, 0xC2]);
+    }
+
+    fn advance(&mut self, n: u32) {
+        match n {
+            0 => {}
+            1 => self.emit(&[0x48, 0xFF, 0xC2]), // inc rdx (shorter than add rdx,1)
+            n if n < 128 => self.emit(&[0x48, 0x83, 0xC2, n as u8]), // add rdx, imm8
+            n => {
+                self.emit(&[0x48, 0x81, 0xC2]); // add rdx, imm32
+                self.emit_u32(n);
+            }
+        }
     }
 
     fn classify(&mut self) {

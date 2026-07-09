@@ -474,6 +474,101 @@ fn emit_dispatch<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, done: La
     }
 }
 
+/// Coalesced byte ranges `[lo, hi]` on which state `s` self-loops
+/// (`transitions[s][class(byte)] == s`). Empty when `s` has no self-transition.
+/// These are the bytes the peeled hot loop tests inline before falling through
+/// to the state's regular exit dispatch.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn self_loop_runs(
+    byte_to_class: &[u8; 256],
+    transitions: &[crate::automata::tdfa::TdfaStateId],
+    nc: usize,
+    s: usize,
+) -> Vec<(u8, u8)> {
+    let is_self = |b: usize| transitions[s * nc + byte_to_class[b] as usize] == s as u32;
+    let mut runs: Vec<(u8, u8)> = Vec::new();
+    let mut b = 0usize;
+    while b < 256 {
+        if is_self(b) {
+            let lo = b;
+            while b + 1 < 256 && is_self(b + 1) {
+                b += 1;
+            }
+            runs.push((lo as u8, b as u8));
+        }
+        b += 1;
+    }
+    runs
+}
+
+/// Emit only the dispatch *tail* of a state's plan (no `eoi_check`, no
+/// `fetch_byte` — the caller has already loaded the byte and advanced `pos`).
+/// Used on the peeled self-loop exit path, which reaches here only for bytes
+/// that leave the state.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn emit_dispatch_tail<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, done: Label) {
+    match plan {
+        Dispatch::AllDone => asm.branch(done),
+        Dispatch::Ranges { runs, default } => asm.dispatch_byte_ranges(runs, *default),
+        Dispatch::Table => {
+            asm.classify();
+            asm.dispatch(jt);
+        }
+    }
+}
+
+/// Emit a peeled self-loop state. `loop_top` (== `block[s]`) is already bound by
+/// the caller. Shape (test-before-advance so `pos` points at the exit byte on
+/// the way out, keeping the accept exact):
+///
+/// ```text
+/// loop_top:
+///   eoi_check -> eoi_pad          ; (eoi_pad == done when not accepting)
+///   load_byte ; advance(1)
+///   <byte in self-set?> -> loop_top    ; raw-byte range tests, direct branch
+///   ; --- exit fall-through: byte at pos-1 left the state ---
+///   (if accepting) acc = pos - 1
+///   <exit dispatch tail>          ; Ranges/Table over the state's plan
+/// eoi_pad:                        ; (accepting only)
+///   acc = pos                     ; == end
+///   jmp done
+/// ```
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn emit_peeled_self_loop<A: Assembler>(
+    asm: &mut A,
+    runs: &[(u8, u8)],
+    loop_top: Label,
+    accepting: bool,
+    plan: &Dispatch,
+    jt: Label,
+    done: Label,
+) {
+    let eoi_pad = if accepting { asm.fresh_label() } else { done };
+    asm.eoi_check(eoi_pad);
+    asm.load_byte();
+    asm.advance(1);
+    // Self bytes branch back to loop_top; others fall through. `dispatch_byte_ranges`
+    // appends a branch to its default, so bind `ft` right after to elide it.
+    let ft = asm.fresh_label();
+    // Widest run first: the most common self byte then matches on the first
+    // compare (e.g. `.`'s `[0x0e,0x7f]` covers letters/digits/space), instead of
+    // falling through the narrow ranges first.
+    let mut self_runs: Vec<(u8, u8, Label)> =
+        runs.iter().map(|&(lo, hi)| (lo, hi, loop_top)).collect();
+    self_runs.sort_by_key(|&(lo, hi, _)| core::cmp::Reverse(hi as u16 - lo as u16));
+    asm.dispatch_byte_ranges(&self_runs, ft);
+    asm.bind(ft);
+    if accepting {
+        asm.record_accept_prev(); // acc = pos - 1 (match ends before the exit byte)
+    }
+    emit_dispatch_tail(asm, plan, jt, done);
+    if accepting {
+        asm.bind(eoi_pad);
+        asm.record_accept(); // acc = pos (== end)
+        asm.branch(done);
+    }
+}
+
 /// States reachable from the automaton's entry points, following live (non-dead)
 /// transitions. Unreachable state blocks are pointed at by nothing, so the
 /// driver skips emitting them. Seeds from both starts, plus `extra_seed` — the
@@ -581,6 +676,26 @@ fn emit_capture_free<A: Assembler>(
     // Only emit blocks reachable from the entry points (incl. the warm-start
     // post_state); unreachable state blocks are referenced by nothing.
     let reachable = reachable_states(tdfa, skip.map(|s| s.post_state as usize));
+    // Decide whether state `s`'s self-loop is worth peeling, returning its self
+    // byte-runs if so. Worth it when: the self-set is a handful of runs (so the
+    // inline test is cheap), the state has no `$`-accept EOI landing pad (whose
+    // accept the peel doesn't emit), and either the state uses the indirect
+    // `Table` dispatch (peel removes the class-table load + indirect branch on
+    // the self path) or it's an accepting `Ranges` state (peel hoists the
+    // per-byte `record_accept` out of the loop).
+    let should_peel = |s: usize| -> Option<Vec<(u8, u8)>> {
+        if eoi_stub[s].is_some() {
+            return None;
+        }
+        let runs = self_loop_runs(byte_to_class, transitions, nc, s);
+        if runs.is_empty() || runs.len() > RANGE_DISPATCH_THRESHOLD {
+            return None;
+        }
+        let worth = matches!(plans[s], Dispatch::Table)
+            || (accepting[s] && matches!(plans[s], Dispatch::Ranges { .. }));
+        worth.then_some(runs)
+    };
+
     let warm = warm_entry(skip, &block);
     asm.prologue(classtab, block[start_anchored], block[start_unanchored], warm);
     for s in 0..num_states {
@@ -588,6 +703,22 @@ fn emit_capture_free<A: Assembler>(
             continue;
         }
         asm.bind(block[s]);
+        // Peel a dominant self-loop when it pays: the hot self path becomes a
+        // raw-byte range test + a direct backward branch, skipping the class
+        // table and the indirect jump-table branch that a `Table` state would
+        // otherwise pay on every self byte. See `should_peel`.
+        if let Some(runs) = should_peel(s) {
+            emit_peeled_self_loop(
+                &mut asm,
+                &runs,
+                block[s],
+                accepting[s],
+                &plans[s],
+                jt[s],
+                done,
+            );
+            continue;
+        }
         if accepting[s] {
             asm.record_accept();
         }
@@ -949,6 +1080,39 @@ mod tests {
         assert_matches_interpreter("[a-c]+", &["abc", "abcd", "d", "cba"]);
     }
 
+    /// Peeled self-loop states (the wide, scan-bound loops) must match the
+    /// interpreter — including the paths the peel is subtle about: `.`'s newline
+    /// exit, UTF-8 multi-byte code points (a lead byte leaves the ASCII self-set,
+    /// so the peel falls back to the scalar UTF-8 chain, then resumes), the
+    /// single-byte `"` exit, and accepting vs. non-accepting loops (`acc = pos-1`
+    /// on exit vs. `acc = pos` at EOI). Every start offset is checked.
+    #[test]
+    fn jit_self_loop_peel_vs_interpreter() {
+        let patterns = [
+            ".*", ".+", "a.*b", // `.` = [^\n\r…]; accepting (`.*`) and not (`a.*b`)
+            "\"[^\"]*\"", "[^\"]+", // single-byte `"` exit; Table self-loop
+            "\\w+", "[a-zA-Z]+ing", "[a-z]*", // accepting Ranges/`\w` loops (accept hoist)
+        ];
+        let inputs = [
+            "",
+            "hello world",
+            "a\nb\nc",              // `.` newline exits
+            "line1\r\nline2",       // CR and LF
+            "\"quoted\" tail",      // `"` exit
+            "\"\"",
+            "über café: 日本語!",   // multi-byte UTF-8 (lead-byte exits → scalar chain)
+            "emoji 😀 x",           // 4-byte code point
+            "abcding endings",
+            "MixedCaseIng",
+            "no_match_here",
+            "\n",
+            "x",
+        ];
+        for pat in patterns {
+            assert_matches_interpreter(pat, &inputs);
+        }
+    }
+
     /// Non-multiline `$` accepts: the capture-free tier records the accept at an
     /// EOI landing pad. Ranges/Table states retarget their `eoi_check`; the
     /// dead-end `$` state (`AllDone`, e.g. after `foo`) gains an `eoi_check` it
@@ -1013,13 +1177,24 @@ mod tests {
     #[ignore = "performance, run manually with --ignored --nocapture"]
     fn jit_throughput_vs_interpreter() {
         use std::time::Instant;
-        // A capture-free scan and a capture scan (group marks stamped per byte).
-        for pattern in ["[a-z]+", "([a-z]+)"] {
+        // Capture-free self-loop scans (the peel targets: `.*`/`"[^"]*"` are
+        // Table self-loops that shed a class-table load + indirect branch per
+        // byte; `\w+`/`[a-z]+` are Ranges loops that shed the per-byte accept),
+        // plus a capture scan (group marks stamped per byte).
+        for pattern in [".*", "\"[^\"]*\"", "\\w+", "[a-z]+", "([a-z]+)"] {
             let tdfa = anchored_tdfa(pattern);
             let jit = JittedTdfa::compile(&tdfa, None).expect("compile");
             let mut scratch =
             Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
-            let input = vec![b'a'; 4 * 1024 * 1024];
+            // A 4 MiB self-looping haystack; `"[^"]*"` needs a leading quote so
+            // the loop is entered (and no closing quote so it runs to the end).
+            let input = if pattern.starts_with('"') {
+                let mut v = vec![b'a'; 4 * 1024 * 1024];
+                v[0] = b'"';
+                v
+            } else {
+                vec![b'a'; 4 * 1024 * 1024]
+            };
             let iters = 200;
 
             let mut sink = 0usize;
