@@ -524,6 +524,54 @@ fn emit_dispatch_tail<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, don
     }
 }
 
+/// How a peeled self-loop state records its accept (at the loop exit and the
+/// EOI pad). The loop body itself never records: for `End` the per-byte accept
+/// is redundant (last-accept-wins), and for `Capture` the peel is gated to
+/// moveless self edges, so the mark file is invariant across the loop and the
+/// deferred record (+ fallback snapshot) observes the same state.
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+enum PeelAccept {
+    /// Not an accepting state: EOI exits straight to `done`.
+    No,
+    /// Capture-free tier: `acc = pos - 1` on exit / `acc = pos` at EOI.
+    End,
+    /// Capture tier: record `(acc_end, acc_state)`, plus the eager mark
+    /// snapshot (`width` lanes) when the accept is a fallback.
+    Capture { state: u32, fallback: bool, width: u32 },
+}
+
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+impl PeelAccept {
+    fn accepting(&self) -> bool {
+        !matches!(self, PeelAccept::No)
+    }
+
+    /// Emit the accept record; `prev` picks `pos - 1` (loop exit, `pos` already
+    /// advanced past the exit byte) over `pos` (EOI pad, `pos == end`).
+    fn emit<A: Assembler>(&self, asm: &mut A, prev: bool) {
+        match *self {
+            PeelAccept::No => {}
+            PeelAccept::End => {
+                if prev {
+                    asm.record_accept_prev();
+                } else {
+                    asm.record_accept();
+                }
+            }
+            PeelAccept::Capture { state, fallback, width } => {
+                if prev {
+                    asm.cap_record_accept_prev(state, fallback);
+                } else {
+                    asm.cap_record_accept(state, fallback);
+                }
+                if fallback {
+                    asm.cap_snapshot(width);
+                }
+            }
+        }
+    }
+}
+
 /// Emit a peeled self-loop state. `loop_top` (== `block[s]`) is already bound by
 /// the caller. Shape (test-before-advance so `pos` points at the exit byte on
 /// the way out, keeping the accept exact):
@@ -534,10 +582,10 @@ fn emit_dispatch_tail<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, don
 ///   load_byte ; advance(1)
 ///   <byte in self-set?> -> loop_top    ; raw-byte range tests, direct branch
 ///   ; --- exit fall-through: byte at pos-1 left the state ---
-///   (if accepting) acc = pos - 1
+///   (if accepting) record accept at pos - 1
 ///   <exit dispatch tail>          ; Ranges/Table over the state's plan
 /// eoi_pad:                        ; (accepting only)
-///   acc = pos                     ; == end
+///   record accept at pos          ; == end
 ///   jmp done
 /// ```
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
@@ -545,7 +593,7 @@ fn emit_peeled_self_loop<A: Assembler>(
     asm: &mut A,
     runs: &[(u8, u8)],
     loop_top: Label,
-    accepting: bool,
+    accept: &PeelAccept,
     plan: &Dispatch,
     jt: Label,
     done: Label,
@@ -562,6 +610,7 @@ fn emit_peeled_self_loop<A: Assembler>(
         asm.simd_self_skip(runs, scalar_tail);
         asm.bind(scalar_tail);
     }
+    let accepting = accept.accepting();
     let eoi_pad = if accepting { asm.fresh_label() } else { done };
     asm.eoi_check(eoi_pad);
     asm.load_byte();
@@ -578,13 +627,119 @@ fn emit_peeled_self_loop<A: Assembler>(
     self_runs.sort_by_key(|&(lo, hi, _)| core::cmp::Reverse(hi as u16 - lo as u16));
     asm.dispatch_byte_ranges(&self_runs, ft);
     asm.bind(ft);
-    if accepting {
-        asm.record_accept_prev(); // acc = pos - 1 (match ends before the exit byte)
-    }
+    accept.emit(asm, true); // record at pos - 1 (match ends before the exit byte)
     emit_dispatch_tail(asm, plan, jt, done);
     if accepting {
         asm.bind(eoi_pad);
-        asm.record_accept(); // acc = pos (== end)
+        accept.emit(asm, false); // record at pos (== end)
+        asm.branch(done);
+    }
+}
+
+/// The complement of `runs` over the full byte range: the coalesced ranges on
+/// which a peeled state *exits* its self-loop. `runs` must be sorted ascending
+/// and non-overlapping (as produced by [`self_loop_runs`]).
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn complement_runs(runs: &[(u8, u8)]) -> Vec<(u8, u8)> {
+    let mut out = Vec::new();
+    let mut next = 0u32;
+    for &(lo, hi) in runs {
+        if (lo as u32) > next {
+            out.push((next as u8, lo - 1));
+        }
+        next = hi as u32 + 1;
+    }
+    if next <= 255 {
+        out.push((next as u8, 255));
+    }
+    out
+}
+
+/// Emit a peeled self-loop whose self edges all apply the same pure
+/// position-stamp moves (`marks[dst] = pos` for each lane in `dsts`; possibly
+/// empty). This is the capture tier's hot-loop shape: the unanchored `.*?`
+/// prefix re-stamps `FULL_MATCH_START` and a quantified group's loop re-stamps
+/// its close mark on every self byte, so the loops the scan actually lives in
+/// carry these moves and would otherwise bounce through a move stub + jump
+/// table per byte.
+///
+/// A stamp depends only on the final `pos` (later stamps overwrite earlier
+/// ones), so the peel stamps once per scalar self byte and once after a SIMD
+/// bulk advance. The subtlety is state *entry*: consuming zero self bytes must
+/// not stamp (the marks then keep whatever the entering edge left). Hence the
+/// entry header below, which consumes the first byte before any stamp; after
+/// that first stamp `marks[dst] == pos` holds at the SIMD boundary, so the
+/// re-sync stamp after the skip is a no-op when the skip advanced zero bytes.
+///
+/// ```text
+/// block[s]:                       ; entry header (bound by the caller)
+///   eoi_check -> eoi_pad          ; (eoi_pad == done when not accepting)
+///   load_byte ; advance(1)
+///   <byte in exit-set?> -> ft     ; first byte leaves: no stamp
+///   stamp dsts                    ; first self byte consumed
+///   [simd skip over the self set] ; full 16-byte vectors only
+///   stamp dsts                    ; re-sync marks to pos after the bulk advance
+/// loop_top:
+///   eoi_check -> eoi_pad
+///   load_byte ; advance(1)
+///   <byte in exit-set?> -> ft
+///   stamp dsts ; jmp loop_top
+/// ft:                             ; byte at pos-1 left the state
+///   (if accepting) record accept at pos - 1
+///   <exit dispatch tail>
+/// eoi_pad:                        ; (accepting only)
+///   record accept at pos          ; == end; marks are in sync here
+///   jmp done
+/// ```
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn emit_peeled_stamp_loop<A: Assembler>(
+    asm: &mut A,
+    runs: &[(u8, u8)],
+    dsts: &[u16],
+    accept: &PeelAccept,
+    plan: &Dispatch,
+    jt: Label,
+    done: Label,
+) {
+    let accepting = accept.accepting();
+    let eoi_pad = if accepting { asm.fresh_label() } else { done };
+    let ft = asm.fresh_label();
+    // Test the *exit* set with the self set as the fall-through: the hot loop
+    // then runs on untaken compares (e.g. `[^"]*` tests only `"` + non-ASCII).
+    let exit_runs: Vec<(u8, u8, Label)> =
+        complement_runs(runs).into_iter().map(|(lo, hi)| (lo, hi, ft)).collect();
+    // Entry header: consume the first byte before any stamp. Binding
+    // `dispatch_byte_ranges`'s default right after elides its branch
+    // (fall-through), here and in the loop below.
+    let entry_cont = asm.fresh_label();
+    asm.eoi_check(eoi_pad);
+    asm.load_byte();
+    asm.advance(1);
+    asm.dispatch_byte_ranges(&exit_runs, entry_cont);
+    asm.bind(entry_cont);
+    asm.cap_stamp_curpos(dsts);
+    if runs.len() <= SIMD_MAX_SELF_RUNS {
+        let resync = asm.fresh_label();
+        asm.simd_self_skip(runs, resync);
+        asm.bind(resync);
+        asm.cap_stamp_curpos(dsts);
+    }
+    let loop_top = asm.fresh_label();
+    let cont = asm.fresh_label();
+    asm.bind(loop_top);
+    asm.eoi_check(eoi_pad);
+    asm.load_byte();
+    asm.advance(1);
+    asm.dispatch_byte_ranges(&exit_runs, cont);
+    asm.bind(cont);
+    asm.cap_stamp_curpos(dsts);
+    asm.branch(loop_top);
+    asm.bind(ft);
+    accept.emit(asm, true); // record at pos - 1 (match ends before the exit byte)
+    emit_dispatch_tail(asm, plan, jt, done);
+    if accepting {
+        asm.bind(eoi_pad);
+        accept.emit(asm, false); // record at pos (== end)
         asm.branch(done);
     }
 }
@@ -728,15 +883,8 @@ fn emit_capture_free<A: Assembler>(
         // table and the indirect jump-table branch that a `Table` state would
         // otherwise pay on every self byte. See `should_peel`.
         if let Some(runs) = should_peel(s) {
-            emit_peeled_self_loop(
-                &mut asm,
-                &runs,
-                block[s],
-                accepting[s],
-                &plans[s],
-                jt[s],
-                done,
-            );
+            let accept = if accepting[s] { PeelAccept::End } else { PeelAccept::No };
+            emit_peeled_self_loop(&mut asm, &runs, block[s], &accept, &plans[s], jt[s], done);
             continue;
         }
         if accepting[s] {
@@ -909,6 +1057,49 @@ fn emit_capture<A: Assembler>(
         }
     }
 
+    // Decide whether state `s`'s self-loop is worth peeling, returning its self
+    // byte-runs and the position-stamp lanes its self edges write. Peelable
+    // when every self edge carries the *same* move sequence made purely of
+    // position stamps (`src == curpos`, so the mark value depends only on the
+    // final `pos` — the peeled loop applies them once per scalar byte / SIMD
+    // bulk advance instead of through a move stub per byte). Moveless self
+    // edges are the `dsts = []` case of the same scheme. A self edge with a
+    // mark-to-mark copy (order-sensitive) declines. (No `eoi_stub` gate here:
+    // the capture tier declines `has_eoi_accepts` outright.) Worth it for a
+    // `Table` state (sheds the class-table load + indirect branch), an
+    // accepting state (hoists `cap_record_accept` and, for fallback accepts,
+    // the whole mark-file snapshot loop out of the loop), or a stamping loop
+    // (sheds the per-byte stub bounce and enables the SIMD skip).
+    let should_peel = |s: usize| -> Option<(Vec<(u8, u8)>, Vec<u16>)> {
+        let mut self_moves: Option<&[crate::automata::tdfa::MoveOp]> = None;
+        for c in 0..nc {
+            let idx = s * nc + c;
+            if transitions[idx] != s as u32 {
+                continue;
+            }
+            let mv = &trans_moves[idx][..];
+            if mv.iter().any(|m| m.src as u32 != curpos_idx) {
+                return None; // mark-to-mark copies: not pure stamps
+            }
+            match self_moves {
+                None => self_moves = Some(mv),
+                Some(prev) => {
+                    if prev.iter().map(|m| (m.dst, m.src)).ne(mv.iter().map(|m| (m.dst, m.src))) {
+                        return None; // self edges disagree on their moves
+                    }
+                }
+            }
+        }
+        let dsts: Vec<u16> = self_moves?.iter().map(|m| m.dst).collect();
+        let runs = self_loop_runs(byte_to_class, transitions, nc, s);
+        if runs.is_empty() || runs.len() > RANGE_DISPATCH_THRESHOLD {
+            return None;
+        }
+        let worth =
+            matches!(plans[s], Dispatch::Table) || accepting[s] || !dsts.is_empty();
+        worth.then_some((runs, dsts))
+    };
+
     let warm = warm_entry(skip, &block);
     asm.cap_prologue(classtab, block[start_anchored], block[start_unanchored], warm);
     for s in 0..num_states {
@@ -916,6 +1107,27 @@ fn emit_capture<A: Assembler>(
             continue;
         }
         asm.bind(block[s]);
+        // Peel a dominant self-loop when it pays (see `should_peel`): the hot
+        // self path becomes a raw-byte range test + direct backward branch
+        // (+ inline stamps for a position-stamping loop), and the accept
+        // bookkeeping moves out of the loop to the exit/EOI paths.
+        if let Some((runs, dsts)) = should_peel(s) {
+            let accept = if accepting[s] {
+                PeelAccept::Capture {
+                    state: s as u32,
+                    fallback: fallback[s],
+                    width: mark_width,
+                }
+            } else {
+                PeelAccept::No
+            };
+            if dsts.is_empty() {
+                emit_peeled_self_loop(&mut asm, &runs, block[s], &accept, &plans[s], jt[s], done);
+            } else {
+                emit_peeled_stamp_loop(&mut asm, &runs, &dsts, &accept, &plans[s], jt[s], done);
+            }
+            continue;
+        }
         if accepting[s] {
             // Record the accept; for a fallback accept also snapshot the live
             // marks (they may be clobbered before scan end).
@@ -968,6 +1180,8 @@ fn emit_capture<A: Assembler>(
         }
         asm.jump_table(jt[s], &entries);
     }
+    // Arch-specific data pools (e.g. the SIMD skip's broadcast constants).
+    asm.end_data();
 
     Ok((asm.finish(), data_start))
 }
@@ -1172,6 +1386,72 @@ mod tests {
                         want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
                         got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
                         "pattern {pat:?} input {input:?} start {start}",
+                    );
+                }
+            }
+        }
+    }
+
+    /// Capture-tier peeled self-loops (incl. the SIMD skip) must match the
+    /// interpreter — the same shapes as the capture-free peel tests, but with
+    /// capture groups (so the capture tier compiles) and thus mark moves on the
+    /// exit edges. Covers accepting loops with the deferred
+    /// `cap_record_accept_prev` (`([a-z]*)` at the end), fallback accepts whose
+    /// snapshot is hoisted out of the loop (`(\w+\s*)+`), and unanchored
+    /// automata (the `.*?` prefix's moveless start-state self-loop). Long
+    /// inputs engage the 16-byte SIMD skip; every start offset shifts its
+    /// alignment relative to the exit byte.
+    #[test]
+    fn jit_capture_self_loop_peel_vs_interpreter() {
+        let patterns = [
+            "a(.*)b", "(.+)", "(\"[^\"]*\")", "\"([^\"]*)\"", "(\\w+)",
+            "([a-zA-Z]+)ing", "([a-z]*)", "(\\w+\\s*)+",
+        ];
+        let mut inputs: Vec<String> = [
+            "",
+            "hello world",
+            "a\nb\nc",
+            "\"quoted\" tail",
+            "\"\"",
+            "über café: 日本語!",
+            "abcding endings",
+            "no_match_here",
+            "x",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        inputs.extend([
+            "a".repeat(64),
+            format!("\"{}\"", "q".repeat(40)),
+            format!("{}\n{}", "x".repeat(30), "y".repeat(30)),
+            format!("a{}b tail", "m".repeat(45)),
+            format!("{}ing after", "w".repeat(20)),
+            format!("{} {}", "aaaa".repeat(9), "bbbb".repeat(9)),
+            "café ".repeat(12),
+        ]);
+        for (anchored, pat) in
+            patterns.iter().flat_map(|&p| [(true, p), (false, p)])
+        {
+            let tdfa = if anchored { anchored_tdfa(pat) } else { unanchored_tdfa(pat) };
+            let Ok(jit) = JittedTdfa::compile(&tdfa, None) else {
+                continue; // outside the supported tier
+            };
+            assert!(
+                matches!(jit.compiled, Compiled::Capture(_)),
+                "{pat:?} should use the capture tier",
+            );
+            let mut scratch =
+                Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
+            for input in &inputs {
+                let bytes = input.as_bytes();
+                for start in 0..=bytes.len() {
+                    let want = tdfa_backend::execute(&tdfa, bytes, start);
+                    let got = jit.run(&tdfa, bytes, start, &mut scratch);
+                    assert_eq!(
+                        want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        "pattern {pat:?} (anchored={anchored}) input {input:?} start {start}",
                     );
                 }
             }
@@ -1412,3 +1692,4 @@ mod tests {
         }
     }
 }
+

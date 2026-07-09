@@ -192,6 +192,16 @@ impl Aarch64Asm {
         self.emit_u32(0xF2A0_0000 | (imm16 << 5) | rd);
     }
 
+    /// Shared tail of `cap_record_accept{,_prev}`: `acc_state = state_id`, with
+    /// the snapshot flag folded in for a fallback accept.
+    fn cap_record_state(&mut self, state_id: u32, is_fallback: bool) {
+        self.movz_x(ACC_STATE, state_id); // acc_state = state_id
+        if is_fallback {
+            // Set bit 31 of acc_state (the snapshot flag): MOVK Xd,#0x8000,LSL#16.
+            self.movk_x_hi16(ACC_STATE, 0x8000);
+        }
+    }
+
     /// `CMN Xn, #1` (ADDS XZR, Xn, #1): sets Z iff `Xn == u64::MAX`.
     fn cmn_x1(&mut self, rn: u32) {
         self.emit_u32(0xB100_0000 | (1 << 10) | (rn << 5) | XZR);
@@ -404,11 +414,13 @@ impl Assembler for Aarch64Asm {
 
     fn cap_record_accept(&mut self, state_id: u32, is_fallback: bool) {
         self.mov_reg(ACC_END, POS); // acc_end = pos
-        self.movz_x(ACC_STATE, state_id); // acc_state = state_id
-        if is_fallback {
-            // Set bit 31 of acc_state (the snapshot flag): MOVK Xd,#0x8000,LSL#16.
-            self.movk_x_hi16(ACC_STATE, 0x8000);
-        }
+        self.cap_record_state(state_id, is_fallback);
+    }
+
+    fn cap_record_accept_prev(&mut self, state_id: u32, is_fallback: bool) {
+        // SUB x9, x2, #1  (acc_end = pos - 1)
+        self.emit_u32(0xD100_0000 | (1 << 10) | (POS << 5) | ACC_END);
+        self.cap_record_state(state_id, is_fallback);
     }
 
     fn cap_snapshot(&mut self, width: u32) {
@@ -423,6 +435,12 @@ impl Assembler for Aarch64Asm {
         let at = self.here();
         let imm19 = (((loop_top as i64 - at as i64) >> 2) as u32) & 0x7_FFFF;
         self.emit_u32(0x5400_0000 | (imm19 << 5) | COND_LO);
+    }
+
+    fn cap_stamp_curpos(&mut self, dsts: &[u16]) {
+        for &dst in dsts {
+            self.str_x(POS, MARKS, dst as u32); // marks[dst] = pos
+        }
     }
 
     fn cap_move_stub(&mut self, curpos_idx: u32, moves: &[(u16, u16)], target: Label) {

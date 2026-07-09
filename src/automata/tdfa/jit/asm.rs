@@ -156,7 +156,9 @@ pub(crate) trait Assembler {
     /// the final `< lane-width` bytes and the exit byte). Default: no-op — an
     /// architecture without a SIMD path just uses the scalar peel, entering
     /// `scalar_tail` directly. `runs` are the same self byte-ranges the scalar
-    /// peel tests.
+    /// peel tests. Both tiers emit this, so it must only clobber the shared
+    /// scratch registers — not any tier-pinned register (e.g. the capture
+    /// tier's `marks`).
     fn simd_self_skip(&mut self, _runs: &[(u8, u8)], _scalar_tail: Label) {}
 
     /// Emit any architecture-specific data pools (e.g. SIMD broadcast constants)
@@ -206,10 +208,22 @@ pub(crate) trait Assembler {
     /// driver emits a following [`cap_snapshot`](Self::cap_snapshot).
     fn cap_record_accept(&mut self, state_id: u32, is_fallback: bool);
 
+    /// Like [`cap_record_accept`](Self::cap_record_accept), but at the
+    /// *previous* position: `acc_end = pos - 1`. Used by the capture-tier
+    /// peeled self-loop exit path, where `pos` has already been advanced past
+    /// the byte that left the state.
+    fn cap_record_accept_prev(&mut self, state_id: u32, is_fallback: bool);
+
     /// Copy `width` u32 lanes from the live mark file into `best_snap` (a
     /// fallback accept's eager snapshot). Emitted at the top of fallback
     /// accepting blocks, right after [`cap_record_accept`](Self::cap_record_accept).
     fn cap_snapshot(&mut self, width: u32);
+
+    /// Position stamps for a peeled stamping self-loop: `marks[dst] = pos` for
+    /// each lane in `dsts` (u64 lanes; no-op when empty). The inline equivalent
+    /// of a self edge's pure-stamp move sequence, emitted per scalar self byte
+    /// and after a SIMD bulk advance.
+    fn cap_stamp_curpos(&mut self, dsts: &[u16]);
 
     /// A move stub: stamp the current position into mark lane `curpos_idx`, then
     /// apply each `(dst, src)` move as `marks[dst] = marks[src]` (u32 lanes),

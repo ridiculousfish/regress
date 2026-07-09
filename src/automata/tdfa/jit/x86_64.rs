@@ -286,10 +286,11 @@ impl Assembler for X86_64Asm {
         self.emit(&[0x48, 0x83, 0xC2, 0x10]); // add rdx, 16
         self.jmp(simd_loop);
         // partial: advance pos to the first out-of-set lane, then fall to scalar.
+        // Keep to rax scratch — rcx is the capture tier's marks pointer.
         self.bind(partial);
         self.emit(&[0xF7, 0xD0]); // not eax   (set bits = out-of-set lanes)
-        self.emit(&[0x0F, 0xBC, 0xC8]); // bsf ecx, eax  (first out-of-set lane; low 16 has a bit)
-        self.emit(&[0x48, 0x01, 0xCA]); // add rdx, rcx
+        self.emit(&[0x0F, 0xBC, 0xC0]); // bsf eax, eax  (first out-of-set lane; low 16 has a bit)
+        self.emit(&[0x48, 0x01, 0xC2]); // add rdx, rax
         // fall through to scalar_tail (bound by the caller)
     }
 
@@ -350,14 +351,13 @@ impl Assembler for X86_64Asm {
     fn cap_record_accept(&mut self, state_id: u32, is_fallback: bool) {
         // mov r9, rdx          (acc_end = pos)       49 89 D1
         self.emit(&[0x49, 0x89, 0xD1]);
-        // mov r10d, state_id                         41 BA <imm32>
-        self.emit(&[0x41, 0xBA]);
-        self.emit_u32(state_id);
-        if is_fallback {
-            // or r10d, 0x8000_0000  (snapshot flag -> bit 63 of the return)
-            self.emit(&[0x41, 0x81, 0xCA]);
-            self.emit_u32(0x8000_0000);
-        }
+        self.cap_record_state(state_id, is_fallback);
+    }
+
+    fn cap_record_accept_prev(&mut self, state_id: u32, is_fallback: bool) {
+        // lea r9, [rdx - 1]    (acc_end = pos - 1)   4C 8D 4A FF
+        self.emit(&[0x4C, 0x8D, 0x4A, 0xFF]);
+        self.cap_record_state(state_id, is_fallback);
     }
 
     fn cap_snapshot(&mut self, width: u32) {
@@ -377,29 +377,19 @@ impl Assembler for X86_64Asm {
         write_u32(&mut self.code, field, rel);
     }
 
-    fn cap_move_stub(&mut self, curpos_idx: u32, moves: &[(u16, u16)], target: Label) {
-        // u64 lanes (×8). A disp8 form (offset < 128, i.e. lanes 0..15) is a
-        // 4-byte instruction — smaller than the disp32 form (7 bytes) and than the
-        // former u32 disp32 mov (6 bytes) — which offsets the REX.W width cost and
-        // keeps the hot loop dense. `op` = 89 store / 8B load; `reg_bits` is the
-        // ModRM reg field already positioned (bits 5..3).
-        fn mark_mem(asm: &mut X86_64Asm, op: u8, reg_bits: u8, lane: u16) {
-            let off = lane as u32 * 8;
-            if off < 128 {
-                // REX.W op modrm(mod=01, reg, rm=rcx=001) disp8
-                asm.emit(&[0x48, op, 0x40 | reg_bits | 0x01, off as u8]);
-            } else {
-                // REX.W op modrm(mod=10, reg, rm=rcx=001) disp32
-                asm.emit(&[0x48, op, 0x80 | reg_bits | 0x01]);
-                asm.emit_u32(off);
-            }
+    fn cap_stamp_curpos(&mut self, dsts: &[u16]) {
+        for &dst in dsts {
+            self.mark_mem(0x89, 0b010_000, dst); // marks[dst] = pos (rdx)
         }
+    }
+
+    fn cap_move_stub(&mut self, curpos_idx: u32, moves: &[(u16, u16)], target: Label) {
         for &(dst, src) in moves {
             if src as u32 == curpos_idx {
-                mark_mem(self, 0x89, 0b010_000, dst); // marks[dst] = pos (rdx)
+                self.mark_mem(0x89, 0b010_000, dst); // marks[dst] = pos (rdx)
             } else {
-                mark_mem(self, 0x8B, 0b000_000, src); // rax = marks[src]
-                mark_mem(self, 0x89, 0b000_000, dst); // marks[dst] = rax
+                self.mark_mem(0x8B, 0b000_000, src); // rax = marks[src]
+                self.mark_mem(0x89, 0b000_000, dst); // marks[dst] = rax
             }
         }
         self.jmp(target); // E9 <rel32>
@@ -450,6 +440,36 @@ impl Assembler for X86_64Asm {
 }
 
 impl X86_64Asm {
+    /// A mark-file access at u64 lane `lane` (offset ×8). A disp8 form (offset
+    /// < 128, i.e. lanes 0..15) is a 4-byte instruction — smaller than the
+    /// disp32 form (7 bytes) — which offsets the REX.W width cost and keeps the
+    /// hot loop dense. `op` = 89 store / 8B load; `reg_bits` is the ModRM reg
+    /// field already positioned (bits 5..3).
+    fn mark_mem(&mut self, op: u8, reg_bits: u8, lane: u16) {
+        let off = lane as u32 * 8;
+        if off < 128 {
+            // REX.W op modrm(mod=01, reg, rm=rcx=001) disp8
+            self.emit(&[0x48, op, 0x40 | reg_bits | 0x01, off as u8]);
+        } else {
+            // REX.W op modrm(mod=10, reg, rm=rcx=001) disp32
+            self.emit(&[0x48, op, 0x80 | reg_bits | 0x01]);
+            self.emit_u32(off);
+        }
+    }
+
+    /// Shared tail of `cap_record_accept{,_prev}`: `acc_state = state_id`, with
+    /// the snapshot flag folded in for a fallback accept.
+    fn cap_record_state(&mut self, state_id: u32, is_fallback: bool) {
+        // mov r10d, state_id                         41 BA <imm32>
+        self.emit(&[0x41, 0xBA]);
+        self.emit_u32(state_id);
+        if is_fallback {
+            // or r10d, 0x8000_0000  (snapshot flag -> bit 63 of the return)
+            self.emit(&[0x41, 0x81, 0xCA]);
+            self.emit_u32(0x8000_0000);
+        }
+    }
+
     /// Intern a broadcast constant (`b` in all 16 lanes), returning its data
     /// label. Deduplicated by value; emitted by [`end_data`](Assembler::end_data).
     fn broadcast(&mut self, b: u8) -> Label {
