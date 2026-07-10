@@ -190,13 +190,7 @@ impl JittedTdfa {
                 }
                 let read_live = r.meta & SNAPSHOT_FLAG == 0;
                 let state = (r.meta & 0x7FFF_FFFF) as u32;
-                let m = tdfa_backend::jit_finalize(tdfa, state, scratch, r.end, read_live);
-                let captures = scratch
-                    .norm_buf
-                    .chunks_exact(2)
-                    .map(|c| if c[0] == usize::MAX { None } else { Some(c[0]..c[1]) })
-                    .collect();
-                Some(NfaMatch { range: m.range, captures })
+                Some(tdfa_backend::jit_finalize(tdfa, state, scratch, r.end, read_live))
             }
         }
     }
@@ -1199,6 +1193,18 @@ mod tests {
     use crate::automata::nfa::Nfa;
     use crate::automata::tdfa_backend::{self, Scratch};
 
+    /// Materialize captures from `scratch.norm_buf` for a `jit.run()` result.
+    /// `jit.run()` writes norm_buf but returns `captures: vec![]` to avoid a
+    /// per-match heap allocation on the hot path; tests use this to compare.
+    fn got_captures(m: &NfaMatch, scratch: &Scratch) -> Vec<Option<core::ops::Range<usize>>> {
+        let _ = m; // range already compared separately; this reads norm_buf
+        scratch
+            .norm_buf
+            .chunks_exact(2)
+            .map(|c| if c[0] == usize::MAX { None } else { Some(c[0]..c[1]) })
+            .collect()
+    }
+
     fn anchored_tdfa(pattern: &str) -> Tdfa {
         let flags = crate::api::Flags::default();
         let re = crate::backends::try_parse(pattern.chars().map(u32::from), flags)
@@ -1247,7 +1253,7 @@ mod tests {
                 let got = jit.run(&tdfa, bytes, start, &mut scratch);
                 assert_eq!(
                     want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
-                    got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                    got.as_ref().map(|m| (m.range.clone(), got_captures(m, &scratch))),
                     "pattern {pattern:?} input {input:?} start {start}",
                 );
             }
@@ -1390,7 +1396,7 @@ mod tests {
                     let got = jit.run(&tdfa, bytes, start, &mut scratch);
                     assert_eq!(
                         want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
-                        got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        got.as_ref().map(|m| (m.range.clone(), got_captures(m, &scratch))),
                         "pattern {pat:?} input {input:?} start {start}",
                     );
                 }
@@ -1456,7 +1462,7 @@ mod tests {
                     let got = jit.run(&tdfa, bytes, start, &mut scratch);
                     assert_eq!(
                         want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
-                        got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        got.as_ref().map(|m| (m.range.clone(), got_captures(m, &scratch))),
                         "pattern {pat:?} (anchored={anchored}) input {input:?} start {start}",
                     );
                 }
@@ -1513,7 +1519,7 @@ mod tests {
                     let got = jit.run(&tdfa, bytes, start, &mut scratch);
                     assert_eq!(
                         want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
-                        got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        got.as_ref().map(|m| (m.range.clone(), got_captures(m, &scratch))),
                         "pattern {pat:?} input {input:?} start {start}",
                     );
                 }
@@ -1605,7 +1611,7 @@ mod tests {
                     let got = jit.run(&tdfa, &bytes, start, &mut scratch);
                     assert_eq!(
                         want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
-                        got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        got.as_ref().map(|m| (m.range.clone(), got_captures(m, &scratch))),
                         "pattern {pat:?} input {bytes:?} start {start}",
                     );
                 }
@@ -1654,7 +1660,7 @@ mod tests {
                     let got = jit.run(&tdfa, bytes, start, &mut scratch);
                     assert_eq!(
                         want.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
-                        got.as_ref().map(|m| (m.range.clone(), m.captures.clone())),
+                        got.as_ref().map(|m| (m.range.clone(), got_captures(m, &scratch))),
                         "pattern {pat:?} input {input:?} start {start}",
                     );
                 }
