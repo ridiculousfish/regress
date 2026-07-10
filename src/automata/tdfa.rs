@@ -993,6 +993,10 @@ pub struct Tdfa {
     /// match is just `[start, end]` — which is a big win for accept-heavy
     /// capture-free patterns like `.*`.
     has_captures: bool,
+    // Number of user-visible capture groups (not counting the full match,
+    // not counting sentinel tags). Equals (nfa.num_capture_tags - 2) / 2.
+    // Used to size norm_buf in Scratch::new.
+    num_capture_groups: usize,
     // Capture-group names cloned from the source NFA so callers can attach
     // them to returned matches without keeping the NFA alive.
     group_names: Box<[Box<str>]>,
@@ -1414,6 +1418,7 @@ impl Tdfa {
             num_classes,
             num_tags,
             has_captures: nfa.num_capture_tags() > 2,
+            num_capture_groups: (nfa.num_capture_tags().saturating_sub(2)) / 2,
             num_marks,
             group_names: nfa.group_names().to_vec().into_boxed_slice(),
             byte_to_class,
@@ -1605,6 +1610,12 @@ impl Tdfa {
 
     pub fn num_tags(&self) -> usize {
         self.num_tags
+    }
+
+    /// Number of user-visible capture groups (not counting the full match,
+    /// not counting sentinel tags). Use this to size `norm_buf` in `Scratch`.
+    pub fn num_capture_groups(&self) -> usize {
+        self.num_capture_groups
     }
 
     /// Capture-group names indexed by group id (empty when no group is named).

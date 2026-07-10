@@ -8,13 +8,12 @@
 //! simultaneous-assignment semantics hold while writing in place. Only the lanes
 //! that change are touched — no width-proportional copy, no double buffer.
 //!
-//! Marks are `usize` byte offsets (via the single-impl [`MarkElem`]), so the
-//! per-byte loop carries no width dispatch and any haystack size is addressable.
+//! Marks are `usize` byte offsets; `usize::MAX` is the NO_MATCH sentinel.
 
 use crate::automata::anchors::boundary_signature;
 use crate::automata::dfa::{DEAD_STATE, Dfa};
-use crate::automata::nfa::{FULL_MATCH_END, FULL_MATCH_START, TEXT_POS_NO_MATCH, TextPos};
-use crate::automata::nfa_backend::{NfaMatch, tags_to_captures};
+use crate::automata::nfa::FULL_MATCH_START;
+use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{
     EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
 };
@@ -22,32 +21,8 @@ use crate::insn::StartPredicate;
 use crate::util::DebugCheckIndex;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+use core::ops::Range;
 use smallvec::SmallVec;
-
-/// A mark-file element: a `usize` byte offset into the haystack (or the
-/// `NO_MATCH` sentinel). Kept as a trait so the scan code reads offsets through
-/// named operations, but there is a single (`usize`) implementation.
-pub(crate) trait MarkElem: Copy + Ord {
-    /// "Unset" sentinel — distinct from every valid offset.
-    const NO_MATCH: Self;
-    /// A valid input offset as a mark value.
-    fn from_pos(p: usize) -> Self;
-    /// This mark as a `usize` offset. Only meaningful for non-`NO_MATCH` values;
-    /// finalization maps the sentinel separately.
-    fn to_pos(self) -> usize;
-}
-
-impl MarkElem for usize {
-    const NO_MATCH: Self = usize::MAX;
-    #[inline]
-    fn from_pos(p: usize) -> Self {
-        p
-    }
-    #[inline]
-    fn to_pos(self) -> usize {
-        self
-    }
-}
 
 /// Compile-time switches that let [`execute_generic`] drop cold sites it can
 /// statically prove the current automaton can't hit. Each realized combination
@@ -77,7 +52,7 @@ impl<const G: bool> TdfaExecConfig for ExecConfig<G> {
 /// so no clone is needed; the marks snapshot lives in a separate reused buffer
 /// updated only when this candidate wins (see `consider_accept`). The best
 /// candidate (leftmost; smallest `match start`) drives `finalize` at scan end.
-type LastAccept<'a, T> = Option<(usize, &'a [FinalCommand], T)>;
+type LastAccept<'a> = Option<(usize, &'a [FinalCommand], usize)>;
 
 /// Anchored match against a (non-tagged) DFA: returns true if `input` matches
 /// from the start. Used by DFA correctness tests; production paths go through
@@ -108,17 +83,17 @@ pub(crate) fn mark_file_width(tdfa: &Tdfa) -> usize {
 /// automaton's contents and run one anchored attempt. The flag check is once per
 /// attempt; the const generic still drops the per-byte branches inside
 /// `run_anchored`.
-fn run_anchored_dyn<T: MarkElem>(
+fn run_anchored_dyn(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
-    scratch: &mut Scratch<T>,
+    scratch: &mut Scratch,
     warm: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
     if tdfa.has_perbyte_guards() {
-        run_anchored::<T, ExecConfig<true>>(tdfa, input, start, scratch, warm)
+        run_anchored::<ExecConfig<true>>(tdfa, input, start, scratch, warm)
     } else {
-        run_anchored::<T, ExecConfig<false>>(tdfa, input, start, scratch, warm)
+        run_anchored::<ExecConfig<false>>(tdfa, input, start, scratch, warm)
     }
 }
 
@@ -126,24 +101,20 @@ fn run_anchored_dyn<T: MarkElem>(
 /// `start`) and run the anchored automaton there, returning the first (leftmost)
 /// match. The `scratch` is reused across every candidate; `skip`, when set,
 /// warm-starts each attempt past the matched literal (see [`PrefixSkip`]).
-fn run_prefiltered_dyn<T: MarkElem>(
+fn run_prefiltered_dyn(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
     pred: &StartPredicate,
-    scratch: &mut Scratch<T>,
+    scratch: &mut Scratch,
     skip: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
     let mut pos = start;
     loop {
         let cand = pred.find_from(input, pos)?;
-        if let Some(m) = run_anchored_dyn::<T>(tdfa, input, cand, scratch, skip) {
-            // Anchored automaton: the match starts exactly at `cand`, and since
-            // candidates are visited left to right this is the leftmost match.
+        if let Some(m) = run_anchored_dyn(tdfa, input, cand, scratch, skip) {
             return Some(m);
         }
-        // No match anchored here; advance past this candidate. Candidate offsets
-        // are UTF-8 lead bytes (codepoint boundaries), so `+1` is safe.
         pos = cand + 1;
     }
 }
@@ -152,8 +123,15 @@ fn run_prefiltered_dyn<T: MarkElem>(
 /// match (range + captures) or `None`. Used by tests and one-shot callers; the
 /// match-iteration hot path uses [`execute_reuse`] with a caller-owned scratch.
 pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
-    let mut scratch = Scratch::<usize>::new(mark_file_width(tdfa), tdfa.num_tags());
-    run_anchored_dyn(tdfa, input, start, &mut scratch, None)
+    let mut scratch = Scratch::new(mark_file_width(tdfa), tdfa.num_capture_groups());
+    let m = run_anchored_dyn(tdfa, input, start, &mut scratch, None)?;
+    // Materialize captures from norm_buf for test/one-shot callers.
+    let captures = scratch
+        .norm_buf
+        .chunks_exact(2)
+        .map(|c| if c[0] == usize::MAX { None } else { Some(c[0]..c[1]) })
+        .collect();
+    Some(NfaMatch { range: m.range, captures })
 }
 
 /// Like [`execute`], but reuses the caller-owned `scratch` (sized to
@@ -163,7 +141,7 @@ pub(crate) fn execute_reuse(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
-    scratch: &mut Scratch<usize>,
+    scratch: &mut Scratch,
 ) -> Option<NfaMatch> {
     run_anchored_dyn(tdfa, input, start, scratch, None)
 }
@@ -177,7 +155,7 @@ pub(crate) fn execute_reuse_warm(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
-    scratch: &mut Scratch<usize>,
+    scratch: &mut Scratch,
     skip: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
     run_anchored_dyn(tdfa, input, start, scratch, skip)
@@ -191,7 +169,7 @@ pub(crate) fn execute_prefiltered_reuse(
     input: &[u8],
     start: usize,
     pred: &StartPredicate,
-    scratch: &mut Scratch<usize>,
+    scratch: &mut Scratch,
     skip: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
     run_prefiltered_dyn(tdfa, input, start, pred, scratch, skip)
@@ -203,7 +181,7 @@ pub(crate) fn execute_prefiltered_reuse(
 /// the precompiled move sequences instead. Touches only the real-mark lanes
 /// (`0..num_marks`); the trailing `clear`/`current_pos`/`scratch` lanes are
 /// irrelevant here because `CurrentPos` writes use `current_pos` directly.
-fn apply_cmds_scalar<T: MarkElem>(buf: &mut [T], cmds: &[TagCommand], current_pos: T) {
+fn apply_cmds_scalar(buf: &mut [usize], cmds: &[TagCommand], current_pos: usize) {
     if cmds.is_empty() {
         return;
     }
@@ -215,7 +193,7 @@ fn apply_cmds_scalar<T: MarkElem>(buf: &mut [T], cmds: &[TagCommand], current_po
     }
     // Phase 2: pre-read all Copy sources before any write, so cyclic or
     // shared-source copies behave as a simultaneous assignment.
-    let mut reads: SmallVec<[(usize, T); 8]> = SmallVec::new();
+    let mut reads: SmallVec<[(usize, usize); 8]> = SmallVec::new();
     for cmd in cmds {
         if let MarkValue::Copy(src) = cmd.src {
             reads.push((cmd.dst.0 as usize, buf[src.0 as usize]));
@@ -230,49 +208,49 @@ fn apply_cmds_scalar<T: MarkElem>(buf: &mut [T], cmds: &[TagCommand], current_po
 /// anchored run, so callers reuse one `Scratch` across many runs: the prefilter
 /// loop reuses it across every candidate, and `TdfaExecutor` owns one and reuses
 /// it across every match in a `find_iter` (see `execute_reuse`). That keeps the
-/// hot path allocation-free per match — only the returned `NfaMatch`'s own
-/// captures Vec (empty for capture-free patterns) is per-match.
+/// hot path allocation-free per match.
 #[derive(Debug)]
-pub(crate) struct Scratch<T: MarkElem> {
+pub(crate) struct Scratch {
     /// The working mark file, mutated in place by each transition. Reset to
-    /// `NO_MATCH` at the start of every `run_anchored`.
-    src_buf: Box<[T]>,
+    /// `usize::MAX` (NO_MATCH) at the start of every `run_anchored`.
+    src_buf: Box<[usize]>,
     /// Snapshot of the winning accept's marks (copied in on replace only).
-    best_snap: Box<[T]>,
+    best_snap: Box<[usize]>,
     /// Scratch for applying a `$`-conditional's commands before snapshotting.
-    cond_buf: Box<[T]>,
-    /// Reusable per-tag value buffer for `finalize` (refilled each call), sized
-    /// to `num_tags`. Holds `usize` offsets regardless of `T`, so it's not
-    /// width-typed.
-    tag_values: Box<[TextPos]>,
+    cond_buf: Box<[usize]>,
+    /// Normalized capture buffer. Sized to `2 * num_capture_groups`. `finalize`
+    /// writes pairs (open, close) directly: `norm_buf[2*i]` = group i open,
+    /// `norm_buf[2*i+1]` = group i close. `usize::MAX` = NO_MATCH sentinel.
+    /// Pre-allocated once; no per-match allocation.
+    pub(crate) norm_buf: Box<[usize]>,
 }
 
 #[cfg(feature = "tdfa-jit")]
-impl<T: MarkElem> Scratch<T> {
+impl Scratch {
     /// Raw pointer to the working mark file, handed to JIT-compiled capture
     /// code (which applies per-transition marks in place). Valid until the next
     /// mutation of `self`.
-    pub(crate) fn src_buf_mut_ptr(&mut self) -> *mut T {
+    pub(crate) fn src_buf_mut_ptr(&mut self) -> *mut usize {
         self.src_buf.as_mut_ptr()
     }
 
     /// Raw pointer to the accept-snapshot buffer, handed to JIT-compiled capture
     /// code (which copies the live marks here on a fallback accept). Valid until
     /// the next mutation of `self`.
-    pub(crate) fn best_snap_mut_ptr(&mut self) -> *mut T {
+    pub(crate) fn best_snap_mut_ptr(&mut self) -> *mut usize {
         self.best_snap.as_mut_ptr()
     }
 }
 
-impl<T: MarkElem> Scratch<T> {
+impl Scratch {
     /// `width` = `num_marks + 3` (real marks, then `clear`, `current_pos`,
-    /// `scratch`); `num_tags` sizes the `finalize` tag buffer.
-    pub(crate) fn new(width: usize, num_tags: usize) -> Self {
+    /// `scratch`); `num_capture_groups` sizes the normalized capture buffer.
+    pub(crate) fn new(width: usize, num_capture_groups: usize) -> Self {
         Self {
-            src_buf: vec![T::NO_MATCH; width].into_boxed_slice(),
-            best_snap: vec![T::NO_MATCH; width].into_boxed_slice(),
-            cond_buf: vec![T::NO_MATCH; width].into_boxed_slice(),
-            tag_values: vec![TEXT_POS_NO_MATCH; num_tags].into_boxed_slice(),
+            src_buf:   vec![usize::MAX; width].into_boxed_slice(),
+            best_snap: vec![usize::MAX; width].into_boxed_slice(),
+            cond_buf:  vec![usize::MAX; width].into_boxed_slice(),
+            norm_buf:  vec![usize::MAX; 2 * num_capture_groups].into_boxed_slice(),
         }
     }
 }
@@ -338,10 +316,6 @@ pub(crate) fn compute_prefix_skip(tdfa: &Tdfa, literal: &[u8]) -> Option<PrefixS
         }
         state = next;
     }
-    // No accept can fire strictly inside a mandatory prefix (that would mean a
-    // match shorter than the literal exists), so intermediate accept checks are
-    // unnecessary; the boundary accept at `P + len` is still performed by the
-    // warm start. `state` is where the byte loop resumes.
     Some(PrefixSkip {
         post_state: state,
         len: literal.len(),
@@ -363,8 +337,6 @@ pub(crate) fn compute_byteclass_skip(
     if tdfa.has_perbyte_guards() || tdfa.has_eoi_accepts() || !tdfa.has_moves() {
         return None;
     }
-    // `^` makes the offset-0 start state differ from the general start; one
-    // `post_state` can't serve both, so bail and stay offset-independent.
     if tdfa.start(0) != tdfa.start(1) {
         return None;
     }
@@ -379,8 +351,6 @@ pub(crate) fn compute_byteclass_skip(
     for b in first_bytes {
         let class = *byte_to_class.iat(b as usize) as usize;
         let idx = start * num_classes + class;
-        // Skipping the byte must not drop a mark write (no capture opening on
-        // the leading byte), mirroring `compute_prefix_skip`.
         if !trans_moves.iat(idx).is_empty() {
             return None;
         }
@@ -391,69 +361,43 @@ pub(crate) fn compute_byteclass_skip(
         match post {
             None => post = Some(next),
             Some(p) if p == next => {}
-            // Two admissible bytes lead to different post-states; one warm start
-            // can't serve both, so fall back to a cold run.
             Some(_) => return None,
         }
     }
-    // `post` is `None` only for an empty class (no admissible byte) — nothing to
-    // warm-start from, so the `?` correctly declines.
     Some(PrefixSkip { post_state: post?, len: 1 })
 }
 
 /// One anchored attempt: run the automaton from byte offset `start`, reusing the
-/// caller-owned `scratch`. Returns the match (range + captures) or `None`. `T`
-/// is the mark element, fixed for the whole pass.
+/// caller-owned `scratch`. Returns the match (range + captures) or `None`.
 ///
 /// `warm`, when set, is a [`PrefixSkip`]: the start `start` is the literal's
 /// offset and the run jumps to `warm.post_state`, resuming the byte loop at
-/// `start + warm.len` instead of re-scanning the literal. It's only ever set
-/// when the automaton has no anchor alts / conditionals (see
-/// `compute_prefix_skip`), so those `C` branches are statically dead on the warm
-/// path.
+/// `start + warm.len` instead of re-scanning the literal.
 #[inline]
-fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
+fn run_anchored<C: TdfaExecConfig>(
     tdfa: &Tdfa,
     input: &[u8],
     start: usize,
-    scratch: &mut Scratch<T>,
+    scratch: &mut Scratch,
     warm: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
-    let num_tags = tdfa.num_tags();
     let num_marks = tdfa.num_marks();
     let curpos_lane = num_marks + 1;
-    // Loop-invariant: capture-free patterns skip the per-byte accept snapshot.
     let has_captures = tdfa.has_captures();
 
-    // Pull the three mark buffers out of `scratch` (and the deref through the
-    // `&mut Scratch`) into direct `&mut [T]` locals held on the stack for the
-    // whole run. These are disjoint fields, so all three borrows coexist; the
-    // hot per-byte loop then indexes a plain slice (one indirection) instead of
-    // chasing `&mut Scratch` -> `Box<[T]>` -> data on every access. `tag_values`
-    // is only touched once at the end.
-    let src_buf: &mut [T] = &mut scratch.src_buf;
-    let best_snap: &mut [T] = &mut scratch.best_snap;
-    let cond_buf: &mut [T] = &mut scratch.cond_buf;
-    let tag_values: &mut [TextPos] = &mut scratch.tag_values;
+    let src_buf: &mut [usize] = &mut scratch.src_buf;
+    let best_snap: &mut [usize] = &mut scratch.best_snap;
+    let cond_buf: &mut [usize] = &mut scratch.cond_buf;
+    let norm_buf = &mut scratch.norm_buf;
 
-    // Reset the working mark file (it's reused across candidates). The `clear`
-    // lane must stay `NO_MATCH`, which the fill restores. `best_snap`/`cond_buf`
-    // are always written before read, so they need no reset.
-    src_buf.fill(T::NO_MATCH);
+    src_buf.fill(usize::MAX);
 
-    apply_cmds_scalar::<T>(src_buf, tdfa.entry_commands(start), T::from_pos(start));
+    apply_cmds_scalar(src_buf, tdfa.entry_commands(start), start);
 
-    let mut last_accept: LastAccept<T> = None;
-    // Whether the winning accept's tags live in `src_buf` (read at scan end) or
-    // were snapshotted into `best_snap`. Updated by every recorded accept.
+    let mut last_accept: LastAccept = None;
     let mut read_live = false;
-    // Per-state fallback flags: which accepting states need the eager snapshot.
     let accept_fallback = tdfa.accept_fallback();
 
-    // Cold start: begin in the start state and scan from `start`. Warm start
-    // (prefix-skip): begin in the post-literal state and scan from `start + len`
-    // — the mark file is unchanged from entry because the literal writes none
-    // (guaranteed by `compute_prefix_skip`).
     let (mut state, loop_start) = match warm {
         Some(s) => (s.post_state, start + s.len),
         None => (tdfa.start(start), start),
@@ -462,19 +406,13 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     if state == TDFA_DEAD_STATE {
         return None;
     }
-    // Word-char widening (regex-global `iu`) for the boundary signature.
     let word_icase = tdfa.word_icase();
-    // Initial position checks at `loop_start`. Cold path (`loop_start == start`):
-    // multiline-`^`/`\b` switch and the start-state empty-match accept. Warm path:
-    // the boundary accept right after the literal (the interior accept checks it
-    // skipped can't fire — see `compute_prefix_skip`); the guard branches are
-    // statically dead since warm is only set when there are no per-byte guards.
     if C::HAS_PERBYTE_GUARDS && !tdfa.guards(state).switches.is_empty() {
         let sig = boundary_signature(input, loop_start, word_icase);
-        apply_switches::<T>(tdfa, &mut state, src_buf, sig, loop_start);
+        apply_switches(tdfa, &mut state, src_buf, sig, loop_start);
     }
     if *tdfa.accepting().iat(state as usize) {
-        record_accept::<T>(
+        record_accept(
             &mut last_accept,
             best_snap,
             loop_start,
@@ -487,7 +425,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     }
     if C::HAS_PERBYTE_GUARDS && !tdfa.guards(state).accepts.is_empty() {
         let sig = boundary_signature(input, loop_start, word_icase);
-        record_accepts::<T>(
+        record_accepts(
             tdfa,
             state,
             sig,
@@ -508,43 +446,18 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     let accepting = tdfa.accepting();
     let num_classes = tdfa.num_classes();
 
-    // Whether to drive transitions with the precompiled move sequences (the
-    // common path) or interpret the command lists directly. The latter covers
-    // only the degenerate too-many-marks-for-`u16` case (see
-    // `Tdfa::compile_moves_all`). Loop-invariant, so the branch predicts
-    // perfectly.
     let use_moves = tdfa.has_moves();
 
-    // When the pattern has no captures and `FULL_MATCH_START` is fixed at entry
-    // (anchored/prefilter builds), no per-byte mark is ever read back: the match
-    // is `[start, end]` with `start` from the untouched entry mark and `end` from
-    // the accept position. So the whole transition-mark application is dead and we
-    // drop it from the hot loop. Loop-invariant — predicts perfectly. (Capture or
-    // `.*?`-scan runs keep applying marks.)
     let skip_marks = !has_captures && tdfa.start_fixed();
 
-    // The capture-free fast loop: premultiplied transitions (no per-byte index
-    // multiply) + accept-flagged targets (no `accepting[]` load) + no mark work.
-    // Applicable exactly when `exec_transitions` was built (capture-free,
-    // `start_fixed`, and — guaranteed by the dispatcher's const flags — no
-    // conditionals or anchor alts). The match always starts at `start`, so accepts
-    // record that directly.
     let use_fast =
         skip_marks && !C::HAS_PERBYTE_GUARDS && !tdfa.exec_transitions().is_empty();
 
-    // Position where `state` was last actually entered (see the long-standing
-    // note below: EOI conditionals evaluate against this, not `input.len()`).
     let mut live_position = loop_start;
 
-    // Whether the byte loop consumed the whole input (vs. breaking on a dead
-    // transition). When true, `state` is the live state at `input.len()`, which
-    // is what the EOI pass needs for non-multiline `$` (it fires only there).
     let mut completed = true;
 
     if use_fast {
-        // `state` is premultiplied here; `estate + class` indexes the table with a
-        // bare add. No marks, no `accepting[]` load, no `finals` — the accept is a
-        // bit test and the start is the run's `start`.
         let exec_trans = tdfa.exec_transitions();
         let mut estate = state * num_classes as u32;
         for (i, &byte) in input[loop_start..].iter().enumerate() {
@@ -556,12 +469,10 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             }
             estate = raw & EXEC_STATE_MASK;
             if raw & EXEC_ACCEPT_FLAG != 0 {
-                // Latest (longest) accept wins; start is fixed at `start`.
-                last_accept = Some((loop_start + i + 1, &[], T::from_pos(start)));
+                last_accept = Some((loop_start + i + 1, &[], start));
                 read_live = false;
             }
         }
-        // Recover the (non-premultiplied) final state for the EOI pass below.
         state = estate / num_classes as u32;
     } else {
     for (i, &byte) in input[loop_start..].iter().enumerate() {
@@ -573,40 +484,30 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
             completed = false;
             break;
         }
-        // Apply the transition's mark update in place. An empty move sequence is
-        // the common tag-free case (marks untouched, skipped). Each move is
-        // `buf[dst] = buf[src]`; the sequence is ordered so reads see pre-update
-        // values, with `src` possibly naming the `current_pos` or `scratch` lane.
         if !skip_marks {
             if use_moves {
                 let moves = trans_moves.iat(idx);
                 if !moves.is_empty() {
-                    *src_buf.mat(curpos_lane) = T::from_pos(pos + 1);
+                    *src_buf.mat(curpos_lane) = pos + 1;
                     for op in moves.iter() {
                         let v = *src_buf.iat(op.src as usize);
                         *src_buf.mat(op.dst as usize) = v;
                     }
                 }
             } else {
-                apply_cmds_scalar::<T>(src_buf, trans_cmds.iat(idx), T::from_pos(pos + 1));
+                apply_cmds_scalar(src_buf, trans_cmds.iat(idx), pos + 1);
             }
         }
         state = next;
-        // `live_position` only feeds the EOI accept pass below, so the per-byte
-        // store is dead weight unless this run has per-byte guards.
         if C::HAS_PERBYTE_GUARDS {
             live_position = pos + 1;
-            // Forward-branching switch (mid-input multiline `^` / `\b`). Guard on
-            // the per-state list so the common (guard-free) state skips it. The
-            // boundary signature is position-only, so compute it lazily and reuse
-            // it for the accept pass below.
             if !tdfa.guards(state).switches.is_empty() {
                 let sig = boundary_signature(input, pos + 1, word_icase);
-                apply_switches::<T>(tdfa, &mut state, src_buf, sig, pos + 1);
+                apply_switches(tdfa, &mut state, src_buf, sig, pos + 1);
             }
         }
         if *accepting.iat(state as usize) {
-            record_accept::<T>(
+            record_accept(
                 &mut last_accept,
                 best_snap,
                 pos + 1,
@@ -619,7 +520,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
         }
         if C::HAS_PERBYTE_GUARDS && !tdfa.guards(state).accepts.is_empty() {
             let sig = boundary_signature(input, pos + 1, word_icase);
-            record_accepts::<T>(
+            record_accepts(
                 tdfa,
                 state,
                 sig,
@@ -635,21 +536,9 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
     }
     }
 
-    // EOI accept pass. Two cases:
-    //
-    // * Per-byte run (`C::HAS_PERBYTE_GUARDS`) — `state`/`live_position` were
-    //   tracked per byte. Evaluate accepts at `live_position` (not `input.len()`):
-    //   a state abandoned mid-input must not falsely accept just because
-    //   `input.len()` satisfies `$`. This handles multiline `$` (fires at a line
-    //   terminator or end) and non-multiline `$` (its `holds_sig` is true only
-    //   when `live_position == input.len()`, i.e. the run completed).
-    //
-    // * Non-per-byte run — only EOI-only (non-multiline) `$` accepts are possible
-    //   and `live_position` wasn't tracked. They fire solely at `input.len()`,
-    //   reached iff the loop `completed`; evaluate there. Covers the fast loop.
     if C::HAS_PERBYTE_GUARDS {
         let sig = boundary_signature(input, live_position, word_icase);
-        record_accepts::<T>(
+        record_accepts(
             tdfa,
             state,
             sig,
@@ -663,7 +552,7 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
         );
     } else if completed && tdfa.has_eoi_accepts() {
         let sig = boundary_signature(input, input.len(), word_icase);
-        record_accepts::<T>(
+        record_accepts(
             tdfa,
             state,
             sig,
@@ -679,20 +568,16 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
 
     match last_accept {
         Some((end, finals, start)) => {
-            // The winner's tags are in the live registers (`src_buf`, read here at
-            // scan end) for cheap-recorded accepts, or in the eager snapshot
-            // (`best_snap`) for fallback/conditional accepts.
-            let marks: &[T] = if read_live { src_buf } else { best_snap };
+            let marks: &[usize] = if read_live { src_buf } else { best_snap };
             Some(if has_captures {
-                finalize::<T>(finals, marks, end, num_tags, tag_values)
+                finalize(finals, marks, end, norm_buf)
             } else {
-                // Snapshot path stored the start; cheap path derives it now.
                 let s = if read_live {
                     snapshot_match_start(finals, marks)
                 } else {
                     start
                 };
-                finalize_nocap::<T>(s, end)
+                finalize_nocap(s, end)
             })
         }
         None => None,
@@ -700,14 +585,8 @@ fn run_anchored<T: MarkElem, C: TdfaExecConfig>(
 }
 
 /// Follow switch guards that hold at this position until no further state
-/// change applies. Alternate closures are built independently, so overlapping
-/// predicates (multiline `^` with `\b` or `\B`) compose by switching through
-/// successively enlarged closures: at each hop we take the first (highest NFA
-/// priority) matching guard, land in a strictly larger subset that carries the
-/// remaining predicates as its own switches, and repeat until none fire. The
-/// chain converges because every switch enlarges the subset, so no state
-/// repeats and `num_states()` bounds the iterations.
-fn apply_switches<T: MarkElem>(tdfa: &Tdfa, state: &mut u32, buf: &mut [T], sig: u8, pos: usize) {
+/// change applies.
+fn apply_switches(tdfa: &Tdfa, state: &mut u32, buf: &mut [usize], sig: u8, pos: usize) {
     for _ in 0..tdfa.num_states() {
         let Some(sw) = tdfa
             .guards(*state)
@@ -717,7 +596,7 @@ fn apply_switches<T: MarkElem>(tdfa: &Tdfa, state: &mut u32, buf: &mut [T], sig:
         else {
             return;
         };
-        apply_cmds_scalar::<T>(buf, &sw.commands, T::from_pos(pos));
+        apply_cmds_scalar(buf, &sw.commands, pos);
         *state = sw.alt;
     }
 
@@ -733,18 +612,17 @@ fn apply_switches<T: MarkElem>(tdfa: &Tdfa, state: &mut u32, buf: &mut [T], sig:
 
 /// For each `$`-style accept on `state` whose predicate holds at the position's
 /// boundary signature `sig`, snapshot the marks into `cond_buf`, apply the
-/// accept's commands, and treat it as a new accept candidate. The caller already
-/// checked the accept list is non-empty.
+/// accept's commands, and treat it as a new accept candidate.
 #[allow(clippy::too_many_arguments)]
-fn record_accepts<'a, T: MarkElem>(
+fn record_accepts<'a>(
     tdfa: &'a Tdfa,
     state: u32,
     sig: u8,
     pos: usize,
-    marks: &[T],
-    cond_buf: &mut [T],
-    last_accept: &mut LastAccept<'a, T>,
-    best_snap: &mut [T],
+    marks: &[usize],
+    cond_buf: &mut [usize],
+    last_accept: &mut LastAccept<'a>,
+    best_snap: &mut [usize],
     has_captures: bool,
     read_live: &mut bool,
 ) {
@@ -753,7 +631,7 @@ fn record_accepts<'a, T: MarkElem>(
             continue;
         }
         cond_buf.copy_from_slice(marks);
-        apply_cmds_scalar::<T>(cond_buf, &ac.commands, T::from_pos(pos));
+        apply_cmds_scalar(cond_buf, &ac.commands, pos);
         consider_accept(
             last_accept,
             best_snap,
@@ -767,9 +645,8 @@ fn record_accepts<'a, T: MarkElem>(
 }
 
 /// Read the `FULL_MATCH_START` value a finalization snapshot would produce, or
-/// `NO_MATCH` if the row doesn't set it. Used to order accept candidates by
-/// match start so leftmost wins (see `consider_accept`).
-fn snapshot_match_start<T: MarkElem>(finals: &[FinalCommand], marks: &[T]) -> T {
+/// `usize::MAX` (NO_MATCH) if the row doesn't set it.
+fn snapshot_match_start(finals: &[FinalCommand], marks: &[usize]) -> usize {
     for cmd in finals {
         if cmd.tag == FULL_MATCH_START {
             if let MarkValue::Copy(src) = cmd.src {
@@ -777,37 +654,17 @@ fn snapshot_match_start<T: MarkElem>(finals: &[FinalCommand], marks: &[T]) -> T 
             }
         }
     }
-    T::NO_MATCH
+    usize::MAX
 }
 
-/// Record an accept candidate, keeping the **leftmost** match. A candidate
-/// replaces the current best unless it starts strictly later (`FULL_MATCH_START`
-/// greater): an earlier start always wins; an equal start (greedy extension of
-/// the same match, or the latest-priority conditional at one position) replaces
-/// so the longest/last-priority extent is taken.
-///
-/// Record an accept at a regular accepting state.
-///
-/// The Laurikari/TDFA insight: tag values live in registers, and `best_snap`
-/// only ever yields the *final* winner — every intermediate snapshot is
-/// overwritten. So for the common case we record only `(end, finals)` and read
-/// the registers at scan end (`run_anchored`'s finalize). That's correct because
-/// `truncate_at_first_goal` pruning fixes the leftmost start once a match is
-/// found, so the **last** accept is the winner and the diverging higher-priority
-/// continuations that run past it write *different* registers (the determinizer's
-/// allocation), leaving the winner's registers intact.
-///
-/// The exception is the "fallback" case the snapshot was invented for: with a
-/// `$`-style conditional, the unanchored prefix can stay alive past a completed
-/// match and produce a later-start accept, so there we still snapshot eagerly
-/// and keep the leftmost ([`consider_accept`]).
+/// Record an accept candidate, keeping the **leftmost** match.
 #[inline]
 #[allow(clippy::too_many_arguments)]
-fn record_accept<'a, T: MarkElem>(
-    last_accept: &mut LastAccept<'a, T>,
-    best_snap: &mut [T],
+fn record_accept<'a>(
+    last_accept: &mut LastAccept<'a>,
+    best_snap: &mut [usize],
     end: usize,
-    marks: &[T],
+    marks: &[usize],
     finals: &'a [FinalCommand],
     has_captures: bool,
     snapshot: bool,
@@ -816,41 +673,25 @@ fn record_accept<'a, T: MarkElem>(
     if snapshot {
         consider_accept(last_accept, best_snap, end, marks, finals, has_captures, read_live);
     } else {
-        // No per-byte copy or start read: last accept wins, registers read at
-        // scan end from the live `src_buf`.
-        *last_accept = Some((end, finals, T::NO_MATCH));
+        *last_accept = Some((end, finals, usize::MAX));
         *read_live = true;
     }
 }
 
 /// The start is read from the live `marks` *before* any copy, so a non-replacing
-/// candidate costs only the comparison — no snapshot copy. This guard matters
-/// only for unanchored search, where the implicit prefix can keep a "still
-/// searching" thread alive past a `$`-completed match; for anchored runs
-/// `FULL_MATCH_START` is constant and this reduces to "latest accept wins".
-///
-/// `has_captures` is loop-invariant (const per scan): when false we skip the
-/// per-byte `best_snap` copy entirely — the match is `start..end` with no
-/// captures (`finalize_nocap`), so the snapshot is dead weight. This is the big
-/// win for accept-heavy capture-free patterns like `.*`, which would otherwise
-/// memcpy the mark file on every byte.
+/// candidate costs only the comparison — no snapshot copy.
 #[inline]
-fn consider_accept<'a, T: MarkElem>(
-    last_accept: &mut LastAccept<'a, T>,
-    best_snap: &mut [T],
+fn consider_accept<'a>(
+    last_accept: &mut LastAccept<'a>,
+    best_snap: &mut [usize],
     end: usize,
-    marks: &[T],
+    marks: &[usize],
     finals: &'a [FinalCommand],
     has_captures: bool,
     read_live: &mut bool,
 ) {
     let new_start = snapshot_match_start(finals, marks);
     if let Some((best_end, _, best_start)) = last_accept {
-        // Leftmost start wins; ties broken by longest end, then by priority.
-        // Candidates are offered in priority order (highest first), so a later
-        // candidate with the *same* start and end must not displace the one
-        // already recorded — that would pick the lower-priority alternative (e.g.
-        // two branches reaching `$` at one position with different captures).
         if new_start > *best_start || (new_start == *best_start && end <= *best_end) {
             return;
         }
@@ -859,104 +700,125 @@ fn consider_accept<'a, T: MarkElem>(
         best_snap.copy_from_slice(marks);
     }
     *last_accept = Some((end, finals, new_start));
-    // This accept's tags are in the snapshot (or, for nocap, in the stored
-    // start), not the live registers.
     *read_live = false;
 }
 
-/// Build a capture-free match directly from the recorded start (the
-/// `FULL_MATCH_START` snapshot value) and end — no mark file, no captures.
-fn finalize_nocap<T: MarkElem>(start: T, end: usize) -> NfaMatch {
-    let start = if start == T::NO_MATCH { 0 } else { start.to_pos() };
+/// Build a capture-free match directly from the recorded start and end.
+fn finalize_nocap(start: usize, end: usize) -> NfaMatch {
+    let start = if start == usize::MAX { 0 } else { start };
     NfaMatch {
         range: start..end,
         captures: Vec::new(),
     }
 }
 
-/// Build an `NfaMatch` from a finalization snapshot. `finals` is the row of
-/// finalize-time commands (per-state for regular accepts, per-conditional for
-/// `$`-fired accepts); `marks` is the snapshot taken at the accept; `end` is the
-/// byte offset where the match ended. Mark values widen to `usize` here, mapping
-/// the `T::NO_MATCH` sentinel onto `TEXT_POS_NO_MATCH`.
-fn finalize<T: MarkElem>(
+/// Normalize the mark file into `norm_buf` and return the match range.
+///
+/// Applies `FinalCommand`s: each command maps a mark register to a tag index.
+/// Tags 0/1 are FULL_MATCH_START/END (used to build the range); tags 2+ map
+/// to capture groups: `norm_buf[tag - 2] = mark_value`. Sentinel tags (above
+/// the capture range, allocated by `make_sentinel()` for `ProgressSince`
+/// nullable-loop predicates) exceed `norm_buf.len()` and are skipped.
+/// `usize::MAX` is the NO_MATCH sentinel throughout.
+fn finalize(
     finals: &[FinalCommand],
-    marks: &[T],
+    marks: &[usize],
     end: usize,
-    num_tags: usize,
-    tag_values: &mut [TextPos],
+    norm_buf: &mut [usize],
 ) -> NfaMatch {
-    // Reused scratch (already sized to `num_tags`): reset rather than allocate.
-    debug_assert_eq!(tag_values.len(), num_tags);
-    tag_values.fill(TEXT_POS_NO_MATCH);
+    norm_buf.fill(usize::MAX);
+
+    let mut full_start = usize::MAX;
+    let mut full_end = usize::MAX;
+
     for cmd in finals {
-        let val = match cmd.src {
-            MarkValue::Copy(src) => marks[src.0 as usize],
-            MarkValue::CurrentPos => unreachable!("finals never use CurrentPos"),
+        let MarkValue::Copy(src) = cmd.src else {
+            unreachable!("finals never use CurrentPos")
         };
-        tag_values[cmd.tag as usize] = if val == T::NO_MATCH {
-            TEXT_POS_NO_MATCH
-        } else {
-            val.to_pos()
-        };
+        let val = marks[src.0 as usize];
+        match cmd.tag as usize {
+            0 => full_start = val,
+            1 => full_end = val,
+            tag => {
+                let norm_idx = tag - 2;
+                // Sentinel tags (ProgressSince for nullable loops) have indices
+                // beyond the capture range; norm_buf is sized to captures only.
+                if norm_idx < norm_buf.len() {
+                    norm_buf[norm_idx] = val;
+                }
+            }
+        }
     }
 
-    // Anchored match — the engine semantics are "match starts at 0" — but
-    // FULL_MATCH_START / FULL_MATCH_END writes from the eps closure should
-    // already encode that. Use them when present; otherwise fall back.
-    let start_pos = tag_values[FULL_MATCH_START as usize];
-    let end_pos = if tag_values[FULL_MATCH_END as usize] == TEXT_POS_NO_MATCH {
-        // Committed-accept sentinel finals are all-Nil; synthesize from `end`.
-        end
-    } else {
-        tag_values[FULL_MATCH_END as usize]
-    };
-    let start_pos = if start_pos == TEXT_POS_NO_MATCH {
-        0
-    } else {
-        start_pos
-    };
-
-    let captures = tags_to_captures(tag_values);
-    NfaMatch {
-        range: start_pos..end_pos,
-        captures,
-    }
+    let start_pos = if full_start == usize::MAX { 0 } else { full_start };
+    let end_pos = if full_end == usize::MAX { end } else { full_end };
+    NfaMatch { range: start_pos..end_pos, captures: Vec::new() }
 }
 
 /// JIT capture-path setup: reset the working mark file to the unset sentinel and
-/// apply the automaton's entry commands for `start`. The JIT-compiled code then
-/// applies per-transition marks in place; [`jit_finalize`] reads them back. This
-/// mirrors `run_anchored`'s pre-loop `src_buf.fill` + entry-command application.
+/// apply the automaton's entry commands for `start`.
 #[cfg(feature = "tdfa-jit")]
-pub(crate) fn jit_prepare_marks<T: MarkElem>(tdfa: &Tdfa, scratch: &mut Scratch<T>, start: usize) {
-    scratch.src_buf.fill(T::NO_MATCH);
-    apply_cmds_scalar::<T>(&mut scratch.src_buf, tdfa.entry_commands(start), T::from_pos(start));
+pub(crate) fn jit_prepare_marks(tdfa: &Tdfa, scratch: &mut Scratch, start: usize) {
+    scratch.src_buf.fill(usize::MAX);
+    apply_cmds_scalar(&mut scratch.src_buf, tdfa.entry_commands(start), start);
 }
 
 /// JIT capture-path finalize: build the winning `NfaMatch` for the accept at
-/// `state`/`end`. `read_live` selects the buffer holding the winner's marks —
-/// the live `src_buf` (the common case, a non-fallback accept whose registers
-/// survive to scan end) or the eager `best_snap` taken at a fallback accept
-/// (Laurikari). Reuses the interpreter's [`finalize`].
+/// `state`/`end`. `read_live` selects the buffer holding the winner's marks.
 #[cfg(feature = "tdfa-jit")]
-pub(crate) fn jit_finalize<T: MarkElem>(
+pub(crate) fn jit_finalize(
     tdfa: &Tdfa,
     state: u32,
-    scratch: &mut Scratch<T>,
+    scratch: &mut Scratch,
     end: usize,
     read_live: bool,
 ) -> NfaMatch {
-    let marks: &[T] = if read_live {
+    let marks: &[usize] = if read_live {
         &scratch.src_buf
     } else {
         &scratch.best_snap
     };
-    finalize::<T>(
-        &tdfa.finals()[state as usize],
-        marks,
-        end,
-        tdfa.num_tags(),
-        &mut scratch.tag_values,
-    )
+    finalize(&tdfa.finals()[state as usize], marks, end, &mut scratch.norm_buf)
+}
+
+/// A TDFA match that borrows captures from the owning iterator's `Scratch.norm_buf`.
+/// Zero allocation per match. Convert to an owned [`NfaMatch`] via `From`/`Into`.
+///
+/// `captures` is a flat slice of `usize` pairs: `captures[2*i]` = group `i` open
+/// byte offset, `captures[2*i+1]` = group `i` close byte offset. `usize::MAX`
+/// means the group did not participate.
+pub struct TdfaMatch<'a> {
+    /// The full match range.
+    pub range: Range<usize>,
+    captures: &'a [usize],
+}
+
+impl<'a> TdfaMatch<'a> {
+    pub(crate) fn new(range: Range<usize>, norm_buf: &'a [usize]) -> Self {
+        Self { range, captures: norm_buf }
+    }
+
+    /// Number of capture groups (not counting the full match).
+    pub fn num_captures(&self) -> usize {
+        self.captures.len() / 2
+    }
+
+    /// Capture group `i` (0-indexed). `None` if the group did not participate.
+    pub fn capture(&self, i: usize) -> Option<Range<usize>> {
+        let s = self.captures[2 * i];
+        if s == usize::MAX {
+            return None;
+        }
+        Some(s..self.captures[2 * i + 1])
+    }
+}
+
+impl<'a> From<TdfaMatch<'a>> for NfaMatch {
+    fn from(m: TdfaMatch<'a>) -> NfaMatch {
+        let captures = m.captures
+            .chunks_exact(2)
+            .map(|c| if c[0] == usize::MAX { None } else { Some(c[0]..c[1]) })
+            .collect();
+        NfaMatch { range: m.range, captures }
+    }
 }

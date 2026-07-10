@@ -42,6 +42,7 @@ use smallvec::SmallVec;
 pub struct TdfaProgram {
     strategy: Strategy,
     group_names: Box<[Box<str>]>,
+    num_capture_groups: usize,
     /// Optional native-code compilation of the strategy's anchored verify
     /// automaton (the capture-free tier). `None` for the plain interpreter
     /// program; populated by [`enable_jit`](Self::enable_jit) for the
@@ -737,10 +738,11 @@ impl TdfaProgram {
     /// Assemble a program from its parts, leaving the optional JIT compilation
     /// off (the default interpreter program). The `tdfa-jit` backend enables it
     /// afterwards with [`enable_jit`](Self::enable_jit).
-    fn from_parts(strategy: Strategy, group_names: Box<[Box<str>]>) -> Self {
+    fn from_parts(strategy: Strategy, group_names: Box<[Box<str>]>, num_capture_groups: usize) -> Self {
         Self {
             strategy,
             group_names,
+            num_capture_groups,
             #[cfg(feature = "tdfa-jit")]
             jit: None,
         }
@@ -755,6 +757,7 @@ impl TdfaProgram {
             return Ok(Self::from_parts(
                 Strategy::WholeLiteral { literal, len },
                 Box::new([]),
+                0,
             ));
         }
 
@@ -770,6 +773,7 @@ impl TdfaProgram {
                     return Ok(Self::from_parts(
                         Strategy::MultiLiteral { searcher },
                         Box::new([]),
+                        0,
                     ));
                 }
             }
@@ -785,6 +789,7 @@ impl TdfaProgram {
                 let mut forward = Tdfa::try_from(&nfa)?;
                 forward.optimize();
                 let group_names = forward.group_names().to_vec().into_boxed_slice();
+                let num_capture_groups = forward.num_capture_groups();
                 // A Teddy SIMD prefilter over the leading case cross-product,
                 // when the pattern admits one; else `None` keeps `searcher`.
                 #[cfg(feature = "prefilter-teddy")]
@@ -799,6 +804,7 @@ impl TdfaProgram {
                         teddy,
                     },
                     group_names,
+                    num_capture_groups,
                 ));
             }
         }
@@ -817,9 +823,11 @@ impl TdfaProgram {
                     let mut forward = Tdfa::try_from(&nfa)?;
                     forward.optimize();
                     let group_names = forward.group_names().to_vec().into_boxed_slice();
+                    let num_capture_groups = forward.num_capture_groups();
                     return Ok(Self::from_parts(
                         Strategy::AltPrefix { forward, teddy },
                         group_names,
+                        num_capture_groups,
                     ));
                 }
             }
@@ -866,7 +874,8 @@ impl TdfaProgram {
         let mut unanchored = Tdfa::try_from(&nfa)?;
         unanchored.optimize();
         let group_names = unanchored.group_names().to_vec().into_boxed_slice();
-        Ok(Self::from_parts(Strategy::Scan { unanchored }, group_names))
+        let num_capture_groups = unanchored.num_capture_groups();
+        Ok(Self::from_parts(Strategy::Scan { unanchored }, group_names, num_capture_groups))
     }
 
     /// Build a [`Strategy::Prefix`] program: an anchored verify automaton driven
@@ -909,6 +918,7 @@ impl TdfaProgram {
             _ => leading_required_byte(re),
         };
         let group_names = anchored.group_names().to_vec().into_boxed_slice();
+        let num_capture_groups = anchored.num_capture_groups();
         Ok(Self::from_parts(
             Strategy::Prefix {
                 anchored,
@@ -917,6 +927,7 @@ impl TdfaProgram {
                 lit_window,
             },
             group_names,
+            num_capture_groups,
         ))
     }
 
@@ -954,6 +965,7 @@ impl TdfaProgram {
         let mut forward = Tdfa::try_from(&Nfa::try_from(re)?)?;
         forward.optimize();
         let group_names = forward.group_names().to_vec().into_boxed_slice();
+        let num_capture_groups = forward.num_capture_groups();
         let literal = Box::new(memmem::Finder::new(&literal).into_owned());
         Ok(Some(Self::from_parts(
             Strategy::ReverseInner {
@@ -962,6 +974,7 @@ impl TdfaProgram {
                 literal,
             },
             group_names,
+            num_capture_groups,
         )))
     }
 
@@ -970,7 +983,8 @@ impl TdfaProgram {
     /// automaton in isolation.
     pub fn scan(unanchored: Tdfa) -> Self {
         let group_names = unanchored.group_names().to_vec().into_boxed_slice();
-        Self::from_parts(Strategy::Scan { unanchored }, group_names)
+        let num_capture_groups = unanchored.num_capture_groups();
+        Self::from_parts(Strategy::Scan { unanchored }, group_names, num_capture_groups)
     }
 
     /// Like [`try_from_ir`](Self::try_from_ir), but additionally JIT-compiles
@@ -1021,7 +1035,7 @@ impl TdfaProgram {
         tdfa: &Tdfa,
         bytes: &[u8],
         s: usize,
-        scratch: &mut Scratch<usize>,
+        scratch: &mut Scratch,
     ) -> Option<NfaMatch> {
         #[cfg(feature = "tdfa-jit")]
         if let Some(jit) = &self.jit {
@@ -1039,7 +1053,7 @@ impl TdfaProgram {
         &self,
         bytes: &[u8],
         offset: usize,
-        scratch: &mut Scratch<usize>,
+        scratch: &mut Scratch,
     ) -> Option<NfaMatch> {
         match &self.strategy {
             Strategy::WholeLiteral { literal, len } => {
@@ -1208,11 +1222,10 @@ impl TdfaProgram {
             .map_or(3, tdfa_backend::mark_file_width)
     }
 
-    /// The number of capture tags a reused [`Scratch`] for this program must
-    /// size its `finalize` buffer to. The literal-only strategies never call
-    /// `finalize`; `2` (the `FULL_MATCH_*` sentinels) is a safe placeholder.
-    pub(crate) fn num_tags(&self) -> usize {
-        self.verify_tdfa().map_or(2, Tdfa::num_tags)
+    /// Number of user-visible capture groups (not counting the full match,
+    /// not counting sentinel tags). Used to size `norm_buf` in [`Scratch::new`].
+    pub(crate) fn num_capture_groups(&self) -> usize {
+        self.num_capture_groups
     }
 
     /// Capture-group names, indexed by group id (see `Tdfa::group_names`).
@@ -1320,7 +1333,7 @@ impl TdfaJitProgram {
         &self,
         bytes: &[u8],
         offset: usize,
-        scratch: &mut Scratch<usize>,
+        scratch: &mut Scratch,
     ) -> Option<NfaMatch> {
         self.0.find_at(bytes, offset, scratch)
     }
@@ -1328,11 +1341,6 @@ impl TdfaJitProgram {
     /// See [`TdfaProgram::mark_width`].
     pub(crate) fn mark_width(&self) -> usize {
         self.0.mark_width()
-    }
-
-    /// See [`TdfaProgram::num_tags`].
-    pub(crate) fn num_tags(&self) -> usize {
-        self.0.num_tags()
     }
 
     /// See [`TdfaProgram::group_names`].
@@ -1348,5 +1356,13 @@ impl TdfaJitProgram {
     /// Stats of the underlying automaton (for the benchmarks' size columns).
     pub fn stats(&self) -> TdfaStats {
         self.0.stats()
+    }
+}
+
+#[cfg(feature = "tdfa-jit")]
+impl core::ops::Deref for TdfaJitProgram {
+    type Target = TdfaProgram;
+    fn deref(&self) -> &TdfaProgram {
+        &self.0
     }
 }

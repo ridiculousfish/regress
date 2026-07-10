@@ -163,7 +163,7 @@ impl JittedTdfa {
         tdfa: &Tdfa,
         input: &[u8],
         start: usize,
-        scratch: &mut Scratch<usize>,
+        scratch: &mut Scratch,
     ) -> Option<NfaMatch> {
         debug_assert!(start <= input.len());
         match self.compiled {
@@ -190,7 +190,13 @@ impl JittedTdfa {
                 }
                 let read_live = r.meta & SNAPSHOT_FLAG == 0;
                 let state = (r.meta & 0x7FFF_FFFF) as u32;
-                Some(tdfa_backend::jit_finalize(tdfa, state, scratch, r.end, read_live))
+                let m = tdfa_backend::jit_finalize(tdfa, state, scratch, r.end, read_live);
+                let captures = scratch
+                    .norm_buf
+                    .chunks_exact(2)
+                    .map(|c| if c[0] == usize::MAX { None } else { Some(c[0]..c[1]) })
+                    .collect();
+                Some(NfaMatch { range: m.range, captures })
             }
         }
     }
@@ -1233,7 +1239,7 @@ mod tests {
         let jit = JittedTdfa::compile(&tdfa, None)
             .unwrap_or_else(|e| panic!("compile {pattern:?}: {e}"));
         let mut scratch =
-            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
+            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_capture_groups());
         for input in inputs {
             let bytes = input.as_bytes();
             for start in 0..=bytes.len() {
@@ -1376,7 +1382,7 @@ mod tests {
             let tdfa = anchored_tdfa(pat);
             let jit = JittedTdfa::compile(&tdfa, None)
                 .unwrap_or_else(|e| panic!("compile {pat:?}: {e}"));
-            let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
+            let mut scratch = Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_capture_groups());
             for input in &long {
                 let bytes = input.as_bytes();
                 for start in 0..=bytes.len() {
@@ -1442,7 +1448,7 @@ mod tests {
                 "{pat:?} should use the capture tier",
             );
             let mut scratch =
-                Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
+                Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_capture_groups());
             for input in &inputs {
                 let bytes = input.as_bytes();
                 for start in 0..=bytes.len() {
@@ -1499,7 +1505,7 @@ mod tests {
                 continue; // outside the supported tier (e.g. conditionals)
             };
             let mut scratch =
-            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
+            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_capture_groups());
             for input in inputs {
                 let bytes = input.as_bytes();
                 for start in 0..=bytes.len() {
@@ -1530,7 +1536,7 @@ mod tests {
             let tdfa = anchored_tdfa(pattern);
             let jit = JittedTdfa::compile(&tdfa, None).expect("compile");
             let mut scratch =
-            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
+            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_capture_groups());
             // A 4 MiB self-looping haystack; `"[^"]*"` needs a leading quote so
             // the loop is entered (and no closing quote so it runs to the end).
             let input = if pattern.starts_with('"') {
@@ -1589,7 +1595,7 @@ mod tests {
                 continue; // legitimately unsupported tier; backend falls back
             };
             let mut scratch =
-            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
+            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_capture_groups());
             for _ in 0..200 {
                 let len = rng.gen_range(0..12);
                 let bytes: Vec<u8> =
@@ -1636,7 +1642,7 @@ mod tests {
                 "{pat:?} should use the capture tier",
             );
             let mut scratch =
-            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_tags());
+            Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_capture_groups());
             let inputs = [
                 "foo123", "12-345", "aaabb", "xpq", "ababab", "9", "b7", "", "zzz", "abab",
                 "a b  c ", "1,2,3,", "ab a",

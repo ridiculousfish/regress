@@ -22,7 +22,7 @@
 
 use regress::backends::{
     self, BacktrackExecutor, CompiledRegex, Nfa, NfaExecutor, PikeVMExecutor, TdfaExecutor,
-    TdfaProgram,
+    TdfaMatches, TdfaProgram,
 };
 #[cfg(feature = "tdfa-jit")]
 use regress::backends::{TdfaJitExecutor, TdfaJitProgram};
@@ -98,6 +98,16 @@ fn cap_sum(m: &regress::Match) -> usize {
     let mut s = m.range.end;
     for c in &m.captures {
         if let Some(r) = c {
+            s = s.wrapping_add(r.end);
+        }
+    }
+    s
+}
+
+fn tdfa_cap_sum(m: &regress::backends::TdfaMatch<'_>) -> usize {
+    let mut s = m.range.end;
+    for i in 0..m.num_captures() {
+        if let Some(r) = m.capture(i) {
             s = s.wrapping_add(r.end);
         }
     }
@@ -416,7 +426,12 @@ fn capture_showcase(haystack: &str, selected: &impl Fn(&str) -> bool) {
         });
         let tdfa_mbps = tdfa.as_ref().map(|t| {
             throughput(haystack.len(), || {
-                backends::find::<TdfaExecutor>(t, haystack, 0).map(|m| cap_sum(&m)).sum()
+                let mut it = TdfaMatches::new(t, haystack, 0);
+                let mut total = 0usize;
+                while let Some(m) = it.next() {
+                    total = total.wrapping_add(tdfa_cap_sum(&m));
+                }
+                total
             })
         });
         // Force the regex crate to materialize captures too (sum of group ends).
@@ -434,7 +449,7 @@ fn capture_showcase(haystack: &str, selected: &impl Fn(&str) -> bool) {
             })
         });
 
-        // tdfa-jit column, materializing captures (cap_sum), same as the others.
+        // tdfa-jit column, materializing captures (tdfa_cap_sum), same as the others.
         #[cfg(feature = "tdfa-jit")]
         let jit_seg = {
             let prog = TdfaJitProgram::try_from_ir(&ire).ok();
@@ -447,9 +462,12 @@ fn capture_showcase(haystack: &str, selected: &impl Fn(&str) -> bool) {
             }
             let mbps = prog.as_ref().map(|p| {
                 throughput(haystack.len(), || {
-                    backends::find::<TdfaJitExecutor>(p, haystack, 0)
-                        .map(|m| cap_sum(&m))
-                        .sum()
+                    let mut it = TdfaMatches::new(&**p, haystack, 0);
+                    let mut total = 0usize;
+                    while let Some(m) = it.next() {
+                        total = total.wrapping_add(tdfa_cap_sum(&m));
+                    }
+                    total
                 })
             });
             let active = prog.as_ref().is_some_and(|p| p.jit_active());

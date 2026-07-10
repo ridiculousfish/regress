@@ -23,7 +23,7 @@ use crate::api::Match;
 use crate::automata::nfa::Nfa;
 use crate::automata::nfa_backend;
 use crate::automata::prefilter::TdfaProgram;
-use crate::automata::tdfa_backend::Scratch;
+use crate::automata::tdfa_backend::{Scratch, TdfaMatch};
 use crate::exec::{Executor, MatchProducer};
 use crate::indexing::{InputIndexer, Utf8Input};
 #[cfg(not(feature = "std"))]
@@ -117,7 +117,7 @@ impl<'r, 't> Executor<'r, 't> for NfaExecutor<'r, 't> {
 pub struct TdfaExecutor<'r, 't> {
     program: &'r TdfaProgram,
     input: Utf8Input<'t>,
-    scratch: Scratch<usize>,
+    scratch: Scratch,
 }
 
 impl<'r, 't> MatchProducer for TdfaExecutor<'r, 't> {
@@ -139,7 +139,13 @@ impl<'r, 't> MatchProducer for TdfaExecutor<'r, 't> {
         // (via the prefilter when one is available), so this stays a single
         // logical pass — same adapter as the NFA executor.
         next_match_single_pass(self.input, names, pos, next_start, |full, start| {
-            program.find_at(full, start, scratch)
+            let m = program.find_at(full, start, scratch)?;
+            let captures = scratch
+                .norm_buf
+                .chunks_exact(2)
+                .map(|c| if c[0] == usize::MAX { None } else { Some(c[0]..c[1]) })
+                .collect();
+            Some(nfa_backend::NfaMatch { range: m.range, captures })
         })
     }
 }
@@ -152,7 +158,7 @@ impl<'r, 't> Executor<'r, 't> for TdfaExecutor<'r, 't> {
         Self {
             program: source,
             input: Utf8Input::new(text, /* unicode */ true),
-            scratch: Scratch::new(source.mark_width(), source.num_tags()),
+            scratch: Scratch::new(source.mark_width(), source.num_capture_groups()),
         }
     }
 }
@@ -166,7 +172,7 @@ impl<'r, 't> Executor<'r, 't> for TdfaExecutor<'r, 't> {
 pub struct TdfaJitExecutor<'r, 't> {
     program: &'r crate::automata::prefilter::TdfaJitProgram,
     input: Utf8Input<'t>,
-    scratch: Scratch<usize>,
+    scratch: Scratch,
 }
 
 #[cfg(feature = "tdfa-jit")]
@@ -186,7 +192,13 @@ impl<'r, 't> MatchProducer for TdfaJitExecutor<'r, 't> {
         let names = program.group_names();
         let scratch = &mut self.scratch;
         next_match_single_pass(self.input, names, pos, next_start, |full, start| {
-            program.find_at(full, start, scratch)
+            let m = program.find_at(full, start, scratch)?;
+            let captures = scratch
+                .norm_buf
+                .chunks_exact(2)
+                .map(|c| if c[0] == usize::MAX { None } else { Some(c[0]..c[1]) })
+                .collect();
+            Some(nfa_backend::NfaMatch { range: m.range, captures })
         })
     }
 }
@@ -200,7 +212,52 @@ impl<'r, 't> Executor<'r, 't> for TdfaJitExecutor<'r, 't> {
         Self {
             program: source,
             input: Utf8Input::new(text, /* unicode */ true),
-            scratch: Scratch::new(source.mark_width(), source.num_tags()),
+            scratch: Scratch::new(source.mark_width(), source.num_capture_groups()),
         }
+    }
+}
+
+/// A lending iterator over TDFA matches. Owns the reusable `Scratch` so each
+/// call to [`next`](TdfaMatches::next) reuses it — zero allocation per match.
+///
+/// Works for both [`TdfaProgram`] and [`TdfaJitProgram`] (via `Deref`).
+///
+/// The returned [`TdfaMatch`] borrows from `self` (lending iterator): you must
+/// drop it before calling `next` again.
+pub struct TdfaMatches<'r, 't> {
+    program: &'r TdfaProgram,
+    input: Utf8Input<'t>,
+    scratch: Scratch,
+    /// `None` when the iterator is exhausted (fell off the end of the input).
+    position: Option<<Utf8Input<'t> as InputIndexer>::Position>,
+}
+
+impl<'r, 't> TdfaMatches<'r, 't> {
+    /// Start iteration over `text` from byte `offset`.
+    pub fn new(program: &'r TdfaProgram, text: &'t str, offset: usize) -> Self {
+        let input = Utf8Input::new(text, /* unicode */ true);
+        let position = input.try_move_right(input.left_end(), offset);
+        Self {
+            program,
+            input,
+            scratch: Scratch::new(program.mark_width(), program.num_capture_groups()),
+            position,
+        }
+    }
+
+    /// Advance to the next match. Returns `None` when exhausted.
+    pub fn next<'a>(&'a mut self) -> Option<TdfaMatch<'a>> {
+        let pos = self.position?;
+        let offset = self.input.pos_to_offset(pos);
+        let m = self.program.find_at(self.input.contents(), offset, &mut self.scratch)?;
+        let end = m.range.end;
+        let end_pos = self.input.try_move_right(self.input.left_end(), end);
+        // Advance past the match; for zero-width matches step one position forward.
+        self.position = if end == m.range.start {
+            end_pos.and_then(|p| self.input.next_right_pos(p))
+        } else {
+            end_pos
+        };
+        Some(TdfaMatch::new(m.range, &self.scratch.norm_buf))
     }
 }

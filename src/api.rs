@@ -912,7 +912,9 @@ pub mod backends {
     #[cfg(feature = "nfa")]
     pub use crate::automata::dfa::Dfa;
     #[cfg(feature = "nfa")]
-    pub use crate::automata::executors::{NfaExecutor, TdfaExecutor};
+    pub use crate::automata::executors::{NfaExecutor, TdfaExecutor, TdfaMatches};
+    #[cfg(feature = "nfa")]
+    pub use crate::automata::tdfa_backend::TdfaMatch;
     #[cfg(feature = "tdfa-jit")]
     pub use crate::automata::executors::TdfaJitExecutor;
     #[cfg(feature = "nfa")]
