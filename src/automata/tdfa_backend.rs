@@ -541,6 +541,25 @@ fn run_anchored<C: TdfaExecConfig>(
                     };
                     end.map(|i| pos + i).unwrap_or(input.len())
                 },
+                // All non-ASCII bytes excluded; pre-store the two ASCII bitmap
+                // words.  Selecting between two registers with a conditional
+                // move eliminates the 4-cycle data-dependent indexed load from
+                // bitmap[b>>6] (L1 load-use chain), cutting the critical path
+                // from ~9 cycles/byte to ~5 cycles/byte.
+                ScanFast::BitmapAscii { bm0, bm1 } => {
+                    while pos < input.len() {
+                        let b = *input.iat(pos) as usize;
+                        if b >= 0x80 {
+                            break;
+                        }
+                        let word = if b < 0x40 { *bm0 } else { *bm1 };
+                        if (word >> (b & 63)) & 1 == 0 {
+                            break;
+                        }
+                        pos += 1;
+                    }
+                    pos
+                }
                 // Generic bitmap scan.
                 ScanFast::Bitmap => {
                     let bitmap = &ss.byte_bitmap;
@@ -612,16 +631,53 @@ fn run_anchored<C: TdfaExecConfig>(
             // self-loop only stamps curpos → marks, scan ahead to the run
             // end and stamp once instead of once per byte.
             if let Some(psl) = pos_stamp_loops.get(state as usize).and_then(Option::as_ref) {
-                let bitmap = &psl.byte_bitmap;
-                let mut p = pos + 1;
-                while p < input.len() {
-                    let b = *input.iat(p) as usize;
-                    if (bitmap[b >> 6] >> (b & 63)) & 1 == 0 {
-                        break;
-                    }
-                    p += 1;
-                }
-                if p > pos + 1 {
+                let start = pos + 1;
+                let p = match &psl.fast {
+                    ScanFast::Memchr { count, bytes } => match count {
+                        0 => input.len(),
+                        1 => memchr::memchr(bytes[0], &input[start..]).map(|i| start + i).unwrap_or(input.len()),
+                        2 => memchr::memchr2(bytes[0], bytes[1], &input[start..]).map(|i| start + i).unwrap_or(input.len()),
+                        _ => memchr::memchr3(bytes[0], bytes[1], bytes[2], &input[start..]).map(|i| start + i).unwrap_or(input.len()),
+                    },
+                    ScanFast::AsciiBarrier { count, bytes } => {
+                        let b0 = bytes[0];
+                        let b1 = bytes[1];
+                        let end = match count {
+                            0 => input[start..].iter().position(|&b| b >= 0x80),
+                            1 => input[start..].iter().position(|&b| b >= 0x80 || b == b0),
+                            _ => input[start..].iter().position(|&b| b >= 0x80 || b == b0 || b == b1),
+                        };
+                        end.map(|i| start + i).unwrap_or(input.len())
+                    },
+                    ScanFast::BitmapAscii { bm0, bm1 } => {
+                        let mut p = start;
+                        while p < input.len() {
+                            let b = *input.iat(p) as usize;
+                            if b >= 0x80 {
+                                break;
+                            }
+                            let word = if b < 0x40 { *bm0 } else { *bm1 };
+                            if (word >> (b & 63)) & 1 == 0 {
+                                break;
+                            }
+                            p += 1;
+                        }
+                        p
+                    },
+                    ScanFast::Bitmap => {
+                        let bitmap = &psl.byte_bitmap;
+                        let mut p = start;
+                        while p < input.len() {
+                            let b = *input.iat(p) as usize;
+                            if (bitmap[b >> 6] >> (b & 63)) & 1 == 0 {
+                                break;
+                            }
+                            p += 1;
+                        }
+                        p
+                    },
+                };
+                if p > start {
                     *src_buf.mat(curpos_lane) = p;
                     for &mark_idx in &psl.stamp_marks {
                         *src_buf.mat(mark_idx as usize) = p;
