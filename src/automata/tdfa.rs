@@ -988,6 +988,9 @@ fn truncate_at_first_goal(mut s: TdfaState) -> TdfaState {
 ///   the form `mark_j := curpos`.  Fast-scan the run, then stamp each
 ///   `mark_j` with `pos` (the first non-skip byte offset) — equivalent to
 ///   the per-byte curpos writes, but in one shot.
+///
+/// For common patterns the runtime uses a faster scan than the generic per-byte
+/// bitmap check; see [`ScanFast`].
 #[derive(Debug, Clone)]
 pub(crate) struct ScanSkip {
     /// 256-bit bitmap: bit `b` is set iff byte `b` triggers a self-loop on
@@ -995,6 +998,29 @@ pub(crate) struct ScanSkip {
     pub(crate) byte_bitmap: [u64; 4],
     /// Marks to write with `pos` after the fast scan.  Empty ⇒ pure skip.
     pub(crate) stamp_marks: SmallVec<[u16; 4]>,
+    /// Accelerated scan mode derived at compile time from the bitmap.
+    pub(crate) fast: ScanFast,
+}
+
+/// Accelerated inner scan for a [`ScanSkip`] state.
+///
+/// When the scan class (set bits in `byte_bitmap`) has few *excluded* ASCII
+/// bytes and all non-ASCII bytes are also excluded, we skip the per-byte bitmap
+/// lookup and go straight to a vectorised search.  Two variants:
+///
+/// - **`Memchr`** (all 0x80–0xFF bits set in bitmap): the only stopping bytes
+///   are the 1–3 listed ASCII bytes; use `memchr`/`memchr2`/`memchr3`.
+/// - **`AsciiBarrier`** (some 0x80–0xFF bits clear): stopping bytes are the
+///   listed ASCII bytes *plus any non-ASCII byte* (b ≥ 0x80).  A
+///   `iter().position()` loop with condition `b >= 0x80 || b == excl…`
+///   auto-vectorises for ASCII-dominant text and falls back naturally for
+///   UTF-8 multi-byte sequences.
+/// - **`Bitmap`**: generic fallback; use the 256-bit bitmap.
+#[derive(Debug, Clone)]
+pub(crate) enum ScanFast {
+    Bitmap,
+    Memchr { count: u8, bytes: [u8; 3] },
+    AsciiBarrier { count: u8, bytes: [u8; 3] },
 }
 
 /// Interpreter self-loop peel data for a state whose every self-loop
@@ -1637,9 +1663,40 @@ impl Tdfa {
                 if !any {
                     return None;
                 }
+                // Classify the bitmap into a fast-scan mode.  Split excluded
+                // bytes (bitmap bit = 0) into ASCII (0x00-0x7F) and non-ASCII
+                // (0x80-0xFF).  We support two fast paths:
+                //   Memchr:       no non-ASCII excluded, ≤3 ASCII excluded bytes
+                //   AsciiBarrier: some non-ASCII excluded, ≤2 ASCII excluded bytes
+                let mut ascii_excl_bytes = [0u8; 3];
+                let mut ascii_excl_count = 0u8;
+                let mut ascii_excl_overflow = false;
+                let mut has_nonascii_excl = false;
+                for b in 0u8..=255u8 {
+                    if (byte_bitmap[b as usize >> 6] >> (b as usize & 63)) & 1 == 0 {
+                        if b < 0x80 {
+                            if ascii_excl_count < 3 {
+                                ascii_excl_bytes[ascii_excl_count as usize] = b;
+                                ascii_excl_count += 1;
+                            } else {
+                                ascii_excl_overflow = true;
+                            }
+                        } else {
+                            has_nonascii_excl = true;
+                        }
+                    }
+                }
+                let fast = if !has_nonascii_excl && !ascii_excl_overflow {
+                    ScanFast::Memchr { count: ascii_excl_count, bytes: ascii_excl_bytes }
+                } else if has_nonascii_excl && ascii_excl_count <= 2 && !ascii_excl_overflow {
+                    ScanFast::AsciiBarrier { count: ascii_excl_count, bytes: ascii_excl_bytes }
+                } else {
+                    ScanFast::Bitmap
+                };
                 Some(ScanSkip {
                     byte_bitmap,
                     stamp_marks: stamp_marks.unwrap_or_default(),
+                    fast,
                 })
             })
             .collect::<Vec<_>>()

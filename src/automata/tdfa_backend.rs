@@ -16,13 +16,14 @@ use crate::automata::nfa::FULL_MATCH_START;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{
     EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
-    PosStampLoop, ScanSkip,
+    PosStampLoop, ScanFast, ScanSkip,
 };
 use crate::insn::StartPredicate;
 use crate::util::DebugCheckIndex;
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 use core::ops::Range;
+extern crate memchr;
 use smallvec::SmallVec;
 
 /// Compile-time switches that let [`execute_generic`] drop cold sites it can
@@ -510,15 +511,49 @@ fn run_anchored<C: TdfaExecConfig>(
         // moves are all `curpos → mark_j`; write each mark_j = pos once
         // after the scan (net effect of the per-byte curpos writes).
         if let Some(ss) = scan_skips.get(state as usize).and_then(Option::as_ref) {
-            let bitmap = &ss.byte_bitmap;
             let scan_start = pos;
-            while pos < input.len() {
-                let b = *input.iat(pos) as usize;
-                if (bitmap[b >> 6] >> (b & 63)) & 1 == 0 {
-                    break;
+            pos = match &ss.fast {
+                // Few excluded bytes, all ASCII: use memchr to jump directly
+                // to the next stopping byte.
+                ScanFast::Memchr { count, bytes } => match count {
+                    0 => input.len(), // all bytes self-loop; scan to EOI
+                    1 => memchr::memchr(bytes[0], &input[pos..])
+                        .map(|i| pos + i).unwrap_or(input.len()),
+                    2 => memchr::memchr2(bytes[0], bytes[1], &input[pos..])
+                        .map(|i| pos + i).unwrap_or(input.len()),
+                    _ => memchr::memchr3(bytes[0], bytes[1], bytes[2], &input[pos..])
+                        .map(|i| pos + i).unwrap_or(input.len()),
+                },
+                // Few ASCII excluded bytes + non-ASCII bytes also excluded
+                // (typical for Unicode patterns like `[^"]`): scan until the
+                // first non-ASCII byte OR one of the excluded ASCII bytes.
+                //
+                // The `b >= 0x80` check eliminates the indexed bitmap load
+                // (which has an ~8-cycle load-use chain), replacing it with
+                // two simple comparisons.  LLVM can vectorise short closures.
+                ScanFast::AsciiBarrier { count, bytes } => {
+                    let b0 = bytes[0];
+                    let b1 = bytes[1];
+                    let end = match count {
+                        0 => input[pos..].iter().position(|&b| b >= 0x80),
+                        1 => input[pos..].iter().position(|&b| b >= 0x80 || b == b0),
+                        _ => input[pos..].iter().position(|&b| b >= 0x80 || b == b0 || b == b1),
+                    };
+                    end.map(|i| pos + i).unwrap_or(input.len())
+                },
+                // Generic bitmap scan.
+                ScanFast::Bitmap => {
+                    let bitmap = &ss.byte_bitmap;
+                    while pos < input.len() {
+                        let b = *input.iat(pos) as usize;
+                        if (bitmap[b >> 6] >> (b & 63)) & 1 == 0 {
+                            break;
+                        }
+                        pos += 1;
+                    }
+                    pos
                 }
-                pos += 1;
-            }
+            };
             // Stamp marks whenever the scan consumed bytes.  This MUST happen
             // before any early exit so that the EOI accept path (which runs
             // after the byte loop when `completed && has_eoi_accepts`) reads
