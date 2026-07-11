@@ -158,14 +158,28 @@ pub(crate) trait TdfaExecConfig {
     /// Non-multiline `$` accepts do NOT set this — they fire only at EOI, handled
     /// by the once-per-run pass via the runtime `Tdfa::has_eoi_accepts` check.
     const HAS_PERBYTE_GUARDS: bool;
+    /// The TDFA has compiled `MoveOp` sequences (i.e. `Tdfa::has_moves()` is
+    /// true). When true the executor uses the fast `transition_moves` table;
+    /// when false it falls back to the scalar command interpreter. Hoisting this
+    /// into a const eliminates the per-byte `use_moves` branch and its register
+    /// spill in the hot byte loop.
+    const HAS_MOVES: bool;
+    /// Precomputed `skip_marks = !has_captures && start_fixed`. When true the
+    /// mark file is not maintained (capture-free fast path, usually followed by
+    /// the exec-transitions loop). When false (capture patterns) every byte-by-byte
+    /// transition applies its `MoveOp` list. Making this const eliminates the
+    /// per-byte `if !C::SKIP_MARKS` branch and stack spill.
+    const SKIP_MARKS: bool;
 }
 
 /// Config marker parameterized directly on its flag bits, so adding a flag is a
 /// new `const` param rather than a new named type per combination.
-pub(crate) struct ExecConfig<const HAS_PERBYTE_GUARDS: bool>;
+pub(crate) struct ExecConfig<const HAS_PERBYTE_GUARDS: bool, const HAS_MOVES: bool, const SKIP_MARKS: bool>;
 
-impl<const G: bool> TdfaExecConfig for ExecConfig<G> {
+impl<const G: bool, const M: bool, const SM: bool> TdfaExecConfig for ExecConfig<G, M, SM> {
     const HAS_PERBYTE_GUARDS: bool = G;
+    const HAS_MOVES: bool = M;
+    const SKIP_MARKS: bool = SM;
 }
 
 /// A recorded accept candidate: `(match end, finalization commands, match
@@ -200,10 +214,10 @@ pub(crate) fn mark_file_width(tdfa: &Tdfa) -> usize {
     tdfa.num_marks() + 3
 }
 
-/// Pick the config-flag monomorphization (`HAS_PERBYTE_GUARDS`) from the
-/// automaton's contents and run one anchored attempt. The flag check is once per
-/// attempt; the const generic still drops the per-byte branches inside
-/// `run_anchored`.
+/// Pick the config-flag monomorphization (`HAS_PERBYTE_GUARDS`, `HAS_MOVES`,
+/// `SKIP_MARKS`) from the automaton's contents and run one anchored attempt.
+/// The flag checks are once per attempt; the const generics drop the per-byte
+/// branches inside `run_anchored`.
 fn run_anchored_dyn(
     tdfa: &Tdfa,
     input: &[u8],
@@ -211,10 +225,16 @@ fn run_anchored_dyn(
     scratch: &mut Scratch,
     warm: Option<PrefixSkip>,
 ) -> Option<NfaMatch> {
-    if tdfa.has_perbyte_guards() {
-        run_anchored::<ExecConfig<true>>(tdfa, input, start, scratch, warm)
-    } else {
-        run_anchored::<ExecConfig<false>>(tdfa, input, start, scratch, warm)
+    let skip_marks = !tdfa.has_captures() && tdfa.start_fixed();
+    match (tdfa.has_perbyte_guards(), tdfa.has_moves(), skip_marks) {
+        (false, true,  false) => run_anchored::<ExecConfig<false, true,  false>>(tdfa, input, start, scratch, warm),
+        (false, true,  true)  => run_anchored::<ExecConfig<false, true,  true >>(tdfa, input, start, scratch, warm),
+        (false, false, false) => run_anchored::<ExecConfig<false, false, false>>(tdfa, input, start, scratch, warm),
+        (false, false, true)  => run_anchored::<ExecConfig<false, false, true >>(tdfa, input, start, scratch, warm),
+        (true,  true,  false) => run_anchored::<ExecConfig<true,  true,  false>>(tdfa, input, start, scratch, warm),
+        (true,  true,  true)  => run_anchored::<ExecConfig<true,  true,  true >>(tdfa, input, start, scratch, warm),
+        (true,  false, false) => run_anchored::<ExecConfig<true,  false, false>>(tdfa, input, start, scratch, warm),
+        (true,  false, true)  => run_anchored::<ExecConfig<true,  false, true >>(tdfa, input, start, scratch, warm),
     }
 }
 
@@ -517,7 +537,7 @@ fn run_anchored<C: TdfaExecConfig>(
     // compact loop used for per-transition moves). Falls back to the scalar
     // command interpreter only when moves weren't compiled — mark file too
     // large, effectively impossible in practice.
-    if tdfa.has_moves() {
+    if C::HAS_MOVES {
         let entry_moves = tdfa.entry_moves(start);
         if !entry_moves.is_empty() {
             *src_buf.mat(curpos_lane) = start;
@@ -582,12 +602,8 @@ fn run_anchored<C: TdfaExecConfig>(
     let accepting = tdfa.accepting();
     let num_classes = tdfa.num_classes();
 
-    let use_moves = tdfa.has_moves();
-
-    let skip_marks = !has_captures && tdfa.start_fixed();
-
     let use_fast =
-        skip_marks && !C::HAS_PERBYTE_GUARDS && !tdfa.exec_transitions().is_empty();
+        C::SKIP_MARKS && !C::HAS_PERBYTE_GUARDS && !tdfa.exec_transitions().is_empty();
 
     let mut live_position = loop_start;
 
@@ -611,12 +627,12 @@ fn run_anchored<C: TdfaExecConfig>(
         }
         state = estate / num_classes as u32;
     } else {
-    let pos_stamp_loops: &[Option<PosStampLoop>] = if !C::HAS_PERBYTE_GUARDS && !skip_marks && use_moves {
+    let pos_stamp_loops: &[Option<PosStampLoop>] = if !C::HAS_PERBYTE_GUARDS && !C::SKIP_MARKS && C::HAS_MOVES {
         tdfa.pos_stamp_loops()
     } else {
         &[]
     };
-    let scan_skips: &[Option<ScanSkip>] = if !C::HAS_PERBYTE_GUARDS && use_moves {
+    let scan_skips: &[Option<ScanSkip>] = if !C::HAS_PERBYTE_GUARDS && C::HAS_MOVES {
         tdfa.scan_skips()
     } else {
         &[]
@@ -751,8 +767,8 @@ fn run_anchored<C: TdfaExecConfig>(
             completed = false;
             break;
         }
-        if !skip_marks {
-            if use_moves {
+        if !C::SKIP_MARKS {
+            if C::HAS_MOVES {
                 let moves = trans_moves.iat(idx);
                 if !moves.is_empty() {
                     let p = pos + 1;
