@@ -119,16 +119,6 @@ fn scan_ascii_ranges_stop_sse2(
     pos
 }
 
-/// Scalar range check: is byte `b` in any of the first `count` (lo, hi) pairs?
-#[inline(always)]
-fn byte_in_ascii_ranges(b: u8, count: u8, pairs: &[u8; 2 * SCAN_MAX_RANGES]) -> bool {
-    for i in 0..count as usize {
-        if b >= pairs[2 * i] && b <= pairs[2 * i + 1] {
-            return true;
-        }
-    }
-    false
-}
 
 /// Compile-time switches that let [`execute_generic`] drop cold sites it can
 /// statically prove the current automaton can't hit. Each realized combination
@@ -647,14 +637,18 @@ fn run_anchored<C: TdfaExecConfig>(
                 },
                 // All non-ASCII excluded; set fits in a small number of byte
                 // ranges.  SSE2 saturating-subtract range masks process 16
-                // bytes per iteration; scalar tail handles remainder.
-                ScanFast::AsciiRanges { count, pairs } => {
+                // bytes per iteration; scalar tail uses the two ASCII bitmap
+                // words (bm0/bm1) — single shift+and — instead of the range
+                // cascade, trading 8 compare/branch pairs for one load+shift.
+                ScanFast::AsciiRanges { count, pairs, bm0, bm1 } => {
                     #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
                     { pos = scan_ascii_ranges_sse2(input, pos, *count, pairs); }
                     // Scalar tail (also the full path on non-x86-64).
                     while pos < input.len() {
-                        let b = *input.iat(pos);
-                        if b >= 0x80 || !byte_in_ascii_ranges(b, *count, pairs) { break; }
+                        let b = *input.iat(pos) as usize;
+                        if b >= 0x80 { break; }
+                        let word = if b < 0x40 { *bm0 } else { *bm1 };
+                        if (word >> (b & 63)) & 1 == 0 { break; }
                         pos += 1;
                     }
                     pos
@@ -733,9 +727,12 @@ fn run_anchored<C: TdfaExecConfig>(
             if use_moves {
                 let moves = trans_moves.iat(idx);
                 if !moves.is_empty() {
-                    *src_buf.mat(curpos_lane) = pos + 1;
+                    let p = pos + 1;
+                    *src_buf.mat(curpos_lane) = p;
                     for op in moves.iter() {
-                        let v = *src_buf.iat(op.src as usize);
+                        // Avoid a 4-cycle load-use chain when the source is
+                        // curpos_lane — `p` is already in a register.
+                        let v = if op.src as usize == curpos_lane { p } else { *src_buf.iat(op.src as usize) };
                         *src_buf.mat(op.dst as usize) = v;
                     }
                 }
@@ -784,14 +781,16 @@ fn run_anchored<C: TdfaExecConfig>(
                         };
                         end.map(|i| start + i).unwrap_or(input.len())
                     },
-                    ScanFast::AsciiRanges { count, pairs } => {
+                    ScanFast::AsciiRanges { count, pairs, bm0, bm1 } => {
                         #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
                         let mut p = scan_ascii_ranges_sse2(input, start, *count, pairs);
                         #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
                         let mut p = start;
                         while p < input.len() {
-                            let b = *input.iat(p);
-                            if b >= 0x80 || !byte_in_ascii_ranges(b, *count, pairs) { break; }
+                            let b = *input.iat(p) as usize;
+                            if b >= 0x80 { break; }
+                            let word = if b < 0x40 { *bm0 } else { *bm1 };
+                            if (word >> (b & 63)) & 1 == 0 { break; }
                             p += 1;
                         }
                         p

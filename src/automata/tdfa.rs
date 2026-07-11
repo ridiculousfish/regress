@@ -1030,7 +1030,9 @@ pub(crate) enum ScanFast {
     AsciiBarrier { count: u8, bytes: [u8; 3] },
     /// All non-ASCII excluded; set fits in ≤`SCAN_MAX_RANGES` byte ranges.
     /// `count` ranges packed as (lo, hi) pairs in `pairs[0..2*count]`.
-    AsciiRanges { count: u8, pairs: [u8; 2 * SCAN_MAX_RANGES] },
+    /// `bm0`/`bm1` are the ASCII bitmap words (bytes 0x00-0x3F / 0x40-0x7F)
+    /// for the scalar tail — same cost as BitmapAscii per-byte but no alloc.
+    AsciiRanges { count: u8, pairs: [u8; 2 * SCAN_MAX_RANGES], bm0: u64, bm1: u64 },
     /// All non-ASCII are self-loop bytes; the *exit* (excluded) ASCII bytes
     /// fit in ≤`SCAN_MAX_RANGES` ranges.  Scan continues while the byte is
     /// NOT in the stop ranges (and is not non-ASCII).
@@ -1438,7 +1440,7 @@ fn classify_scan_fast(byte_bitmap: &[u64; 4]) -> ScanFast {
         ScanFast::AsciiBarrier { count: ascii_excl_count, bytes: ascii_excl_bytes }
     } else if all_nonascii_excl {
         if let Some((count, pairs)) = bitmap_to_ascii_ranges(byte_bitmap[0], byte_bitmap[1]) {
-            ScanFast::AsciiRanges { count, pairs }
+            ScanFast::AsciiRanges { count, pairs, bm0: byte_bitmap[0], bm1: byte_bitmap[1] }
         } else {
             ScanFast::BitmapAscii { bm0: byte_bitmap[0], bm1: byte_bitmap[1] }
         }
