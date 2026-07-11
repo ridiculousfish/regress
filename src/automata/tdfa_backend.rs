@@ -689,7 +689,7 @@ fn run_anchored<C: TdfaExecConfig>(
                         src_buf,
                         tdfa.finals().iat(state as usize),
                         has_captures,
-                        *accept_fallback.iat(state as usize),
+                        psl.needs_snapshot,
                         &mut read_live,
                     );
                     pos = p;

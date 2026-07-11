@@ -1041,6 +1041,10 @@ pub(crate) struct PosStampLoop {
     pub(crate) byte_bitmap: [u64; 4],
     /// Accelerated inner scan variant (same logic as for [`ScanSkip`]).
     pub(crate) fast: ScanFast,
+    /// Cached `accept_fallback[state]`: whether `record_accept` at the
+    /// PosStampLoop exit needs a best-snap snapshot. Cached here to avoid the
+    /// double-indirect load on the hot PosStampLoop exit path.
+    pub(crate) needs_snapshot: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1648,7 +1652,8 @@ impl Tdfa {
                     return None;
                 }
                 let fast = classify_scan_fast(&byte_bitmap);
-                Some(PosStampLoop { stamp_marks, byte_bitmap, fast })
+                let needs_snapshot = self.accept_fallback[state];
+                Some(PosStampLoop { stamp_marks, byte_bitmap, fast, needs_snapshot })
             })
             .collect::<Vec<_>>()
             .into_boxed_slice()
