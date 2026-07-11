@@ -44,30 +44,26 @@ impl Thread {
     }
 
     fn tags_to_captures(&self, num_capture_tags: usize) -> Vec<Option<Range<usize>>> {
-        tags_to_captures(&self.tags[..num_capture_tags])
+        let mut buf = Vec::new();
+        fill_captures(&self.tags[..num_capture_tags], &mut buf);
+        buf
     }
 }
 
-/// Convert a flat per-tag value array into capture-group ranges. Tags 0/1 are
-/// the full match and are skipped; pairs `(2,3), (4,5), ...` are group N's
+/// Convert a flat per-tag value array into capture-group ranges, filling `buf`
+/// in place (clearing first, then reusing its allocation). Tags 0/1 are the
+/// full match and are skipped; pairs `(2,3), (4,5), ...` are group N's
 /// open/close. `TEXT_POS_NO_MATCH` in either slot means the group didn't
 /// participate.
-pub(crate) fn tags_to_captures(tags: &[TextPos]) -> Vec<Option<Range<usize>>> {
-    let mut captures = Vec::new();
-    captures.reserve_exact((tags.len() - 2) / 2);
-    let mut tag_idx = 2;
-    while tag_idx + 1 < tags.len() {
-        let start = tags[tag_idx];
-        let end = tags[tag_idx + 1];
+pub(crate) fn fill_captures(tags: &[TextPos], buf: &mut Vec<Option<Range<usize>>>) {
+    let n = (tags.len() - 2) / 2;
+    buf.resize(n, None);
+    for i in 0..n {
+        let start = tags[2 + 2 * i];
+        let end = tags[3 + 2 * i];
         debug_assert!((start == TEXT_POS_NO_MATCH) == (end == TEXT_POS_NO_MATCH));
-        if start == TEXT_POS_NO_MATCH {
-            captures.push(None);
-        } else {
-            captures.push(Some(start..end));
-        }
-        tag_idx += 2;
+        buf[i] = if start == TEXT_POS_NO_MATCH { None } else { Some(start..end) };
     }
-    captures
 }
 
 /// Result of NFA execution.
