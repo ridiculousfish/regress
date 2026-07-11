@@ -1011,9 +1011,13 @@ pub(crate) struct ScanSkip {
 ///   are the 1–3 listed ASCII bytes; use `memchr`/`memchr2`/`memchr3`.
 /// - **`AsciiBarrier`** (some 0x80–0xFF bits clear, ≤2 excluded ASCII bytes):
 ///   stop on `b ≥ 0x80 || b == excl…`.  Auto-vectorises; good for `[^"]`.
-/// - **`AsciiRanges`** (all non-ASCII excluded; set decomposes into ≤8 byte ranges):
+/// - **`AsciiRanges`** (all non-ASCII excluded; set decomposes into ≤SCAN_MAX_RANGES byte ranges):
 ///   SSE2 saturating-subtract range masks, 16 bytes per iteration.  Falls back
 ///   to scalar range check on non-x86-64.
+/// - **`AsciiRangesStop`** (all non-ASCII are self-loop bytes; ASCII *exit* bytes
+///   form ≤SCAN_MAX_RANGES ranges): SSE2 scan that stops at first byte *in* the
+///   stop ranges.  Complement of `AsciiRanges`.  Covers unanchored start states
+///   like `.*?` before `\w+` where non-ASCII bytes are continuations.
 /// - **`BitmapAscii`** (all non-ASCII excluded; too many ranges for `AsciiRanges`):
 ///   pre-store the two ASCII bitmap words; select with a conditional move.
 /// - **`Bitmap`**: full 256-bit bitmap; non-ASCII bytes may be self-loop bytes.
@@ -1027,6 +1031,11 @@ pub(crate) enum ScanFast {
     /// All non-ASCII excluded; set fits in ≤`SCAN_MAX_RANGES` byte ranges.
     /// `count` ranges packed as (lo, hi) pairs in `pairs[0..2*count]`.
     AsciiRanges { count: u8, pairs: [u8; 2 * SCAN_MAX_RANGES] },
+    /// All non-ASCII are self-loop bytes; the *exit* (excluded) ASCII bytes
+    /// fit in ≤`SCAN_MAX_RANGES` ranges.  Scan continues while the byte is
+    /// NOT in the stop ranges (and is not non-ASCII).
+    /// `bm0`/`bm1` mirror `BitmapAscii` for the scalar byte-by-byte tail.
+    AsciiRangesStop { count: u8, pairs: [u8; 2 * SCAN_MAX_RANGES], bm0: u64, bm1: u64 },
     /// Non-ASCII excluded; `bm0` = `byte_bitmap[0]` (bytes 0x00-0x3F),
     /// `bm1` = `byte_bitmap[1]` (bytes 0x40-0x7F).
     BitmapAscii { bm0: u64, bm1: u64 },
@@ -1416,8 +1425,15 @@ fn classify_scan_fast(byte_bitmap: &[u64; 4]) -> ScanFast {
             all_nonascii_excl = false;
         }
     }
-    if !has_nonascii_excl && !ascii_excl_overflow {
-        ScanFast::Memchr { count: ascii_excl_count, bytes: ascii_excl_bytes }
+    if !has_nonascii_excl {
+        // All non-ASCII bytes are self-loop bytes.
+        if !ascii_excl_overflow {
+            ScanFast::Memchr { count: ascii_excl_count, bytes: ascii_excl_bytes }
+        } else if let Some((count, pairs)) = ascii_excluded_to_ranges(byte_bitmap[0], byte_bitmap[1]) {
+            ScanFast::AsciiRangesStop { count, pairs, bm0: byte_bitmap[0], bm1: byte_bitmap[1] }
+        } else {
+            ScanFast::Bitmap
+        }
     } else if has_nonascii_excl && ascii_excl_count <= 2 && !ascii_excl_overflow {
         ScanFast::AsciiBarrier { count: ascii_excl_count, bytes: ascii_excl_bytes }
     } else if all_nonascii_excl {
@@ -1447,6 +1463,43 @@ fn bitmap_to_ascii_ranges(bm0: u64, bm1: u64) -> Option<(u8, [u8; 2 * SCAN_MAX_R
             range_start = b;
             in_range = true;
         } else if !in_set && in_range {
+            if count >= SCAN_MAX_RANGES {
+                return None;
+            }
+            pairs[2 * count] = range_start;
+            pairs[2 * count + 1] = b - 1;
+            count += 1;
+            in_range = false;
+        }
+    }
+    if in_range {
+        if count >= SCAN_MAX_RANGES {
+            return None;
+        }
+        pairs[2 * count] = range_start;
+        pairs[2 * count + 1] = 0x7F;
+        count += 1;
+    }
+
+    Some((count as u8, pairs))
+}
+
+/// Like [`bitmap_to_ascii_ranges`] but builds ranges from *excluded* bytes
+/// (bit = 0 in the bitmap = stop bytes).  Used for [`ScanFast::AsciiRangesStop`]
+/// where the self-loop set is the complement of the stop set.
+fn ascii_excluded_to_ranges(bm0: u64, bm1: u64) -> Option<(u8, [u8; 2 * SCAN_MAX_RANGES])> {
+    let mut pairs = [0u8; 2 * SCAN_MAX_RANGES];
+    let mut count = 0usize;
+    let mut in_range = false;
+    let mut range_start = 0u8;
+
+    for b in 0u8..=0x7F {
+        let word = if b < 0x40 { bm0 } else { bm1 };
+        let excluded = (word >> (b as usize & 63)) & 1 == 0;
+        if excluded && !in_range {
+            range_start = b;
+            in_range = true;
+        } else if !excluded && in_range {
             if count >= SCAN_MAX_RANGES {
                 return None;
             }

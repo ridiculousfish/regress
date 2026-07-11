@@ -75,6 +75,50 @@ fn scan_ascii_ranges_sse2(
     pos
 }
 
+/// Complement of [`scan_ascii_ranges_sse2`]: advances `pos` to the first byte
+/// that IS in any of the `count` (lo, hi) ranges (scan continues while NOT in
+/// ranges).  Non-ASCII bytes (≥ 0x80) are never in any ASCII range, so they
+/// are always skipped.
+#[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
+#[inline(always)]
+fn scan_ascii_ranges_stop_sse2(
+    input: &[u8],
+    mut pos: usize,
+    count: u8,
+    pairs: &[u8; 2 * SCAN_MAX_RANGES],
+) -> usize {
+    use std::arch::x86_64::*;
+    // SAFETY: SSE2 is the x86-64 baseline; all accesses are within `input`.
+    unsafe {
+        let zero = _mm_setzero_si128();
+        while pos + 16 <= input.len() {
+            let v = _mm_loadu_si128(input.as_ptr().add(pos) as *const __m128i);
+            let mut member = _mm_setzero_si128();
+            for i in 0..count as usize {
+                let lo = pairs[2 * i];
+                let hi = pairs[2 * i + 1];
+                let rm = if lo == hi {
+                    _mm_cmpeq_epi8(v, _mm_set1_epi8(lo as i8))
+                } else if lo == 0 {
+                    _mm_cmpeq_epi8(_mm_subs_epu8(v, _mm_set1_epi8(hi as i8)), zero)
+                } else {
+                    let hi_ok = _mm_cmpeq_epi8(_mm_subs_epu8(v, _mm_set1_epi8(hi as i8)), zero);
+                    let lo_ok = _mm_cmpeq_epi8(_mm_subs_epu8(_mm_set1_epi8(lo as i8), v), zero);
+                    _mm_and_si128(hi_ok, lo_ok)
+                };
+                member = _mm_or_si128(member, rm);
+            }
+            // Stop at the first lane where a stop byte was found (member bit set).
+            let bits = _mm_movemask_epi8(member) as u32 & 0xFFFF;
+            if bits != 0 {
+                return pos + bits.trailing_zeros() as usize;
+            }
+            pos += 16;
+        }
+    }
+    pos
+}
+
 /// Scalar range check: is byte `b` in any of the first `count` (lo, hi) pairs?
 #[inline(always)]
 fn byte_in_ascii_ranges(b: u8, count: u8, pairs: &[u8; 2 * SCAN_MAX_RANGES]) -> bool {
@@ -634,6 +678,23 @@ fn run_anchored<C: TdfaExecConfig>(
                     }
                     pos
                 }
+                // All non-ASCII self-loop; ASCII exit bytes fit in ≤SCAN_MAX_RANGES ranges.
+                // SSE2 path scans 16 bytes per iteration until a stop byte is found.
+                // Scalar tail uses the two ASCII bitmap words (bm0/bm1) — same cost
+                // as BitmapAscii — rather than the 4-range loop.
+                ScanFast::AsciiRangesStop { count, pairs, bm0, bm1 } => {
+                    #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
+                    { pos = scan_ascii_ranges_stop_sse2(input, pos, *count, pairs); }
+                    while pos < input.len() {
+                        let b = *input.iat(pos) as usize;
+                        if b < 0x80 {
+                            let word = if b < 0x40 { *bm0 } else { *bm1 };
+                            if (word >> (b & 63)) & 1 == 0 { break; }
+                        }
+                        pos += 1;
+                    }
+                    pos
+                }
                 // Generic bitmap scan.
                 ScanFast::Bitmap => {
                     let bitmap = &ss.byte_bitmap;
@@ -745,6 +806,21 @@ fn run_anchored<C: TdfaExecConfig>(
                             let word = if b < 0x40 { *bm0 } else { *bm1 };
                             if (word >> (b & 63)) & 1 == 0 {
                                 break;
+                            }
+                            p += 1;
+                        }
+                        p
+                    },
+                    ScanFast::AsciiRangesStop { count, pairs, bm0, bm1 } => {
+                        #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
+                        let mut p = scan_ascii_ranges_stop_sse2(input, start, *count, pairs);
+                        #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
+                        let mut p = start;
+                        while p < input.len() {
+                            let b = *input.iat(p) as usize;
+                            if b < 0x80 {
+                                let word = if b < 0x40 { *bm0 } else { *bm1 };
+                                if (word >> (b & 63)) & 1 == 0 { break; }
                             }
                             p += 1;
                         }
