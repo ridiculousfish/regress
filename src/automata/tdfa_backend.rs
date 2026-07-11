@@ -16,7 +16,7 @@ use crate::automata::nfa::FULL_MATCH_START;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{
     EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
-    PosStampLoop,
+    PosStampLoop, ScanSkip,
 };
 use crate::insn::StartPredicate;
 use crate::util::DebugCheckIndex;
@@ -496,8 +496,42 @@ fn run_anchored<C: TdfaExecConfig>(
     } else {
         &[]
     };
+    let scan_skips: &[Option<ScanSkip>] = if !C::HAS_PERBYTE_GUARDS && use_moves {
+        tdfa.scan_skips()
+    } else {
+        &[]
+    };
     let mut pos = loop_start;
     'byte_loop: while pos < input.len() {
+        // Scan-skip / scan-stamp: if the current state is a non-accepting
+        // self-loop, fast-scan ahead using the precomputed byte bitmap.
+        // Pure skip (stamp_marks empty): self-loop moves are all empty, no
+        // mark update needed.  Scan-stamp (stamp_marks non-empty): self-loop
+        // moves are all `curpos → mark_j`; write each mark_j = pos once
+        // after the scan (net effect of the per-byte curpos writes).
+        if let Some(ss) = scan_skips.get(state as usize).and_then(Option::as_ref) {
+            let bitmap = &ss.byte_bitmap;
+            let scan_start = pos;
+            while pos < input.len() {
+                let b = *input.iat(pos) as usize;
+                if (bitmap[b >> 6] >> (b & 63)) & 1 == 0 {
+                    break;
+                }
+                pos += 1;
+            }
+            // Stamp marks whenever the scan consumed bytes.  This MUST happen
+            // before any early exit so that the EOI accept path (which runs
+            // after the byte loop when `completed && has_eoi_accepts`) reads
+            // the correct marks.
+            if !ss.stamp_marks.is_empty() && pos > scan_start {
+                for &mark_idx in &ss.stamp_marks {
+                    *src_buf.mat(mark_idx as usize) = pos;
+                }
+            }
+            if pos >= input.len() {
+                break; // byte loop exhausted — let EOI accept path run
+            }
+        }
         let byte = *input.iat(pos);
         let class = *byte_to_class.iat(byte as usize) as usize;
         let idx = state as usize * num_classes + class;

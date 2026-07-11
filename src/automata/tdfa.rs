@@ -972,6 +972,31 @@ fn truncate_at_first_goal(mut s: TdfaState) -> TdfaState {
     s
 }
 
+/// Interpreter scan-skip data for a non-accepting state whose self-loop
+/// transitions have *empty* move-op lists (no mark updates at all).  When
+/// the executor is in such a state it can scan ahead to the first byte that
+/// does *not* self-loop with an empty list, advancing the position with zero
+/// mark-file overhead — no transition-table lookup, no move-op iteration,
+/// no accepting check.  This is the common case for the implicit `.*?`
+/// scanning prefix of an unanchored TDFA.
+///
+/// Two variants (selected at compile time, uniform across all self-loop byte
+/// classes of the state):
+/// - **Pure skip** (`stamp_marks` is empty): all self-loop moves are empty —
+///   fast-scan without any mark update.
+/// - **Scan-stamp** (`stamp_marks` is non-empty): all self-loop moves are of
+///   the form `mark_j := curpos`.  Fast-scan the run, then stamp each
+///   `mark_j` with `pos` (the first non-skip byte offset) — equivalent to
+///   the per-byte curpos writes, but in one shot.
+#[derive(Debug, Clone)]
+pub(crate) struct ScanSkip {
+    /// 256-bit bitmap: bit `b` is set iff byte `b` triggers a self-loop on
+    /// this state (with either empty or curpos-only move ops).
+    pub(crate) byte_bitmap: [u64; 4],
+    /// Marks to write with `pos` after the fast scan.  Empty ⇒ pure skip.
+    pub(crate) stamp_marks: SmallVec<[u16; 4]>,
+}
+
 /// Interpreter self-loop peel data for a state whose every self-loop
 /// transition consists solely of `curpos → mark` stamping ops, with the
 /// same destination marks across all self-loop byte classes.  When the
@@ -1123,6 +1148,11 @@ pub struct Tdfa {
     /// pure curpos-stamp (all `MoveOp::src == curpos_lane`) with consistent
     /// targets.  Empty slice when `transition_moves` was not compiled.
     pos_stamp_loops: Box<[Option<PosStampLoop>]>,
+
+    /// Per-state scan-skip info.  Indexed by state ID.  `Some` only for
+    /// non-accepting states that have at least one self-loop transition with
+    /// empty move ops — the executor can bypass those bytes entirely.
+    scan_skips: Box<[Option<ScanSkip>]>,
 }
 
 #[derive(Debug, Clone)]
@@ -1465,6 +1495,7 @@ impl Tdfa {
             entry_moves_anchored: Box::default(),
             entry_moves_unanchored: Box::default(),
             pos_stamp_loops: Box::default(),
+            scan_skips: Box::default(),
         };
         tdfa.compile_moves_all();
         Ok(tdfa)
@@ -1488,6 +1519,7 @@ impl Tdfa {
             self.entry_moves_anchored = Box::default();
             self.entry_moves_unanchored = Box::default();
             self.pos_stamp_loops = Box::default();
+            self.scan_skips = Box::default();
             return;
         }
         self.transition_moves = self
@@ -1500,6 +1532,7 @@ impl Tdfa {
         self.entry_moves_unanchored =
             compile_moves(&self.entry_commands_unanchored, num_marks);
         self.pos_stamp_loops = self.compute_pos_stamp_loops();
+        self.scan_skips = self.compute_scan_skips();
     }
 
     /// Compute per-state position-stamp self-loop info from the compiled
@@ -1548,6 +1581,66 @@ impl Tdfa {
                     return None;
                 }
                 Some(PosStampLoop { stamp_marks, byte_bitmap })
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice()
+    }
+
+    /// Compute per-state scan-skip info from `transition_moves`.  A state
+    /// qualifies when it is non-accepting and every self-loop byte class has
+    /// move ops of a *uniform* kind across the whole state:
+    /// - all empty (pure skip), OR
+    /// - all curpos-stamps with the same destination marks (scan-stamp).
+    /// A mix of the two, or any non-curpos move, disqualifies the state.
+    fn compute_scan_skips(&self) -> Box<[Option<ScanSkip>]> {
+        let curpos_lane = (self.num_marks + 1) as u16;
+        let num_states = self.accepting.len();
+        let num_classes = self.num_classes;
+
+        (0..num_states)
+            .map(|state| {
+                if self.accepting[state] {
+                    return None; // only for non-accepting states
+                }
+                let mut byte_bitmap = [0u64; 4];
+                let mut any = false;
+                // Tracks the expected stamps for every self-loop byte class.
+                // None = not yet seen any self-loop class.
+                let mut stamp_marks: Option<SmallVec<[u16; 4]>> = None;
+
+                for b in 0u8..=255u8 {
+                    let class = self.byte_to_class[b as usize] as usize;
+                    let idx = state * num_classes + class;
+                    if self.transitions[idx] as usize != state {
+                        continue; // not a self-loop
+                    }
+                    let moves = &self.transition_moves[idx];
+                    let class_stamps: SmallVec<[u16; 4]> = if moves.is_empty() {
+                        SmallVec::new() // pure skip
+                    } else {
+                        // All ops must be curpos → mark; any other src disqualifies.
+                        if moves.iter().any(|op| op.src != curpos_lane) {
+                            return None;
+                        }
+                        moves.iter().map(|op| op.dst).collect()
+                    };
+                    // Require uniform stamps across all self-loop byte classes.
+                    match &stamp_marks {
+                        None => stamp_marks = Some(class_stamps),
+                        Some(sm) if *sm == class_stamps => {}
+                        Some(_) => return None,
+                    }
+                    byte_bitmap[b as usize >> 6] |= 1u64 << (b as usize & 63);
+                    any = true;
+                }
+
+                if !any {
+                    return None;
+                }
+                Some(ScanSkip {
+                    byte_bitmap,
+                    stamp_marks: stamp_marks.unwrap_or_default(),
+                })
             })
             .collect::<Vec<_>>()
             .into_boxed_slice()
@@ -1638,6 +1731,12 @@ impl Tdfa {
     /// Returns an empty slice when `transition_moves` was not compiled.
     pub(crate) fn pos_stamp_loops(&self) -> &[Option<PosStampLoop>] {
         &self.pos_stamp_loops
+    }
+
+    /// Per-state scan-skip table.  Indexed by state ID.
+    /// Returns an empty slice when `transition_moves` was not compiled.
+    pub(crate) fn scan_skips(&self) -> &[Option<ScanSkip>] {
+        &self.scan_skips
     }
 
     /// Entry commands pre-compiled to [`MoveOp`] sequences. Returns the
