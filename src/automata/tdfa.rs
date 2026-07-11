@@ -39,6 +39,12 @@ pub const EXEC_ACCEPT_FLAG: u32 = 1 << 31;
 /// Mask recovering the premultiplied state from an `exec_transitions` entry.
 pub const EXEC_STATE_MASK: u32 = !EXEC_ACCEPT_FLAG;
 
+/// Bit 0 of `trans_flags[idx]`: the transition's target state is accepting.
+pub(crate) const TF_ACCEPT: u8 = 1;
+/// Bit 1 of `trans_flags[idx]`: the target accepting state has `accept_fallback`
+/// (an eager mark snapshot is needed on acceptance).
+pub(crate) const TF_FALLBACK: u8 = 2;
+
 /// Maximum number of TDFA states before we bail out. Matches
 /// `dfa::DFA_STATE_BUDGET`.
 const TDFA_STATE_BUDGET: usize = 4096;
@@ -1188,6 +1194,14 @@ pub struct Tdfa {
     // (`start_fixed`, no captures/conditionals/anchor-alts); empty otherwise.
     exec_transitions: Box<[u32]>,
 
+    // Per-transition accept + fallback flag byte. Same shape/indexing as `transitions`
+    // (`state * num_classes + class`). `TF_ACCEPT` (bit 0) is set when the target
+    // state is accepting; `TF_FALLBACK` (bit 1) when it also has `accept_fallback`.
+    // Loaded in parallel with `transitions[idx]` so the accept check costs no
+    // serial memory hops after the transition lookup; eliminates the per-byte
+    // `accepting[]` / `accept_fallback[]` loads in the !HAS_PERBYTE_GUARDS path.
+    trans_flags: Box<[u8]>,
+
     // Entry commands pre-compiled to `MoveOp` sequences so the executor can
     // apply them with the same tight loop used for per-transition moves,
     // avoiding the `apply_cmds_scalar` overhead (SmallVec + two-pass scan).
@@ -1665,12 +1679,15 @@ impl Tdfa {
             has_eoi_accepts,
             start_fixed: false,
             exec_transitions: Box::default(),
+            trans_flags: Box::default(),
             entry_moves_anchored: Box::default(),
             entry_moves_unanchored: Box::default(),
             pos_stamp_loops: Box::default(),
             scan_skips: Box::default(),
         };
         tdfa.compile_moves_all();
+        // Build after compile_moves_all so accept_fallback (computed above) is current.
+        tdfa.build_trans_flags();
         Ok(tdfa)
     }
 
@@ -1859,6 +1876,36 @@ impl Tdfa {
         &self.exec_transitions
     }
 
+    /// Build `trans_flags`: per-transition flag bytes (`TF_ACCEPT` / `TF_FALLBACK`).
+    /// Must be called after `accept_fallback` is in its final state (see `optimize`).
+    fn build_trans_flags(&mut self) {
+        let accepting = &self.accepting;
+        let accept_fallback = &self.accept_fallback;
+        self.trans_flags = self
+            .transitions
+            .iter()
+            .map(|&t| {
+                if t == TDFA_DEAD_STATE {
+                    0
+                } else {
+                    let mut f: u8 = 0;
+                    if accepting[t as usize] {
+                        f |= TF_ACCEPT;
+                    }
+                    if accept_fallback[t as usize] {
+                        f |= TF_FALLBACK;
+                    }
+                    f
+                }
+            })
+            .collect();
+    }
+
+    /// Per-transition accept + fallback flag bytes for the capture-path hot loop.
+    pub(crate) fn trans_flags(&self) -> &[u8] {
+        &self.trans_flags
+    }
+
     /// Whether `FULL_MATCH_START` is written only by the entry commands (never by
     /// a transition). Collect every mark an accepting state reads back as
     /// `FULL_MATCH_START`, then check no transition command writes one of them.
@@ -1951,6 +1998,8 @@ impl Tdfa {
             self.num_classes,
             self.num_marks,
         );
+        // Rebuild after accept_fallback is refreshed (compile_moves_all above used the stale value).
+        self.build_trans_flags();
     }
 
     /// The zero-width guards for `state` (switches + accepts). Empty for most

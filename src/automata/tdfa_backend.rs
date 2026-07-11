@@ -17,6 +17,7 @@ use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{
     EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
     PosStampLoop, ScanFast, ScanSkip, SCAN_MAX_RANGES,
+    TF_ACCEPT, TF_FALLBACK,
 };
 use crate::insn::StartPredicate;
 use crate::util::DebugCheckIndex;
@@ -600,6 +601,7 @@ fn run_anchored<C: TdfaExecConfig>(
     let trans_moves = tdfa.transition_moves();
     let trans_cmds = tdfa.transition_commands();
     let accepting = tdfa.accepting();
+    let trans_flags = tdfa.trans_flags();
     let num_classes = tdfa.num_classes();
 
     let use_fast =
@@ -792,7 +794,21 @@ fn run_anchored<C: TdfaExecConfig>(
                 apply_switches(tdfa, &mut state, src_buf, sig, pos + 1);
             }
         }
-        if *accepting.iat(state as usize) {
+        // For !HAS_PERBYTE_GUARDS, tf is loaded in parallel with transitions[idx]
+        // (same index, both can start as soon as idx is known) and encodes TF_ACCEPT
+        // + TF_FALLBACK, eliminating per-byte accepting[] / accept_fallback[] spills.
+        let tf = if C::HAS_PERBYTE_GUARDS { 0u8 } else { *trans_flags.iat(idx) };
+        let is_accepting = if C::HAS_PERBYTE_GUARDS {
+            *accepting.iat(state as usize)
+        } else {
+            tf & TF_ACCEPT != 0
+        };
+        if is_accepting {
+            let needs_snapshot = if C::HAS_PERBYTE_GUARDS {
+                true  // always snapshot under per-byte guards
+            } else {
+                tf & TF_FALLBACK != 0
+            };
             record_accept(
                 &mut last_accept,
                 best_snap,
@@ -800,7 +816,7 @@ fn run_anchored<C: TdfaExecConfig>(
                 src_buf,
                 tdfa.finals().iat(state as usize),
                 has_captures,
-                C::HAS_PERBYTE_GUARDS || *accept_fallback.iat(state as usize),
+                needs_snapshot,
                 &mut read_live,
             );
             // Position-stamp self-loop peel: if this accepting state's
