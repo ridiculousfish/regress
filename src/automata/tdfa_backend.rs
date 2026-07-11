@@ -37,6 +37,8 @@ fn scan_ascii_ranges_sse2(
     mut pos: usize,
     count: u8,
     pairs: &[u8; 2 * SCAN_MAX_RANGES],
+    bm0: u64,
+    bm1: u64,
 ) -> usize {
     use std::arch::x86_64::*;
     // SAFETY: SSE2 is the x86-64 baseline; all accesses are within `input`.
@@ -72,6 +74,17 @@ fn scan_ascii_ranges_sse2(
             pos += 16;
         }
     }
+    // Scalar tail for the final partial 16-byte chunk (0–15 bytes).  Using
+    // bm0/bm1 avoids the caller re-entering a scalar loop on the SIMD exit
+    // position (one wasted iteration per match when SIMD finds the stop byte
+    // inside a full chunk).
+    while pos < input.len() {
+        let b = input[pos] as usize;
+        if b >= 0x80 { break; }
+        let word = if b < 0x40 { bm0 } else { bm1 };
+        if (word >> (b & 63)) & 1 == 0 { break; }
+        pos += 1;
+    }
     pos
 }
 
@@ -86,6 +99,8 @@ fn scan_ascii_ranges_stop_sse2(
     mut pos: usize,
     count: u8,
     pairs: &[u8; 2 * SCAN_MAX_RANGES],
+    bm0: u64,
+    bm1: u64,
 ) -> usize {
     use std::arch::x86_64::*;
     // SAFETY: SSE2 is the x86-64 baseline; all accesses are within `input`.
@@ -115,6 +130,16 @@ fn scan_ascii_ranges_stop_sse2(
             }
             pos += 16;
         }
+    }
+    // Scalar tail for the final partial 16-byte chunk.  Non-ASCII bytes are
+    // self-loop bytes (continue); ASCII stop bytes (bit==0) end the scan.
+    while pos < input.len() {
+        let b = input[pos] as usize;
+        if b < 0x80 {
+            let word = if b < 0x40 { bm0 } else { bm1 };
+            if (word >> (b & 63)) & 1 == 0 { break; }
+        }
+        pos += 1;
     }
     pos
 }
@@ -642,8 +667,9 @@ fn run_anchored<C: TdfaExecConfig>(
                 // cascade, trading 8 compare/branch pairs for one load+shift.
                 ScanFast::AsciiRanges { count, pairs, bm0, bm1 } => {
                     #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
-                    { pos = scan_ascii_ranges_sse2(input, pos, *count, pairs); }
-                    // Scalar tail (also the full path on non-x86-64).
+                    { pos = scan_ascii_ranges_sse2(input, pos, *count, pairs, *bm0, *bm1); }
+                    // Scalar path (non-x86-64 or prohibit-unsafe).
+                    #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
                     while pos < input.len() {
                         let b = *input.iat(pos) as usize;
                         if b >= 0x80 { break; }
@@ -678,7 +704,9 @@ fn run_anchored<C: TdfaExecConfig>(
                 // as BitmapAscii — rather than the 4-range loop.
                 ScanFast::AsciiRangesStop { count, pairs, bm0, bm1 } => {
                     #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
-                    { pos = scan_ascii_ranges_stop_sse2(input, pos, *count, pairs); }
+                    { pos = scan_ascii_ranges_stop_sse2(input, pos, *count, pairs, *bm0, *bm1); }
+                    // Scalar path (non-x86-64 or prohibit-unsafe).
+                    #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
                     while pos < input.len() {
                         let b = *input.iat(pos) as usize;
                         if b < 0x80 {
@@ -783,16 +811,19 @@ fn run_anchored<C: TdfaExecConfig>(
                     },
                     ScanFast::AsciiRanges { count, pairs, bm0, bm1 } => {
                         #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
-                        let mut p = scan_ascii_ranges_sse2(input, start, *count, pairs);
+                        let p = scan_ascii_ranges_sse2(input, start, *count, pairs, *bm0, *bm1);
                         #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
-                        let mut p = start;
-                        while p < input.len() {
-                            let b = *input.iat(p) as usize;
-                            if b >= 0x80 { break; }
-                            let word = if b < 0x40 { *bm0 } else { *bm1 };
-                            if (word >> (b & 63)) & 1 == 0 { break; }
-                            p += 1;
-                        }
+                        let p = {
+                            let mut p = start;
+                            while p < input.len() {
+                                let b = *input.iat(p) as usize;
+                                if b >= 0x80 { break; }
+                                let word = if b < 0x40 { *bm0 } else { *bm1 };
+                                if (word >> (b & 63)) & 1 == 0 { break; }
+                                p += 1;
+                            }
+                            p
+                        };
                         p
                     },
                     ScanFast::BitmapAscii { bm0, bm1 } => {
@@ -812,17 +843,20 @@ fn run_anchored<C: TdfaExecConfig>(
                     },
                     ScanFast::AsciiRangesStop { count, pairs, bm0, bm1 } => {
                         #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
-                        let mut p = scan_ascii_ranges_stop_sse2(input, start, *count, pairs);
+                        let p = scan_ascii_ranges_stop_sse2(input, start, *count, pairs, *bm0, *bm1);
                         #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
-                        let mut p = start;
-                        while p < input.len() {
-                            let b = *input.iat(p) as usize;
-                            if b < 0x80 {
-                                let word = if b < 0x40 { *bm0 } else { *bm1 };
-                                if (word >> (b & 63)) & 1 == 0 { break; }
+                        let p = {
+                            let mut p = start;
+                            while p < input.len() {
+                                let b = *input.iat(p) as usize;
+                                if b < 0x80 {
+                                    let word = if b < 0x40 { *bm0 } else { *bm1 };
+                                    if (word >> (b & 63)) & 1 == 0 { break; }
+                                }
+                                p += 1;
                             }
-                            p += 1;
-                        }
+                            p
+                        };
                         p
                     },
                     ScanFast::Bitmap => {
