@@ -16,7 +16,7 @@ use crate::automata::nfa::FULL_MATCH_START;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{
     EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
-    PosStampLoop, ScanFast, ScanSkip,
+    PosStampLoop, ScanFast, ScanSkip, SCAN_MAX_RANGES,
 };
 use crate::insn::StartPredicate;
 use crate::util::DebugCheckIndex;
@@ -25,6 +25,66 @@ use alloc::vec::Vec;
 use core::ops::Range;
 extern crate memchr;
 use smallvec::SmallVec;
+
+/// SSE2 scan: advance `pos` while each byte is in the union of the given
+/// (lo, hi) ranges.  Stops at the first byte outside all ranges or at
+/// `input.len()`.  Handles the 16-byte SIMD loop; callers append a scalar
+/// tail for the remaining ≤15 bytes.
+#[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
+#[inline(always)]
+fn scan_ascii_ranges_sse2(
+    input: &[u8],
+    mut pos: usize,
+    count: u8,
+    pairs: &[u8; 2 * SCAN_MAX_RANGES],
+) -> usize {
+    use std::arch::x86_64::*;
+    // SAFETY: SSE2 is the x86-64 baseline; all accesses are within `input`.
+    unsafe {
+        let zero = _mm_setzero_si128();
+        while pos + 16 <= input.len() {
+            let v = _mm_loadu_si128(input.as_ptr().add(pos) as *const __m128i);
+            // Build membership mask: 0xFF per lane if in any range, else 0x00.
+            let mut member = _mm_setzero_si128();
+            for i in 0..count as usize {
+                let lo = pairs[2 * i];
+                let hi = pairs[2 * i + 1];
+                // range_mask = 0xFF where lo <= v <= hi.
+                // psubusb(v, hi)==0  ↔  v<=hi (unsigned saturating subtract)
+                // psubusb(lo, v)==0  ↔  v>=lo
+                let rm = if lo == hi {
+                    _mm_cmpeq_epi8(v, _mm_set1_epi8(lo as i8))
+                } else if lo == 0 {
+                    _mm_cmpeq_epi8(_mm_subs_epu8(v, _mm_set1_epi8(hi as i8)), zero)
+                } else {
+                    let hi_ok = _mm_cmpeq_epi8(_mm_subs_epu8(v, _mm_set1_epi8(hi as i8)), zero);
+                    let lo_ok = _mm_cmpeq_epi8(_mm_subs_epu8(_mm_set1_epi8(lo as i8), v), zero);
+                    _mm_and_si128(hi_ok, lo_ok)
+                };
+                member = _mm_or_si128(member, rm);
+            }
+            // pmovmskb: bit i set ↔ lane i MSB set ↔ member[i]==0xFF (in set).
+            let bits = _mm_movemask_epi8(member) as u32;
+            if bits != 0xFFFF {
+                // First lane not in set: lowest clear bit in bits.
+                return pos + (bits ^ 0xFFFF).trailing_zeros() as usize;
+            }
+            pos += 16;
+        }
+    }
+    pos
+}
+
+/// Scalar range check: is byte `b` in any of the first `count` (lo, hi) pairs?
+#[inline(always)]
+fn byte_in_ascii_ranges(b: u8, count: u8, pairs: &[u8; 2 * SCAN_MAX_RANGES]) -> bool {
+    for i in 0..count as usize {
+        if b >= pairs[2 * i] && b <= pairs[2 * i + 1] {
+            return true;
+        }
+    }
+    false
+}
 
 /// Compile-time switches that let [`execute_generic`] drop cold sites it can
 /// statically prove the current automaton can't hit. Each realized combination
@@ -541,6 +601,20 @@ fn run_anchored<C: TdfaExecConfig>(
                     };
                     end.map(|i| pos + i).unwrap_or(input.len())
                 },
+                // All non-ASCII excluded; set fits in a small number of byte
+                // ranges.  SSE2 saturating-subtract range masks process 16
+                // bytes per iteration; scalar tail handles remainder.
+                ScanFast::AsciiRanges { count, pairs } => {
+                    #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
+                    { pos = scan_ascii_ranges_sse2(input, pos, *count, pairs); }
+                    // Scalar tail (also the full path on non-x86-64).
+                    while pos < input.len() {
+                        let b = *input.iat(pos);
+                        if b >= 0x80 || !byte_in_ascii_ranges(b, *count, pairs) { break; }
+                        pos += 1;
+                    }
+                    pos
+                }
                 // All non-ASCII bytes excluded; pre-store the two ASCII bitmap
                 // words.  Selecting between two registers with a conditional
                 // move eliminates the 4-cycle data-dependent indexed load from
@@ -648,6 +722,18 @@ fn run_anchored<C: TdfaExecConfig>(
                             _ => input[start..].iter().position(|&b| b >= 0x80 || b == b0 || b == b1),
                         };
                         end.map(|i| start + i).unwrap_or(input.len())
+                    },
+                    ScanFast::AsciiRanges { count, pairs } => {
+                        #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
+                        let mut p = scan_ascii_ranges_sse2(input, start, *count, pairs);
+                        #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
+                        let mut p = start;
+                        while p < input.len() {
+                            let b = *input.iat(p);
+                            if b >= 0x80 || !byte_in_ascii_ranges(b, *count, pairs) { break; }
+                            p += 1;
+                        }
+                        p
                     },
                     ScanFast::BitmapAscii { bm0, bm1 } => {
                         let mut p = start;

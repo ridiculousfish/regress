@@ -1011,16 +1011,22 @@ pub(crate) struct ScanSkip {
 ///   are the 1–3 listed ASCII bytes; use `memchr`/`memchr2`/`memchr3`.
 /// - **`AsciiBarrier`** (some 0x80–0xFF bits clear, ≤2 excluded ASCII bytes):
 ///   stop on `b ≥ 0x80 || b == excl…`.  Auto-vectorises; good for `[^"]`.
-/// - **`BitmapAscii`** (some 0x80–0xFF bits clear, many ASCII bytes vary):
-///   all non-ASCII bytes are excluded so `bitmap[2]=bitmap[3]=0`.  Pre-store
-///   the two used ASCII words as values in the variant; at runtime select
-///   with a `cmov` (1 cycle) instead of an indexed load (4-cycle L1 chain).
+/// - **`AsciiRanges`** (all non-ASCII excluded; set decomposes into ≤8 byte ranges):
+///   SSE2 saturating-subtract range masks, 16 bytes per iteration.  Falls back
+///   to scalar range check on non-x86-64.
+/// - **`BitmapAscii`** (all non-ASCII excluded; too many ranges for `AsciiRanges`):
+///   pre-store the two ASCII bitmap words; select with a conditional move.
 /// - **`Bitmap`**: full 256-bit bitmap; non-ASCII bytes may be self-loop bytes.
+pub(crate) const SCAN_MAX_RANGES: usize = 4;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ScanFast {
     Bitmap,
     Memchr { count: u8, bytes: [u8; 3] },
     AsciiBarrier { count: u8, bytes: [u8; 3] },
+    /// All non-ASCII excluded; set fits in ≤`SCAN_MAX_RANGES` byte ranges.
+    /// `count` ranges packed as (lo, hi) pairs in `pairs[0..2*count]`.
+    AsciiRanges { count: u8, pairs: [u8; 2 * SCAN_MAX_RANGES] },
     /// Non-ASCII excluded; `bm0` = `byte_bitmap[0]` (bytes 0x00-0x3F),
     /// `bm1` = `byte_bitmap[1]` (bytes 0x40-0x7F).
     BitmapAscii { bm0: u64, bm1: u64 },
@@ -1415,10 +1421,51 @@ fn classify_scan_fast(byte_bitmap: &[u64; 4]) -> ScanFast {
     } else if has_nonascii_excl && ascii_excl_count <= 2 && !ascii_excl_overflow {
         ScanFast::AsciiBarrier { count: ascii_excl_count, bytes: ascii_excl_bytes }
     } else if all_nonascii_excl {
-        ScanFast::BitmapAscii { bm0: byte_bitmap[0], bm1: byte_bitmap[1] }
+        if let Some((count, pairs)) = bitmap_to_ascii_ranges(byte_bitmap[0], byte_bitmap[1]) {
+            ScanFast::AsciiRanges { count, pairs }
+        } else {
+            ScanFast::BitmapAscii { bm0: byte_bitmap[0], bm1: byte_bitmap[1] }
+        }
     } else {
         ScanFast::Bitmap
     }
+}
+
+/// Convert the ASCII half of a bitmap (bm0 for 0x00-0x3F, bm1 for 0x40-0x7F)
+/// into a compact list of (lo, hi) byte ranges.  Returns `None` if the set
+/// requires more than `SCAN_MAX_RANGES` ranges.
+fn bitmap_to_ascii_ranges(bm0: u64, bm1: u64) -> Option<(u8, [u8; 2 * SCAN_MAX_RANGES])> {
+    let mut pairs = [0u8; 2 * SCAN_MAX_RANGES];
+    let mut count = 0usize;
+    let mut in_range = false;
+    let mut range_start = 0u8;
+
+    for b in 0u8..=0x7F {
+        let word = if b < 0x40 { bm0 } else { bm1 };
+        let in_set = (word >> (b as usize & 63)) & 1 != 0;
+        if in_set && !in_range {
+            range_start = b;
+            in_range = true;
+        } else if !in_set && in_range {
+            if count >= SCAN_MAX_RANGES {
+                return None;
+            }
+            pairs[2 * count] = range_start;
+            pairs[2 * count + 1] = b - 1;
+            count += 1;
+            in_range = false;
+        }
+    }
+    if in_range {
+        if count >= SCAN_MAX_RANGES {
+            return None;
+        }
+        pairs[2 * count] = range_start;
+        pairs[2 * count + 1] = 0x7F;
+        count += 1;
+    }
+
+    Some((count as u8, pairs))
 }
 
 impl Tdfa {
