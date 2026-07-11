@@ -1111,6 +1111,13 @@ pub struct Tdfa {
     // (`start_fixed`, no captures/conditionals/anchor-alts); empty otherwise.
     exec_transitions: Box<[u32]>,
 
+    // Entry commands pre-compiled to `MoveOp` sequences so the executor can
+    // apply them with the same tight loop used for per-transition moves,
+    // avoiding the `apply_cmds_scalar` overhead (SmallVec + two-pass scan).
+    // Parallel structure to `entry_commands_anchored/unanchored`.
+    entry_moves_anchored: Box<[MoveOp]>,
+    entry_moves_unanchored: Box<[MoveOp]>,
+
     /// Per-state position-stamp self-loop info.  Indexed by state ID.
     /// `Some` only for accepting states whose every self-loop transition is a
     /// pure curpos-stamp (all `MoveOp::src == curpos_lane`) with consistent
@@ -1455,6 +1462,8 @@ impl Tdfa {
             has_eoi_accepts,
             start_fixed: false,
             exec_transitions: Box::default(),
+            entry_moves_anchored: Box::default(),
+            entry_moves_unanchored: Box::default(),
             pos_stamp_loops: Box::default(),
         };
         tdfa.compile_moves_all();
@@ -1476,6 +1485,8 @@ impl Tdfa {
         let num_marks = self.num_marks;
         if num_marks + 3 > u16::MAX as usize {
             self.transition_moves = Box::default();
+            self.entry_moves_anchored = Box::default();
+            self.entry_moves_unanchored = Box::default();
             self.pos_stamp_loops = Box::default();
             return;
         }
@@ -1484,6 +1495,10 @@ impl Tdfa {
             .iter()
             .map(|cmds| compile_moves(cmds, num_marks))
             .collect();
+        self.entry_moves_anchored =
+            compile_moves(&self.entry_commands_anchored, num_marks);
+        self.entry_moves_unanchored =
+            compile_moves(&self.entry_commands_unanchored, num_marks);
         self.pos_stamp_loops = self.compute_pos_stamp_loops();
     }
 
@@ -1623,6 +1638,18 @@ impl Tdfa {
     /// Returns an empty slice when `transition_moves` was not compiled.
     pub(crate) fn pos_stamp_loops(&self) -> &[Option<PosStampLoop>] {
         &self.pos_stamp_loops
+    }
+
+    /// Entry commands pre-compiled to [`MoveOp`] sequences. Returns the
+    /// anchored list when `start == 0` and the unanchored list otherwise.
+    /// Empty when `transition_moves` was not compiled (rare: mark file too
+    /// large) or when there are no entry commands for this start mode.
+    pub(crate) fn entry_moves(&self, start: usize) -> &[MoveOp] {
+        if start == 0 {
+            &self.entry_moves_anchored
+        } else {
+            &self.entry_moves_unanchored
+        }
     }
 
     /// Apply the optional optimization passes (state minimization + register

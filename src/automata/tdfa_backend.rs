@@ -393,7 +393,22 @@ fn run_anchored<C: TdfaExecConfig>(
 
     src_buf.fill(usize::MAX);
 
-    apply_cmds_scalar(src_buf, tdfa.entry_commands(start), start);
+    // Apply entry commands using the pre-compiled MoveOp fast path (same
+    // compact loop used for per-transition moves). Falls back to the scalar
+    // command interpreter only when moves weren't compiled — mark file too
+    // large, effectively impossible in practice.
+    if tdfa.has_moves() {
+        let entry_moves = tdfa.entry_moves(start);
+        if !entry_moves.is_empty() {
+            *src_buf.mat(curpos_lane) = start;
+            for op in entry_moves {
+                let v = *src_buf.iat(op.src as usize);
+                *src_buf.mat(op.dst as usize) = v;
+            }
+        }
+    } else {
+        apply_cmds_scalar(src_buf, tdfa.entry_commands(start), start);
+    }
 
     let mut last_accept: LastAccept = None;
     let mut read_live = false;
