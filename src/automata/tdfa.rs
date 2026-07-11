@@ -972,6 +972,21 @@ fn truncate_at_first_goal(mut s: TdfaState) -> TdfaState {
     s
 }
 
+/// Interpreter self-loop peel data for a state whose every self-loop
+/// transition consists solely of `curpos → mark` stamping ops, with the
+/// same destination marks across all self-loop byte classes.  When the
+/// executor enters such an accepting state it can scan ahead to the first
+/// byte that does *not* self-loop, stamp the marks once with the run end,
+/// and record one accept — instead of iterating through each byte.
+#[derive(Debug, Clone)]
+pub(crate) struct PosStampLoop {
+    /// Indices into `src_buf` that should be written with the run-end position.
+    pub(crate) stamp_marks: SmallVec<[u16; 4]>,
+    /// 256-bit bitmap: bit `b` is set iff byte `b` triggers a self-loop with
+    /// only curpos-stamp move ops from this state.
+    pub(crate) byte_bitmap: [u64; 4],
+}
+
 #[derive(Debug, Clone)]
 pub struct Tdfa {
     /// Initial state when matching is being attempted at byte offset 0 of
@@ -1095,6 +1110,12 @@ pub struct Tdfa {
     // load). `TDFA_DEAD_STATE` stays 0. Built only when the fast loop can run
     // (`start_fixed`, no captures/conditionals/anchor-alts); empty otherwise.
     exec_transitions: Box<[u32]>,
+
+    /// Per-state position-stamp self-loop info.  Indexed by state ID.
+    /// `Some` only for accepting states whose every self-loop transition is a
+    /// pure curpos-stamp (all `MoveOp::src == curpos_lane`) with consistent
+    /// targets.  Empty slice when `transition_moves` was not compiled.
+    pos_stamp_loops: Box<[Option<PosStampLoop>]>,
 }
 
 #[derive(Debug, Clone)]
@@ -1434,6 +1455,7 @@ impl Tdfa {
             has_eoi_accepts,
             start_fixed: false,
             exec_transitions: Box::default(),
+            pos_stamp_loops: Box::default(),
         };
         tdfa.compile_moves_all();
         Ok(tdfa)
@@ -1454,6 +1476,7 @@ impl Tdfa {
         let num_marks = self.num_marks;
         if num_marks + 3 > u16::MAX as usize {
             self.transition_moves = Box::default();
+            self.pos_stamp_loops = Box::default();
             return;
         }
         self.transition_moves = self
@@ -1461,6 +1484,58 @@ impl Tdfa {
             .iter()
             .map(|cmds| compile_moves(cmds, num_marks))
             .collect();
+        self.pos_stamp_loops = self.compute_pos_stamp_loops();
+    }
+
+    /// Compute per-state position-stamp self-loop info from the compiled
+    /// `transition_moves`.  A state qualifies when it is accepting and every
+    /// byte that self-loops from it has only `curpos → mark` move ops with
+    /// consistent target marks across all such byte classes.
+    fn compute_pos_stamp_loops(&self) -> Box<[Option<PosStampLoop>]> {
+        let curpos_lane = (self.num_marks + 1) as u16;
+        let num_states = self.accepting.len();
+        let num_classes = self.num_classes;
+
+        (0..num_states)
+            .map(|state| {
+                if !self.accepting[state] {
+                    return None;
+                }
+                let mut stamp_marks: SmallVec<[u16; 4]> = SmallVec::new();
+                let mut byte_bitmap = [0u64; 4];
+                let mut initialized = false;
+
+                for b in 0u8..=255u8 {
+                    let class = self.byte_to_class[b as usize] as usize;
+                    let idx = state * num_classes + class;
+                    if self.transitions[idx] as usize != state {
+                        continue; // not a self-loop
+                    }
+                    let moves = &self.transition_moves[idx];
+                    if moves.is_empty() {
+                        continue; // no stamp ops
+                    }
+                    if moves.iter().any(|op| op.src != curpos_lane) {
+                        continue; // not all curpos-stamps
+                    }
+                    let class_marks: SmallVec<[u16; 4]> =
+                        moves.iter().map(|op| op.dst).collect();
+                    if !initialized {
+                        stamp_marks = class_marks;
+                        initialized = true;
+                    } else if stamp_marks != class_marks {
+                        return None; // inconsistent targets across classes
+                    }
+                    byte_bitmap[b as usize >> 6] |= 1u64 << (b as usize & 63);
+                }
+
+                if !initialized {
+                    return None;
+                }
+                Some(PosStampLoop { stamp_marks, byte_bitmap })
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice()
     }
 
     /// Build the capture-free fast-loop transition table (see
@@ -1542,6 +1617,12 @@ impl Tdfa {
     /// back to interpreting [`transition_commands`](Self::transition_commands)).
     pub fn has_moves(&self) -> bool {
         !self.transition_moves.is_empty()
+    }
+
+    /// Per-state position-stamp self-loop table.  Indexed by state ID.
+    /// Returns an empty slice when `transition_moves` was not compiled.
+    pub(crate) fn pos_stamp_loops(&self) -> &[Option<PosStampLoop>] {
+        &self.pos_stamp_loops
     }
 
     /// Apply the optional optimization passes (state minimization + register

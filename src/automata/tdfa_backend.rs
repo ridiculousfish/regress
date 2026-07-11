@@ -16,6 +16,7 @@ use crate::automata::nfa::FULL_MATCH_START;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{
     EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
+    PosStampLoop,
 };
 use crate::insn::StartPredicate;
 use crate::util::DebugCheckIndex;
@@ -475,8 +476,14 @@ fn run_anchored<C: TdfaExecConfig>(
         }
         state = estate / num_classes as u32;
     } else {
-    for (i, &byte) in input[loop_start..].iter().enumerate() {
-        let pos = loop_start + i;
+    let pos_stamp_loops: &[Option<PosStampLoop>] = if !C::HAS_PERBYTE_GUARDS && !skip_marks && use_moves {
+        tdfa.pos_stamp_loops()
+    } else {
+        &[]
+    };
+    let mut pos = loop_start;
+    'byte_loop: while pos < input.len() {
+        let byte = *input.iat(pos);
         let class = *byte_to_class.iat(byte as usize) as usize;
         let idx = state as usize * num_classes + class;
         let next = *transitions.iat(idx);
@@ -517,6 +524,38 @@ fn run_anchored<C: TdfaExecConfig>(
                 C::HAS_PERBYTE_GUARDS || *accept_fallback.iat(state as usize),
                 &mut read_live,
             );
+            // Position-stamp self-loop peel: if this accepting state's
+            // self-loop only stamps curpos → marks, scan ahead to the run
+            // end and stamp once instead of once per byte.
+            if let Some(psl) = pos_stamp_loops.get(state as usize).and_then(Option::as_ref) {
+                let bitmap = &psl.byte_bitmap;
+                let mut p = pos + 1;
+                while p < input.len() {
+                    let b = *input.iat(p) as usize;
+                    if (bitmap[b >> 6] >> (b & 63)) & 1 == 0 {
+                        break;
+                    }
+                    p += 1;
+                }
+                if p > pos + 1 {
+                    *src_buf.mat(curpos_lane) = p;
+                    for &mark_idx in &psl.stamp_marks {
+                        *src_buf.mat(mark_idx as usize) = p;
+                    }
+                    record_accept(
+                        &mut last_accept,
+                        best_snap,
+                        p,
+                        src_buf,
+                        tdfa.finals().iat(state as usize),
+                        has_captures,
+                        *accept_fallback.iat(state as usize),
+                        &mut read_live,
+                    );
+                    pos = p;
+                    continue 'byte_loop;
+                }
+            }
         }
         if C::HAS_PERBYTE_GUARDS && !tdfa.guards(state).accepts.is_empty() {
             let sig = boundary_signature(input, pos + 1, word_icase);
@@ -533,6 +572,7 @@ fn run_anchored<C: TdfaExecConfig>(
                 &mut read_live,
             );
         }
+        pos += 1;
     }
     }
 
