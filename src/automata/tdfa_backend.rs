@@ -145,6 +145,92 @@ fn scan_ascii_ranges_stop_sse2(
     pos
 }
 
+/// Run the pos-stamp PSL scan from `start`; return the first position outside
+/// the self-loop set (or `input.len()` if the entire tail is in-set).
+/// Returns `start` immediately when `input[start]` is not in the set.
+#[inline(always)]
+fn scan_pos_stamp(psl: &PosStampLoop, input: &[u8], start: usize) -> usize {
+    match &psl.fast {
+        ScanFast::Memchr { count, bytes } => match count {
+            0 => input.len(),
+            1 => memchr::memchr(bytes[0], &input[start..])
+                .map(|i| start + i)
+                .unwrap_or(input.len()),
+            2 => memchr::memchr2(bytes[0], bytes[1], &input[start..])
+                .map(|i| start + i)
+                .unwrap_or(input.len()),
+            _ => memchr::memchr3(bytes[0], bytes[1], bytes[2], &input[start..])
+                .map(|i| start + i)
+                .unwrap_or(input.len()),
+        },
+        ScanFast::AsciiBarrier { count, bytes } => {
+            let b0 = bytes[0];
+            let b1 = bytes[1];
+            let end = match count {
+                0 => input[start..].iter().position(|&b| b >= 0x80),
+                1 => input[start..].iter().position(|&b| b >= 0x80 || b == b0),
+                _ => input[start..].iter().position(|&b| b >= 0x80 || b == b0 || b == b1),
+            };
+            end.map(|i| start + i).unwrap_or(input.len())
+        },
+        ScanFast::AsciiRanges { count, pairs, bm0, bm1 } => {
+            #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
+            let p = scan_ascii_ranges_sse2(input, start, *count, pairs, *bm0, *bm1);
+            #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
+            let p = {
+                let mut p = start;
+                while p < input.len() {
+                    let b = *input.iat(p) as usize;
+                    if b >= 0x80 { break; }
+                    let word = if b < 0x40 { *bm0 } else { *bm1 };
+                    if (word >> (b & 63)) & 1 == 0 { break; }
+                    p += 1;
+                }
+                p
+            };
+            p
+        },
+        ScanFast::BitmapAscii { bm0, bm1 } => {
+            let mut p = start;
+            while p < input.len() {
+                let b = *input.iat(p) as usize;
+                if b >= 0x80 { break; }
+                let word = if b < 0x40 { *bm0 } else { *bm1 };
+                if (word >> (b & 63)) & 1 == 0 { break; }
+                p += 1;
+            }
+            p
+        },
+        ScanFast::AsciiRangesStop { count, pairs, bm0, bm1 } => {
+            #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
+            let p = scan_ascii_ranges_stop_sse2(input, start, *count, pairs, *bm0, *bm1);
+            #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
+            let p = {
+                let mut p = start;
+                while p < input.len() {
+                    let b = *input.iat(p) as usize;
+                    if b < 0x80 {
+                        let word = if b < 0x40 { *bm0 } else { *bm1 };
+                        if (word >> (b & 63)) & 1 == 0 { break; }
+                    }
+                    p += 1;
+                }
+                p
+            };
+            p
+        },
+        ScanFast::Bitmap => {
+            let bitmap = &psl.byte_bitmap;
+            let mut p = start;
+            while p < input.len() {
+                let b = *input.iat(p) as usize;
+                if (bitmap[b >> 6] >> (b & 63)) & 1 == 0 { break; }
+                p += 1;
+            }
+            p
+        },
+    }
+}
 
 /// Compile-time switches that let [`execute_generic`] drop cold sites it can
 /// statically prove the current automaton can't hit. Each realized combination
@@ -639,6 +725,11 @@ fn run_anchored<C: TdfaExecConfig>(
     } else {
         &[]
     };
+    let psl_ascii_bms: &[(u64, u64)] = if !C::HAS_PERBYTE_GUARDS && !C::SKIP_MARKS && C::HAS_MOVES {
+        tdfa.psl_ascii_bms()
+    } else {
+        &[]
+    };
     let mut pos = loop_start;
     'byte_loop: while pos < input.len() {
         // Scan-skip / scan-stamp: if the current state is a non-accepting
@@ -760,7 +851,7 @@ fn run_anchored<C: TdfaExecConfig>(
             if pos >= input.len() {
                 break; // byte loop exhausted — let EOI accept path run
             }
-        }
+        } // end if let Some(ss) = scan_skips
         let byte = *input.iat(pos);
         let class = *byte_to_class.iat(byte as usize) as usize;
         let idx = state as usize * num_classes + class;
@@ -805,122 +896,96 @@ fn run_anchored<C: TdfaExecConfig>(
         };
         if is_accepting {
             let needs_snapshot = if C::HAS_PERBYTE_GUARDS {
-                true  // always snapshot under per-byte guards
+                true
             } else {
                 tf & TF_FALLBACK != 0
             };
-            record_accept(
-                &mut last_accept,
-                best_snap,
-                pos + 1,
-                src_buf,
-                tdfa.finals().iat(state as usize),
-                has_captures,
-                needs_snapshot,
-                &mut read_live,
-            );
-            // Position-stamp self-loop peel: if this accepting state's
-            // self-loop only stamps curpos → marks, scan ahead to the run
-            // end and stamp once instead of once per byte.
-            if let Some(psl) = pos_stamp_loops.get(state as usize).and_then(Option::as_ref) {
+            // PSL peek: for ASCII-only PSL states, check the next byte before
+            // committing. If it's not in the self-loop set the scan returns
+            // p=start immediately; skip both the scan and the wasted first
+            // record_accept. If it is in-set, run the scan and record once at
+            // the final position (eliminating the wasted record_accept at pos+1
+            // that the old two-call path always emitted).
+            let (psl_bm0, psl_bm1) = psl_ascii_bms
+                .get(state as usize)
+                .copied()
+                .unwrap_or((0, 0));
+            if (psl_bm0 | psl_bm1) != 0 {
                 let start = pos + 1;
-                let p = match &psl.fast {
-                    ScanFast::Memchr { count, bytes } => match count {
-                        0 => input.len(),
-                        1 => memchr::memchr(bytes[0], &input[start..]).map(|i| start + i).unwrap_or(input.len()),
-                        2 => memchr::memchr2(bytes[0], bytes[1], &input[start..]).map(|i| start + i).unwrap_or(input.len()),
-                        _ => memchr::memchr3(bytes[0], bytes[1], bytes[2], &input[start..]).map(|i| start + i).unwrap_or(input.len()),
-                    },
-                    ScanFast::AsciiBarrier { count, bytes } => {
-                        let b0 = bytes[0];
-                        let b1 = bytes[1];
-                        let end = match count {
-                            0 => input[start..].iter().position(|&b| b >= 0x80),
-                            1 => input[start..].iter().position(|&b| b >= 0x80 || b == b0),
-                            _ => input[start..].iter().position(|&b| b >= 0x80 || b == b0 || b == b1),
-                        };
-                        end.map(|i| start + i).unwrap_or(input.len())
-                    },
-                    ScanFast::AsciiRanges { count, pairs, bm0, bm1 } => {
-                        #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
-                        let p = scan_ascii_ranges_sse2(input, start, *count, pairs, *bm0, *bm1);
-                        #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
-                        let p = {
-                            let mut p = start;
-                            while p < input.len() {
-                                let b = *input.iat(p) as usize;
-                                if b >= 0x80 { break; }
-                                let word = if b < 0x40 { *bm0 } else { *bm1 };
-                                if (word >> (b & 63)) & 1 == 0 { break; }
-                                p += 1;
-                            }
-                            p
-                        };
-                        p
-                    },
-                    ScanFast::BitmapAscii { bm0, bm1 } => {
-                        let mut p = start;
-                        while p < input.len() {
-                            let b = *input.iat(p) as usize;
-                            if b >= 0x80 {
-                                break;
-                            }
-                            let word = if b < 0x40 { *bm0 } else { *bm1 };
-                            if (word >> (b & 63)) & 1 == 0 {
-                                break;
-                            }
-                            p += 1;
-                        }
-                        p
-                    },
-                    ScanFast::AsciiRangesStop { count, pairs, bm0, bm1 } => {
-                        #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
-                        let p = scan_ascii_ranges_stop_sse2(input, start, *count, pairs, *bm0, *bm1);
-                        #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
-                        let p = {
-                            let mut p = start;
-                            while p < input.len() {
-                                let b = *input.iat(p) as usize;
-                                if b < 0x80 {
-                                    let word = if b < 0x40 { *bm0 } else { *bm1 };
-                                    if (word >> (b & 63)) & 1 == 0 { break; }
-                                }
-                                p += 1;
-                            }
-                            p
-                        };
-                        p
-                    },
-                    ScanFast::Bitmap => {
-                        let bitmap = &psl.byte_bitmap;
-                        let mut p = start;
-                        while p < input.len() {
-                            let b = *input.iat(p) as usize;
-                            if (bitmap[b >> 6] >> (b & 63)) & 1 == 0 {
-                                break;
-                            }
-                            p += 1;
-                        }
-                        p
-                    },
+                let next_in_set = start < input.len() && {
+                    let b = *input.iat(start) as usize;
+                    b < 0x80 && (({
+                        let w = if b < 0x40 { psl_bm0 } else { psl_bm1 };
+                        (w >> (b & 63)) & 1
+                    }) != 0)
                 };
-                if p > start {
-                    *src_buf.mat(curpos_lane) = p;
-                    for &mark_idx in &psl.stamp_marks {
-                        *src_buf.mat(mark_idx as usize) = p;
+                if next_in_set {
+                    // psl_ascii_bms nonzero ↔ pos_stamp_loops[state] is Some.
+                    let psl = pos_stamp_loops[state as usize].as_ref().unwrap();
+                    let p = scan_pos_stamp(psl, input, start);
+                    if p > start {
+                        *src_buf.mat(curpos_lane) = p;
+                        for &mark_idx in &psl.stamp_marks {
+                            *src_buf.mat(mark_idx as usize) = p;
+                        }
+                        record_accept(
+                            &mut last_accept,
+                            best_snap,
+                            p,
+                            src_buf,
+                            tdfa.finals().iat(state as usize),
+                            has_captures,
+                            psl.needs_snapshot,
+                            &mut read_live,
+                        );
+                        pos = p;
+                        continue 'byte_loop;
                     }
-                    record_accept(
-                        &mut last_accept,
-                        best_snap,
-                        p,
-                        src_buf,
-                        tdfa.finals().iat(state as usize),
-                        has_captures,
-                        psl.needs_snapshot,
-                        &mut read_live,
-                    );
-                    pos = p;
-                    continue 'byte_loop;
+                    // p == start despite peek: fall through to plain accept.
+                }
+                record_accept(
+                    &mut last_accept,
+                    best_snap,
+                    pos + 1,
+                    src_buf,
+                    tdfa.finals().iat(state as usize),
+                    has_captures,
+                    needs_snapshot,
+                    &mut read_live,
+                );
+            } else {
+                // PSL-None or non-ASCII PSL: original two-call path.
+                record_accept(
+                    &mut last_accept,
+                    best_snap,
+                    pos + 1,
+                    src_buf,
+                    tdfa.finals().iat(state as usize),
+                    has_captures,
+                    needs_snapshot,
+                    &mut read_live,
+                );
+                if let Some(psl) = pos_stamp_loops.get(state as usize).and_then(Option::as_ref) {
+                    let start = pos + 1;
+                    let p = scan_pos_stamp(psl, input, start);
+                    if p > start {
+                        *src_buf.mat(curpos_lane) = p;
+                        for &mark_idx in &psl.stamp_marks {
+                            *src_buf.mat(mark_idx as usize) = p;
+                        }
+                        record_accept(
+                            &mut last_accept,
+                            best_snap,
+                            p,
+                            src_buf,
+                            tdfa.finals().iat(state as usize),
+                            has_captures,
+                            psl.needs_snapshot,
+                            &mut read_live,
+                        );
+                        pos = p;
+                        continue 'byte_loop;
+                    }
                 }
             }
         }

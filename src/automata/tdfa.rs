@@ -1215,6 +1215,16 @@ pub struct Tdfa {
     /// targets.  Empty slice when `transition_moves` was not compiled.
     pos_stamp_loops: Box<[Option<PosStampLoop>]>,
 
+    /// Per-state ASCII bitmap pair for the PSL byte set.  Indexed by state ID.
+    /// For PSL-Some ASCII-only states: `(byte_bitmap[0], byte_bitmap[1])` — the
+    /// two 64-bit words covering the ASCII range (bytes 0x00–0x7F) of the
+    /// self-loop set.  `(0, 0)` for PSL-None states or states whose PSL set
+    /// includes non-ASCII bytes.
+    ///
+    /// Stride is 16 bytes = `state << 4`, no multiply.  The executor uses this
+    /// to peek at the next byte before committing to the full PSL scan.
+    psl_ascii_bms: Box<[(u64, u64)]>,
+
     /// Per-state scan-skip info.  Indexed by state ID.  `Some` only for
     /// non-accepting states that have at least one self-loop transition with
     /// empty move ops — the executor can bypass those bytes entirely.
@@ -1683,6 +1693,7 @@ impl Tdfa {
             entry_moves_anchored: Box::default(),
             entry_moves_unanchored: Box::default(),
             pos_stamp_loops: Box::default(),
+            psl_ascii_bms: Box::default(),
             scan_skips: Box::default(),
         };
         tdfa.compile_moves_all();
@@ -1709,6 +1720,7 @@ impl Tdfa {
             self.entry_moves_anchored = Box::default();
             self.entry_moves_unanchored = Box::default();
             self.pos_stamp_loops = Box::default();
+            self.psl_ascii_bms = Box::default();
             self.scan_skips = Box::default();
             return;
         }
@@ -1722,6 +1734,23 @@ impl Tdfa {
         self.entry_moves_unanchored =
             compile_moves(&self.entry_commands_unanchored, num_marks);
         self.pos_stamp_loops = self.compute_pos_stamp_loops();
+        self.psl_ascii_bms = self
+            .pos_stamp_loops
+            .iter()
+            .map(|opt| match opt {
+                None => (0u64, 0u64),
+                Some(psl) => {
+                    // Only emit non-zero bitmaps for ASCII-only PSL sets (bytes[2]/[3] = 0).
+                    // The executor treats (0,0) as "no peek optimisation" — non-ASCII PSL
+                    // sets fall back to the old scan path.
+                    if psl.byte_bitmap[2] == 0 && psl.byte_bitmap[3] == 0 {
+                        (psl.byte_bitmap[0], psl.byte_bitmap[1])
+                    } else {
+                        (0, 0)
+                    }
+                }
+            })
+            .collect();
         self.scan_skips = self.compute_scan_skips();
     }
 
@@ -1955,6 +1984,13 @@ impl Tdfa {
     /// Returns an empty slice when `transition_moves` was not compiled.
     pub(crate) fn pos_stamp_loops(&self) -> &[Option<PosStampLoop>] {
         &self.pos_stamp_loops
+    }
+
+    /// Per-state ASCII bitmap pair for the PSL byte set.  `(0,0)` for PSL-None
+    /// states or PSL sets that include non-ASCII bytes.  Indexed by state ID;
+    /// 16-byte stride (`state << 4`), no multiply.
+    pub(crate) fn psl_ascii_bms(&self) -> &[(u64, u64)] {
+        &self.psl_ascii_bms
     }
 
     /// Per-state scan-skip table.  Indexed by state ID.
