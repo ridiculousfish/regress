@@ -1,0 +1,5 @@
+error: regex!: Unbalanced parenthesis
+ --> tests/ui/syntax_error.rs:2:35
+  |
+2 |     let _ = regress_macro::regex!("(unclosed");
+  |                                   ^^^^^^^^^^^

@@ -28,6 +28,7 @@ mod aarch64;
 mod x86_64;
 
 use crate::automata::nfa_backend::NfaMatch;
+use crate::automata::tdfa::plan::{self, Dispatch};
 use crate::automata::tdfa::{TDFA_DEAD_STATE, Tdfa};
 use crate::automata::tdfa_backend::{self, PrefixSkip, Scratch};
 use asm::{Assembler, Label};
@@ -372,84 +373,12 @@ fn lower<A: Assembler>(
     }
 }
 
-/// Max number of byte-range compares before a state prefers the jump table.
-/// Below this, a compare-chain on the raw byte (no class table, no jump-table
-/// memory access) is cheaper; above it, the table's constant cost wins. Tunable.
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-const RANGE_DISPATCH_THRESHOLD: usize = 8;
-
 /// Max self-runs for which a peeled state gets the SIMD skip prelude. Bounds the
 /// inline per-vector membership test (each run is a few vector ops); above this,
 /// the scalar peel alone is used. Real wide self-loops (`.` `[^"]` `\w` `[a-z]`)
 /// are well under this.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const SIMD_MAX_SELF_RUNS: usize = 4;
-
-/// How a state dispatches on the next input byte.
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-enum Dispatch {
-    /// Every byte dead-ends — branch straight to `done`, skipping the fetch.
-    AllDone,
-    /// Sparse: a compare-chain on raw byte ranges, falling through to `default`.
-    Ranges {
-        runs: Vec<(u8, u8, Label)>,
-        default: Label,
-    },
-    /// Dense: load the byte class and indirect-branch through the jump table.
-    Table,
-}
-
-/// Decide how a state dispatches. `target_of(class)` resolves a byte class to
-/// the label it branches to (a state block, a capture move stub, or `done`).
-/// Coalesces the per-byte targets into runs, picks the most-covered target as
-/// the fall-through `default` (so e.g. `[^x]` tests only `x`), and chooses the
-/// compare-chain when there are few enough runs, else the jump table.
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-fn analyze_dispatch(
-    byte_to_class: &[u8; 256],
-    done: Label,
-    target_of: impl Fn(usize) -> Label,
-) -> Dispatch {
-    let byte_target: Vec<Label> =
-        (0..256).map(|b| target_of(byte_to_class[b] as usize)).collect();
-    // Coalesce contiguous equal labels into runs.
-    let mut runs: Vec<(u8, u8, Label)> = Vec::new();
-    let mut i = 0usize;
-    while i < 256 {
-        let lbl = byte_target[i];
-        let lo = i;
-        while i + 1 < 256 && byte_target[i + 1] == lbl {
-            i += 1;
-        }
-        runs.push((lo as u8, i as u8, lbl));
-        i += 1;
-    }
-    // Most-covered label becomes the fall-through default (fewest compares).
-    let mut coverage: Vec<(Label, usize)> = Vec::new();
-    for &(lo, hi, lbl) in &runs {
-        let width = hi as usize - lo as usize + 1;
-        match coverage.iter_mut().find(|(l, _)| *l == lbl) {
-            Some(e) => e.1 += width,
-            None => coverage.push((lbl, width)),
-        }
-    }
-    let default = coverage
-        .iter()
-        .max_by_key(|(_, bytes)| *bytes)
-        .map_or(done, |(l, _)| *l);
-    let nondefault: Vec<(u8, u8, Label)> =
-        runs.into_iter().filter(|&(_, _, l)| l != default).collect();
-    if nondefault.is_empty() && default == done {
-        Dispatch::AllDone
-    } else if nondefault.len() <= RANGE_DISPATCH_THRESHOLD {
-        Dispatch::Ranges {
-            runs: nondefault,
-            default,
-        }
-    } else {
-        Dispatch::Table
-    }
-}
 
 /// Emit one state's per-byte dispatch through `A` given its [`Dispatch`] plan.
 /// `eoi` is where the state jumps when input is exhausted: normally the shared
@@ -459,7 +388,13 @@ fn analyze_dispatch(
 /// it; an `AllDone` state branches straight to `done` and needs the check only
 /// when it has a `$` accept to record (`eoi != done`).
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-fn emit_dispatch<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, done: Label, eoi: Label) {
+fn emit_dispatch<A: Assembler>(
+    asm: &mut A,
+    plan: &Dispatch<Label>,
+    jt: Label,
+    done: Label,
+    eoi: Label,
+) {
     match plan {
         Dispatch::AllDone => {
             if eoi != done {
@@ -481,39 +416,12 @@ fn emit_dispatch<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, done: La
     }
 }
 
-/// Coalesced byte ranges `[lo, hi]` on which state `s` self-loops
-/// (`transitions[s][class(byte)] == s`). Empty when `s` has no self-transition.
-/// These are the bytes the peeled hot loop tests inline before falling through
-/// to the state's regular exit dispatch.
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-fn self_loop_runs(
-    byte_to_class: &[u8; 256],
-    transitions: &[crate::automata::tdfa::TdfaStateId],
-    nc: usize,
-    s: usize,
-) -> Vec<(u8, u8)> {
-    let is_self = |b: usize| transitions[s * nc + byte_to_class[b] as usize] == s as u32;
-    let mut runs: Vec<(u8, u8)> = Vec::new();
-    let mut b = 0usize;
-    while b < 256 {
-        if is_self(b) {
-            let lo = b;
-            while b + 1 < 256 && is_self(b + 1) {
-                b += 1;
-            }
-            runs.push((lo as u8, b as u8));
-        }
-        b += 1;
-    }
-    runs
-}
-
 /// Emit only the dispatch *tail* of a state's plan (no `eoi_check`, no
 /// `fetch_byte` — the caller has already loaded the byte and advanced `pos`).
 /// Used on the peeled self-loop exit path, which reaches here only for bytes
 /// that leave the state.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-fn emit_dispatch_tail<A: Assembler>(asm: &mut A, plan: &Dispatch, jt: Label, done: Label) {
+fn emit_dispatch_tail<A: Assembler>(asm: &mut A, plan: &Dispatch<Label>, jt: Label, done: Label) {
     match plan {
         Dispatch::AllDone => asm.branch(done),
         Dispatch::Ranges { runs, default } => asm.dispatch_byte_ranges(runs, *default),
@@ -594,7 +502,7 @@ fn emit_peeled_self_loop<A: Assembler>(
     runs: &[(u8, u8)],
     loop_top: Label,
     accept: &PeelAccept,
-    plan: &Dispatch,
+    plan: &Dispatch<Label>,
     jt: Label,
     done: Label,
 ) {
@@ -634,25 +542,6 @@ fn emit_peeled_self_loop<A: Assembler>(
         accept.emit(asm, false); // record at pos (== end)
         asm.branch(done);
     }
-}
-
-/// The complement of `runs` over the full byte range: the coalesced ranges on
-/// which a peeled state *exits* its self-loop. `runs` must be sorted ascending
-/// and non-overlapping (as produced by [`self_loop_runs`]).
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-fn complement_runs(runs: &[(u8, u8)]) -> Vec<(u8, u8)> {
-    let mut out = Vec::new();
-    let mut next = 0u32;
-    for &(lo, hi) in runs {
-        if (lo as u32) > next {
-            out.push((next as u8, lo - 1));
-        }
-        next = hi as u32 + 1;
-    }
-    if next <= 255 {
-        out.push((next as u8, 255));
-    }
-    out
 }
 
 /// Emit a peeled self-loop whose self edges all apply the same pure
@@ -697,7 +586,7 @@ fn emit_peeled_stamp_loop<A: Assembler>(
     runs: &[(u8, u8)],
     dsts: &[u16],
     accept: &PeelAccept,
-    plan: &Dispatch,
+    plan: &Dispatch<Label>,
     jt: Label,
     done: Label,
 ) {
@@ -707,7 +596,7 @@ fn emit_peeled_stamp_loop<A: Assembler>(
     // Test the *exit* set with the self set as the fall-through: the hot loop
     // then runs on untaken compares (e.g. `[^"]*` tests only `"` + non-ASCII).
     let exit_runs: Vec<(u8, u8, Label)> =
-        complement_runs(runs).into_iter().map(|(lo, hi)| (lo, hi, ft)).collect();
+        plan::complement_runs(runs).into_iter().map(|(lo, hi)| (lo, hi, ft)).collect();
     // Entry header: consume the first byte before any stamp. Binding
     // `dispatch_byte_ranges`'s default right after elides its branch
     // (fall-through), here and in the loop below.
@@ -742,37 +631,6 @@ fn emit_peeled_stamp_loop<A: Assembler>(
         accept.emit(asm, false); // record at pos (== end)
         asm.branch(done);
     }
-}
-
-/// States reachable from the automaton's entry points, following live (non-dead)
-/// transitions. Unreachable state blocks are pointed at by nothing, so the
-/// driver skips emitting them. Seeds from both starts, plus `extra_seed` — the
-/// warm-start `post_state` the prologue can branch straight into, which the cold
-/// starts might not reach.
-#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
-fn reachable_states(tdfa: &Tdfa, extra_seed: Option<usize>) -> Vec<bool> {
-    let nc = tdfa.num_classes();
-    let num_states = tdfa.num_states();
-    let transitions = tdfa.transitions();
-    let mut seen = vec![false; num_states];
-    let mut stack: Vec<usize> = Vec::new();
-    let seeds = [Some(tdfa.start(0) as usize), Some(tdfa.start(1) as usize), extra_seed];
-    for s in seeds.into_iter().flatten() {
-        if s < num_states && !seen[s] {
-            seen[s] = true;
-            stack.push(s);
-        }
-    }
-    while let Some(s) = stack.pop() {
-        for &t in &transitions[s * nc..s * nc + nc] {
-            let t = t as usize;
-            if t != TDFA_DEAD_STATE as usize && t < num_states && !seen[t] {
-                seen[t] = true;
-                stack.push(t);
-            }
-        }
-    }
-    seen
 }
 
 /// The arch-independent codegen driver: walk `tdfa` and emit the capture-free
@@ -830,9 +688,9 @@ fn emit_capture_free<A: Assembler>(
 
     // Decide each state's dispatch up front (also tells us which states need a
     // jump table).
-    let plans: Vec<Dispatch> = (0..num_states)
+    let plans: Vec<Dispatch<Label>> = (0..num_states)
         .map(|s| {
-            analyze_dispatch(byte_to_class, done, |c| {
+            plan::analyze_dispatch(byte_to_class, done, |c| {
                 let t = transitions[s * nc + c];
                 if t == TDFA_DEAD_STATE {
                     done
@@ -850,26 +708,10 @@ fn emit_capture_free<A: Assembler>(
     // the cold start.
     // Only emit blocks reachable from the entry points (incl. the warm-start
     // post_state); unreachable state blocks are referenced by nothing.
-    let reachable = reachable_states(tdfa, skip.map(|s| s.post_state as usize));
-    // Decide whether state `s`'s self-loop is worth peeling, returning its self
-    // byte-runs if so. Worth it when: the self-set is a handful of runs (so the
-    // inline test is cheap), the state has no `$`-accept EOI landing pad (whose
-    // accept the peel doesn't emit), and either the state uses the indirect
-    // `Table` dispatch (peel removes the class-table load + indirect branch on
-    // the self path) or it's an accepting `Ranges` state (peel hoists the
-    // per-byte `record_accept` out of the loop).
-    let should_peel = |s: usize| -> Option<Vec<(u8, u8)>> {
-        if eoi_stub[s].is_some() {
-            return None;
-        }
-        let runs = self_loop_runs(byte_to_class, transitions, nc, s);
-        if runs.is_empty() || runs.len() > RANGE_DISPATCH_THRESHOLD {
-            return None;
-        }
-        let worth = matches!(plans[s], Dispatch::Table)
-            || (accepting[s] && matches!(plans[s], Dispatch::Ranges { .. }));
-        worth.then_some(runs)
-    };
+    let reachable = plan::reachable_states(tdfa, skip.map(|s| s.post_state as usize));
+    // Whether state `s`'s self-loop is worth peeling (see `plan::peel_capture_free`).
+    let should_peel =
+        |s: usize| plan::peel_capture_free(tdfa, s, eoi_stub[s].is_some(), &plans[s]);
 
     let warm = warm_entry(skip, &block);
     asm.prologue(classtab, block[start_anchored], block[start_unanchored], warm);
@@ -1025,9 +867,9 @@ fn emit_capture<A: Assembler>(
     }
 
     // Dispatch plan per state (a move-edge resolves to its stub label).
-    let plans: Vec<Dispatch> = (0..num_states)
+    let plans: Vec<Dispatch<Label>> = (0..num_states)
         .map(|s| {
-            analyze_dispatch(byte_to_class, done, |c| {
+            plan::analyze_dispatch(byte_to_class, done, |c| {
                 let idx = s * nc + c;
                 let t = transitions[idx];
                 if t == TDFA_DEAD_STATE {
@@ -1044,7 +886,7 @@ fn emit_capture<A: Assembler>(
     // Only emit blocks reachable from the entry points (incl. the warm-start
     // post_state). A stub is emitted only when a reachable state points at it;
     // its target is then reachable too, so `block[target]` below is always bound.
-    let reachable = reachable_states(tdfa, skip.map(|s| s.post_state as usize));
+    let reachable = plan::reachable_states(tdfa, skip.map(|s| s.post_state as usize));
     let mut referenced_stubs: HashSet<u32> = HashSet::new();
     for s in 0..num_states {
         if !reachable[s] {
@@ -1057,48 +899,9 @@ fn emit_capture<A: Assembler>(
         }
     }
 
-    // Decide whether state `s`'s self-loop is worth peeling, returning its self
-    // byte-runs and the position-stamp lanes its self edges write. Peelable
-    // when every self edge carries the *same* move sequence made purely of
-    // position stamps (`src == curpos`, so the mark value depends only on the
-    // final `pos` — the peeled loop applies them once per scalar byte / SIMD
-    // bulk advance instead of through a move stub per byte). Moveless self
-    // edges are the `dsts = []` case of the same scheme. A self edge with a
-    // mark-to-mark copy (order-sensitive) declines. (No `eoi_stub` gate here:
-    // the capture tier declines `has_eoi_accepts` outright.) Worth it for a
-    // `Table` state (sheds the class-table load + indirect branch), an
-    // accepting state (hoists `cap_record_accept` and, for fallback accepts,
-    // the whole mark-file snapshot loop out of the loop), or a stamping loop
-    // (sheds the per-byte stub bounce and enables the SIMD skip).
-    let should_peel = |s: usize| -> Option<(Vec<(u8, u8)>, Vec<u16>)> {
-        let mut self_moves: Option<&[crate::automata::tdfa::MoveOp]> = None;
-        for c in 0..nc {
-            let idx = s * nc + c;
-            if transitions[idx] != s as u32 {
-                continue;
-            }
-            let mv = &trans_moves[idx][..];
-            if mv.iter().any(|m| m.src as u32 != curpos_idx) {
-                return None; // mark-to-mark copies: not pure stamps
-            }
-            match self_moves {
-                None => self_moves = Some(mv),
-                Some(prev) => {
-                    if prev.iter().map(|m| (m.dst, m.src)).ne(mv.iter().map(|m| (m.dst, m.src))) {
-                        return None; // self edges disagree on their moves
-                    }
-                }
-            }
-        }
-        let dsts: Vec<u16> = self_moves?.iter().map(|m| m.dst).collect();
-        let runs = self_loop_runs(byte_to_class, transitions, nc, s);
-        if runs.is_empty() || runs.len() > RANGE_DISPATCH_THRESHOLD {
-            return None;
-        }
-        let worth =
-            matches!(plans[s], Dispatch::Table) || accepting[s] || !dsts.is_empty();
-        worth.then_some((runs, dsts))
-    };
+    // Whether state `s`'s self-loop is worth peeling, and the position-stamp
+    // lanes its self edges write (see `plan::peel_capture`).
+    let should_peel = |s: usize| plan::peel_capture(tdfa, s, &plans[s]);
 
     let warm = warm_entry(skip, &block);
     asm.cap_prologue(classtab, block[start_anchored], block[start_unanchored], warm);

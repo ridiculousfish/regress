@@ -1,0 +1,5 @@
+error: regex!: multiline anchors and word boundaries are not yet supported by the ahead-of-time compiler; use regress::Regex for this pattern
+ --> tests/ui/word_boundary.rs:2:35
+  |
+2 |     let _ = regress_macro::regex!(r"\bword");
+  |                                   ^^^^^^^^^

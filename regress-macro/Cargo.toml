@@ -1,0 +1,23 @@
+[package]
+name = "regress-macro"
+version = "0.1.0"
+authors = ["ridiculousfish <corydoras@ridiculousfish.com>"]
+description = "regex! proc-macro: regress regexes compiled to Rust ahead of time"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/ridiculousfish/regress"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+# Exact-version pin: the generated code links against `regress::__codegen`,
+# which is doc(hidden) and semver-exempt — emitter and runtime must agree.
+regress = { path = "..", version = "=0.11.1", features = ["codegen"] }
+syn = { version = "2", default-features = false, features = ["parsing", "proc-macro", "printing"] }
+proc-macro2 = "1"
+
+[dev-dependencies]
+# The integration tests link generated code against the same regress.
+regress = { path = "..", version = "=0.11.1", features = ["codegen"] }
+trybuild = "1"

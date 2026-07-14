@@ -10,7 +10,7 @@ edition = "2024"
 readme = "README.md"
 
 [workspace]
-members = ["regress-tool", "gen-unicode", "."]
+members = ["regress-tool", "regress-macro", "gen-unicode", "."]
 default-members = ["regress-tool", "."]
 
 [profile.release]
@@ -52,6 +52,14 @@ tdfa-jit = ["nfa", "std", "dep:region", "prefilter-teddy"]
 # Adds `--dump-jit` disassembly of the generated TDFA-JIT code (via capstone).
 # A development aid only; off by default.
 tdfa-jit-dump = ["tdfa-jit", "dep:capstone"]
+
+# Enables the TDFA ahead-of-time compiler: `regress::codegen::compile_to_rust`
+# emits Rust source for a statically known pattern (consumed by the
+# `regress-macro` crate's `regex!` proc-macro) plus the `__codegen` runtime
+# module the generated code links against. Pulls in `prefilter-teddy` so the
+# strategy set is identical on the macro (host) and runtime (target) sides;
+# like `tdfa-jit`, this makes it incompatible with `prohibit-unsafe`.
+codegen = ["nfa", "std", "prefilter-teddy"]
 
 # Uses an aho-corasick Teddy (SIMD multi-substring) prefilter for
 # case-insensitive literals (e.g. `Sherlock`/i) instead of the single-rare-byte

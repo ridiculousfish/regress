@@ -1,0 +1,5 @@
+error: regex!: unsupported flag `x` (supported: imsuv)
+ --> tests/ui/bad_flag.rs:2:42
+  |
+2 |     let _ = regress_macro::regex!("abc", "x");
+  |                                          ^^^

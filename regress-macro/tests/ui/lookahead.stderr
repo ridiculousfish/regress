@@ -1,0 +1,5 @@
+error: regex!: Lookaround assertions not supported by the ahead-of-time compiler; use regress::Regex for this pattern
+ --> tests/ui/lookahead.rs:2:35
+  |
+2 |     let _ = regress_macro::regex!("(?=a)b");
+  |                                   ^^^^^^^^

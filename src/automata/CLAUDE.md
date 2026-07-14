@@ -32,6 +32,18 @@ the interpreter otherwise. Cross-check it against the backtracker oracle the
 same way; `--exec tdfa-jit` in `regress-tool` labels output `tdfa-jit` vs
 `tdfa-jit(interp)` so you can see which path ran.
 
+The optional `codegen` feature (off by default; implies `nfa`+`std`+
+`prefilter-teddy`, incompatible with `prohibit-unsafe`) adds the **AoT
+compiler**: `regress::codegen::compile_to_rust` lowers a built `TdfaProgram`
+to Rust *source* — the JIT's sibling with rustc as the backend. The
+`regress-macro` workspace crate's `regex!("pat", "flags")` proc-macro runs it
+at expansion time; generated code links against the doc(hidden)
+`regress::__codegen` runtime (prefilter drivers + `CompiledMatcher`). Unlike
+the JIT there is no interpreter fallback: unsupported patterns (per-byte
+guards, `$`+captures, backrefs/lookaround, size caps) are compile errors.
+Shared lowering decisions live in `tdfa/plan.rs` so JIT and rustgen agree;
+inspect output with `regress-tool --emit-rust` (feature `codegen`).
+
 ## Pipeline at a glance
 
 ```
@@ -65,6 +77,8 @@ ir::Regex (src/ir.rs)
 | `nfa_backend.rs` | Anchored NFA executor (Thompson simulation over bytes). | `execute` :193, `NfaMatch` :75 |
 | `tdfa_backend.rs` | Anchored TDFA byte-loop executor. Marks are `usize` byte offsets (single-impl `MarkElem`); one reusable `Scratch<usize>` per executor keeps `find_iter` allocation-free per match. Leftmost accept with Laurikari-style fallback snapshot. | `execute`, `run_anchored_dyn`, `Scratch` |
 | `tdfa/jit/` | **TDFA JIT** (feature `tdfa-jit`): hand-rolled native codegen that specializes a built `Tdfa` into machine code — states→code blocks, transitions→jump tables, `pos/end/input/acc` pinned in fixed registers. Two tiers: capture-free (the `exec_transitions` conditions) and anchored captures (inlined `MoveOp` stores + `finalize`, no fallback accepts). aarch64 + x86-64 encoders behind one `Assembler` trait; RX pages via `region`. | `JittedTdfa::compile`/`run`, `emit_capture_free`/`emit_capture` (drivers), `aarch64.rs`/`x86_64.rs` |
+| `tdfa/plan.rs` | Lowering analysis **shared by JIT and rustgen** (dispatch shape per state, self-loop peel decisions, reachability), generic over the backend's label type. Change lowering policy here, not in one backend. | `analyze_dispatch`, `peel_capture_free`, `peel_capture`, `reachable_states` |
+| `tdfa/rustgen/` | **AoT Rust-source emitter** (feature `codegen`): same two tiers as the JIT but emits text — states→`match` arms, peels→`while` loops LLVM vectorizes, `MoveOp`s→local-variable assignments, `finalize` unrolled per accepting state; the chosen prefilter `Strategy` is serialized into a `__codegen::PrefilterSpec` static (needles re-derived from the IR via the `prefilter.rs` detection helpers). Deterministic output; golden snapshots in `rustgen/snapshots/` double as executable oracle tests via `include!` (see `extern crate self as regress` in lib.rs). | `compile_to_rust`, `emit_expansion`, `verify.rs`, `prefilter.rs`, `tests.rs` |
 | `prefilter.rs` | `TdfaProgram` = automaton + a search `Strategy`: `WholeLiteral` (memmem only), `CaseFoldLiteral`, `Prefix` (+optional `PrefixSkip` warm-start), `ReverseInner`, `Scan` (plain unanchored). Selectivity gate `should_prefilter`. | `try_from_ir` :309, `should_prefilter` :286, `find_at` |
 | `reverse.rs` | Reverse NFA/DFA for required-suffix literals (`\w+\s+Holmes`). Walks back to the leftmost start, then forward-verifies. Bails on conditional eps edges. | `reverse_nfa`, `reverse_find_start` |
 | `casefold_search.rs` | SIMD case-insensitive literal scan: packed-pair on two rare anchor bytes (NEON on aarch64, SWAR fallback). Anchors chosen by `byte_frequencies`. | `CaseFoldSearcher` |

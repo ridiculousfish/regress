@@ -171,6 +171,27 @@ mod api;
 #[cfg(feature = "nfa")]
 pub mod automata;
 mod bytesearch;
+// Runtime support for ahead-of-time compiled matchers (the code `regex!`
+// emits links against this). Hidden and semver-exempt: `regress-macro` pins
+// the exact regress version.
+#[cfg(feature = "codegen")]
+#[doc(hidden)]
+#[path = "codegen_rt.rs"]
+pub mod __codegen;
+
+/// Ahead-of-time compilation of a statically known pattern to Rust source
+/// (feature `codegen`). Consumed by the `regress-macro` crate's `regex!`
+/// proc-macro; also reachable via `regress-tool --emit-rust` for inspection.
+#[cfg(feature = "codegen")]
+pub mod codegen {
+    pub use crate::automata::tdfa::rustgen::{EmitError, compile_to_rust};
+}
+
+// Let generated code's `::regress::__codegen` paths resolve inside this
+// crate's own tests, so the golden snapshot files can be `include!`d and
+// executed against the oracle.
+#[cfg(all(test, feature = "codegen"))]
+extern crate self as regress;
 mod charclasses;
 mod classicalbacktrack;
 mod codepointset;

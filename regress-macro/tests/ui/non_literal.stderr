@@ -1,0 +1,5 @@
+error: regex! expects a string literal pattern: regex!("pat") or regex!("pat", "flags")
+ --> tests/ui/non_literal.rs:3:35
+  |
+3 |     let _ = regress_macro::regex!(pattern);
+  |                                   ^^^^^^^

@@ -234,6 +234,19 @@ impl ByteBitmap {
         bb
     }
 
+    /// Construct from the raw bit array (see [`raw`](Self::raw)). Used by the
+    /// AoT codegen runtime to reconstruct a serialized bitmap.
+    #[cfg(feature = "codegen")]
+    pub(crate) const fn from_raw(bits: [u16; 16]) -> ByteBitmap {
+        ByteBitmap(bits)
+    }
+
+    /// The raw bit array, for serialization by the AoT code emitter.
+    #[cfg(feature = "codegen")]
+    pub(crate) fn raw(&self) -> [u16; 16] {
+        self.0
+    }
+
     /// Construct from a single byte.
     pub fn from_byte(byte: u8) -> ByteBitmap {
         let mut bb = ByteBitmap::default();

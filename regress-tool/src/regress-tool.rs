@@ -68,6 +68,11 @@ struct Opt {
     #[structopt(long)]
     dump_jit: bool,
 
+    /// Emit the AoT-compiled Rust source (what `regex!` expands to). Requires
+    /// the `codegen` feature.
+    #[structopt(long)]
+    emit_rust: bool,
+
     /// Print summary stats instead of the full automaton dump (modifies --dump-nfa/--dump-dfa).
     #[structopt(long)]
     stats_only: bool,
@@ -291,6 +296,17 @@ fn main() -> Result<(), Error> {
         if args.dump_phases || args.dump_optimized_ir {
             println!("Optimized IR:\n{}", ire);
         }
+    }
+
+    if args.emit_rust {
+        // `compile_to_rust` runs its own parse + optimize pipeline.
+        #[cfg(feature = "codegen")]
+        match regress::codegen::compile_to_rust(&args.pattern, flags) {
+            Ok(src) => println!("{}", src),
+            Err(e) => println!("Failed to AoT-compile: {}", e),
+        }
+        #[cfg(not(feature = "codegen"))]
+        println!("AoT codegen not available. Compile with --features codegen");
     }
 
     // Lazy build caches. None = not attempted; Some(Err) = built but failed.

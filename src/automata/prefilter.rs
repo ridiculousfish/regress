@@ -55,7 +55,7 @@ pub struct TdfaProgram {
 }
 
 #[derive(Debug)]
-enum Strategy {
+pub(crate) enum Strategy {
     /// The whole regex is exactly a literal (no captures, tail, or assertions):
     /// the `memmem` span IS the match, so we skip the automaton entirely — just
     /// `memmem` + build the `Match`. This is the regex-crate pure-literal path.
@@ -155,7 +155,7 @@ impl From<tdfa::Error> for BuildError {
 /// `memmem` span and no automaton is needed at all. The optimizer leaves such a
 /// pattern as a `ByteSequence` (optionally inside a `Cat` with only trailing
 /// zero-width `Goal`/`Empty` markers).
-fn whole_literal(re: &ir::Regex) -> Option<Vec<u8>> {
+pub(crate) fn whole_literal(re: &ir::Regex) -> Option<Vec<u8>> {
     use ir::Node;
     fn lit(n: &Node) -> Option<Vec<u8>> {
         match n {
@@ -192,7 +192,7 @@ fn whole_literal(re: &ir::Regex) -> Option<Vec<u8>> {
 /// zero-width `Goal`/`Empty`) guarantees no capture groups or anchors, so the
 /// matched needle's `start..end` is the exact ECMAScript leftmost-first match.
 #[cfg(feature = "prefilter-teddy")]
-fn literal_alternation(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
+pub(crate) fn literal_alternation(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
     use ir::Node;
     // Past this many literals Teddy spills to its slower verify path; the
     // generic strategy is then no worse. (Practical alternations are small.)
@@ -240,10 +240,10 @@ fn literal_alternation(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
 /// The fold-clean run extracted from a case-insensitive literal: the run's
 /// per-position ASCII case-sets, plus the min/max byte width of the literal
 /// portion *before* it.
-struct CleanRunInfo {
-    sets: Vec<SmallVec<[u8; 4]>>,
-    prefix_lo: usize,
-    prefix_hi: usize,
+pub(crate) struct CleanRunInfo {
+    pub(crate) sets: Vec<SmallVec<[u8; 4]>>,
+    pub(crate) prefix_lo: usize,
+    pub(crate) prefix_hi: usize,
 }
 
 /// UTF-8 byte width of a codepoint.
@@ -270,7 +270,7 @@ fn cp_width(c: u32) -> usize {
 /// (`ByteSet`/coalesced `ByteSequence` = clean ASCII; `CharSet` = includes the
 /// non-ASCII, width-changing `s`→ſ / `k`→Kelvin fold), so we read it straight
 /// off the IR — conformant by construction with what the automaton matches.
-fn casefold_clean_run(re: &ir::Regex) -> Option<CleanRunInfo> {
+pub(crate) fn casefold_clean_run(re: &ir::Regex) -> Option<CleanRunInfo> {
     use ir::Node;
     /// A clean ASCII case-set (width 1), or a width-`wmin..=wmax` problem char.
     enum Pos {
@@ -382,7 +382,7 @@ fn casefold_clean_run(re: &ir::Regex) -> Option<CleanRunInfo> {
 /// the cross-product would exceed the caps — the caller then keeps the
 /// single-byte `CaseFoldSearcher`.
 #[cfg(feature = "prefilter-teddy")]
-fn casefold_prefix_variants(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
+pub(crate) fn casefold_prefix_variants(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
     use ir::Node;
     // Teddy is fastest with a *small* literal set: its packed buckets stay
     // selective up to ~32 needles, past which it spills into a slower verify
@@ -484,7 +484,7 @@ fn leading_fold_variants(
 /// is shortened (down to 2 positions) so more branches still fit — shorter keys
 /// are less selective but keep Teddy in its fast regime.
 #[cfg(feature = "prefilter-teddy")]
-fn alternation_prefix_variants(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
+pub(crate) fn alternation_prefix_variants(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
     use ir::Node;
     // Per-branch prefix length, and a union cap kept near Teddy's fast ceiling.
     const MAX_BRANCH_POSITIONS: usize = 4;
@@ -554,7 +554,7 @@ fn alternation_prefix_variants(re: &ir::Regex) -> Option<Vec<Vec<u8>>> {
 /// target, or the literal set declines) — the caller falls back to
 /// `CaseFoldSearcher`.
 #[cfg(feature = "prefilter-teddy")]
-fn build_teddy(patterns: &[Vec<u8>]) -> Option<aho_corasick::packed::Searcher> {
+pub(crate) fn build_teddy(patterns: &[Vec<u8>]) -> Option<aho_corasick::packed::Searcher> {
     use aho_corasick::packed::{Config, MatchKind};
     Config::new()
         .match_kind(MatchKind::LeftmostFirst)
@@ -611,10 +611,10 @@ fn should_prefilter(pred: &StartPredicate) -> bool {
 /// A required literal byte that must occur within `[lo, hi]` bytes of any match
 /// start — a cheap secondary filter for an unselective prefix prefilter.
 #[derive(Debug, Clone, Copy)]
-struct LitWindow {
-    byte: u8,
-    lo: usize,
-    hi: usize,
+pub(crate) struct LitWindow {
+    pub(crate) byte: u8,
+    pub(crate) lo: usize,
+    pub(crate) hi: usize,
 }
 
 impl LitWindow {
@@ -1196,6 +1196,13 @@ impl TdfaProgram {
                 }
             }
         }
+    }
+
+    /// The chosen search strategy, for the AoT code emitter (`tdfa/rustgen`),
+    /// which serializes it and lowers its verify automaton.
+    #[cfg(feature = "codegen")]
+    pub(crate) fn strategy(&self) -> &Strategy {
+        &self.strategy
     }
 
     /// The strategy's verify automaton, or `None` for the literal-only
