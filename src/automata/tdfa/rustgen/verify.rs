@@ -472,9 +472,12 @@ pub(super) fn emit_capture(w: &mut String, tdfa: &Tdfa, skip: Option<PrefixSkip>
     }
 
     let _ = writeln!(w, "    #[allow(unused_mut, unused_assignments)]");
+    // A zero-group pattern can still land in this tier (unanchored Scan);
+    // nothing then reads or fills `caps`, so underscore it.
+    let caps_name = if num_caps > 0 { "caps" } else { "_caps" };
     let _ = writeln!(
         w,
-        "    fn __verify(\n        input: &[u8],\n        start: usize,\n        caps: &mut [usize],\n    ) -> ::core::option::Option<(usize, usize)> {{"
+        "    fn __verify(\n        input: &[u8],\n        start: usize,\n        {caps_name}: &mut [usize],\n    ) -> ::core::option::Option<(usize, usize)> {{"
     );
     if needs_classes {
         emit_class_table(w, byte_to_class);
