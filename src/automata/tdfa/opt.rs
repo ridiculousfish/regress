@@ -231,6 +231,42 @@ const MAX_RA_MARKS: usize = 1 << 14;
 /// shrink below the gather cap anyway.
 const MAX_RA_INTERFERENCE: u128 = 8_000_000;
 
+/// Apply `f` to every `TagCommandList` in `t` (entry commands, per-transition
+/// commands, and every switch/accept command list in the guards). Centralises the
+/// "visit all command lists" traversal so each optimization pass is one call.
+fn for_each_cmd_list_mut(t: &mut Tdfa, mut f: impl FnMut(&mut TagCommandList)) {
+    f(&mut t.entry_commands_anchored);
+    f(&mut t.entry_commands_unanchored);
+    for cmds in t.transition_commands.iter_mut() {
+        f(cmds);
+    }
+    for g in t.guards.iter_mut() {
+        for sw in g.switches.iter_mut() {
+            f(&mut sw.commands);
+        }
+        for ac in g.accepts.iter_mut() {
+            f(&mut ac.commands);
+        }
+    }
+}
+
+/// Read-only sibling of [`for_each_cmd_list_mut`].
+fn for_each_cmd_list(t: &Tdfa, mut f: impl FnMut(&TagCommandList)) {
+    f(&t.entry_commands_anchored);
+    f(&t.entry_commands_unanchored);
+    for cmds in t.transition_commands.iter() {
+        f(cmds);
+    }
+    for g in t.guards.iter() {
+        for sw in &g.switches {
+            f(&sw.commands);
+        }
+        for ac in &g.accepts {
+            f(&ac.commands);
+        }
+    }
+}
+
 /// Fold `r := CurrentPos` (phase 1) + `c := Copy(r)` (phase 2) into
 /// `c := CurrentPos`, collapsing raw→canonical indirections for freshly stamped
 /// positions. If `r` has no remaining reads, `eliminate_dead_marks` removes the
@@ -242,19 +278,7 @@ const MAX_RA_INTERFERENCE: u128 = 8_000_000;
 /// from phase 2 to phase 1 would change what a sibling copy reads from `c` (the
 /// parallel-shift case; those marks stay).
 fn fold_currentpos_copies(t: &mut Tdfa) {
-    fold_list(&mut t.entry_commands_anchored);
-    fold_list(&mut t.entry_commands_unanchored);
-    for cmds in t.transition_commands.iter_mut() {
-        fold_list(cmds);
-    }
-    for g in t.guards.iter_mut() {
-        for sw in g.switches.iter_mut() {
-            fold_list(&mut sw.commands);
-        }
-        for ac in g.accepts.iter_mut() {
-            fold_list(&mut ac.commands);
-        }
-    }
+    for_each_cmd_list_mut(t, fold_list);
 }
 
 /// Dead-mark elimination to a fixpoint: a command whose destination is read
@@ -266,24 +290,11 @@ fn eliminate_dead_marks(t: &mut Tdfa) {
     loop {
         read_marks(t, &mut used);
         let mut changed = false;
-        let mut prune = |cmds: &mut TagCommandList| {
+        for_each_cmd_list_mut(t, |cmds| {
             let before = cmds.len();
             cmds.retain(|c| used[c.dst.0 as usize]);
             changed |= cmds.len() != before;
-        };
-        prune(&mut t.entry_commands_anchored);
-        prune(&mut t.entry_commands_unanchored);
-        for cmds in t.transition_commands.iter_mut() {
-            prune(cmds);
-        }
-        for g in t.guards.iter_mut() {
-            for sw in g.switches.iter_mut() {
-                prune(&mut sw.commands);
-            }
-            for ac in g.accepts.iter_mut() {
-                prune(&mut ac.commands);
-            }
-        }
+        });
         if !changed {
             break;
         }
@@ -295,20 +306,12 @@ fn eliminate_dead_marks(t: &mut Tdfa) {
 /// mark absent here is read on no path and its writes are dead.
 fn read_marks(t: &Tdfa, used: &mut [bool]) {
     used.fill(false);
-    collect_cmd_srcs(&t.entry_commands_anchored, used);
-    collect_cmd_srcs(&t.entry_commands_unanchored, used);
-    for cmds in t.transition_commands.iter() {
-        collect_cmd_srcs(cmds, used);
-    }
+    for_each_cmd_list(t, |cmds| collect_cmd_srcs(cmds, used));
     for fs in t.finals.iter() {
         collect_final_srcs(fs, used);
     }
     for g in t.guards.iter() {
-        for sw in &g.switches {
-            collect_cmd_srcs(&sw.commands, used);
-        }
         for ac in &g.accepts {
-            collect_cmd_srcs(&ac.commands, used);
             collect_final_srcs(&ac.finals, used);
         }
     }
@@ -317,20 +320,12 @@ fn read_marks(t: &Tdfa, used: &mut [bool]) {
 /// Visit every `InputMark` slot (each command `dst`, and each `Copy` source in
 /// commands and finals) across all command-bearing structures.
 fn for_each_mark_mut(t: &mut Tdfa, mut f: impl FnMut(&mut InputMark)) {
-    visit_cmd_marks(&mut t.entry_commands_anchored, &mut f);
-    visit_cmd_marks(&mut t.entry_commands_unanchored, &mut f);
-    for cmds in t.transition_commands.iter_mut() {
-        visit_cmd_marks(cmds, &mut f);
-    }
+    for_each_cmd_list_mut(t, |cmds| visit_cmd_marks(cmds, &mut f));
     for fs in t.finals.iter_mut() {
         visit_final_marks(fs, &mut f);
     }
     for g in t.guards.iter_mut() {
-        for sw in g.switches.iter_mut() {
-            visit_cmd_marks(&mut sw.commands, &mut f);
-        }
         for ac in g.accepts.iter_mut() {
-            visit_cmd_marks(&mut ac.commands, &mut f);
             visit_final_marks(&mut ac.finals, &mut f);
         }
     }
@@ -623,22 +618,9 @@ fn bs_clear(bits: &mut [u64], i: u32) {
 /// After register coloring, a `Copy` whose source and destination map to the
 /// same slot is a no-op; remove such commands everywhere.
 fn drop_identity_copies(t: &mut Tdfa) {
-    let prune = |cmds: &mut TagCommandList| {
+    for_each_cmd_list_mut(t, |cmds| {
         cmds.retain(|c| !matches!(c.src, MarkValue::Copy(s) if s == c.dst));
-    };
-    prune(&mut t.entry_commands_anchored);
-    prune(&mut t.entry_commands_unanchored);
-    for cmds in t.transition_commands.iter_mut() {
-        prune(cmds);
-    }
-    for g in t.guards.iter_mut() {
-        for sw in g.switches.iter_mut() {
-            prune(&mut sw.commands);
-        }
-        for ac in g.accepts.iter_mut() {
-            prune(&mut ac.commands);
-        }
-    }
+    });
 }
 
 /// Fold `c := Copy(r)` into `c := CurrentPos` within one command list when `r`

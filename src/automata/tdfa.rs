@@ -1455,7 +1455,7 @@ fn classify_scan_fast(byte_bitmap: &[u64; 4]) -> ScanFast {
         // All non-ASCII bytes are self-loop bytes.
         if !ascii_excl_overflow {
             ScanFast::Memchr { count: ascii_excl_count, bytes: ascii_excl_bytes }
-        } else if let Some((count, pairs)) = ascii_excluded_to_ranges(byte_bitmap[0], byte_bitmap[1]) {
+        } else if let Some((count, pairs)) = build_ascii_ranges(byte_bitmap[0], byte_bitmap[1], true) {
             ScanFast::AsciiRangesStop { count, pairs, bm0: byte_bitmap[0], bm1: byte_bitmap[1] }
         } else {
             ScanFast::Bitmap
@@ -1463,7 +1463,7 @@ fn classify_scan_fast(byte_bitmap: &[u64; 4]) -> ScanFast {
     } else if has_nonascii_excl && ascii_excl_count <= 2 && !ascii_excl_overflow {
         ScanFast::AsciiBarrier { count: ascii_excl_count, bytes: ascii_excl_bytes }
     } else if all_nonascii_excl {
-        if let Some((count, pairs)) = bitmap_to_ascii_ranges(byte_bitmap[0], byte_bitmap[1]) {
+        if let Some((count, pairs)) = build_ascii_ranges(byte_bitmap[0], byte_bitmap[1], false) {
             ScanFast::AsciiRanges { count, pairs, bm0: byte_bitmap[0], bm1: byte_bitmap[1] }
         } else {
             ScanFast::BitmapAscii { bm0: byte_bitmap[0], bm1: byte_bitmap[1] }
@@ -1473,10 +1473,13 @@ fn classify_scan_fast(byte_bitmap: &[u64; 4]) -> ScanFast {
     }
 }
 
-/// Convert the ASCII half of a bitmap (bm0 for 0x00-0x3F, bm1 for 0x40-0x7F)
-/// into a compact list of (lo, hi) byte ranges.  Returns `None` if the set
-/// requires more than `SCAN_MAX_RANGES` ranges.
-fn bitmap_to_ascii_ranges(bm0: u64, bm1: u64) -> Option<(u8, [u8; 2 * SCAN_MAX_RANGES])> {
+/// Convert the ASCII half of a bitmap (bm0 for 0x00–0x3F, bm1 for 0x40–0x7F)
+/// into a compact list of (lo, hi) byte ranges covering the *selected* bytes.
+/// When `complement` is false the selected bytes are the *set* bits (self-loop
+/// bytes, for [`ScanFast::AsciiRanges`]); when true the selected bytes are the
+/// *clear* bits (excluded/stop bytes, for [`ScanFast::AsciiRangesStop`]).
+/// Returns `None` if the selected set requires more than `SCAN_MAX_RANGES` ranges.
+fn build_ascii_ranges(bm0: u64, bm1: u64, complement: bool) -> Option<(u8, [u8; 2 * SCAN_MAX_RANGES])> {
     let mut pairs = [0u8; 2 * SCAN_MAX_RANGES];
     let mut count = 0usize;
     let mut in_range = false;
@@ -1484,48 +1487,11 @@ fn bitmap_to_ascii_ranges(bm0: u64, bm1: u64) -> Option<(u8, [u8; 2 * SCAN_MAX_R
 
     for b in 0u8..=0x7F {
         let word = if b < 0x40 { bm0 } else { bm1 };
-        let in_set = (word >> (b as usize & 63)) & 1 != 0;
-        if in_set && !in_range {
+        let selected = ((word >> (b as usize & 63)) & 1 != 0) ^ complement;
+        if selected && !in_range {
             range_start = b;
             in_range = true;
-        } else if !in_set && in_range {
-            if count >= SCAN_MAX_RANGES {
-                return None;
-            }
-            pairs[2 * count] = range_start;
-            pairs[2 * count + 1] = b - 1;
-            count += 1;
-            in_range = false;
-        }
-    }
-    if in_range {
-        if count >= SCAN_MAX_RANGES {
-            return None;
-        }
-        pairs[2 * count] = range_start;
-        pairs[2 * count + 1] = 0x7F;
-        count += 1;
-    }
-
-    Some((count as u8, pairs))
-}
-
-/// Like [`bitmap_to_ascii_ranges`] but builds ranges from *excluded* bytes
-/// (bit = 0 in the bitmap = stop bytes).  Used for [`ScanFast::AsciiRangesStop`]
-/// where the self-loop set is the complement of the stop set.
-fn ascii_excluded_to_ranges(bm0: u64, bm1: u64) -> Option<(u8, [u8; 2 * SCAN_MAX_RANGES])> {
-    let mut pairs = [0u8; 2 * SCAN_MAX_RANGES];
-    let mut count = 0usize;
-    let mut in_range = false;
-    let mut range_start = 0u8;
-
-    for b in 0u8..=0x7F {
-        let word = if b < 0x40 { bm0 } else { bm1 };
-        let excluded = (word >> (b as usize & 63)) & 1 == 0;
-        if excluded && !in_range {
-            range_start = b;
-            in_range = true;
-        } else if !excluded && in_range {
+        } else if !selected && in_range {
             if count >= SCAN_MAX_RANGES {
                 return None;
             }

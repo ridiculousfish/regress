@@ -1274,21 +1274,9 @@ impl TdfaProgram {
     pub fn stats(&self) -> TdfaStats {
         match &self.strategy {
             // No automaton was built.
-            Strategy::WholeLiteral { .. } => TdfaStats {
-                num_states: 0,
-                num_marks: 0,
-                total_commands: 0,
-                copy_commands: 0,
-                currentpos_commands: 0,
-            },
+            Strategy::WholeLiteral { .. } => TdfaStats::default(),
             #[cfg(feature = "prefilter-teddy")]
-            Strategy::MultiLiteral { .. } => TdfaStats {
-                num_states: 0,
-                num_marks: 0,
-                total_commands: 0,
-                copy_commands: 0,
-                currentpos_commands: 0,
-            },
+            Strategy::MultiLiteral { .. } => TdfaStats::default(),
             Strategy::Scan { unanchored } => unanchored.stats(),
             Strategy::Prefix { anchored, .. } => anchored.stats(),
             Strategy::CaseFoldLiteral { forward, .. } => forward.stats(),
@@ -1326,36 +1314,6 @@ impl TdfaJitProgram {
     /// reason — an un-JIT-able automaton just keeps the interpreter).
     pub fn try_from_ir(re: &ir::Regex) -> Result<Self, BuildError> {
         Ok(Self(TdfaProgram::try_from_ir_jit(re)?))
-    }
-
-    /// See [`TdfaProgram::find_at`].
-    pub(crate) fn find_at(
-        &self,
-        bytes: &[u8],
-        offset: usize,
-        scratch: &mut Scratch,
-    ) -> Option<NfaMatch> {
-        self.0.find_at(bytes, offset, scratch)
-    }
-
-    /// See [`TdfaProgram::mark_width`].
-    pub(crate) fn mark_width(&self) -> usize {
-        self.0.mark_width()
-    }
-
-    /// See [`TdfaProgram::group_names`].
-    pub fn group_names(&self) -> &[Box<str>] {
-        self.0.group_names()
-    }
-
-    /// Whether native code is actually in use (vs. interpreter fallback).
-    pub fn jit_active(&self) -> bool {
-        self.0.jit_active()
-    }
-
-    /// Stats of the underlying automaton (for the benchmarks' size columns).
-    pub fn stats(&self) -> TdfaStats {
-        self.0.stats()
     }
 }
 

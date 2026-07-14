@@ -145,40 +145,41 @@ fn scan_ascii_ranges_stop_sse2(
     pos
 }
 
-/// Run the pos-stamp PSL scan from `start`; return the first position outside
-/// the self-loop set (or `input.len()` if the entire tail is in-set).
-/// Returns `start` immediately when `input[start]` is not in the set.
+/// Advance `pos` through `input` while bytes remain in the self-loop set
+/// described by `fast` (and, for the `Bitmap` variant, `byte_bitmap`).
+/// Returns the first position outside the set, or `input.len()` if the entire
+/// remaining input is in-set.
 #[inline(always)]
-fn scan_pos_stamp(psl: &PosStampLoop, input: &[u8], start: usize) -> usize {
-    match &psl.fast {
+fn scan_fast(fast: &ScanFast, byte_bitmap: &[u64; 4], input: &[u8], pos: usize) -> usize {
+    match fast {
         ScanFast::Memchr { count, bytes } => match count {
             0 => input.len(),
-            1 => memchr::memchr(bytes[0], &input[start..])
-                .map(|i| start + i)
+            1 => memchr::memchr(bytes[0], &input[pos..])
+                .map(|i| pos + i)
                 .unwrap_or(input.len()),
-            2 => memchr::memchr2(bytes[0], bytes[1], &input[start..])
-                .map(|i| start + i)
+            2 => memchr::memchr2(bytes[0], bytes[1], &input[pos..])
+                .map(|i| pos + i)
                 .unwrap_or(input.len()),
-            _ => memchr::memchr3(bytes[0], bytes[1], bytes[2], &input[start..])
-                .map(|i| start + i)
+            _ => memchr::memchr3(bytes[0], bytes[1], bytes[2], &input[pos..])
+                .map(|i| pos + i)
                 .unwrap_or(input.len()),
         },
         ScanFast::AsciiBarrier { count, bytes } => {
             let b0 = bytes[0];
             let b1 = bytes[1];
             let end = match count {
-                0 => input[start..].iter().position(|&b| b >= 0x80),
-                1 => input[start..].iter().position(|&b| b >= 0x80 || b == b0),
-                _ => input[start..].iter().position(|&b| b >= 0x80 || b == b0 || b == b1),
+                0 => input[pos..].iter().position(|&b| b >= 0x80),
+                1 => input[pos..].iter().position(|&b| b >= 0x80 || b == b0),
+                _ => input[pos..].iter().position(|&b| b >= 0x80 || b == b0 || b == b1),
             };
-            end.map(|i| start + i).unwrap_or(input.len())
-        },
+            end.map(|i| pos + i).unwrap_or(input.len())
+        }
         ScanFast::AsciiRanges { count, pairs, bm0, bm1 } => {
             #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
-            let p = scan_ascii_ranges_sse2(input, start, *count, pairs, *bm0, *bm1);
+            let p = scan_ascii_ranges_sse2(input, pos, *count, pairs, *bm0, *bm1);
             #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
             let p = {
-                let mut p = start;
+                let mut p = pos;
                 while p < input.len() {
                     let b = *input.iat(p) as usize;
                     if b >= 0x80 { break; }
@@ -189,9 +190,9 @@ fn scan_pos_stamp(psl: &PosStampLoop, input: &[u8], start: usize) -> usize {
                 p
             };
             p
-        },
+        }
         ScanFast::BitmapAscii { bm0, bm1 } => {
-            let mut p = start;
+            let mut p = pos;
             while p < input.len() {
                 let b = *input.iat(p) as usize;
                 if b >= 0x80 { break; }
@@ -200,13 +201,13 @@ fn scan_pos_stamp(psl: &PosStampLoop, input: &[u8], start: usize) -> usize {
                 p += 1;
             }
             p
-        },
+        }
         ScanFast::AsciiRangesStop { count, pairs, bm0, bm1 } => {
             #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
-            let p = scan_ascii_ranges_stop_sse2(input, start, *count, pairs, *bm0, *bm1);
+            let p = scan_ascii_ranges_stop_sse2(input, pos, *count, pairs, *bm0, *bm1);
             #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
             let p = {
-                let mut p = start;
+                let mut p = pos;
                 while p < input.len() {
                     let b = *input.iat(p) as usize;
                     if b < 0x80 {
@@ -218,18 +219,23 @@ fn scan_pos_stamp(psl: &PosStampLoop, input: &[u8], start: usize) -> usize {
                 p
             };
             p
-        },
+        }
         ScanFast::Bitmap => {
-            let bitmap = &psl.byte_bitmap;
-            let mut p = start;
+            let mut p = pos;
             while p < input.len() {
                 let b = *input.iat(p) as usize;
-                if (bitmap[b >> 6] >> (b & 63)) & 1 == 0 { break; }
+                if (byte_bitmap[b >> 6] >> (b & 63)) & 1 == 0 { break; }
                 p += 1;
             }
             p
-        },
+        }
     }
+}
+
+/// Run the pos-stamp PSL scan from `start`; delegates to [`scan_fast`].
+#[inline(always)]
+fn scan_pos_stamp(psl: &PosStampLoop, input: &[u8], start: usize) -> usize {
+    scan_fast(&psl.fast, &psl.byte_bitmap, input, start)
 }
 
 /// Compile-time switches that let [`execute_generic`] drop cold sites it can
@@ -740,105 +746,7 @@ fn run_anchored<C: TdfaExecConfig>(
         // after the scan (net effect of the per-byte curpos writes).
         if let Some(ss) = scan_skips.get(state as usize).and_then(Option::as_ref) {
             let scan_start = pos;
-            pos = match &ss.fast {
-                // Few excluded bytes, all ASCII: use memchr to jump directly
-                // to the next stopping byte.
-                ScanFast::Memchr { count, bytes } => match count {
-                    0 => input.len(), // all bytes self-loop; scan to EOI
-                    1 => memchr::memchr(bytes[0], &input[pos..])
-                        .map(|i| pos + i).unwrap_or(input.len()),
-                    2 => memchr::memchr2(bytes[0], bytes[1], &input[pos..])
-                        .map(|i| pos + i).unwrap_or(input.len()),
-                    _ => memchr::memchr3(bytes[0], bytes[1], bytes[2], &input[pos..])
-                        .map(|i| pos + i).unwrap_or(input.len()),
-                },
-                // Few ASCII excluded bytes + non-ASCII bytes also excluded
-                // (typical for Unicode patterns like `[^"]`): scan until the
-                // first non-ASCII byte OR one of the excluded ASCII bytes.
-                //
-                // The `b >= 0x80` check eliminates the indexed bitmap load
-                // (which has an ~8-cycle load-use chain), replacing it with
-                // two simple comparisons.  LLVM can vectorise short closures.
-                ScanFast::AsciiBarrier { count, bytes } => {
-                    let b0 = bytes[0];
-                    let b1 = bytes[1];
-                    let end = match count {
-                        0 => input[pos..].iter().position(|&b| b >= 0x80),
-                        1 => input[pos..].iter().position(|&b| b >= 0x80 || b == b0),
-                        _ => input[pos..].iter().position(|&b| b >= 0x80 || b == b0 || b == b1),
-                    };
-                    end.map(|i| pos + i).unwrap_or(input.len())
-                },
-                // All non-ASCII excluded; set fits in a small number of byte
-                // ranges.  SSE2 saturating-subtract range masks process 16
-                // bytes per iteration; scalar tail uses the two ASCII bitmap
-                // words (bm0/bm1) — single shift+and — instead of the range
-                // cascade, trading 8 compare/branch pairs for one load+shift.
-                ScanFast::AsciiRanges { count, pairs, bm0, bm1 } => {
-                    #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
-                    { pos = scan_ascii_ranges_sse2(input, pos, *count, pairs, *bm0, *bm1); }
-                    // Scalar path (non-x86-64 or prohibit-unsafe).
-                    #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
-                    while pos < input.len() {
-                        let b = *input.iat(pos) as usize;
-                        if b >= 0x80 { break; }
-                        let word = if b < 0x40 { *bm0 } else { *bm1 };
-                        if (word >> (b & 63)) & 1 == 0 { break; }
-                        pos += 1;
-                    }
-                    pos
-                }
-                // All non-ASCII bytes excluded; pre-store the two ASCII bitmap
-                // words.  Selecting between two registers with a conditional
-                // move eliminates the 4-cycle data-dependent indexed load from
-                // bitmap[b>>6] (L1 load-use chain), cutting the critical path
-                // from ~9 cycles/byte to ~5 cycles/byte.
-                ScanFast::BitmapAscii { bm0, bm1 } => {
-                    while pos < input.len() {
-                        let b = *input.iat(pos) as usize;
-                        if b >= 0x80 {
-                            break;
-                        }
-                        let word = if b < 0x40 { *bm0 } else { *bm1 };
-                        if (word >> (b & 63)) & 1 == 0 {
-                            break;
-                        }
-                        pos += 1;
-                    }
-                    pos
-                }
-                // All non-ASCII self-loop; ASCII exit bytes fit in ≤SCAN_MAX_RANGES ranges.
-                // SSE2 path scans 16 bytes per iteration until a stop byte is found.
-                // Scalar tail uses the two ASCII bitmap words (bm0/bm1) — same cost
-                // as BitmapAscii — rather than the 4-range loop.
-                ScanFast::AsciiRangesStop { count, pairs, bm0, bm1 } => {
-                    #[cfg(all(target_arch = "x86_64", not(feature = "prohibit-unsafe")))]
-                    { pos = scan_ascii_ranges_stop_sse2(input, pos, *count, pairs, *bm0, *bm1); }
-                    // Scalar path (non-x86-64 or prohibit-unsafe).
-                    #[cfg(not(all(target_arch = "x86_64", not(feature = "prohibit-unsafe"))))]
-                    while pos < input.len() {
-                        let b = *input.iat(pos) as usize;
-                        if b < 0x80 {
-                            let word = if b < 0x40 { *bm0 } else { *bm1 };
-                            if (word >> (b & 63)) & 1 == 0 { break; }
-                        }
-                        pos += 1;
-                    }
-                    pos
-                }
-                // Generic bitmap scan.
-                ScanFast::Bitmap => {
-                    let bitmap = &ss.byte_bitmap;
-                    while pos < input.len() {
-                        let b = *input.iat(pos) as usize;
-                        if (bitmap[b >> 6] >> (b & 63)) & 1 == 0 {
-                            break;
-                        }
-                        pos += 1;
-                    }
-                    pos
-                }
-            };
+            pos = scan_fast(&ss.fast, &ss.byte_bitmap, input, pos);
             // Stamp marks whenever the scan consumed bytes.  This MUST happen
             // before any early exit so that the EOI accept path (which runs
             // after the byte loop when `completed && has_eoi_accepts`) reads
