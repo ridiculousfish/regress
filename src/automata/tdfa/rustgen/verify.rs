@@ -303,9 +303,11 @@ enum CTarget {
     Done,
 }
 
-/// The mark file a capture-tier verify manipulates, lowered to locals:
-/// `m{i}` per live mark lane, `tmp` for the cycle-breaking scratch lane,
+/// The mark file a capture-tier verify manipulates, lowered to one local
+/// array: `m[i]` per mark lane, `tmp` for the cycle-breaking scratch lane,
 /// `pos` for the current-position lane, and `usize::MAX` for the clear lane.
+/// Every index is an emit-time constant, so LLVM's SROA splits `m` into the
+/// same SSA values individual locals would produce.
 struct MarkFile {
     num_marks: usize,
 }
@@ -324,7 +326,7 @@ impl MarkFile {
     /// A lane as a *read* expression.
     fn read(&self, lane: usize) -> String {
         if lane < self.num_marks {
-            format!("m{lane}")
+            format!("m[{lane}]")
         } else if lane == self.clear_lane() {
             "usize::MAX".to_string()
         } else if lane == self.curpos_lane() {
@@ -340,7 +342,7 @@ impl MarkFile {
     /// are ever written by compiled moves.
     fn write(&self, lane: usize) -> String {
         if lane < self.num_marks {
-            format!("m{lane}")
+            format!("m[{lane}]")
         } else if lane == self.scratch_lane() {
             "tmp".to_string()
         } else {
@@ -443,27 +445,18 @@ pub(super) fn emit_capture(w: &mut String, tdfa: &Tdfa, skip: Option<PrefixSkip>
     let needs_classes =
         (0..num_states).any(|s| reachable[s] && matches!(plans[s], Dispatch::Table));
 
-    // Which mark locals the emitted code actually touches (declare only those),
-    // and which marks each fallback accept must snapshot (the ones its state's
-    // finals read — a later accept overwrites, which is fine: finalize only
-    // reads the winner's lanes, all written at the winner's record).
-    let mut mark_used = vec![false; marks.num_marks];
+    // Whether any emitted move touches the cycle-breaking scratch lane, and
+    // whether any reachable accept is a fallback (needing the snapshot array).
     let mut uses_tmp = false;
-    let mut snap_used = vec![false; marks.num_marks];
+    let mut any_fallback = false;
     {
-        let use_moves = |mvs: &[MoveOp], mark_used: &mut [bool], uses_tmp: &mut bool| {
-            for mv in mvs {
-                for lane in [mv.dst as usize, mv.src as usize] {
-                    if lane < marks.num_marks {
-                        mark_used[lane] = true;
-                    } else if lane == marks.scratch_lane() {
-                        *uses_tmp = true;
-                    }
-                }
-            }
+        let mut check_moves = |mvs: &[MoveOp]| {
+            uses_tmp |= mvs
+                .iter()
+                .any(|mv| mv.dst as usize == marks.scratch_lane() || mv.src as usize == marks.scratch_lane());
         };
-        use_moves(tdfa.entry_moves(0), &mut mark_used, &mut uses_tmp);
-        use_moves(tdfa.entry_moves(1), &mut mark_used, &mut uses_tmp);
+        check_moves(tdfa.entry_moves(0));
+        check_moves(tdfa.entry_moves(1));
         for s in 0..num_states {
             if !reachable[s] {
                 continue;
@@ -471,24 +464,10 @@ pub(super) fn emit_capture(w: &mut String, tdfa: &Tdfa, skip: Option<PrefixSkip>
             for c in 0..nc {
                 let idx = s * nc + c;
                 if stub[idx].is_some() {
-                    use_moves(&trans_moves[idx], &mut mark_used, &mut uses_tmp);
+                    check_moves(&trans_moves[idx]);
                 }
             }
-            if let Some((_, dsts)) = &peel[s] {
-                for &d in dsts {
-                    mark_used[d as usize] = true;
-                }
-            }
-            if accepting[s] {
-                for lane in finals_lanes(tdfa, s) {
-                    if lane < marks.num_marks {
-                        mark_used[lane] = true;
-                        if fallback[s] {
-                            snap_used[lane] = true;
-                        }
-                    }
-                }
-            }
+            any_fallback |= accepting[s] && fallback[s];
         }
     }
 
@@ -502,18 +481,14 @@ pub(super) fn emit_capture(w: &mut String, tdfa: &Tdfa, skip: Option<PrefixSkip>
     }
     let _ = writeln!(w, "        let len = input.len();");
     let _ = writeln!(w, "        let mut pos = start;");
-    for (i, used) in mark_used.iter().enumerate() {
-        if *used {
-            let _ = writeln!(w, "        let mut m{i} = usize::MAX;");
-        }
-    }
+    // The mark file and (for fallback accepts) its snapshot. All indices are
+    // constant, so SROA scalarizes both; unused lanes just vanish.
+    let _ = writeln!(w, "        let mut m = [usize::MAX; {}];", marks.num_marks);
     if uses_tmp {
         let _ = writeln!(w, "        let mut tmp = usize::MAX;");
     }
-    for (i, used) in snap_used.iter().enumerate() {
-        if *used {
-            let _ = writeln!(w, "        let mut s{i} = usize::MAX;");
-        }
+    if any_fallback {
+        let _ = writeln!(w, "        let mut s = [usize::MAX; {}];", marks.num_marks);
     }
     let _ = writeln!(w, "        let mut acc_end = usize::MAX;");
     let _ = writeln!(w, "        let mut acc_state = u32::MAX;");
@@ -613,7 +588,7 @@ fn emit_cap_accept(w: &mut String, indent: &str, s: usize, tdfa: &Tdfa, is_fallb
         lanes.dedup();
         for lane in lanes {
             if lane < tdfa.num_marks() {
-                let _ = writeln!(w, "{indent}s{lane} = m{lane};");
+                let _ = writeln!(w, "{indent}s[{lane}] = m[{lane}];");
             }
         }
     }
@@ -792,7 +767,7 @@ fn emit_finalize_arm(
     // A fallback accept reads its snapshot lanes; others read live marks.
     let lane_expr = |lane: usize| -> String {
         if is_fallback && lane < marks.num_marks {
-            format!("s{lane}")
+            format!("s[{lane}]")
         } else {
             marks.read(lane)
         }

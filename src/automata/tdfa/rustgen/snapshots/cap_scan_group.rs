@@ -29,22 +29,17 @@
         ];
         let len = input.len();
         let mut pos = start;
-        let mut m0 = usize::MAX;
-        let mut m1 = usize::MAX;
-        let mut m2 = usize::MAX;
-        let mut m3 = usize::MAX;
-        let mut m4 = usize::MAX;
-        let mut m5 = usize::MAX;
+        let mut m = [usize::MAX; 6];
         let mut acc_end = usize::MAX;
         let mut acc_state = u32::MAX;
         if start == 0 {
-            m1 = pos;
-            m0 = pos;
+            m[1] = pos;
+            m[0] = pos;
         } else {
-            m1 = pos;
-            m0 = pos;
-            m3 = pos;
-            m2 = pos;
+            m[1] = pos;
+            m[0] = pos;
+            m[3] = pos;
+            m[2] = pos;
         }
         let mut state: u32 = 1;
         'scan: loop {
@@ -57,19 +52,19 @@
                     pos += 1;
                     match __CLASSES[b as usize] {
                         0 => {
-                            m1 = pos;
-                            m0 = pos;
-                            m4 = pos;
+                            m[1] = pos;
+                            m[0] = pos;
+                            m[4] = pos;
                             state = 1;
                         }
                         1 | 2 | 4 => {
-                            m1 = pos;
-                            m0 = pos;
+                            m[1] = pos;
+                            m[0] = pos;
                             state = 1;
                         }
                         3 => {
-                            m3 = pos;
-                            m2 = pos;
+                            m[3] = pos;
+                            m[2] = pos;
                             state = 2;
                         }
                         9 => {
@@ -106,17 +101,17 @@
                     pos += 1;
                     match __CLASSES[b as usize] {
                         0 | 2 | 4 => {
-                            m1 = pos;
-                            m0 = pos;
+                            m[1] = pos;
+                            m[0] = pos;
                             state = 1;
                         }
                         1 => {
-                            m3 = pos;
+                            m[3] = pos;
                             state = 10;
                         }
                         3 => {
-                            m4 = pos;
-                            m2 = pos;
+                            m[4] = pos;
+                            m[2] = pos;
                             state = 11;
                         }
                         9 => {
@@ -153,8 +148,8 @@
                     pos += 1;
                     match b {
                         0x80..=0xbf => {
-                            m1 = pos;
-                            m0 = pos;
+                            m[1] = pos;
+                            m[0] = pos;
                             state = 1;
                         }
                         _ => {
@@ -265,19 +260,19 @@
                     pos += 1;
                     match __CLASSES[b as usize] {
                         0 | 2 | 4 => {
-                            m1 = pos;
-                            m0 = pos;
+                            m[1] = pos;
+                            m[0] = pos;
                             state = 1;
                         }
                         1 => {
-                            m3 = pos;
+                            m[3] = pos;
                             state = 10;
                         }
                         3 => {
-                            m3 = m4;
-                            m4 = pos;
-                            m2 = pos;
-                            m5 = pos;
+                            m[3] = m[4];
+                            m[4] = pos;
+                            m[2] = pos;
+                            m[5] = pos;
                             state = 11;
                         }
                         9 => {
@@ -317,10 +312,10 @@
         }
         match acc_state {
             10 => {
-                caps[0] = m1;
-                caps[1] = m2;
-                let fs = m0;
-                let fe = m3;
+                caps[0] = m[1];
+                caps[1] = m[2];
+                let fs = m[0];
+                let fe = m[3];
                 ::core::option::Option::Some((
                     if fs == usize::MAX { 0 } else { fs },
                     if fe == usize::MAX { acc_end } else { fe },

@@ -41,22 +41,17 @@
     ) -> ::core::option::Option<(usize, usize)> {
         let len = input.len();
         let mut pos = start;
-        let mut m0 = usize::MAX;
-        let mut m1 = usize::MAX;
-        let mut m2 = usize::MAX;
-        let mut m3 = usize::MAX;
-        let mut m4 = usize::MAX;
-        let mut m5 = usize::MAX;
+        let mut m = [usize::MAX; 6];
         let mut acc_end = usize::MAX;
         let mut acc_state = u32::MAX;
         if start == 0 {
-            m1 = pos;
-            m0 = pos;
+            m[1] = pos;
+            m[0] = pos;
         } else {
-            m1 = pos;
-            m0 = pos;
-            m3 = pos;
-            m2 = pos;
+            m[1] = pos;
+            m[0] = pos;
+            m[3] = pos;
+            m[2] = pos;
         }
         let mut state: u32 = 1;
         'scan: loop {
@@ -69,17 +64,17 @@
                     pos += 1;
                     match b {
                         b'0'..=b'9' => {
-                            m2 = pos;
-                            m4 = pos;
+                            m[2] = pos;
+                            m[4] = pos;
                             state = 2;
                         }
                         b'A'..=b'Z' => {
-                            m2 = pos;
-                            m5 = pos;
+                            m[2] = pos;
+                            m[5] = pos;
                             state = 2;
                         }
                         b'_' | b'a'..=b'z' => {
-                            m2 = pos;
+                            m[2] = pos;
                             state = 2;
                         }
                         _ => {
@@ -93,7 +88,7 @@
                         pos += 1;
                     }
                     if pos != p0 {
-                        m2 = pos;
+                        m[2] = pos;
                     }
                     if pos >= len {
                         break 'scan;
@@ -102,11 +97,11 @@
                     pos += 1;
                     match b {
                         b'0'..=b'9' | b'A'..=b'Z' | b'_' | b'a'..=b'z' => {
-                            m2 = pos;
+                            m[2] = pos;
                             state = 2;
                         }
                         b'@' => {
-                            m3 = pos;
+                            m[3] = pos;
                             state = 3;
                         }
                         _ => {
@@ -122,8 +117,8 @@
                     pos += 1;
                     match b {
                         b'0'..=b'9' | b'A'..=b'Z' | b'_' | b'a'..=b'z' => {
-                            m5 = pos;
-                            m4 = pos;
+                            m[5] = pos;
+                            m[4] = pos;
                             state = 4;
                         }
                         _ => {
@@ -137,8 +132,8 @@
                         pos += 1;
                     }
                     if pos != p0 {
-                        m5 = pos;
-                        m4 = pos;
+                        m[5] = pos;
+                        m[4] = pos;
                     }
                     acc_end = pos;
                     acc_state = 4;
@@ -149,8 +144,8 @@
                     pos += 1;
                     match b {
                         b'0'..=b'9' | b'A'..=b'Z' | b'_' | b'a'..=b'z' => {
-                            m5 = pos;
-                            m4 = pos;
+                            m[5] = pos;
+                            m[4] = pos;
                             state = 4;
                         }
                         _ => {
@@ -169,12 +164,12 @@
         }
         match acc_state {
             4 => {
-                caps[0] = m1;
-                caps[1] = m2;
-                caps[2] = m3;
-                caps[3] = m4;
-                let fs = m0;
-                let fe = m5;
+                caps[0] = m[1];
+                caps[1] = m[2];
+                caps[2] = m[3];
+                caps[3] = m[4];
+                let fs = m[0];
+                let fe = m[5];
                 ::core::option::Option::Some((
                     if fs == usize::MAX { 0 } else { fs },
                     if fe == usize::MAX { acc_end } else { fe },
