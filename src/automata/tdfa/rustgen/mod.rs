@@ -22,13 +22,15 @@ use crate::automata::tdfa::Tdfa;
 use crate::automata::tdfa_backend::PrefixSkip;
 use core::fmt::Write;
 
-/// Caps on the generated code's size, well under the TDFA's own build budget
-/// (4096 states): a `match` over hundreds of states is fine, thousands starts
-/// to hurt rustc. Tunable with build-time measurements.
-const CODEGEN_MAX_STATES: usize = 512;
+/// Caps on the generated code's size. Set at the TDFA's own build budget
+/// (`TDFA_STATE_BUDGET` = 4096): a budget-limit automaton emits ~1 MB of
+/// source that release rustc chews through in a few seconds, so anything the
+/// TDFA can build, the emitter accepts.
+const CODEGEN_MAX_STATES: usize = 4096;
 
-/// Mark-file cap: marks become local variables in the capture tier.
-const CODEGEN_MAX_MARKS: usize = 64;
+/// Mark-file cap: marks become local variables in the capture tier (they're
+/// just SSA values to LLVM; the bound only keeps the emitted text sane).
+const CODEGEN_MAX_MARKS: usize = 4096;
 
 mod prefilter;
 mod verify;
