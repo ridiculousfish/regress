@@ -18,12 +18,10 @@ use crate::pikevm;
 use crate::util::to_char_sat;
 
 #[cfg(not(feature = "std"))]
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{borrow::Cow, boxed::Box, string::String, vec::Vec};
 use core::{fmt, iter::FusedIterator, str::FromStr};
+#[cfg(feature = "std")]
+use std::borrow::Cow;
 
 pub use parse::Error;
 
@@ -530,7 +528,7 @@ impl Regex {
     /// where `$1` refers to the first capture group, `$2` to the second, and so on.
     /// `$0` refers to the entire match. Use `$$` to insert a literal `$`.
     ///
-    /// If no match is found, the original text is returned unchanged.
+    /// If no match is found, the original text is returned unchanged without allocation.
     ///
     /// # Examples
     ///
@@ -545,16 +543,16 @@ impl Regex {
     /// let result = re.replace("2023-12-25", "$2/$3/$1");
     /// assert_eq!(result, "12/25/2023");
     /// ```
-    pub fn replace(&self, text: &str, replacement: &str) -> String {
+    pub fn replace<'t>(&self, text: &'t str, replacement: &str) -> Cow<'t, str> {
         match self.find(text) {
             Some(m) => {
                 let mut result = String::with_capacity(text.len());
                 result.push_str(&text[..m.start()]);
                 self.expand_replacement(&m, text, replacement, &mut result);
                 result.push_str(&text[m.end()..]);
-                result
+                Cow::Owned(result)
             }
-            None => text.to_string(),
+            None => Cow::Borrowed(text),
         }
     }
 
@@ -563,6 +561,8 @@ impl Regex {
     /// The replacement string may contain capture group references in the form `$1`, `$2`, etc.,
     /// where `$1` refers to the first capture group, `$2` to the second, and so on.
     /// `$0` refers to the entire match. Use `$$` to insert a literal `$`.
+    ///
+    /// If no match is found, the original text is returned unchanged without allocation.
     ///
     /// # Examples
     ///
@@ -577,18 +577,23 @@ impl Regex {
     /// let result = re.replace_all("hello world", "$1.$2");
     /// assert_eq!(result, "h.ello w.orld");
     /// ```
-    pub fn replace_all(&self, text: &str, replacement: &str) -> String {
+    pub fn replace_all<'t>(&self, text: &'t str, replacement: &str) -> Cow<'t, str> {
+        let mut matches = self.find_iter(text);
+        let Some(first_match) = matches.next() else {
+            return Cow::Borrowed(text);
+        };
+
         let mut result = String::with_capacity(text.len());
         let mut last_end = 0;
 
-        for m in self.find_iter(text) {
+        for m in core::iter::once(first_match).chain(matches) {
             result.push_str(&text[last_end..m.start()]);
             self.expand_replacement(&m, text, replacement, &mut result);
             last_end = m.end();
         }
 
         result.push_str(&text[last_end..]);
-        result
+        Cow::Owned(result)
     }
 
     /// Replaces the first match of the regex in `text` using a closure.
@@ -596,7 +601,7 @@ impl Regex {
     /// The closure receives a `&Match` and should return the replacement string.
     /// This is useful for dynamic replacements that depend on the match details.
     ///
-    /// If no match is found, the original text is returned unchanged.
+    /// If no match is found, the original text is returned unchanged without allocation.
     ///
     /// # Examples
     ///
@@ -611,7 +616,7 @@ impl Regex {
     /// });
     /// assert_eq!(result, "Price: $246");
     /// ```
-    pub fn replace_with<F>(&self, text: &str, replacement: F) -> String
+    pub fn replace_with<'t, F>(&self, text: &'t str, replacement: F) -> Cow<'t, str>
     where
         F: FnOnce(&Match) -> String,
     {
@@ -621,9 +626,9 @@ impl Regex {
                 result.push_str(&text[..m.start()]);
                 result.push_str(&replacement(&m));
                 result.push_str(&text[m.end()..]);
-                result
+                Cow::Owned(result)
             }
-            None => text.to_string(),
+            None => Cow::Borrowed(text),
         }
     }
 
@@ -631,6 +636,8 @@ impl Regex {
     ///
     /// The closure receives a `&Match` and should return the replacement string.
     /// This is useful for dynamic replacements that depend on the match details.
+    ///
+    /// If no match is found, the original text is returned unchanged without allocation.
     ///
     /// # Examples
     ///
@@ -645,21 +652,26 @@ impl Regex {
     /// });
     /// assert_eq!(result, "Items: [50], [100], [150]");
     /// ```
-    pub fn replace_all_with<F>(&self, text: &str, replacement: F) -> String
+    pub fn replace_all_with<'t, F>(&self, text: &'t str, replacement: F) -> Cow<'t, str>
     where
         F: Fn(&Match) -> String,
     {
+        let mut matches = self.find_iter(text);
+        let Some(first_match) = matches.next() else {
+            return Cow::Borrowed(text);
+        };
+
         let mut result = String::with_capacity(text.len());
         let mut last_end = 0;
 
-        for m in self.find_iter(text) {
+        for m in core::iter::once(first_match).chain(matches) {
             result.push_str(&text[last_end..m.start()]);
             result.push_str(&replacement(&m));
             last_end = m.end();
         }
 
         result.push_str(&text[last_end..]);
-        result
+        Cow::Owned(result)
     }
 
     /// Helper method to expand replacement strings with capture group substitutions.
