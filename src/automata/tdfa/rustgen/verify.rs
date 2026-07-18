@@ -53,7 +53,7 @@ pub(super) fn emit_capture_free(w: &mut String, tdfa: &Tdfa, skip: Option<Prefix
     // that here, since `has_perbyte_guards` is false) records `acc = pos` in
     // its EOI branch — the analog of the JIT's EOI landing pads.
     let eoi_accept: Vec<bool> = (0..num_states)
-        .map(|s| !tdfa.guards(s as u32).accepts.is_empty())
+        .map(|s| tdfa.guards(s as u32).is_some_and(|g| !g.accepts.is_empty()))
         .collect();
     let reachable = plan::reachable_states(tdfa, skip.map(|s| s.post_state as usize));
     let peel: Vec<Option<Vec<(u8, u8)>>> = (0..num_states)

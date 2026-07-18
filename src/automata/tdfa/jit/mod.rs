@@ -682,7 +682,11 @@ fn emit_capture_free<A: Assembler>(
     // reaching end-of-input in this state, record the accept, then fall into
     // `done`. States without a `$` accept jump straight to `done` at EOI.
     let eoi_stub: Vec<Option<Label>> = (0..num_states)
-        .map(|s| (!tdfa.guards(s as u32).accepts.is_empty()).then(|| asm.fresh_label()))
+        .map(|s| {
+            tdfa.guards(s as u32)
+                .is_some_and(|g| !g.accepts.is_empty())
+                .then(|| asm.fresh_label())
+        })
         .collect();
     let eoi_target = |s: usize| eoi_stub[s].unwrap_or(done);
 

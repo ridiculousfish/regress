@@ -50,6 +50,17 @@ pub(crate) const TF_ACCEPT: u8 = 1;
 /// Bit 1 of `trans_flags[idx]`: the target accepting state has `accept_fallback`
 /// (an eager mark snapshot is needed on acceptance).
 pub(crate) const TF_FALLBACK: u8 = 2;
+/// Bit 2 of `trans_flags[idx]`: the target state carries switch guards
+/// (multiline `^`, `\b`/`\B`). Read by the per-byte-guards loop so the common
+/// no-boundary byte never touches the guard tables.
+pub(crate) const TF_SWITCHES: u8 = 4;
+/// Bit 3 of `trans_flags[idx]`: the target state carries `$`-style accept
+/// guards. Like `TF_SWITCHES`, only meaningful while the live state is still
+/// the transition target (a fired switch invalidates both bits).
+pub(crate) const TF_ACCEPTS: u8 = 8;
+
+/// `guard_index` sentinel: the state has no zero-width guards.
+const GUARD_NONE: u32 = u32::MAX;
 
 /// Maximum number of TDFA states before we bail out. Matches
 /// `dfa::DFA_STATE_BUDGET`.
@@ -332,6 +343,21 @@ fn conditional_needs_perbyte(c: &AnchorConditional) -> bool {
 /// (multiline `$`). See [`Tdfa::has_perbyte_guards`].
 fn state_guards_need_perbyte(g: &StateGuards) -> bool {
     !g.switches.is_empty() || g.accepts.iter().any(conditional_needs_perbyte)
+}
+
+/// Pack a dense per-state guard list into the stored sparse form: a per-state
+/// index (`GUARD_NONE` for guard-free states) plus a table of only the
+/// non-empty records. See the `guard_index`/`guard_table` field docs.
+fn pack_guards(dense: Vec<StateGuards>) -> (Box<[u32]>, Box<[StateGuards]>) {
+    let mut index = vec![GUARD_NONE; dense.len()];
+    let mut table = Vec::new();
+    for (s, g) in dense.into_iter().enumerate() {
+        if !g.is_empty() {
+            index[s] = table.len() as u32;
+            table.push(g);
+        }
+    }
+    (index.into_boxed_slice(), table.into_boxed_slice())
 }
 
 /// Whether any `\b`/`\B` switch widens its word-char test with the icase folds
@@ -1174,12 +1200,20 @@ pub struct Tdfa {
     // state's mark snapshot.
     finals: Box<[SmallVec<[FinalCommand; 4]>]>,
 
-    // Per-state zero-width guards: the unified table for `^ $ \b \B`, indexed by
-    // state ID. Each [`StateGuards`] holds the state's `switches` (multiline `^`,
-    // `\b`/`\B` — change state and keep matching) and `accepts` (`$` — record a
-    // match candidate without changing state). The executor decodes each guard's
+    // Per-state zero-width guards: the unified table for `^ $ \b \B`. Each
+    // [`StateGuards`] holds a state's `switches` (multiline `^`, `\b`/`\B` —
+    // change state and keep matching) and `accepts` (`$` — record a match
+    // candidate without changing state). The executor decodes each guard's
     // `cond` from the position's `boundary_signature` (see `anchors.rs`).
-    guards: Box<[StateGuards]>,
+    //
+    // Stored packed: `guard_index` (indexed by state ID) holds `GUARD_NONE`
+    // for the — usually all — guard-free states, else an index into
+    // `guard_table`, which keeps a `StateGuards` record per guarded state
+    // only. A `StateGuards` is ~250 bytes of inline `SmallVec`s even when
+    // empty, so the dense per-state layout charged every automaton for the
+    // rare anchored-guard patterns.
+    guard_index: Box<[u32]>,
+    guard_table: Box<[StateGuards]>,
 
     // Whether `\b`/`^`/`$` word-char tests should widen with the icase folds
     // (ſ / Kelvin) — the regex-global `iu` property. Lets the executor compute a
@@ -1218,12 +1252,15 @@ pub struct Tdfa {
     // (`start_fixed`, no captures/conditionals/anchor-alts); empty otherwise.
     exec_transitions: Box<[u32]>,
 
-    // Per-transition accept + fallback flag byte. Same shape/indexing as `transitions`
+    // Per-transition flag byte. Same shape/indexing as `transitions`
     // (`state * num_classes + class`). `TF_ACCEPT` (bit 0) is set when the target
-    // state is accepting; `TF_FALLBACK` (bit 1) when it also has `accept_fallback`.
-    // Loaded in parallel with `transitions[idx]` so the accept check costs no
-    // serial memory hops after the transition lookup; eliminates the per-byte
-    // `accepting[]` / `accept_fallback[]` loads in the !HAS_PERBYTE_GUARDS path.
+    // state is accepting; `TF_FALLBACK` (bit 1) when it also has `accept_fallback`;
+    // `TF_SWITCHES`/`TF_ACCEPTS` (bits 2/3) when it carries guard switches/
+    // accepts. Loaded in parallel with `transitions[idx]` so these checks cost
+    // no serial memory hops after the transition lookup; eliminates the per-byte
+    // `accepting[]` / `accept_fallback[]` loads in the !HAS_PERBYTE_GUARDS path
+    // and the per-byte guard-table touches in the HAS_PERBYTE_GUARDS path
+    // (which falls back to the per-state tables only after a switch fires).
     trans_flags: Box<[u8]>,
 
     // Entry commands pre-compiled to `MoveOp` sequences so the executor can
@@ -1644,16 +1681,17 @@ impl Tdfa {
         );
 
         // Fuse the two per-state construction lists into the unified guard table
-        // (switches = alts, accepts = conditionals), one entry per state.
-        let guards: Box<[StateGuards]> = build
+        // (switches = alts, accepts = conditionals), then pack it sparse.
+        let guards: Vec<StateGuards> = build
             .anchor_alts
             .into_iter()
             .zip(build.anchor_conditionals)
             .map(|(switches, accepts)| StateGuards { switches, accepts })
             .collect();
-        let word_icase = guards_word_icase(&guards);
-        let has_perbyte_guards = guards.iter().any(state_guards_need_perbyte);
-        let has_eoi_accepts = guards.iter().any(|g| !g.accepts.is_empty());
+        let (guard_index, guard_table) = pack_guards(guards);
+        let word_icase = guards_word_icase(&guard_table);
+        let has_perbyte_guards = guard_table.iter().any(state_guards_need_perbyte);
+        let has_eoi_accepts = guard_table.iter().any(|g| !g.accepts.is_empty());
 
         let mut tdfa = Tdfa {
             start_anchored,
@@ -1673,7 +1711,8 @@ impl Tdfa {
             transition_commands: build.transition_commands.into_boxed_slice(),
             transition_moves: Box::default(),
             finals: build.finals.into_boxed_slice(),
-            guards,
+            guard_index,
+            guard_table,
             word_icase,
             has_perbyte_guards,
             has_eoi_accepts,
@@ -1895,11 +1934,15 @@ impl Tdfa {
         &self.exec_transitions
     }
 
-    /// Build `trans_flags`: per-transition flag bytes (`TF_ACCEPT` / `TF_FALLBACK`).
-    /// Must be called after `accept_fallback` is in its final state (see `optimize`).
+    /// Build `trans_flags`: per-transition flag bytes (`TF_ACCEPT` /
+    /// `TF_FALLBACK` / `TF_SWITCHES` / `TF_ACCEPTS`). Must be called after
+    /// `accept_fallback` and the guard tables are in their final state (see
+    /// `optimize`).
     fn build_trans_flags(&mut self) {
         let accepting = &self.accepting;
         let accept_fallback = &self.accept_fallback;
+        let guard_index = &self.guard_index;
+        let guard_table = &self.guard_table;
         self.trans_flags = self
             .transitions
             .iter()
@@ -1913,6 +1956,16 @@ impl Tdfa {
                     }
                     if accept_fallback[t as usize] {
                         f |= TF_FALLBACK;
+                    }
+                    let gi = guard_index[t as usize];
+                    if gi != GUARD_NONE {
+                        let g = &guard_table[gi as usize];
+                        if !g.switches.is_empty() {
+                            f |= TF_SWITCHES;
+                        }
+                        if !g.accepts.is_empty() {
+                            f |= TF_ACCEPTS;
+                        }
                     }
                     f
                 }
@@ -1935,7 +1988,7 @@ impl Tdfa {
         // (`Holmes$`) — a `$` accept reads the start mark back through its own
         // finals, not the state's plain finals, so both must be scanned for an
         // anchored `…$` pattern to be recognized as start-fixed.
-        let cond_finals = self.guards.iter().flat_map(|g| g.accepts.iter().map(|ac| &ac.finals));
+        let cond_finals = self.guard_table.iter().flat_map(|g| g.accepts.iter().map(|ac| &ac.finals));
         for finals in self.finals.iter().map(|f| f.as_slice()).chain(cond_finals.map(|f| f.as_slice())) {
             for cmd in finals {
                 if cmd.tag == FULL_MATCH_START {
@@ -2008,9 +2061,9 @@ impl Tdfa {
         opt::optimize(self);
         // State minimization can remove guard-bearing states, so refresh the
         // precomputed flags the executor's dispatcher reads.
-        self.has_perbyte_guards = self.guards.iter().any(state_guards_need_perbyte);
-        self.has_eoi_accepts = self.guards.iter().any(|g| !g.accepts.is_empty());
-        self.word_icase = guards_word_icase(&self.guards);
+        self.has_perbyte_guards = self.guard_table.iter().any(state_guards_need_perbyte);
+        self.has_eoi_accepts = self.guard_table.iter().any(|g| !g.accepts.is_empty());
+        self.word_icase = guards_word_icase(&self.guard_table);
         // `optimize` renumbers marks and rewrites the command lists, so the
         // precompiled move sequences must be rebuilt from the new state. The
         // capture-free fast table built there also depends on the refreshed
@@ -2028,10 +2081,16 @@ impl Tdfa {
         self.build_trans_flags();
     }
 
-    /// The zero-width guards for `state` (switches + accepts). Empty for most
-    /// states.
-    pub(crate) fn guards(&self, state: TdfaStateId) -> &StateGuards {
-        &self.guards[state as usize]
+    /// The zero-width guards for `state` (switches + accepts). `None` for the
+    /// — usually all — guard-free states; the stored form is a per-state index
+    /// into a packed table of only the guarded states.
+    pub(crate) fn guards(&self, state: TdfaStateId) -> Option<&StateGuards> {
+        let i = self.guard_index[state as usize];
+        if i == GUARD_NONE {
+            None
+        } else {
+            Some(&self.guard_table[i as usize])
+        }
     }
 
     /// Whether `\b`/`^`/`$` word tests widen with the icase folds (regex-global
@@ -2105,7 +2164,7 @@ impl Tdfa {
         for cmds in self.transition_commands.iter() {
             tally(cmds);
         }
-        for g in self.guards.iter() {
+        for g in self.guard_table.iter() {
             for sw in &g.switches {
                 tally(&sw.commands);
             }

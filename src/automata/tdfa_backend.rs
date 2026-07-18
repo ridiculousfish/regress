@@ -17,7 +17,7 @@ use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{
     EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
     PosStampLoop, ScanFast, ScanSkip, SCAN_MAX_RANGES,
-    TF_ACCEPT, TF_FALLBACK,
+    TF_ACCEPT, TF_ACCEPTS, TF_FALLBACK, TF_SWITCHES,
 };
 use crate::insn::StartPredicate;
 use crate::util::DebugCheckIndex;
@@ -656,7 +656,7 @@ fn run_anchored<C: TdfaExecConfig>(
         return None;
     }
     let word_icase = tdfa.word_icase();
-    if C::HAS_PERBYTE_GUARDS && !tdfa.guards(state).switches.is_empty() {
+    if C::HAS_PERBYTE_GUARDS && tdfa.guards(state).is_some_and(|g| !g.switches.is_empty()) {
         let sig = boundary_signature(input, loop_start, word_icase);
         apply_switches(tdfa, &mut state, src_buf, sig, loop_start);
     }
@@ -672,7 +672,7 @@ fn run_anchored<C: TdfaExecConfig>(
             &mut read_live,
         );
     }
-    if C::HAS_PERBYTE_GUARDS && !tdfa.guards(state).accepts.is_empty() {
+    if C::HAS_PERBYTE_GUARDS && tdfa.guards(state).is_some_and(|g| !g.accepts.is_empty()) {
         let sig = boundary_signature(input, loop_start, word_icase);
         record_accepts(
             tdfa,
@@ -786,18 +786,23 @@ fn run_anchored<C: TdfaExecConfig>(
             }
         }
         state = next;
+        // tf is loaded in parallel with transitions[idx] (same index, both can
+        // start as soon as idx is known) and encodes TF_ACCEPT + TF_FALLBACK
+        // plus, for the guards path, TF_SWITCHES + TF_ACCEPTS — so the common
+        // no-boundary byte checks a register bit instead of striding the guard
+        // tables.
+        let tf = *trans_flags.iat(idx);
         if C::HAS_PERBYTE_GUARDS {
             live_position = pos + 1;
-            if !tdfa.guards(state).switches.is_empty() {
+            if tf & TF_SWITCHES != 0 {
                 let sig = boundary_signature(input, pos + 1, word_icase);
                 apply_switches(tdfa, &mut state, src_buf, sig, pos + 1);
             }
         }
-        // For !HAS_PERBYTE_GUARDS, tf is loaded in parallel with transitions[idx]
-        // (same index, both can start as soon as idx is known) and encodes TF_ACCEPT
-        // + TF_FALLBACK, eliminating per-byte accepting[] / accept_fallback[] spills.
-        let tf = if C::HAS_PERBYTE_GUARDS { 0u8 } else { *trans_flags.iat(idx) };
-        let is_accepting = if C::HAS_PERBYTE_GUARDS {
+        // A fired switch moves the live state off the transition target, so tf
+        // no longer describes it; fall back to the per-state tables then.
+        let switched = C::HAS_PERBYTE_GUARDS && state != next;
+        let is_accepting = if switched {
             *accepting.iat(state as usize)
         } else {
             tf & TF_ACCEPT != 0
@@ -897,7 +902,13 @@ fn run_anchored<C: TdfaExecConfig>(
                 }
             }
         }
-        if C::HAS_PERBYTE_GUARDS && !tdfa.guards(state).accepts.is_empty() {
+        let has_accept_guards = C::HAS_PERBYTE_GUARDS
+            && if switched {
+                tdfa.guards(state).is_some_and(|g| !g.accepts.is_empty())
+            } else {
+                tf & TF_ACCEPTS != 0
+            };
+        if has_accept_guards {
             let sig = boundary_signature(input, pos + 1, word_icase);
             record_accepts(
                 tdfa,
@@ -970,9 +981,7 @@ fn apply_switches(tdfa: &Tdfa, state: &mut u32, buf: &mut [usize], sig: u8, pos:
     for _ in 0..tdfa.num_states() {
         let Some(sw) = tdfa
             .guards(*state)
-            .switches
-            .iter()
-            .find(|sw| sw.cond.holds_sig(sig))
+            .and_then(|g| g.switches.iter().find(|sw| sw.cond.holds_sig(sig)))
         else {
             return;
         };
@@ -983,9 +992,7 @@ fn apply_switches(tdfa: &Tdfa, state: &mut u32, buf: &mut [usize], sig: u8, pos:
     debug_assert!(
         !tdfa
             .guards(*state)
-            .switches
-            .iter()
-            .any(|sw| sw.cond.holds_sig(sig)),
+            .is_some_and(|g| g.switches.iter().any(|sw| sw.cond.holds_sig(sig))),
         "zero-width switch cycle"
     );
 }
@@ -1006,7 +1013,10 @@ fn record_accepts<'a>(
     has_captures: bool,
     read_live: &mut bool,
 ) {
-    for ac in &tdfa.guards(state).accepts {
+    let Some(g) = tdfa.guards(state) else {
+        return;
+    };
+    for ac in &g.accepts {
         if !ac.cond.holds_sig(sig) {
             continue;
         }
