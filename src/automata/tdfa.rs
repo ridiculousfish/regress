@@ -53,7 +53,7 @@ pub(crate) const TF_FALLBACK: u8 = 2;
 
 /// Maximum number of TDFA states before we bail out. Matches
 /// `dfa::DFA_STATE_BUDGET`.
-const TDFA_STATE_BUDGET: usize = 4096;
+const TDFA_STATE_BUDGET: usize = 65536;
 
 #[derive(Debug)]
 pub enum Error {

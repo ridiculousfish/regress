@@ -28,5 +28,9 @@ mod multiliteral;
 mod nfa_backend;
 #[cfg(not(feature = "utf16"))]
 mod reverse;
+// The Scan → `Prefix` size fallback asserts on byte-class start predicates,
+// which the optimizer emits only outside `utf16` mode (same as `prefix_skip`).
+#[cfg(not(feature = "utf16"))]
+mod scan_fallback;
 mod tdfa;
 mod word_boundary;

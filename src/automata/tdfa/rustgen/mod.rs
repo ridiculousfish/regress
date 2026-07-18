@@ -22,14 +22,24 @@ use crate::automata::tdfa::Tdfa;
 use crate::automata::tdfa_backend::PrefixSkip;
 use core::fmt::Write;
 
-/// Caps on the generated code's size. Set at the TDFA's own build budget
-/// (`TDFA_STATE_BUDGET` = 4096): a budget-limit automaton emits ~1 MB of
-/// source that release rustc chews through in a few seconds, so anything the
-/// TDFA can build, the emitter accepts.
+/// Cap on emitted automaton states — deliberately decoupled from (and far
+/// below) the TDFA's own build budget (`TDFA_STATE_BUDGET` = 65536). For
+/// generated source the binding cost is not the automaton but release rustc,
+/// whose time scales roughly quadratically with the emitted text: `a.{5}b`
+/// (287 KB) 0.7 s, `a.{7}b` (1.2 MB) 7 s, `a.{8}b` (2.4 MB, ~2000 states)
+/// 34 s — a budget-limit automaton (~80 MB) would hang the user's build for
+/// hours. 4096 states (a few MB, minutes of rustc at worst) is the most a
+/// proc-macro can decently ask; past it we fail fast and point at the
+/// interpreter, which handles the full budget. Real patterns sit orders of
+/// magnitude below this — the size-aware Scan → `Prefix` fallback in
+/// `prefilter.rs` diverts the common subset-blowup shapes to small anchored
+/// automatons before they reach the emitter.
 const CODEGEN_MAX_STATES: usize = 4096;
 
-/// Mark-file cap: marks become local variables in the capture tier (they're
-/// just SSA values to LLVM; the bound only keeps the emitted text sane).
+/// Mark-file cap for the capture tier, where every mark becomes a local
+/// variable (they're just SSA values to LLVM; the bound keeps the emitted
+/// text and rustc's local count sane). Binds well before the interpreter's
+/// `has_moves` u16 ceiling (65,532 marks).
 const CODEGEN_MAX_MARKS: usize = 4096;
 
 mod prefilter;

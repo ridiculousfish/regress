@@ -14,7 +14,11 @@
 //! Strategies:
 //! - [`Strategy::Scan`] — no usable literal: the original single-pass unanchored
 //!   scan. This is also what start-anchored regexes use (their unanchored build
-//!   already drops the `.*?` prefix and only tries offset 0).
+//!   already drops the `.*?` prefix and only tries offset 0). An unselective
+//!   (common-byte) predicate normally lands here too, but not when the
+//!   unanchored automaton blows up in size (`a.{12}b` — every pending start in
+//!   the window becomes DFA state): past `MAX_SCAN_STATES`, or past the build
+//!   budget outright, selection falls back to `Prefix` on that predicate.
 //! - [`Strategy::Prefix`] — a prefix literal / byte set: `memchr`/`memmem` to the
 //!   next candidate, then the anchored TDFA verifies (and extracts captures).
 //!   `find` semantics are preserved because the predicate is a necessary
@@ -590,9 +594,19 @@ fn byte_is_common(b: u8) -> bool {
     b == b' ' || b.is_ascii_lowercase()
 }
 
+/// Ceiling on the unanchored Scan automaton's (post-optimize) state count
+/// before [`TdfaProgram::try_from_ir`] reconsiders a start predicate that
+/// [`should_prefilter`] rejected. Ordinary patterns determinize to tens of
+/// states; the pathological ones (bounded repeats overlapping their first
+/// byte, `a.{12}b`) double per window increment, so any threshold in the
+/// hundreds cleanly separates the two populations.
+const MAX_SCAN_STATES: usize = 512;
+
 /// Whether a start predicate is worth prefiltering on. `Arbitrary` /anchored
 /// fall through to `Scan`; an unselective single-byte-class predicate also
-/// falls through (prefiltering on it would be slower than scanning).
+/// falls through (prefiltering on it would be slower than scanning) — unless
+/// the Scan automaton itself blows up, see `MAX_SCAN_STATES` and the fallback
+/// in [`TdfaProgram::try_from_ir`].
 fn should_prefilter(pred: &StartPredicate) -> bool {
     match pred {
         // A literal sequence (always length >= 2) is selective.
@@ -871,8 +885,36 @@ impl TdfaProgram {
         }
 
         let nfa = Nfa::try_from_unanchored(re)?;
-        let mut unanchored = Tdfa::try_from(&nfa)?;
+        // Size-aware fallback. `should_prefilter` turned the start predicate
+        // down on selectivity grounds — skipping to every common byte and
+        // verifying would be slower than one linear scan. That reasoning
+        // assumes the Scan automaton is small. A bounded repeat whose body
+        // overlaps the first byte (`a.{12}b`) breaks the assumption: the
+        // unanchored subset construction must remember which of the last
+        // `window` positions hold a pending start, so states grow as
+        // 2^window. When that blowup exceeds the whole TDFA build budget, an
+        // anchored verify behind the unselective prefilter is the only way to
+        // build the pattern at all; below the budget but past
+        // MAX_SCAN_STATES it is still the better machine — the exponential
+        // table has no cache locality, while a failed anchored verify of a
+        // bounded-width pattern dies within `width` bytes, capping the worst
+        // case at O(n·width). Unbounded-width patterns (where a dead
+        // candidate could cost O(n)) keep the linear, if large, scan.
+        let prefix_usable =
+            !matches!(pred, StartPredicate::Arbitrary | StartPredicate::StartAnchored);
+        let mut unanchored = match Tdfa::try_from(&nfa) {
+            Err(tdfa::Error::BudgetExceeded) if prefix_usable => {
+                return Self::build_prefix(re, pred);
+            }
+            other => other?,
+        };
         unanchored.optimize();
+        if prefix_usable
+            && unanchored.num_states() > MAX_SCAN_STATES
+            && node_width(&re.node).is_some()
+        {
+            return Self::build_prefix(re, pred);
+        }
         let group_names = unanchored.group_names().to_vec().into_boxed_slice();
         let num_capture_groups = unanchored.num_capture_groups();
         Ok(Self::from_parts(Strategy::Scan { unanchored }, group_names, num_capture_groups))
@@ -1244,6 +1286,18 @@ impl TdfaProgram {
     #[cfg(test)]
     pub(crate) fn is_reverse_inner(&self) -> bool {
         matches!(self.strategy, Strategy::ReverseInner { .. })
+    }
+
+    /// Test-only: whether this program uses the prefix-prefilter strategy.
+    #[cfg(test)]
+    pub(crate) fn is_prefix(&self) -> bool {
+        matches!(self.strategy, Strategy::Prefix { .. })
+    }
+
+    /// Test-only: whether this program uses the single-pass scan strategy.
+    #[cfg(test)]
+    pub(crate) fn is_scan(&self) -> bool {
+        matches!(self.strategy, Strategy::Scan { .. })
     }
 
     /// Test-only: whether this program uses the case-fold-literal strategy.

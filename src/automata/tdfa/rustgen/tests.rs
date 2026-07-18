@@ -164,6 +164,41 @@ fn exec_digits_window() {
     );
 }
 
+// ---- window_fallback: size-aware Scan → Prefix fallback (`a.{12}b`) ----
+//
+// The unanchored Scan automaton for a bounded window overlapping its first
+// byte grows as 2^window (~45k states here); strategy selection falls back to
+// a `Prefix` program on the common-byte predicate, whose anchored verify is
+// linear in the pattern (see `MAX_SCAN_STATES` in `prefilter.rs`).
+
+const WINDOW_FALLBACK: &str = "a.{12}b";
+
+#[test]
+fn golden_window_fallback() {
+    assert_golden("window_fallback", WINDOW_FALLBACK, "",
+        include_str!("snapshots/window_fallback.rs"),
+    );
+}
+
+#[test]
+fn exec_window_fallback() {
+    let m = include!("snapshots/window_fallback.rs");
+    oracle_check(&m, WINDOW_FALLBACK, "",
+        &[
+            "",
+            "ab",
+            "a123456789012b",
+            "xxa123456789012b_a123456789012byy",
+            "aaaaaaaaaaaaaaab",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+            "a12345678901xb no, then a123456789012b yes",
+            "a12345678901\nb",
+            "a\u{2028}23456789012b",
+            "aαβγδεζηθικλμb",
+        ],
+    );
+}
+
 // ---- capture tier: Prefix strategy with a group + warm-start skip ----
 
 const CAP_PREFIX_GROUP: &str = r"Sherlock (\w+)";
@@ -318,5 +353,21 @@ fn unsupported_patterns_error() {
             EmitError::Build(_) | EmitError::Unsupported(_) => {}
             other => panic!("unexpected error kind for `{pattern}`: {other:?}"),
         }
+    }
+}
+
+/// An automaton the TDFA can build (under `TDFA_STATE_BUDGET`) but far past
+/// `CODEGEN_MAX_STATES` must fail fast instead of handing rustc a
+/// tens-of-MB source file. The unbounded `\w*` tail keeps the pattern off the
+/// Scan → `Prefix` size fallback, so its ~45k-state Scan automaton reaches
+/// the emitter's own cap.
+#[test]
+fn oversized_automaton_fails_fast() {
+    let err = compile_to_rust(r"a.{12}b\w*", Flags::default())
+        .map(|_| ())
+        .expect_err("expected the generated-code size cap to reject");
+    match err {
+        super::EmitError::Unsupported(msg) if msg.contains("too large") => {}
+        other => panic!("expected the size-cap error, got: {other:?}"),
     }
 }
