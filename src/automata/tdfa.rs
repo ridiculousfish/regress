@@ -149,10 +149,50 @@ pub type TagCommandList = SmallVec<[TagCommand; 4]>;
 ///
 /// Unlike a full-width gather, a move sequence touches **only** the lanes that
 /// change — no width-proportional identity copy and no double buffer.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MoveOp {
     pub dst: u16,
     pub src: u16,
+}
+
+/// Compiled per-transition move sequences: one shared `MoveOp` arena plus a
+/// per-transition `(offset, len)` cell, same shape/indexing as `transitions`.
+/// Identical sequences — common across a state's byte classes, and across
+/// states thanks to `compile_moves`' canonical emission order — share a single
+/// arena range, so the hot loop's sequences are contiguous and deduped instead
+/// of one heap allocation per transition. Empty `cells` ⇔ the table was not
+/// compiled (see [`Tdfa::has_moves`]).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MoveTable {
+    cells: Box<[(u32, u32)]>,
+    arena: Box<[MoveOp]>,
+}
+
+impl core::ops::Index<usize> for MoveTable {
+    type Output = [MoveOp];
+    #[inline]
+    fn index(&self, idx: usize) -> &[MoveOp] {
+        let (off, len) = self.cells[idx];
+        &self.arena[off as usize..off as usize + len as usize]
+    }
+}
+
+impl MoveTable {
+    /// Debug-checked `Index` (the `DebugCheckIndex` convention): the
+    /// executor's per-byte path, where the two bounds checks of the safe
+    /// `Index` impl are measurable. Offsets/lengths are constructed valid by
+    /// `compile_moves_all`.
+    #[inline(always)]
+    pub(crate) fn iat(&self, idx: usize) -> &[MoveOp] {
+        let &(off, len) = crate::util::DebugCheckIndex::iat(&*self.cells, idx);
+        let range = off as usize..off as usize + len as usize;
+        debug_assert!(self.arena.get(range.clone()).is_some(), "move arena range out of bounds");
+        if cfg!(feature = "prohibit-unsafe") {
+            &self.arena[range]
+        } else {
+            unsafe { self.arena.get_unchecked(range) }
+        }
+    }
 }
 
 /// Compile a [`TagCommandList`] into an ordered, in-place [`MoveOp`] sequence
@@ -1265,13 +1305,13 @@ pub struct Tdfa {
     // loop applies `transition_moves`.
     transition_commands: Box<[TagCommandList]>,
 
-    // Precompiled in-place move sequence per transition, same shape/indexing as
-    // `transition_commands`. Built by `compile_moves_all` at the end of
-    // `try_from` and rebuilt after `optimize` (which changes `num_marks` and the
-    // command lists). The executor's per-byte hot loop applies these in order,
-    // in place, instead of interpreting `TagCommand`s. An empty entry has no tag
-    // effect (skip). See [`MoveOp`].
-    transition_moves: Box<[Box<[MoveOp]>]>,
+    // Precompiled in-place move sequence per transition, same indexing as
+    // `transition_commands` (arena + per-cell range — see [`MoveTable`]).
+    // Built by `compile_moves_all` at the end of `try_from` and rebuilt after
+    // `optimize` (which changes `num_marks` and the command lists). The
+    // executor's per-byte hot loop applies these in order, in place, instead
+    // of interpreting `TagCommand`s. An empty entry has no tag effect (skip).
+    transition_moves: MoveTable,
 
     // Per-state finalization commands. Indexed by state ID. For accepting
     // states this is `num_tags` commands (one per tag) describing how to read
@@ -1414,6 +1454,11 @@ pub struct TdfaStats {
     pub total_commands: usize,
     pub copy_commands: usize,
     pub currentpos_commands: usize,
+    /// Compiled `MoveOp`s summed over every transition cell (what a
+    /// per-transition layout would store).
+    pub move_ops_total: usize,
+    /// `MoveOp`s actually stored in the deduped arena (see [`MoveTable`]).
+    pub move_ops_arena: usize,
 }
 
 /// Set bit `i` in a `u64` bitset (mark-id indexed). Local twin of the `opt`
@@ -1801,7 +1846,7 @@ impl Tdfa {
             accepting: build.accepting.into_boxed_slice(),
             accept_fallback,
             transition_commands: build.transition_commands.into_boxed_slice(),
-            transition_moves: Box::default(),
+            transition_moves: MoveTable::default(),
             finals: build.finals.into_boxed_slice(),
             guard_index,
             guard_table,
@@ -1837,7 +1882,7 @@ impl Tdfa {
         self.build_exec_transitions();
         let num_marks = self.num_marks;
         if num_marks + 3 > u16::MAX as usize {
-            self.transition_moves = Box::default();
+            self.transition_moves = MoveTable::default();
             self.entry_moves_anchored = Box::default();
             self.entry_moves_unanchored = Box::default();
             self.pos_stamp_loops = Box::default();
@@ -1845,11 +1890,30 @@ impl Tdfa {
             self.scan_skips = Box::default();
             return;
         }
-        self.transition_moves = self
-            .transition_commands
-            .iter()
-            .map(|cmds| compile_moves(cmds, num_marks))
-            .collect();
+        // Compile each command list and intern the result: identical sequences
+        // (exact after canonical emission) share one arena range.
+        let mut intern: HashMap<Box<[MoveOp]>, (u32, u32)> = HashMap::new();
+        let mut arena: Vec<MoveOp> = Vec::new();
+        let mut cells: Vec<(u32, u32)> = Vec::with_capacity(self.transition_commands.len());
+        for cmds in self.transition_commands.iter() {
+            let seq = compile_moves(cmds, num_marks);
+            let cell = if seq.is_empty() {
+                (0, 0)
+            } else if let Some(&c) = intern.get(&seq) {
+                c
+            } else {
+                let off = u32::try_from(arena.len()).expect("move arena exceeds u32 range");
+                arena.extend_from_slice(&seq);
+                let c = (off, seq.len() as u32);
+                intern.insert(seq, c);
+                c
+            };
+            cells.push(cell);
+        }
+        self.transition_moves = MoveTable {
+            cells: cells.into_boxed_slice(),
+            arena: arena.into_boxed_slice(),
+        };
         self.entry_moves_anchored =
             compile_moves(&self.entry_commands_anchored, num_marks);
         self.entry_moves_unanchored =
@@ -2112,7 +2176,7 @@ impl Tdfa {
     /// for a mark file too large to index with `u16` (the executor then falls
     /// back to interpreting [`transition_commands`](Self::transition_commands)).
     pub fn has_moves(&self) -> bool {
-        !self.transition_moves.is_empty()
+        !self.transition_moves.cells.is_empty()
     }
 
     /// Per-state position-stamp self-loop table.  Indexed by state ID.
@@ -2271,6 +2335,13 @@ impl Tdfa {
             total_commands: total,
             copy_commands: copy,
             currentpos_commands: cur,
+            move_ops_total: self
+                .transition_moves
+                .cells
+                .iter()
+                .map(|&(_, len)| len as usize)
+                .sum(),
+            move_ops_arena: self.transition_moves.arena.len(),
         }
     }
 
@@ -2278,10 +2349,11 @@ impl Tdfa {
         &self.transition_commands
     }
 
-    /// Precompiled in-place move sequences for each transition, same
-    /// shape/indexing as [`transition_commands`](Self::transition_commands). The
-    /// executor applies these in its hot loop. See [`MoveOp`].
-    pub(crate) fn transition_moves(&self) -> &[Box<[MoveOp]>] {
+    /// Precompiled in-place move sequences for each transition, same indexing
+    /// as [`transition_commands`](Self::transition_commands) via
+    /// `Index<usize>`. The executor applies these in its hot loop. See
+    /// [`MoveOp`] and [`MoveTable`].
+    pub(crate) fn transition_moves(&self) -> &MoveTable {
         &self.transition_moves
     }
 
