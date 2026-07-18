@@ -17,7 +17,7 @@ use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{
     EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
     PosStampLoop, ScanFast, ScanSkip, SCAN_MAX_RANGES,
-    TF_ACCEPT, TF_ACCEPTS, TF_FALLBACK, TF_SWITCHES,
+    NO_PRUNE, TF_ACCEPT, TF_ACCEPTS, TF_FALLBACK, TF_SWITCHES,
 };
 use crate::insn::StartPredicate;
 use crate::util::DebugCheckIndex;
@@ -674,7 +674,7 @@ fn run_anchored<C: TdfaExecConfig>(
     }
     if C::HAS_PERBYTE_GUARDS && tdfa.guards(state).is_some_and(|g| !g.accepts.is_empty()) {
         let sig = boundary_signature(input, loop_start, word_icase);
-        record_accepts(
+        let prune = record_accepts(
             tdfa,
             state,
             sig,
@@ -686,6 +686,10 @@ fn run_anchored<C: TdfaExecConfig>(
             has_captures,
             &mut read_live,
         );
+        if let Some((prune_state, prune_cmds)) = prune {
+            apply_cmds_scalar(src_buf, prune_cmds, loop_start);
+            state = prune_state;
+        }
     }
 
     let byte_to_class = tdfa.byte_to_class();
@@ -910,7 +914,7 @@ fn run_anchored<C: TdfaExecConfig>(
             };
         if has_accept_guards {
             let sig = boundary_signature(input, pos + 1, word_icase);
-            record_accepts(
+            let prune = record_accepts(
                 tdfa,
                 state,
                 sig,
@@ -922,6 +926,14 @@ fn run_anchored<C: TdfaExecConfig>(
                 has_captures,
                 &mut read_live,
             );
+            // Leftmost cut: the fired accept outranks every thread the pruned
+            // state drops, so switch to it — for `\w+$`-style patterns the
+            // next byte then hits the dead state instead of the scan running
+            // to end of input.
+            if let Some((prune_state, prune_cmds)) = prune {
+                apply_cmds_scalar(src_buf, prune_cmds, pos + 1);
+                state = prune_state;
+            }
         }
         pos += 1;
     }
@@ -929,7 +941,8 @@ fn run_anchored<C: TdfaExecConfig>(
 
     if C::HAS_PERBYTE_GUARDS {
         let sig = boundary_signature(input, live_position, word_icase);
-        record_accepts(
+        // Scan is over — the leftmost-cut return is irrelevant here.
+        let _ = record_accepts(
             tdfa,
             state,
             sig,
@@ -943,7 +956,7 @@ fn run_anchored<C: TdfaExecConfig>(
         );
     } else if completed && tdfa.has_eoi_accepts() {
         let sig = boundary_signature(input, input.len(), word_icase);
-        record_accepts(
+        let _ = record_accepts(
             tdfa,
             state,
             sig,
@@ -1000,6 +1013,14 @@ fn apply_switches(tdfa: &Tdfa, state: &mut u32, buf: &mut [usize], sig: u8, pos:
 /// For each `$`-style accept on `state` whose predicate holds at the position's
 /// boundary signature `sig`, snapshot the marks into `cond_buf`, apply the
 /// accept's commands, and treat it as a new accept candidate.
+///
+/// Returns the leftmost cut of the first (highest-priority) accept that fired,
+/// if it has one: the pruned successor state and the mark moves that switch
+/// into it. Mid-scan callers apply it to the live state so the automaton can
+/// die instead of dragging the outranked scanner threads to end of input; the
+/// EOI callers ignore it (the scan is over). Safe to apply after recording —
+/// `consider_accept` materializes every candidate (snapshot or recorded
+/// start), so later live-mark writes can't corrupt them.
 #[allow(clippy::too_many_arguments)]
 fn record_accepts<'a>(
     tdfa: &'a Tdfa,
@@ -1012,13 +1033,19 @@ fn record_accepts<'a>(
     best_snap: &mut [usize],
     has_captures: bool,
     read_live: &mut bool,
-) {
-    let Some(g) = tdfa.guards(state) else {
-        return;
-    };
+) -> Option<(u32, &'a [TagCommand])> {
+    let g = tdfa.guards(state)?;
+    let mut prune: Option<(u32, &[TagCommand])> = None;
+    let mut fired_any = false;
     for ac in &g.accepts {
         if !ac.cond.holds_sig(sig) {
             continue;
+        }
+        if !fired_any {
+            fired_any = true;
+            if ac.prune != NO_PRUNE {
+                prune = Some((ac.prune, &ac.prune_commands));
+            }
         }
         cond_buf.copy_from_slice(marks);
         apply_cmds_scalar(cond_buf, &ac.commands, pos);
@@ -1032,6 +1059,7 @@ fn record_accepts<'a>(
             read_live,
         );
     }
+    prune
 }
 
 /// Read the `FULL_MATCH_START` value a finalization snapshot would produce, or

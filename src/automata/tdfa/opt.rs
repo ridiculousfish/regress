@@ -11,8 +11,8 @@
 //! equivalent states byte-identical for minimization.
 
 use super::{
-    FinalCommand, InputMark, MarkValue, StateGuards, TDFA_DEAD_STATE, TagCommand, TagCommandList,
-    Tdfa,
+    FinalCommand, InputMark, MarkValue, NO_PRUNE, StateGuards, TDFA_DEAD_STATE, TagCommand,
+    TagCommandList, Tdfa,
 };
 use smallvec::SmallVec;
 use std::collections::HashMap;
@@ -172,6 +172,11 @@ pub(crate) fn minimize(t: &mut Tdfa) {
         for sw in g.switches.iter_mut() {
             sw.alt = old_to_new[sw.alt as usize];
         }
+        for ac in g.accepts.iter_mut() {
+            if ac.prune != NO_PRUNE {
+                ac.prune = old_to_new[ac.prune as usize];
+            }
+        }
         guards[nid] = g;
         for c in 0..k {
             transitions[nid * k + c] = old_to_new[t.transitions[r * k + c] as usize];
@@ -248,6 +253,7 @@ fn for_each_cmd_list_mut(t: &mut Tdfa, mut f: impl FnMut(&mut TagCommandList)) {
         }
         for ac in g.accepts.iter_mut() {
             f(&mut ac.commands);
+            f(&mut ac.prune_commands);
         }
     }
 }
@@ -265,6 +271,7 @@ fn for_each_cmd_list(t: &Tdfa, mut f: impl FnMut(&TagCommandList)) {
         }
         for ac in &g.accepts {
             f(&ac.commands);
+            f(&ac.prune_commands);
         }
     }
 }
@@ -422,7 +429,7 @@ fn register_allocate(t: &mut Tdfa) {
                 }
             }
             for ac in &g.accepts {
-                for c in &ac.commands {
+                for c in ac.commands.iter().chain(&ac.prune_commands) {
                     if let MarkValue::Copy(mk) = c.src {
                         bs_set(r, mk.0);
                     }
@@ -445,6 +452,20 @@ fn register_allocate(t: &mut Tdfa) {
                 preds[tgt as usize].push(s as u32);
             }
         }
+        // Guard edges: switch alts and accept prunes move the live state like
+        // a transition does, so their targets' live-in must flow back to `s`
+        // (pass-through marks their commands don't mention stay live across
+        // the switch).
+        if let Some(g) = t.guards(s as u32) {
+            for sw in &g.switches {
+                preds[sw.alt as usize].push(s as u32);
+            }
+            for ac in &g.accepts {
+                if ac.prune != NO_PRUNE {
+                    preds[ac.prune as usize].push(s as u32);
+                }
+            }
+        }
     }
 
     // Worklist fixpoint. `acc` accumulates the new `live[s]`.
@@ -456,37 +477,52 @@ fn register_allocate(t: &mut Tdfa) {
         let s = s as usize;
         in_wl[s] = false;
         acc.copy_from_slice(&reads_at[s * words..(s + 1) * words]);
-        for c in 0..k {
-            let tgt = t.transitions[s * k + c];
-            if tgt == TDFA_DEAD_STATE {
-                continue;
-            }
+        {
             // Per-edge: live_before = use ∪ (live[tgt] \ def), computed in `tmp`
             // then unioned into `acc` (so edges don't corrupt each other). Over-
             // approximate: def = all dsts, use = all Copy srcs of this edge.
-            let cmds = &t.transition_commands[s * k + c];
-            tmp.copy_from_slice(&live[tgt as usize * words..(tgt as usize + 1) * words]);
-            for cmd in cmds {
-                bs_clear(&mut tmp, cmd.dst.0); // kill def
-            }
-            for cmd in cmds {
-                if let MarkValue::Copy(src) = cmd.src {
-                    // A `Copy` source stamped by a `CurrentPos` in this same list
-                    // reads the fresh stamp (two-phase: CurrentPos = phase 1, Copy
-                    // reads = phase 2), so it is *not* live-before. Excluding it
-                    // avoids spurious interference from canonicalize's parallel-
-                    // shift pattern (`m := pos; x := m`), which otherwise keeps
-                    // every per-state stamp mark mutually live and defeats RA.
-                    let stamped_here = cmds
-                        .iter()
-                        .any(|d| d.dst == src && matches!(d.src, MarkValue::CurrentPos));
-                    if !stamped_here {
-                        bs_set(&mut tmp, src.0); // gen use
+            let edge_flow = |tgt: usize, cmds: &TagCommandList, acc: &mut [u64], tmp: &mut [u64]| {
+                tmp.copy_from_slice(&live[tgt * words..(tgt + 1) * words]);
+                for cmd in cmds {
+                    bs_clear(tmp, cmd.dst.0); // kill def
+                }
+                for cmd in cmds {
+                    if let MarkValue::Copy(src) = cmd.src {
+                        // A `Copy` source stamped by a `CurrentPos` in this same list
+                        // reads the fresh stamp (two-phase: CurrentPos = phase 1, Copy
+                        // reads = phase 2), so it is *not* live-before. Excluding it
+                        // avoids spurious interference from canonicalize's parallel-
+                        // shift pattern (`m := pos; x := m`), which otherwise keeps
+                        // every per-state stamp mark mutually live and defeats RA.
+                        let stamped_here = cmds
+                            .iter()
+                            .any(|d| d.dst == src && matches!(d.src, MarkValue::CurrentPos));
+                        if !stamped_here {
+                            bs_set(tmp, src.0); // gen use
+                        }
                     }
                 }
+                for (w, &tw) in tmp.iter().enumerate() {
+                    acc[w] |= tw;
+                }
+            };
+            for c in 0..k {
+                let tgt = t.transitions[s * k + c];
+                if tgt == TDFA_DEAD_STATE {
+                    continue;
+                }
+                edge_flow(tgt as usize, &t.transition_commands[s * k + c], &mut acc, &mut tmp);
             }
-            for (w, &tw) in tmp.iter().enumerate() {
-                acc[w] |= tw;
+            // Guard edges (switch alts, accept prunes) flow like transitions.
+            if let Some(g) = t.guards(s as u32) {
+                for sw in &g.switches {
+                    edge_flow(sw.alt as usize, &sw.commands, &mut acc, &mut tmp);
+                }
+                for ac in &g.accepts {
+                    if ac.prune != NO_PRUNE {
+                        edge_flow(ac.prune as usize, &ac.prune_commands, &mut acc, &mut tmp);
+                    }
+                }
             }
         }
         let cur = &mut live[s * words..(s + 1) * words];
@@ -551,7 +587,7 @@ fn register_allocate(t: &mut Tdfa) {
                 }
             }
             for ac in &g.accepts {
-                for c in &ac.commands {
+                for c in ac.commands.iter().chain(&ac.prune_commands) {
                     bs_set(&mut edgeset, c.dst.0);
                     if let MarkValue::Copy(mk) = c.src {
                         bs_set(&mut edgeset, mk.0);

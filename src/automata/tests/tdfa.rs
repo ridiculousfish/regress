@@ -696,3 +696,65 @@ fn optional_tail_captures_survive_read_live() {
         assert_eq!(m.captures, vec![Some(0..3), None]);
     }
 }
+
+// ===== Leftmost cut for mid-input `$` accepts (accept prunes) =====
+//
+// A multiline-`$` accept is a runtime conditional, so construction can't bake
+// the leftmost cut into the state graph the way eager accepts get it (their
+// closures truncate at GOAL). Without a runtime cut, a fired accept leaves the
+// later-start scanner threads alive and every `find` scans to end of input —
+// O(n·matches) iteration. `resolve_accept_prunes` precomputes the pruned
+// successor per accept; the executor switches to it when the accept fires.
+
+/// The `\w+$`/m Scan automaton must carry at least one resolved prune — and
+/// pruning must survive `optimize` (minimize remaps the target ids).
+#[test]
+fn multiline_dollar_accepts_carry_prunes() {
+    use crate::automata::tdfa::NO_PRUNE;
+    let check = |t: &Tdfa, label: &str| {
+        let has_prune = (0..t.num_states() as u32)
+            .filter_map(|s| t.guards(s))
+            .flat_map(|g| g.accepts.iter())
+            .any(|ac| ac.prune != NO_PRUNE);
+        assert!(has_prune, "{label}: expected a resolved leftmost-cut prune target");
+    };
+    let mut t = make_tdfa_unanchored_ml(r"\w+$");
+    check(&t, "raw");
+    t.optimize();
+    check(&t, "optimized");
+}
+
+/// Oracle cross-check of multiline-`$` patterns (with and without captures)
+/// against the NFA backend, raw and optimized. These inputs make the cut fire
+/// mid-scan: matches on early lines followed by more matchable lines.
+#[test]
+fn multiline_dollar_prune_cross_check() {
+    let inputs: &[&[u8]] = &[
+        b"",
+        b"abc\n",
+        b"abc\ndef\n",
+        b"abc def\nghi jkl\nmno",
+        b"  \nabc\n  \ndef",
+        b"a\n\nb\n\n",
+        b"no newline at all",
+        b"trailing word\nend",
+    ];
+    for pattern in [r"\w+$", r"(\w+)$", r"[a-z]+?$", r"(\w+)\s(\w+)$", r"\w+$|!"] {
+        let re = parse_ir_multiline(pattern);
+        let nfa = Nfa::try_from_unanchored(&re).expect("nfa build");
+        let raw = Tdfa::try_from(&nfa).expect("tdfa build");
+        let mut opt = Tdfa::try_from(&nfa).expect("tdfa build");
+        opt.optimize();
+        for input in inputs {
+            let expected = execute_nfa(&nfa, input);
+            for (label, t) in [("raw", &raw), ("optimized", &opt)] {
+                assert_eq!(
+                    execute_tdfa(t, input),
+                    expected,
+                    "{label} mismatch on pattern {pattern:?} input {:?}",
+                    std::str::from_utf8(input).unwrap_or("<binary>")
+                );
+            }
+        }
+    }
+}

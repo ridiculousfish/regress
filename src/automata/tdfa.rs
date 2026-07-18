@@ -62,6 +62,11 @@ pub(crate) const TF_ACCEPTS: u8 = 8;
 /// `guard_index` sentinel: the state has no zero-width guards.
 const GUARD_NONE: u32 = u32::MAX;
 
+/// `AnchorConditional::prune` sentinel: no leftmost-cut successor — either the
+/// accept can only fire at end of input (nothing left to prune) or the cut
+/// would keep the state unchanged.
+pub(crate) const NO_PRUNE: TdfaStateId = u32::MAX;
+
 /// Maximum number of TDFA states before we bail out. Matches
 /// `dfa::DFA_STATE_BUDGET`.
 const TDFA_STATE_BUDGET: usize = 65536;
@@ -325,6 +330,26 @@ pub struct AnchorConditional {
     pub cond: EpsCondition,
     pub commands: TagCommandList,
     pub finals: SmallVec<[FinalCommand; 4]>,
+    /// Leftmost-cut successor: when this accept fires mid-scan the executor
+    /// applies `prune_commands` to the live marks and switches to this state —
+    /// the source state minus every thread the accept outranks. Without the
+    /// cut, a fired `$` accept leaves the later-start scanner threads alive
+    /// and the automaton never reaches the dead state, making `find` scan to
+    /// end of input (O(n·matches) iteration — `\w+$`/m). The eager-accept path
+    /// gets the same cut at construction time via `truncate_at_first_goal`;
+    /// a conditional accept can only take it at runtime, once the predicate
+    /// has actually held. `NO_PRUNE` when not applicable (EOI-only accepts,
+    /// or the cut keeps the state unchanged).
+    pub(crate) prune: TdfaStateId,
+    /// Mark moves for the `prune` switch (source-canonical → pruned-canonical
+    /// layout), computed like an anchor-alt's switch commands.
+    pub(crate) prune_commands: TagCommandList,
+    /// Construction-only: number of leading threads of the owning state that
+    /// outrank this accept (the closure prefix at the moment the conditional
+    /// was recorded — ending with the accepting thread itself). Consumed by
+    /// `Build::resolve_accept_prunes`, which re-closes this prefix to build
+    /// the pruned state; meaningless afterwards.
+    prune_prefix: usize,
 }
 
 /// Whether a `$`-style accept must be checked at every byte (`true`) or only
@@ -672,6 +697,14 @@ fn close_priority(
                             cond: edge.cond.clone(),
                             commands: all_cmds,
                             finals,
+                            prune: NO_PRUNE,
+                            prune_commands: TagCommandList::new(),
+                            // Threads popped so far (ending with the current
+                            // thread) outrank this accept; the current thread's
+                            // own higher-priority eps descendants — also above
+                            // the accept — are regenerated when the prefix is
+                            // re-closed during prune resolution.
+                            prune_prefix: threads.len(),
                         });
                         continue;
                     }
@@ -746,6 +779,10 @@ struct Build<'a> {
     anchor_conditionals: Vec<SmallVec<[AnchorConditional; 1]>>,
     anchor_alts: Vec<SmallVec<[AnchorAlt; 1]>>,
     worklist: Vec<TdfaState>,
+    /// States registered with a mid-input-capable (`multiline $`) conditional,
+    /// awaiting leftmost-cut resolution (see `resolve_accept_prunes`). Kept
+    /// with their canonical thread lists so the prune prefix can be re-closed.
+    pending_prunes: Vec<(TdfaStateId, TdfaState)>,
 }
 
 impl Build<'_> {
@@ -766,6 +803,9 @@ impl Build<'_> {
         }
         let is_accepting = canon.0.iter().any(|t| t.state == GOAL_STATE);
         let state_finals = synthesize_finals(&canon, self.num_tags);
+        if conds.iter().any(conditional_needs_perbyte) {
+            self.pending_prunes.push((id, canon.clone()));
+        }
         self.accepting.push(is_accepting);
         self.finals.push(state_finals);
         self.anchor_conditionals.push(conds);
@@ -909,6 +949,46 @@ impl Build<'_> {
             alt: alt_id,
             commands: switch_commands,
         });
+        Ok(())
+    }
+
+    /// Resolve the leftmost-cut successors for `sid`'s mid-input accept
+    /// conditionals. For each, re-close the recorded thread prefix (the
+    /// threads outranking the accept — the re-closure regenerates the
+    /// accepting thread's own higher-priority descendants, and may keep some
+    /// outranked descendants too, which is safe: `consider_accept` still
+    /// adjudicates their candidates) and register the result as the state to
+    /// switch to when the accept fires. Threads *not* reachable from the
+    /// prefix — the later-start scanners the accept outranks — drop out, which
+    /// is what lets the scan die instead of running to end of input. The
+    /// switch commands are computed like an anchor-alt's (structural slot
+    /// diff), so no raw-mark bookkeeping crosses the canonicalization.
+    fn resolve_accept_prunes(&mut self, sid: TdfaStateId, canon: &TdfaState) -> Result<(), Error> {
+        for cidx in 0..self.anchor_conditionals[sid as usize].len() {
+            let ac = &self.anchor_conditionals[sid as usize][cidx];
+            if !conditional_needs_perbyte(ac) {
+                continue;
+            }
+            // Clamped: `truncate_at_first_goal` may have shortened the list
+            // below the recorded prefix (an eager accept above this
+            // conditional); re-closing everything then dedups to `sid` below.
+            let count = ac.prune_prefix.min(canon.0.len());
+            let seeds: Vec<TaggedNfaState> = canon.0[..count].to_vec();
+            let (canon_prune, _entry, conds_prune) =
+                self.closure_from_seeds(&seeds, false, false, &[])?;
+            let switch_commands = compute_alt_switch_commands(canon, &canon_prune);
+            let canon_for_alt = canon_prune.clone();
+            let (prune_id, is_new) = self.register_or_get_state(canon_prune, conds_prune)?;
+            if is_new {
+                self.compute_anchor_alt_for(&canon_for_alt, &seeds, false, prune_id)?;
+            }
+            if prune_id == sid {
+                continue; // Cut keeps the state unchanged — nothing to gain.
+            }
+            let ac = &mut self.anchor_conditionals[sid as usize][cidx];
+            ac.prune = prune_id;
+            ac.prune_commands = switch_commands;
+        }
         Ok(())
     }
 }
@@ -1598,6 +1678,7 @@ impl Tdfa {
             anchor_conditionals: Vec::new(),
             anchor_alts: Vec::new(),
             worklist: Vec::new(),
+            pending_prunes: Vec::new(),
         };
 
         // State 0 = dead state (self-loops, not accepting). Represented as
@@ -1625,6 +1706,12 @@ impl Tdfa {
         let (start_unanchored, entry_commands_unanchored) =
             seed_initial_state(&mut build, /* at_start_of_input */ false)?;
 
+        // Outer fixpoint: drain the transition worklist, then resolve one
+        // state's accept prunes (which may register new states, refilling the
+        // worklist — and those states may carry prunable accepts of their
+        // own). Both queues only grow with fresh states, so the budget bounds
+        // the loop.
+        loop {
         while let Some(state) = build.worklist.pop() {
             let dfa_state = build.state_map[&state];
             let row_offset = dfa_state as usize * num_classes;
@@ -1668,6 +1755,11 @@ impl Tdfa {
                     )?;
                 }
             }
+        }
+        let Some((sid, canon)) = build.pending_prunes.pop() else {
+            break;
+        };
+        build.resolve_accept_prunes(sid, &canon)?;
         }
 
         let num_marks = build.alloc.count() as usize;
@@ -2170,6 +2262,7 @@ impl Tdfa {
             }
             for ac in &g.accepts {
                 tally(&ac.commands);
+                tally(&ac.prune_commands);
             }
         }
         TdfaStats {
