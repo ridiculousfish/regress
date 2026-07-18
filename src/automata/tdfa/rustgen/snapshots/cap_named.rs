@@ -95,14 +95,9 @@
                     let b = input[pos];
                     pos += 1;
                     match b {
-                        b'0'..=b'9' => {
+                        b'0'..=b'9' | b'A'..=b'Z' | b'_' | b'a'..=b'z' => {
                             m[2] = pos;
                             m[3] = pos;
-                            state = 6;
-                        }
-                        b'A'..=b'Z' | b'_' | b'a'..=b'z' => {
-                            m[3] = pos;
-                            m[2] = pos;
                             state = 6;
                         }
                         _ => {
@@ -116,8 +111,8 @@
                         pos += 1;
                     }
                     if pos != p0 {
-                        m[3] = pos;
                         m[2] = pos;
+                        m[3] = pos;
                     }
                     acc_end = pos;
                     acc_state = 6;
@@ -128,8 +123,8 @@
                     pos += 1;
                     match b {
                         b'0'..=b'9' | b'A'..=b'Z' | b'_' | b'a'..=b'z' => {
-                            m[3] = pos;
                             m[2] = pos;
+                            m[3] = pos;
                             state = 6;
                         }
                         _ => {

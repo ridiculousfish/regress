@@ -155,6 +155,11 @@ pub struct MoveOp {
 /// single `scratch` lane — saved once per cycle and consumed before the
 /// component finishes — suffices. An empty command list yields an empty
 /// sequence (the executor skips it, leaving the mark file untouched).
+///
+/// Among the valid linearizations the emitted one is canonical: ties are
+/// broken toward the smallest global mark id, yielding the lexicographically
+/// least order. Semantically equal parallel assignments therefore compile to
+/// identical `MoveOp` sequences regardless of command-list order.
 fn compile_moves(cmds: &[TagCommand], num_marks: usize) -> Box<[MoveOp]> {
     if cmds.is_empty() {
         return Box::default();
@@ -240,8 +245,20 @@ fn compile_moves(cmds: &[TagCommand], num_marks: usize) -> Box<[MoveOp]> {
         .collect();
     let mut remaining = pred.iter().filter(|p| p.is_some()).count();
 
+    // Emission is canonical: wherever the dependency order leaves a choice
+    // (which ready destination to emit, which cycle mark to save), take the
+    // smallest *global* mark id. The output is then the lexicographically
+    // least valid linearization, so equal parallel assignments compile to
+    // byte-identical sequences no matter what order construction enumerated
+    // the commands in — command-list order can't leak through.
     while remaining > 0 {
-        if let Some(d) = ready.pop() {
+        let pick = ready
+            .iter()
+            .enumerate()
+            .min_by_key(|&(_, &d)| marks[d])
+            .map(|(i, _)| i);
+        if let Some(i) = pick {
+            let d = ready.swap_remove(i);
             let s = pred[d].take().unwrap();
             remaining -= 1;
             let src_idx = match s {
@@ -264,7 +281,8 @@ fn compile_moves(cmds: &[TagCommand], num_marks: usize) -> Box<[MoveOp]> {
             // marks to `scratch` and redirect that mark's readers there; the
             // mark is then free to overwrite and the component drains in order.
             let m = (0..n)
-                .find(|&x| pred[x].is_some() && read_count[x] > 0)
+                .filter(|&x| pred[x].is_some() && read_count[x] > 0)
+                .min_by_key(|&x| marks[x])
                 .expect("a cycle node exists when stalled with work remaining");
             ops.push(MoveOp {
                 dst: scratch,

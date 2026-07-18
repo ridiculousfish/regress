@@ -45,13 +45,13 @@
         let mut acc_end = usize::MAX;
         let mut acc_state = u32::MAX;
         if start == 0 {
-            m[1] = pos;
             m[0] = pos;
+            m[1] = pos;
         } else {
-            m[1] = pos;
             m[0] = pos;
-            m[3] = pos;
+            m[1] = pos;
             m[2] = pos;
+            m[3] = pos;
         }
         let mut state: u32 = 1;
         'scan: loop {
@@ -117,8 +117,8 @@
                     pos += 1;
                     match b {
                         b'0'..=b'9' | b'A'..=b'Z' | b'_' | b'a'..=b'z' => {
-                            m[5] = pos;
                             m[4] = pos;
+                            m[5] = pos;
                             state = 4;
                         }
                         _ => {
@@ -132,8 +132,8 @@
                         pos += 1;
                     }
                     if pos != p0 {
-                        m[5] = pos;
                         m[4] = pos;
+                        m[5] = pos;
                     }
                     acc_end = pos;
                     acc_state = 4;
@@ -144,8 +144,8 @@
                     pos += 1;
                     match b {
                         b'0'..=b'9' | b'A'..=b'Z' | b'_' | b'a'..=b'z' => {
-                            m[5] = pos;
                             m[4] = pos;
+                            m[5] = pos;
                             state = 4;
                         }
                         _ => {
