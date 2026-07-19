@@ -1459,6 +1459,10 @@ pub struct TdfaStats {
     pub move_ops_total: usize,
     /// `MoveOp`s actually stored in the deduped arena (see [`MoveTable`]).
     pub move_ops_arena: usize,
+    /// Estimated heap footprint of the automaton's tables in bytes: every
+    /// per-transition and per-state table plus SmallVec spill. Inline struct
+    /// fields (`byte_to_class` etc.) and allocator overhead are not counted.
+    pub heap_bytes: usize,
 }
 
 /// Set bit `i` in a `u64` bitset (mark-id indexed). Local twin of the `opt`
@@ -2342,7 +2346,51 @@ impl Tdfa {
                 .map(|&(_, len)| len as usize)
                 .sum(),
             move_ops_arena: self.transition_moves.arena.len(),
+            heap_bytes: self.heap_bytes(),
         }
+    }
+
+    /// Estimate the heap bytes held by the automaton's tables (see
+    /// [`TdfaStats::heap_bytes`]).
+    fn heap_bytes(&self) -> usize {
+        use core::mem::size_of;
+        fn smallvec_bytes<A: smallvec::Array>(v: &SmallVec<A>) -> usize {
+            size_of::<SmallVec<A>>()
+                + if v.spilled() {
+                    v.capacity() * size_of::<A::Item>()
+                } else {
+                    0
+                }
+        }
+        let mut bytes = 0usize;
+        bytes += self.transitions.len() * size_of::<TdfaStateId>();
+        bytes += self.trans_flags.len();
+        bytes += self.exec_transitions.len() * size_of::<u32>();
+        bytes += self
+            .transition_commands
+            .iter()
+            .map(smallvec_bytes)
+            .sum::<usize>();
+        bytes += self.transition_moves.cells.len() * size_of::<(u32, u32)>()
+            + self.transition_moves.arena.len() * size_of::<MoveOp>();
+        bytes += self.accepting.len() + self.accept_fallback.len();
+        bytes += self.finals.iter().map(smallvec_bytes).sum::<usize>();
+        bytes += self.guard_index.len() * size_of::<u32>();
+        for g in self.guard_table.iter() {
+            bytes += size_of::<StateGuards>();
+            for sw in &g.switches {
+                bytes += smallvec_bytes(&sw.commands);
+            }
+            for ac in &g.accepts {
+                bytes += smallvec_bytes(&ac.commands)
+                    + smallvec_bytes(&ac.prune_commands)
+                    + smallvec_bytes(&ac.finals);
+            }
+        }
+        bytes += self.pos_stamp_loops.len() * size_of::<Option<PosStampLoop>>();
+        bytes += self.psl_ascii_bms.len() * size_of::<(u64, u64)>();
+        bytes += self.scan_skips.len() * size_of::<Option<ScanSkip>>();
+        bytes
     }
 
     pub fn transition_commands(&self) -> &[TagCommandList] {
