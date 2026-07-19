@@ -223,7 +223,7 @@ fn finals_have_one_command_per_tag_when_accepting() {
     for s in 0..t.accepting().len() {
         if t.accepting()[s] {
             assert_eq!(
-                t.finals()[s].len(),
+                t.finals(s as u32).len(),
                 num_tags,
                 "state {s} accepting but finals length != num_tags"
             );

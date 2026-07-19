@@ -1264,6 +1264,32 @@ pub(crate) enum ScanFast {
     BitmapAscii { bm0: u64, bm1: u64 },
 }
 
+/// Sentinel for the per-state accelerator indexes (`psl_index`,
+/// `scan_skip_index`): the state has no accelerator record.
+pub(crate) const ACCEL_NONE: u32 = u32::MAX;
+
+/// Flat (static-representable) form of [`ScanSkip`]: the stamp list becomes a
+/// range into the shared stamp arena. This is what the packed side tables
+/// store; the rich SmallVec form exists only during computation.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScanSkipFlat {
+    pub(crate) byte_bitmap: [u64; 4],
+    pub(crate) fast: ScanFast,
+    /// `(offset, len)` into [`Tdfa::stamp_arena`]; `len == 0` ⇒ pure skip.
+    pub(crate) stamp: (u32, u32),
+}
+
+/// Flat form of [`PosStampLoop`] — see [`ScanSkipFlat`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PosStampLoopFlat {
+    pub(crate) byte_bitmap: [u64; 4],
+    pub(crate) fast: ScanFast,
+    /// `(offset, len)` into [`Tdfa::stamp_arena`].
+    pub(crate) stamp: (u32, u32),
+    /// Cached `accept_fallback[state]` (see [`PosStampLoop::needs_snapshot`]).
+    pub(crate) needs_snapshot: bool,
+}
+
 /// Interpreter self-loop peel data for a state whose every self-loop
 /// transition consists solely of `curpos → mark` stamping ops, with the
 /// same destination marks across all self-loop byte classes.  When the
@@ -1435,11 +1461,13 @@ pub struct Tdfa {
     entry_moves_anchored: Box<[MoveOp]>,
     entry_moves_unanchored: Box<[MoveOp]>,
 
-    /// Per-state position-stamp self-loop info.  Indexed by state ID.
-    /// `Some` only for accepting states whose every self-loop transition is a
-    /// pure curpos-stamp (all `MoveOp::src == curpos_lane`) with consistent
-    /// targets.  Empty slice when `transition_moves` was not compiled.
-    pos_stamp_loops: Box<[Option<PosStampLoop>]>,
+    /// Per-state position-stamp self-loop accelerator, stored sparse: a
+    /// per-state index (`ACCEL_NONE` for most states) into a packed table.
+    /// A state qualifies when it is accepting and every self-loop transition
+    /// is a pure curpos-stamp (all `MoveOp::src == curpos_lane`) with
+    /// consistent targets. Empty when `transition_moves` was not compiled.
+    psl_index: Box<[u32]>,
+    psl_table: Box<[PosStampLoopFlat]>,
 
     /// Per-state ASCII bitmap pair for the PSL byte set.  Indexed by state ID.
     /// For PSL-Some ASCII-only states: `(byte_bitmap[0], byte_bitmap[1])` — the
@@ -1449,12 +1477,19 @@ pub struct Tdfa {
     ///
     /// Stride is 16 bytes = `state << 4`, no multiply.  The executor uses this
     /// to peek at the next byte before committing to the full PSL scan.
+    /// Non-zero ⇔ `psl_index[state] != ACCEL_NONE` with an ASCII-only set.
     psl_ascii_bms: Box<[(u64, u64)]>,
 
-    /// Per-state scan-skip info.  Indexed by state ID.  `Some` only for
-    /// non-accepting states that have at least one self-loop transition with
-    /// empty move ops — the executor can bypass those bytes entirely.
-    scan_skips: Box<[Option<ScanSkip>]>,
+    /// Per-state scan-skip accelerator, sparse like `psl_index`/`psl_table`.
+    /// A state qualifies when it is non-accepting and has at least one
+    /// self-loop transition with empty (or uniform curpos-stamp) move ops —
+    /// the executor can bypass those bytes entirely.
+    scan_skip_index: Box<[u32]>,
+    scan_skip_table: Box<[ScanSkipFlat]>,
+
+    /// Shared arena for the accelerator tables' stamp-mark lists (interned;
+    /// `ScanSkipFlat::stamp` / `PosStampLoopFlat::stamp` are ranges into it).
+    stamp_arena: Box<[u16]>,
 }
 
 #[derive(Debug, Clone)]
@@ -1908,9 +1943,12 @@ impl Tdfa {
             trans_flags: Box::default(),
             entry_moves_anchored: Box::default(),
             entry_moves_unanchored: Box::default(),
-            pos_stamp_loops: Box::default(),
+            psl_index: Box::default(),
+            psl_table: Box::default(),
             psl_ascii_bms: Box::default(),
-            scan_skips: Box::default(),
+            scan_skip_index: Box::default(),
+            scan_skip_table: Box::default(),
+            stamp_arena: Box::default(),
         };
         tdfa.compile_moves_all();
         // Build after compile_moves_all so accept_fallback (computed above) is current.
@@ -1935,9 +1973,12 @@ impl Tdfa {
             self.transition_moves = MoveTable::default();
             self.entry_moves_anchored = Box::default();
             self.entry_moves_unanchored = Box::default();
-            self.pos_stamp_loops = Box::default();
+            self.psl_index = Box::default();
+            self.psl_table = Box::default();
             self.psl_ascii_bms = Box::default();
-            self.scan_skips = Box::default();
+            self.scan_skip_index = Box::default();
+            self.scan_skip_table = Box::default();
+            self.stamp_arena = Box::default();
             return;
         }
         // Compile each command list and intern the result: identical sequences
@@ -1952,9 +1993,8 @@ impl Tdfa {
             compile_moves(&self.entry_commands_anchored, num_marks);
         self.entry_moves_unanchored =
             compile_moves(&self.entry_commands_unanchored, num_marks);
-        self.pos_stamp_loops = self.compute_pos_stamp_loops();
-        self.psl_ascii_bms = self
-            .pos_stamp_loops
+        let psls = self.compute_pos_stamp_loops();
+        self.psl_ascii_bms = psls
             .iter()
             .map(|opt| match opt {
                 None => (0u64, 0u64),
@@ -1970,7 +2010,55 @@ impl Tdfa {
                 }
             })
             .collect();
-        self.scan_skips = self.compute_scan_skips();
+        let skips = self.compute_scan_skips();
+
+        // Pack both accelerators sparse: per-state sentinel index + packed
+        // table, stamp lists interned into one shared arena.
+        let mut stamp_arena: Vec<u16> = Vec::new();
+        let mut stamp_intern: HashMap<Box<[u16]>, (u32, u32)> = HashMap::new();
+        let mut intern_stamp = |marks: &[u16], arena: &mut Vec<u16>| -> (u32, u32) {
+            if marks.is_empty() {
+                return (0, 0);
+            }
+            if let Some(&r) = stamp_intern.get(marks) {
+                return r;
+            }
+            let off = u32::try_from(arena.len()).expect("stamp arena exceeds u32 range");
+            arena.extend_from_slice(marks);
+            let r = (off, marks.len() as u32);
+            stamp_intern.insert(marks.into(), r);
+            r
+        };
+        let mut psl_index = vec![ACCEL_NONE; psls.len()];
+        let mut psl_table: Vec<PosStampLoopFlat> = Vec::new();
+        for (s, opt) in psls.iter().enumerate() {
+            if let Some(psl) = opt {
+                psl_index[s] = psl_table.len() as u32;
+                psl_table.push(PosStampLoopFlat {
+                    byte_bitmap: psl.byte_bitmap,
+                    fast: psl.fast,
+                    stamp: intern_stamp(&psl.stamp_marks, &mut stamp_arena),
+                    needs_snapshot: psl.needs_snapshot,
+                });
+            }
+        }
+        let mut scan_skip_index = vec![ACCEL_NONE; skips.len()];
+        let mut scan_skip_table: Vec<ScanSkipFlat> = Vec::new();
+        for (s, opt) in skips.iter().enumerate() {
+            if let Some(ss) = opt {
+                scan_skip_index[s] = scan_skip_table.len() as u32;
+                scan_skip_table.push(ScanSkipFlat {
+                    byte_bitmap: ss.byte_bitmap,
+                    fast: ss.fast,
+                    stamp: intern_stamp(&ss.stamp_marks, &mut stamp_arena),
+                });
+            }
+        }
+        self.psl_index = psl_index.into_boxed_slice();
+        self.psl_table = psl_table.into_boxed_slice();
+        self.scan_skip_index = scan_skip_index.into_boxed_slice();
+        self.scan_skip_table = scan_skip_table.into_boxed_slice();
+        self.stamp_arena = stamp_arena.into_boxed_slice();
     }
 
     /// Compute per-state position-stamp self-loop info from the compiled
@@ -2215,8 +2303,14 @@ impl Tdfa {
 
     /// Per-state position-stamp self-loop table.  Indexed by state ID.
     /// Returns an empty slice when `transition_moves` was not compiled.
-    pub(crate) fn pos_stamp_loops(&self) -> &[Option<PosStampLoop>] {
-        &self.pos_stamp_loops
+    /// Sparse PSL accelerator: `(per-state index with ACCEL_NONE, packed table)`.
+    pub(crate) fn psl_tables(&self) -> (&[u32], &[PosStampLoopFlat]) {
+        (&self.psl_index, &self.psl_table)
+    }
+
+    /// Shared stamp-mark arena the accelerator `stamp` ranges point into.
+    pub(crate) fn stamp_arena(&self) -> &[u16] {
+        &self.stamp_arena
     }
 
     /// Per-state ASCII bitmap pair for the PSL byte set.  `(0,0)` for PSL-None
@@ -2228,8 +2322,9 @@ impl Tdfa {
 
     /// Per-state scan-skip table.  Indexed by state ID.
     /// Returns an empty slice when `transition_moves` was not compiled.
-    pub(crate) fn scan_skips(&self) -> &[Option<ScanSkip>] {
-        &self.scan_skips
+    /// Sparse scan-skip accelerator: `(per-state index with ACCEL_NONE, packed table)`.
+    pub(crate) fn scan_skip_tables(&self) -> (&[u32], &[ScanSkipFlat]) {
+        (&self.scan_skip_index, &self.scan_skip_table)
     }
 
     /// Entry commands pre-compiled to [`MoveOp`] sequences. Returns the
@@ -2418,9 +2513,12 @@ impl Tdfa {
                     + smallvec_bytes(&ac.finals);
             }
         }
-        bytes += self.pos_stamp_loops.len() * size_of::<Option<PosStampLoop>>();
+        bytes += self.psl_index.len() * size_of::<u32>()
+            + self.psl_table.len() * size_of::<PosStampLoopFlat>();
         bytes += self.psl_ascii_bms.len() * size_of::<(u64, u64)>();
-        bytes += self.scan_skips.len() * size_of::<Option<ScanSkip>>();
+        bytes += self.scan_skip_index.len() * size_of::<u32>()
+            + self.scan_skip_table.len() * size_of::<ScanSkipFlat>();
+        bytes += self.stamp_arena.len() * size_of::<u16>();
         bytes
     }
 

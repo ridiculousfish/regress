@@ -16,7 +16,7 @@ use crate::automata::nfa::FULL_MATCH_START;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{
     EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
-    PosStampLoop, ScanFast, ScanSkip, SCAN_MAX_RANGES,
+    ACCEL_NONE, PosStampLoopFlat, ScanFast, ScanSkipFlat, SCAN_MAX_RANGES,
     NO_PRUNE, TF_ACCEPT, TF_ACCEPTS, TF_FALLBACK, TF_SWITCHES,
 };
 use crate::insn::StartPredicate;
@@ -232,9 +232,15 @@ fn scan_fast(fast: &ScanFast, byte_bitmap: &[u64; 4], input: &[u8], pos: usize) 
     }
 }
 
+/// Resolve an accelerator's `(offset, len)` stamp range in the shared arena.
+#[inline(always)]
+fn stamp_slice(arena: &[u16], stamp: (u32, u32)) -> &[u16] {
+    &arena[stamp.0 as usize..(stamp.0 + stamp.1) as usize]
+}
+
 /// Run the pos-stamp PSL scan from `start`; delegates to [`scan_fast`].
 #[inline(always)]
-fn scan_pos_stamp(psl: &PosStampLoop, input: &[u8], start: usize) -> usize {
+fn scan_pos_stamp(psl: &PosStampLoopFlat, input: &[u8], start: usize) -> usize {
     scan_fast(&psl.fast, &psl.byte_bitmap, input, start)
 }
 
@@ -725,16 +731,18 @@ fn run_anchored<C: TdfaExecConfig>(
         }
         state = estate / num_classes as u32;
     } else {
-    let pos_stamp_loops: &[Option<PosStampLoop>] = if !C::HAS_PERBYTE_GUARDS && !C::SKIP_MARKS && C::HAS_MOVES {
-        tdfa.pos_stamp_loops()
+    let (psl_index, psl_table): (&[u32], &[PosStampLoopFlat]) =
+        if !C::HAS_PERBYTE_GUARDS && !C::SKIP_MARKS && C::HAS_MOVES {
+            tdfa.psl_tables()
+        } else {
+            (&[], &[])
+        };
+    let (ss_index, ss_table): (&[u32], &[ScanSkipFlat]) = if !C::HAS_PERBYTE_GUARDS && C::HAS_MOVES {
+        tdfa.scan_skip_tables()
     } else {
-        &[]
+        (&[], &[])
     };
-    let scan_skips: &[Option<ScanSkip>] = if !C::HAS_PERBYTE_GUARDS && C::HAS_MOVES {
-        tdfa.scan_skips()
-    } else {
-        &[]
-    };
+    let stamp_arena = tdfa.stamp_arena();
     let psl_ascii_bms: &[(u64, u64)] = if !C::HAS_PERBYTE_GUARDS && !C::SKIP_MARKS && C::HAS_MOVES {
         tdfa.psl_ascii_bms()
     } else {
@@ -748,22 +756,25 @@ fn run_anchored<C: TdfaExecConfig>(
         // mark update needed.  Scan-stamp (stamp_marks non-empty): self-loop
         // moves are all `curpos → mark_j`; write each mark_j = pos once
         // after the scan (net effect of the per-byte curpos writes).
-        if let Some(ss) = scan_skips.get(state as usize).and_then(Option::as_ref) {
-            let scan_start = pos;
-            pos = scan_fast(&ss.fast, &ss.byte_bitmap, input, pos);
-            // Stamp marks whenever the scan consumed bytes.  This MUST happen
-            // before any early exit so that the EOI accept path (which runs
-            // after the byte loop when `completed && has_eoi_accepts`) reads
-            // the correct marks.
-            if !ss.stamp_marks.is_empty() && pos > scan_start {
-                for &mark_idx in &ss.stamp_marks {
-                    *src_buf.mat(mark_idx as usize) = pos;
+        if let Some(&ssi) = ss_index.get(state as usize) {
+            if ssi != ACCEL_NONE {
+                let ss = &ss_table[ssi as usize];
+                let scan_start = pos;
+                pos = scan_fast(&ss.fast, &ss.byte_bitmap, input, pos);
+                // Stamp marks whenever the scan consumed bytes.  This MUST happen
+                // before any early exit so that the EOI accept path (which runs
+                // after the byte loop when `completed && has_eoi_accepts`) reads
+                // the correct marks.
+                if ss.stamp.1 != 0 && pos > scan_start {
+                    for &mark_idx in stamp_slice(stamp_arena, ss.stamp) {
+                        *src_buf.mat(mark_idx as usize) = pos;
+                    }
+                }
+                if pos >= input.len() {
+                    break; // byte loop exhausted — let EOI accept path run
                 }
             }
-            if pos >= input.len() {
-                break; // byte loop exhausted — let EOI accept path run
-            }
-        } // end if let Some(ss) = scan_skips
+        } // end scan-skip
         let byte = *input.iat(pos);
         let class = *byte_to_class.iat(byte as usize) as usize;
         let idx = state as usize * num_classes + class;
@@ -837,12 +848,12 @@ fn run_anchored<C: TdfaExecConfig>(
                     }) != 0)
                 };
                 if next_in_set {
-                    // psl_ascii_bms nonzero ↔ pos_stamp_loops[state] is Some.
-                    let psl = pos_stamp_loops[state as usize].as_ref().unwrap();
+                    // psl_ascii_bms nonzero ↔ psl_index[state] != ACCEL_NONE.
+                    let psl = &psl_table[psl_index[state as usize] as usize];
                     let p = scan_pos_stamp(psl, input, start);
                     if p > start {
                         *src_buf.mat(curpos_lane) = p;
-                        for &mark_idx in &psl.stamp_marks {
+                        for &mark_idx in stamp_slice(stamp_arena, psl.stamp) {
                             *src_buf.mat(mark_idx as usize) = p;
                         }
                         record_accept(
@@ -882,12 +893,13 @@ fn run_anchored<C: TdfaExecConfig>(
                     needs_snapshot,
                     &mut read_live,
                 );
-                if let Some(psl) = pos_stamp_loops.get(state as usize).and_then(Option::as_ref) {
+                if let Some(&pi) = psl_index.get(state as usize).filter(|&&pi| pi != ACCEL_NONE) {
+                    let psl = &psl_table[pi as usize];
                     let start = pos + 1;
                     let p = scan_pos_stamp(psl, input, start);
                     if p > start {
                         *src_buf.mat(curpos_lane) = p;
-                        for &mark_idx in &psl.stamp_marks {
+                        for &mark_idx in stamp_slice(stamp_arena, psl.stamp) {
                             *src_buf.mat(mark_idx as usize) = p;
                         }
                         record_accept(
