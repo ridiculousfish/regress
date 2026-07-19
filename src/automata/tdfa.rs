@@ -192,6 +192,21 @@ impl<T> core::ops::Index<usize> for CsrTable<T> {
     }
 }
 
+/// Debug-checked CSR lookup over raw `(cells, arena)` slices — the borrowed
+/// form of [`CsrTable::iat`], usable with `static` tables (the AoT table
+/// tier) as well as heap ones.
+#[inline(always)]
+pub(crate) fn csr_iat<'a, T>(cells: &[(u32, u32)], arena: &'a [T], idx: usize) -> &'a [T] {
+    let &(off, len) = crate::util::DebugCheckIndex::iat(cells, idx);
+    let range = off as usize..off as usize + len as usize;
+    debug_assert!(arena.get(range.clone()).is_some(), "CSR arena range out of bounds");
+    if cfg!(feature = "prohibit-unsafe") {
+        &arena[range]
+    } else {
+        unsafe { arena.get_unchecked(range) }
+    }
+}
+
 impl<T> CsrTable<T> {
     /// Debug-checked `Index` (the `DebugCheckIndex` convention): the
     /// executor's per-byte path, where the two bounds checks of the safe
@@ -199,14 +214,12 @@ impl<T> CsrTable<T> {
     /// the builders.
     #[inline(always)]
     pub(crate) fn iat(&self, idx: usize) -> &[T] {
-        let &(off, len) = crate::util::DebugCheckIndex::iat(&*self.cells, idx);
-        let range = off as usize..off as usize + len as usize;
-        debug_assert!(self.arena.get(range.clone()).is_some(), "CSR arena range out of bounds");
-        if cfg!(feature = "prohibit-unsafe") {
-            &self.arena[range]
-        } else {
-            unsafe { self.arena.get_unchecked(range) }
-        }
+        csr_iat(&self.cells, &self.arena, idx)
+    }
+
+    /// The raw `(cells, arena)` slice pair (for the table-view abstraction).
+    pub(crate) fn as_raw(&self) -> (&[(u32, u32)], &[T]) {
+        (&self.cells, &self.arena)
     }
 
     /// Build from per-index lists, interning identical non-empty lists so they

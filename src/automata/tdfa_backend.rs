@@ -15,7 +15,8 @@ use crate::automata::dfa::{DEAD_STATE, Dfa};
 use crate::automata::nfa::FULL_MATCH_START;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{
-    EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, TDFA_DEAD_STATE, TagCommand, Tdfa,
+    EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, MoveOp, StateGuards,
+    TDFA_DEAD_STATE, TagCommand, TagCommandList, Tdfa, csr_iat,
     ACCEL_NONE, PosStampLoopFlat, ScanFast, ScanSkipFlat, SCAN_MAX_RANGES,
     NO_PRUNE, TF_ACCEPT, TF_ACCEPTS, TF_FALLBACK, TF_SWITCHES,
 };
@@ -307,9 +308,77 @@ pub fn execute_dfa(dfa: &Dfa, input: &[u8]) -> bool {
     accepting[state as usize]
 }
 
+/// Borrowed view of every table and flag the executor reads — the abstraction
+/// that lets one loop drive both a heap-built [`Tdfa`] and the AoT table
+/// tier's `static` tables. Implementors must uphold the same invariants
+/// `Tdfa` does (table shapes and premultiplication, CSR range validity, flag
+/// consistency); the executor's `debug_assert`s cross-check in debug builds.
+pub(crate) trait TdfaTables {
+    fn num_classes(&self) -> usize;
+    fn num_marks(&self) -> usize;
+    fn num_states(&self) -> usize;
+    fn has_captures(&self) -> bool;
+    fn has_moves(&self) -> bool;
+    fn has_perbyte_guards(&self) -> bool;
+    fn has_eoi_accepts(&self) -> bool;
+    fn word_icase(&self) -> bool;
+    fn start_fixed(&self) -> bool;
+    fn start(&self, start: usize) -> u32;
+    fn byte_to_class(&self) -> &[u8; 256];
+    fn transitions(&self) -> &[u32];
+    fn trans_flags(&self) -> &[u8];
+    fn exec_transitions(&self) -> &[u32];
+    fn accepting(&self) -> &[bool];
+    fn accept_fallback(&self) -> &[bool];
+    /// The compiled move table as raw `(cells, arena)` CSR slices.
+    fn moves_raw(&self) -> (&[(u32, u32)], &[MoveOp]);
+    /// Scalar-fallback command lists; may be empty when `has_moves()`.
+    fn transition_commands(&self) -> &[TagCommandList];
+    fn entry_moves(&self, start: usize) -> &[MoveOp];
+    fn entry_commands(&self, start: usize) -> &[TagCommand];
+    fn finals(&self, state: u32) -> &[FinalCommand];
+    /// Zero-width guards; `None` for guard-free states. Table-tier
+    /// implementations without guard support return `None` unconditionally
+    /// (their `has_perbyte_guards`/`has_eoi_accepts` are false).
+    fn guards(&self, state: u32) -> Option<&StateGuards>;
+    fn psl_tables(&self) -> (&[u32], &[PosStampLoopFlat]);
+    fn scan_skip_tables(&self) -> (&[u32], &[ScanSkipFlat]);
+    fn stamp_arena(&self) -> &[u16];
+    fn psl_ascii_bms(&self) -> &[(u64, u64)];
+}
+
+impl TdfaTables for Tdfa {
+    fn num_classes(&self) -> usize { Tdfa::num_classes(self) }
+    fn num_marks(&self) -> usize { Tdfa::num_marks(self) }
+    fn num_states(&self) -> usize { Tdfa::num_states(self) }
+    fn has_captures(&self) -> bool { Tdfa::has_captures(self) }
+    fn has_moves(&self) -> bool { Tdfa::has_moves(self) }
+    fn has_perbyte_guards(&self) -> bool { Tdfa::has_perbyte_guards(self) }
+    fn has_eoi_accepts(&self) -> bool { Tdfa::has_eoi_accepts(self) }
+    fn word_icase(&self) -> bool { Tdfa::word_icase(self) }
+    fn start_fixed(&self) -> bool { Tdfa::start_fixed(self) }
+    fn start(&self, start: usize) -> u32 { Tdfa::start(self, start) }
+    fn byte_to_class(&self) -> &[u8; 256] { Tdfa::byte_to_class(self) }
+    fn transitions(&self) -> &[u32] { Tdfa::transitions(self) }
+    fn trans_flags(&self) -> &[u8] { Tdfa::trans_flags(self) }
+    fn exec_transitions(&self) -> &[u32] { Tdfa::exec_transitions(self) }
+    fn accepting(&self) -> &[bool] { Tdfa::accepting(self) }
+    fn accept_fallback(&self) -> &[bool] { Tdfa::accept_fallback(self) }
+    fn moves_raw(&self) -> (&[(u32, u32)], &[MoveOp]) { self.transition_moves().as_raw() }
+    fn transition_commands(&self) -> &[TagCommandList] { Tdfa::transition_commands(self) }
+    fn entry_moves(&self, start: usize) -> &[MoveOp] { Tdfa::entry_moves(self, start) }
+    fn entry_commands(&self, start: usize) -> &[TagCommand] { Tdfa::entry_commands(self, start) }
+    fn finals(&self, state: u32) -> &[FinalCommand] { Tdfa::finals(self, state) }
+    fn guards(&self, state: u32) -> Option<&StateGuards> { Tdfa::guards(self, state) }
+    fn psl_tables(&self) -> (&[u32], &[PosStampLoopFlat]) { Tdfa::psl_tables(self) }
+    fn scan_skip_tables(&self) -> (&[u32], &[ScanSkipFlat]) { Tdfa::scan_skip_tables(self) }
+    fn stamp_arena(&self) -> &[u16] { Tdfa::stamp_arena(self) }
+    fn psl_ascii_bms(&self) -> &[(u64, u64)] { Tdfa::psl_ascii_bms(self) }
+}
+
 /// `num_marks + 3`: the mark-file width (real marks, then `clear`,
 /// `current_pos`, `scratch`). The size a [`Scratch`] must be built with.
-pub(crate) fn mark_file_width(tdfa: &Tdfa) -> usize {
+pub(crate) fn mark_file_width<T: TdfaTables>(tdfa: &T) -> usize {
     tdfa.num_marks() + 3
 }
 
@@ -317,8 +386,8 @@ pub(crate) fn mark_file_width(tdfa: &Tdfa) -> usize {
 /// `SKIP_MARKS`) from the automaton's contents and run one anchored attempt.
 /// The flag checks are once per attempt; the const generics drop the per-byte
 /// branches inside `run_anchored`.
-fn run_anchored_dyn(
-    tdfa: &Tdfa,
+fn run_anchored_dyn<T: TdfaTables>(
+    tdfa: &T,
     input: &[u8],
     start: usize,
     scratch: &mut Scratch,
@@ -326,14 +395,14 @@ fn run_anchored_dyn(
 ) -> Option<NfaMatch> {
     let skip_marks = !tdfa.has_captures() && tdfa.start_fixed();
     match (tdfa.has_perbyte_guards(), tdfa.has_moves(), skip_marks) {
-        (false, true,  false) => run_anchored::<ExecConfig<false, true,  false>>(tdfa, input, start, scratch, warm),
-        (false, true,  true)  => run_anchored::<ExecConfig<false, true,  true >>(tdfa, input, start, scratch, warm),
-        (false, false, false) => run_anchored::<ExecConfig<false, false, false>>(tdfa, input, start, scratch, warm),
-        (false, false, true)  => run_anchored::<ExecConfig<false, false, true >>(tdfa, input, start, scratch, warm),
-        (true,  true,  false) => run_anchored::<ExecConfig<true,  true,  false>>(tdfa, input, start, scratch, warm),
-        (true,  true,  true)  => run_anchored::<ExecConfig<true,  true,  true >>(tdfa, input, start, scratch, warm),
-        (true,  false, false) => run_anchored::<ExecConfig<true,  false, false>>(tdfa, input, start, scratch, warm),
-        (true,  false, true)  => run_anchored::<ExecConfig<true,  false, true >>(tdfa, input, start, scratch, warm),
+        (false, true,  false) => run_anchored::<ExecConfig<false, true, false>, T>(tdfa, input, start, scratch, warm),
+        (false, true,  true)  => run_anchored::<ExecConfig<false, true, true>, T>(tdfa, input, start, scratch, warm),
+        (false, false, false) => run_anchored::<ExecConfig<false, false, false>, T>(tdfa, input, start, scratch, warm),
+        (false, false, true)  => run_anchored::<ExecConfig<false, false, true>, T>(tdfa, input, start, scratch, warm),
+        (true,  true,  false) => run_anchored::<ExecConfig<true, true, false>, T>(tdfa, input, start, scratch, warm),
+        (true,  true,  true)  => run_anchored::<ExecConfig<true, true, true>, T>(tdfa, input, start, scratch, warm),
+        (true,  false, false) => run_anchored::<ExecConfig<true, false, false>, T>(tdfa, input, start, scratch, warm),
+        (true,  false, true)  => run_anchored::<ExecConfig<true, false, true>, T>(tdfa, input, start, scratch, warm),
     }
 }
 
@@ -341,8 +410,8 @@ fn run_anchored_dyn(
 /// `start`) and run the anchored automaton there, returning the first (leftmost)
 /// match. The `scratch` is reused across every candidate; `skip`, when set,
 /// warm-starts each attempt past the matched literal (see [`PrefixSkip`]).
-fn run_prefiltered_dyn(
-    tdfa: &Tdfa,
+fn run_prefiltered_dyn<T: TdfaTables>(
+    tdfa: &T,
     input: &[u8],
     start: usize,
     pred: &StartPredicate,
@@ -377,8 +446,8 @@ pub fn execute(tdfa: &Tdfa, input: &[u8], start: usize) -> Option<NfaMatch> {
 /// Like [`execute`], but reuses the caller-owned `scratch` (sized to
 /// [`mark_file_width`]) instead of allocating — so a `find_iter` over many
 /// matches stays allocation-free per match.
-pub(crate) fn execute_reuse(
-    tdfa: &Tdfa,
+pub(crate) fn execute_reuse<T: TdfaTables>(
+    tdfa: &T,
     input: &[u8],
     start: usize,
     scratch: &mut Scratch,
@@ -391,8 +460,8 @@ pub(crate) fn execute_reuse(
 /// `start`). The match still begins at `start`; only the byte loop resumes at
 /// `start + skip.len` from `skip.post_state`. `skip == None` is identical to
 /// [`execute_reuse`].
-pub(crate) fn execute_reuse_warm(
-    tdfa: &Tdfa,
+pub(crate) fn execute_reuse_warm<T: TdfaTables>(
+    tdfa: &T,
     input: &[u8],
     start: usize,
     scratch: &mut Scratch,
@@ -404,8 +473,8 @@ pub(crate) fn execute_reuse_warm(
 /// Execute an **anchored** TDFA driven by a literal prefilter, reusing the
 /// caller-owned `scratch`. `skip` warm-starts each verify past the matched
 /// literal (see [`PrefixSkip`]).
-pub(crate) fn execute_prefiltered_reuse(
-    tdfa: &Tdfa,
+pub(crate) fn execute_prefiltered_reuse<T: TdfaTables>(
+    tdfa: &T,
     input: &[u8],
     start: usize,
     pred: &StartPredicate,
@@ -614,8 +683,8 @@ pub(crate) fn compute_byteclass_skip(
 /// offset and the run jumps to `warm.post_state`, resuming the byte loop at
 /// `start + warm.len` instead of re-scanning the literal.
 #[inline]
-fn run_anchored<C: TdfaExecConfig>(
-    tdfa: &Tdfa,
+fn run_anchored<C: TdfaExecConfig, T: TdfaTables>(
+    tdfa: &T,
     input: &[u8],
     start: usize,
     scratch: &mut Scratch,
@@ -700,7 +769,7 @@ fn run_anchored<C: TdfaExecConfig>(
 
     let byte_to_class = tdfa.byte_to_class();
     let transitions = tdfa.transitions();
-    let trans_moves = tdfa.transition_moves();
+    let (mv_cells, mv_arena) = tdfa.moves_raw();
     let trans_cmds = tdfa.transition_commands();
     let accepting = tdfa.accepting();
     let trans_flags = tdfa.trans_flags();
@@ -785,7 +854,7 @@ fn run_anchored<C: TdfaExecConfig>(
         }
         if !C::SKIP_MARKS {
             if C::HAS_MOVES {
-                let moves = trans_moves.iat(idx);
+                let moves = csr_iat(mv_cells, mv_arena, idx);
                 if !moves.is_empty() {
                     let p = pos + 1;
                     *src_buf.mat(curpos_lane) = p;
@@ -1002,7 +1071,7 @@ fn run_anchored<C: TdfaExecConfig>(
 
 /// Follow switch guards that hold at this position until no further state
 /// change applies.
-fn apply_switches(tdfa: &Tdfa, state: &mut u32, buf: &mut [usize], sig: u8, pos: usize) {
+fn apply_switches<T: TdfaTables>(tdfa: &T, state: &mut u32, buf: &mut [usize], sig: u8, pos: usize) {
     for _ in 0..tdfa.num_states() {
         let Some(sw) = tdfa
             .guards(*state)
@@ -1034,8 +1103,8 @@ fn apply_switches(tdfa: &Tdfa, state: &mut u32, buf: &mut [usize], sig: u8, pos:
 /// `consider_accept` materializes every candidate (snapshot or recorded
 /// start), so later live-mark writes can't corrupt them.
 #[allow(clippy::too_many_arguments)]
-fn record_accepts<'a>(
-    tdfa: &'a Tdfa,
+fn record_accepts<'a, T: TdfaTables>(
+    tdfa: &'a T,
     state: u32,
     sig: u8,
     pos: usize,
