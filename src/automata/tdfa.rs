@@ -155,42 +155,87 @@ pub struct MoveOp {
     pub src: u16,
 }
 
-/// Compiled per-transition move sequences: one shared `MoveOp` arena plus a
-/// per-transition `(offset, len)` cell, same shape/indexing as `transitions`.
-/// Identical sequences — common across a state's byte classes, and across
-/// states thanks to `compile_moves`' canonical emission order — share a single
-/// arena range, so the hot loop's sequences are contiguous and deduped instead
-/// of one heap allocation per transition. Empty `cells` ⇔ the table was not
-/// compiled (see [`Tdfa::has_moves`]).
-#[derive(Debug, Clone, Default)]
-pub(crate) struct MoveTable {
+/// CSR-style table: one shared element arena plus an `(offset, len)` cell per
+/// index. The flat layout is what lets the executor's tables be borrowed as
+/// plain slices (see `TdfaView`) and, for the AoT table tier, emitted as
+/// `static` data; interning by the builder lets identical sequences share one
+/// arena range. Empty `cells` ⇔ the table was not built.
+#[derive(Debug, Clone)]
+pub(crate) struct CsrTable<T> {
     cells: Box<[(u32, u32)]>,
-    arena: Box<[MoveOp]>,
+    arena: Box<[T]>,
 }
 
-impl core::ops::Index<usize> for MoveTable {
-    type Output = [MoveOp];
+// Manual impl: the derive would demand `T: Default`, which the element types
+// don't (and needn't) satisfy — an empty table stores no elements.
+impl<T> Default for CsrTable<T> {
+    fn default() -> Self {
+        CsrTable {
+            cells: Box::default(),
+            arena: Box::default(),
+        }
+    }
+}
+
+/// Compiled per-transition move sequences, same shape/indexing as
+/// `transitions`. Identical sequences — common across a state's byte classes,
+/// and across states thanks to `compile_moves`' canonical emission order —
+/// share a single arena range (see [`Tdfa::has_moves`]).
+pub(crate) type MoveTable = CsrTable<MoveOp>;
+
+impl<T> core::ops::Index<usize> for CsrTable<T> {
+    type Output = [T];
     #[inline]
-    fn index(&self, idx: usize) -> &[MoveOp] {
+    fn index(&self, idx: usize) -> &[T] {
         let (off, len) = self.cells[idx];
         &self.arena[off as usize..off as usize + len as usize]
     }
 }
 
-impl MoveTable {
+impl<T> CsrTable<T> {
     /// Debug-checked `Index` (the `DebugCheckIndex` convention): the
     /// executor's per-byte path, where the two bounds checks of the safe
     /// `Index` impl are measurable. Offsets/lengths are constructed valid by
-    /// `compile_moves_all`.
+    /// the builders.
     #[inline(always)]
-    pub(crate) fn iat(&self, idx: usize) -> &[MoveOp] {
+    pub(crate) fn iat(&self, idx: usize) -> &[T] {
         let &(off, len) = crate::util::DebugCheckIndex::iat(&*self.cells, idx);
         let range = off as usize..off as usize + len as usize;
-        debug_assert!(self.arena.get(range.clone()).is_some(), "move arena range out of bounds");
+        debug_assert!(self.arena.get(range.clone()).is_some(), "CSR arena range out of bounds");
         if cfg!(feature = "prohibit-unsafe") {
             &self.arena[range]
         } else {
             unsafe { self.arena.get_unchecked(range) }
+        }
+    }
+
+    /// Build from per-index lists, interning identical non-empty lists so they
+    /// share one arena range.
+    fn from_lists<L: AsRef<[T]>>(lists: impl Iterator<Item = L>) -> Self
+    where
+        T: Clone + Eq + core::hash::Hash,
+    {
+        let mut intern: HashMap<Box<[T]>, (u32, u32)> = HashMap::new();
+        let mut arena: Vec<T> = Vec::new();
+        let mut cells: Vec<(u32, u32)> = Vec::new();
+        for list in lists {
+            let list = list.as_ref();
+            let cell = if list.is_empty() {
+                (0, 0)
+            } else if let Some(&c) = intern.get(list) {
+                c
+            } else {
+                let off = u32::try_from(arena.len()).expect("CSR arena exceeds u32 range");
+                arena.extend_from_slice(list);
+                let c = (off, list.len() as u32);
+                intern.insert(list.into(), c);
+                c
+            };
+            cells.push(cell);
+        }
+        CsrTable {
+            cells: cells.into_boxed_slice(),
+            arena: arena.into_boxed_slice(),
         }
     }
 }
@@ -1313,12 +1358,12 @@ pub struct Tdfa {
     // of interpreting `TagCommand`s. An empty entry has no tag effect (skip).
     transition_moves: MoveTable,
 
-    // Per-state finalization commands. Indexed by state ID. For accepting
-    // states this is `num_tags` commands (one per tag) describing how to read
-    // the final capture positions out of the mark file. For non-accepting
-    // states it's empty. Run once at scan end against the last-accepted
-    // state's mark snapshot.
-    finals: Box<[SmallVec<[FinalCommand; 4]>]>,
+    // Per-state finalization commands (CSR: per-state cell into a shared,
+    // interned arena). For accepting states this is `num_tags` commands (one
+    // per tag) describing how to read the final capture positions out of the
+    // mark file. For non-accepting states it's empty. Run once at scan end
+    // against the last-accepted state's mark snapshot.
+    finals: CsrTable<FinalCommand>,
 
     // Per-state zero-width guards: the unified table for `^ $ \b \B`. Each
     // [`StateGuards`] holds a state's `switches` (multiline `^`, `\b`/`\B` —
@@ -1535,7 +1580,7 @@ fn compute_accept_fallback(
     accepting: &[bool],
     transitions: &[TdfaStateId],
     transition_commands: &[TagCommandList],
-    finals: &[SmallVec<[FinalCommand; 4]>],
+    finals: &CsrTable<FinalCommand>,
     num_classes: usize,
     num_marks: usize,
 ) -> Box<[bool]> {
@@ -1812,11 +1857,12 @@ impl Tdfa {
         }
 
         let num_marks = build.alloc.count() as usize;
+        let finals = CsrTable::from_lists(build.finals.iter());
         let accept_fallback = compute_accept_fallback(
             &build.accepting,
             &build.transitions,
             &build.transition_commands,
-            &build.finals,
+            &finals,
             num_classes,
             num_marks,
         );
@@ -1851,7 +1897,7 @@ impl Tdfa {
             accept_fallback,
             transition_commands: build.transition_commands.into_boxed_slice(),
             transition_moves: MoveTable::default(),
-            finals: build.finals.into_boxed_slice(),
+            finals,
             guard_index,
             guard_table,
             word_icase,
@@ -1896,28 +1942,12 @@ impl Tdfa {
         }
         // Compile each command list and intern the result: identical sequences
         // (exact after canonical emission) share one arena range.
-        let mut intern: HashMap<Box<[MoveOp]>, (u32, u32)> = HashMap::new();
-        let mut arena: Vec<MoveOp> = Vec::new();
-        let mut cells: Vec<(u32, u32)> = Vec::with_capacity(self.transition_commands.len());
-        for cmds in self.transition_commands.iter() {
-            let seq = compile_moves(cmds, num_marks);
-            let cell = if seq.is_empty() {
-                (0, 0)
-            } else if let Some(&c) = intern.get(&seq) {
-                c
-            } else {
-                let off = u32::try_from(arena.len()).expect("move arena exceeds u32 range");
-                arena.extend_from_slice(&seq);
-                let c = (off, seq.len() as u32);
-                intern.insert(seq, c);
-                c
-            };
-            cells.push(cell);
-        }
-        self.transition_moves = MoveTable {
-            cells: cells.into_boxed_slice(),
-            arena: arena.into_boxed_slice(),
-        };
+        let moves = MoveTable::from_lists(
+            self.transition_commands
+                .iter()
+                .map(|cmds| compile_moves(cmds, num_marks)),
+        );
+        self.transition_moves = moves;
         self.entry_moves_anchored =
             compile_moves(&self.entry_commands_anchored, num_marks);
         self.entry_moves_unanchored =
@@ -2149,7 +2179,7 @@ impl Tdfa {
         // finals, not the state's plain finals, so both must be scanned for an
         // anchored `…$` pattern to be recognized as start-fixed.
         let cond_finals = self.guard_table.iter().flat_map(|g| g.accepts.iter().map(|ac| &ac.finals));
-        for finals in self.finals.iter().map(|f| f.as_slice()).chain(cond_finals.map(|f| f.as_slice())) {
+        for finals in core::iter::once(&*self.finals.arena).chain(cond_finals.map(|f| f.as_slice())) {
             for cmd in finals {
                 if cmd.tag == FULL_MATCH_START {
                     if let MarkValue::Copy(m) = cmd.src {
@@ -2374,7 +2404,8 @@ impl Tdfa {
         bytes += self.transition_moves.cells.len() * size_of::<(u32, u32)>()
             + self.transition_moves.arena.len() * size_of::<MoveOp>();
         bytes += self.accepting.len() + self.accept_fallback.len();
-        bytes += self.finals.iter().map(smallvec_bytes).sum::<usize>();
+        bytes += self.finals.cells.len() * size_of::<(u32, u32)>()
+            + self.finals.arena.len() * size_of::<FinalCommand>();
         bytes += self.guard_index.len() * size_of::<u32>();
         for g in self.guard_table.iter() {
             bytes += size_of::<StateGuards>();
@@ -2405,8 +2436,8 @@ impl Tdfa {
         &self.transition_moves
     }
 
-    pub fn finals(&self) -> &[SmallVec<[FinalCommand; 4]>] {
-        &self.finals
+    pub fn finals(&self, state: TdfaStateId) -> &[FinalCommand] {
+        self.finals.iat(state as usize)
     }
 
     /// Entry commands paired with the chosen initial state for the given

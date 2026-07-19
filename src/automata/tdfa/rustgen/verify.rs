@@ -568,7 +568,7 @@ pub(super) fn emit_capture(w: &mut String, tdfa: &Tdfa, skip: Option<PrefixSkip>
 /// The mark lanes state `s`'s finals read.
 fn finals_lanes(tdfa: &Tdfa, s: usize) -> Vec<usize> {
     use crate::automata::tdfa::MarkValue;
-    tdfa.finals()[s]
+    tdfa.finals(s as u32)
         .iter()
         .map(|cmd| {
             let MarkValue::Copy(src) = cmd.src else {
@@ -778,7 +778,7 @@ fn emit_finalize_arm(
     let mut start_expr: Option<String> = None;
     let mut end_expr: Option<String> = None;
     let _ = writeln!(w, "            {s} => {{");
-    for cmd in &tdfa.finals()[s] {
+    for cmd in tdfa.finals(s as u32) {
         let MarkValue::Copy(src) = cmd.src else {
             unreachable!("finals never use CurrentPos")
         };

@@ -161,13 +161,13 @@ pub(crate) fn minimize(t: &mut Tdfa) {
     // Rebuild the per-state arrays from each block's representative, remapping
     // transition targets and anchor-alt targets to the new ids.
     let mut accepting = vec![false; nn];
-    let mut finals: Vec<SmallVec<[FinalCommand; 4]>> = vec![SmallVec::new(); nn];
+    let mut finals: Vec<Vec<FinalCommand>> = vec![Vec::new(); nn];
     let mut guards = vec![StateGuards::default(); nn];
     let mut transitions = vec![TDFA_DEAD_STATE; nn * k];
     let mut transition_commands: Vec<TagCommandList> = vec![SmallVec::new(); nn * k];
     for (nid, &r) in rep.iter().enumerate() {
         accepting[nid] = t.accepting[r];
-        finals[nid] = t.finals[r].clone();
+        finals[nid] = t.finals[r].to_vec();
         let mut g = t.guards(r as u32).cloned().unwrap_or_default();
         for sw in g.switches.iter_mut() {
             sw.alt = old_to_new[sw.alt as usize];
@@ -185,7 +185,7 @@ pub(crate) fn minimize(t: &mut Tdfa) {
     }
 
     t.accepting = accepting.into_boxed_slice();
-    t.finals = finals.into_boxed_slice();
+    t.finals = super::CsrTable::from_lists(finals.iter());
     let (guard_index, guard_table) = super::pack_guards(guards);
     t.guard_index = guard_index;
     t.guard_table = guard_table;
@@ -316,9 +316,7 @@ fn eliminate_dead_marks(t: &mut Tdfa) {
 fn read_marks(t: &Tdfa, used: &mut [bool]) {
     used.fill(false);
     for_each_cmd_list(t, |cmds| collect_cmd_srcs(cmds, used));
-    for fs in t.finals.iter() {
-        collect_final_srcs(fs, used);
-    }
+    collect_final_srcs(&t.finals.arena, used);
     for g in t.guard_table.iter() {
         for ac in &g.accepts {
             collect_final_srcs(&ac.finals, used);
@@ -330,9 +328,7 @@ fn read_marks(t: &Tdfa, used: &mut [bool]) {
 /// commands and finals) across all command-bearing structures.
 fn for_each_mark_mut(t: &mut Tdfa, mut f: impl FnMut(&mut InputMark)) {
     for_each_cmd_list_mut(t, |cmds| visit_cmd_marks(cmds, &mut f));
-    for fs in t.finals.iter_mut() {
-        visit_final_marks(fs, &mut f);
-    }
+    visit_final_marks(&mut t.finals.arena, &mut f);
     for g in t.guard_table.iter_mut() {
         for ac in g.accepts.iter_mut() {
             visit_final_marks(&mut ac.finals, &mut f);

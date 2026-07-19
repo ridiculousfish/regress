@@ -88,7 +88,6 @@ pub fn to_readable_string(tdfa: &Tdfa) -> String {
     let transitions = tdfa.transitions();
     let trans_cmds = tdfa.transition_commands();
     let accepting = tdfa.accepting();
-    let finals = tdfa.finals();
     let start = tdfa.start(0);
 
     out.push_str(&format!(
@@ -127,10 +126,10 @@ pub fn to_readable_string(tdfa: &Tdfa) -> String {
         };
         out.push_str(&format!("State {}{}\n", state, marker));
 
-        if accepting[state as usize] && !finals[state as usize].is_empty() {
+        if accepting[state as usize] && !tdfa.finals(state).is_empty() {
             out.push_str(&format!(
                 "  finals: [{}]\n",
-                format_finals(&finals[state as usize])
+                format_finals(tdfa.finals(state))
             ));
         }
 

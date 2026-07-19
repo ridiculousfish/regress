@@ -666,7 +666,7 @@ fn run_anchored<C: TdfaExecConfig>(
             best_snap,
             loop_start,
             src_buf,
-            tdfa.finals().iat(state as usize),
+            tdfa.finals(state),
             has_captures,
             C::HAS_PERBYTE_GUARDS || *accept_fallback.iat(state as usize),
             &mut read_live,
@@ -850,7 +850,7 @@ fn run_anchored<C: TdfaExecConfig>(
                             best_snap,
                             p,
                             src_buf,
-                            tdfa.finals().iat(state as usize),
+                            tdfa.finals(state),
                             has_captures,
                             psl.needs_snapshot,
                             &mut read_live,
@@ -865,7 +865,7 @@ fn run_anchored<C: TdfaExecConfig>(
                     best_snap,
                     pos + 1,
                     src_buf,
-                    tdfa.finals().iat(state as usize),
+                    tdfa.finals(state),
                     has_captures,
                     needs_snapshot,
                     &mut read_live,
@@ -877,7 +877,7 @@ fn run_anchored<C: TdfaExecConfig>(
                     best_snap,
                     pos + 1,
                     src_buf,
-                    tdfa.finals().iat(state as usize),
+                    tdfa.finals(state),
                     has_captures,
                     needs_snapshot,
                     &mut read_live,
@@ -895,7 +895,7 @@ fn run_anchored<C: TdfaExecConfig>(
                             best_snap,
                             p,
                             src_buf,
-                            tdfa.finals().iat(state as usize),
+                            tdfa.finals(state),
                             has_captures,
                             psl.needs_snapshot,
                             &mut read_live,
@@ -1196,7 +1196,7 @@ pub(crate) fn jit_finalize(
     } else {
         &scratch.best_snap
     };
-    finalize(&tdfa.finals()[state as usize], marks, end, &mut scratch.norm_buf)
+    finalize(tdfa.finals(state), marks, end, &mut scratch.norm_buf)
 }
 
 /// A TDFA match that borrows captures from the owning iterator's `Scratch.norm_buf`.
