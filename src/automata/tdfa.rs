@@ -69,7 +69,7 @@ pub(crate) const NO_PRUNE: TdfaStateId = u32::MAX;
 
 /// Maximum number of TDFA states before we bail out. Matches
 /// `dfa::DFA_STATE_BUDGET`.
-const TDFA_STATE_BUDGET: usize = 65536;
+pub(crate) const TDFA_STATE_BUDGET: usize = 65536;
 
 #[derive(Debug)]
 pub enum Error {
@@ -149,7 +149,12 @@ pub type TagCommandList = SmallVec<[TagCommand; 4]>;
 ///
 /// Unlike a full-width gather, a move sequence touches **only** the lanes that
 /// change — no width-proportional identity copy and no double buffer.
+// `repr(C)` (declaration-order layout, no padding for two u16 fields) is load-
+// bearing for the AoT table tier's `le_moveops` cast, which reinterprets a raw
+// little-endian byte blob as `&[MoveOp]` — every `(u16, u16)` bit pattern is a
+// valid `MoveOp`, so the cast is sound given the guaranteed layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(C)]
 pub struct MoveOp {
     pub dst: u16,
     pub src: u16,
@@ -162,7 +167,9 @@ pub struct MoveOp {
 /// arena range. Empty `cells` ⇔ the table was not built.
 #[derive(Debug, Clone)]
 pub(crate) struct CsrTable<T> {
-    cells: Box<[(u32, u32)]>,
+    /// Flat `(offset, len)` pairs at `2i` / `2i + 1` — flat `u32`s rather
+    /// than tuples so the table tier can reinterpret a byte blob soundly.
+    cells: Box<[u32]>,
     arena: Box<[T]>,
 }
 
@@ -187,17 +194,19 @@ impl<T> core::ops::Index<usize> for CsrTable<T> {
     type Output = [T];
     #[inline]
     fn index(&self, idx: usize) -> &[T] {
-        let (off, len) = self.cells[idx];
+        let (off, len) = (self.cells[2 * idx], self.cells[2 * idx + 1]);
         &self.arena[off as usize..off as usize + len as usize]
     }
 }
 
 /// Debug-checked CSR lookup over raw `(cells, arena)` slices — the borrowed
 /// form of [`CsrTable::iat`], usable with `static` tables (the AoT table
-/// tier) as well as heap ones.
+/// tier) as well as heap ones. `cells` holds flat `(offset, len)` pairs at
+/// `2 * idx` / `2 * idx + 1`.
 #[inline(always)]
-pub(crate) fn csr_iat<'a, T>(cells: &[(u32, u32)], arena: &'a [T], idx: usize) -> &'a [T] {
-    let &(off, len) = crate::util::DebugCheckIndex::iat(cells, idx);
+pub(crate) fn csr_iat<'a, T>(cells: &[u32], arena: &'a [T], idx: usize) -> &'a [T] {
+    let off = *crate::util::DebugCheckIndex::iat(cells, 2 * idx);
+    let len = *crate::util::DebugCheckIndex::iat(cells, 2 * idx + 1);
     let range = off as usize..off as usize + len as usize;
     debug_assert!(arena.get(range.clone()).is_some(), "CSR arena range out of bounds");
     if cfg!(feature = "prohibit-unsafe") {
@@ -218,7 +227,7 @@ impl<T> CsrTable<T> {
     }
 
     /// The raw `(cells, arena)` slice pair (for the table-view abstraction).
-    pub(crate) fn as_raw(&self) -> (&[(u32, u32)], &[T]) {
+    pub(crate) fn as_raw(&self) -> (&[u32], &[T]) {
         (&self.cells, &self.arena)
     }
 
@@ -230,7 +239,7 @@ impl<T> CsrTable<T> {
     {
         let mut intern: HashMap<Box<[T]>, (u32, u32)> = HashMap::new();
         let mut arena: Vec<T> = Vec::new();
-        let mut cells: Vec<(u32, u32)> = Vec::new();
+        let mut cells: Vec<u32> = Vec::new();
         for list in lists {
             let list = list.as_ref();
             let cell = if list.is_empty() {
@@ -244,7 +253,8 @@ impl<T> CsrTable<T> {
                 intern.insert(list.into(), c);
                 c
             };
-            cells.push(cell);
+            cells.push(cell.0);
+            cells.push(cell.1);
         }
         CsrTable {
             cells: cells.into_boxed_slice(),
@@ -877,6 +887,9 @@ struct Build<'a> {
     anchor_conditionals: Vec<SmallVec<[AnchorConditional; 1]>>,
     anchor_alts: Vec<SmallVec<[AnchorAlt; 1]>>,
     worklist: Vec<TdfaState>,
+    /// State-count budget for this build (`TDFA_STATE_BUDGET` unless the
+    /// caller can recover from `BudgetExceeded` and asked for less).
+    budget: usize,
     /// States registered with a mid-input-capable (`multiline $`) conditional,
     /// awaiting leftmost-cut resolution (see `resolve_accept_prunes`). Kept
     /// with their canonical thread lists so the prune prefix can be re-closed.
@@ -896,7 +909,7 @@ impl Build<'_> {
             return Ok((id, false));
         }
         let id = self.accepting.len() as TdfaStateId;
-        if id as usize >= TDFA_STATE_BUDGET {
+        if id as usize >= self.budget {
             return Err(Error::BudgetExceeded);
         }
         let is_accepting = canon.0.iter().any(|t| t.state == GOAL_STATE);
@@ -1255,10 +1268,10 @@ pub(crate) struct ScanSkip {
 /// - **`BitmapAscii`** (all non-ASCII excluded; too many ranges for `AsciiRanges`):
 ///   pre-store the two ASCII bitmap words; select with a conditional move.
 /// - **`Bitmap`**: full 256-bit bitmap; non-ASCII bytes may be self-loop bytes.
-pub(crate) const SCAN_MAX_RANGES: usize = 4;
+pub const SCAN_MAX_RANGES: usize = 4;
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum ScanFast {
+pub enum ScanFast {
     Bitmap,
     Memchr { count: u8, bytes: [u8; 3] },
     AsciiBarrier { count: u8, bytes: [u8; 3] },
@@ -1279,28 +1292,28 @@ pub(crate) enum ScanFast {
 
 /// Sentinel for the per-state accelerator indexes (`psl_index`,
 /// `scan_skip_index`): the state has no accelerator record.
-pub(crate) const ACCEL_NONE: u32 = u32::MAX;
+pub const ACCEL_NONE: u32 = u32::MAX;
 
 /// Flat (static-representable) form of [`ScanSkip`]: the stamp list becomes a
 /// range into the shared stamp arena. This is what the packed side tables
 /// store; the rich SmallVec form exists only during computation.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ScanSkipFlat {
-    pub(crate) byte_bitmap: [u64; 4],
-    pub(crate) fast: ScanFast,
+pub struct ScanSkipFlat {
+    pub byte_bitmap: [u64; 4],
+    pub fast: ScanFast,
     /// `(offset, len)` into [`Tdfa::stamp_arena`]; `len == 0` ⇒ pure skip.
-    pub(crate) stamp: (u32, u32),
+    pub stamp: (u32, u32),
 }
 
 /// Flat form of [`PosStampLoop`] — see [`ScanSkipFlat`].
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct PosStampLoopFlat {
-    pub(crate) byte_bitmap: [u64; 4],
-    pub(crate) fast: ScanFast,
+pub struct PosStampLoopFlat {
+    pub byte_bitmap: [u64; 4],
+    pub fast: ScanFast,
     /// `(offset, len)` into [`Tdfa::stamp_arena`].
-    pub(crate) stamp: (u32, u32),
+    pub stamp: (u32, u32),
     /// Cached `accept_fallback[state]` (see [`PosStampLoop::needs_snapshot`]).
-    pub(crate) needs_snapshot: bool,
+    pub needs_snapshot: bool,
 }
 
 /// Interpreter self-loop peel data for a state whose every self-loop
@@ -1491,7 +1504,8 @@ pub struct Tdfa {
     /// Stride is 16 bytes = `state << 4`, no multiply.  The executor uses this
     /// to peek at the next byte before committing to the full PSL scan.
     /// Non-zero ⇔ `psl_index[state] != ACCEL_NONE` with an ASCII-only set.
-    psl_ascii_bms: Box<[(u64, u64)]>,
+    /// Flat `(bm0, bm1)` pairs at `2s` / `2s + 1` (byte-blob friendly).
+    psl_ascii_bms: Box<[u64]>,
 
     /// Per-state scan-skip accelerator, sparse like `psl_index`/`psl_table`.
     /// A state qualifies when it is non-accepting and has at least one
@@ -1802,6 +1816,16 @@ impl Tdfa {
     /// states are merged. Call [`Tdfa::optimize`] to apply the optional
     /// optimization passes.
     pub fn try_from(nfa: &Nfa) -> Result<Self, Error> {
+        Self::try_from_with_budget(nfa, TDFA_STATE_BUDGET)
+    }
+
+    /// [`try_from`](Self::try_from) with an explicit state budget. Callers
+    /// that can *recover* from `BudgetExceeded` (the Scan → Prefix strategy
+    /// fallback) pass a small budget so a doomed subset blowup dies in
+    /// milliseconds instead of grinding to the full build budget — at
+    /// `regex!` expansion time that's the difference between instant and
+    /// tens of seconds per pattern.
+    pub fn try_from_with_budget(nfa: &Nfa, budget: usize) -> Result<Self, Error> {
         let (byte_to_class, num_classes) = compute_byte_classes(nfa);
         let rep_bytes = representative_bytes(&byte_to_class, num_classes);
         let num_tags = nfa.num_tags();
@@ -1821,6 +1845,7 @@ impl Tdfa {
             anchor_alts: Vec::new(),
             worklist: Vec::new(),
             pending_prunes: Vec::new(),
+            budget,
         };
 
         // State 0 = dead state (self-loops, not accepting). Represented as
@@ -2009,16 +2034,16 @@ impl Tdfa {
         let psls = self.compute_pos_stamp_loops();
         self.psl_ascii_bms = psls
             .iter()
-            .map(|opt| match opt {
-                None => (0u64, 0u64),
+            .flat_map(|opt| match opt {
+                None => [0u64, 0u64],
                 Some(psl) => {
                     // Only emit non-zero bitmaps for ASCII-only PSL sets (bytes[2]/[3] = 0).
                     // The executor treats (0,0) as "no peek optimisation" — non-ASCII PSL
                     // sets fall back to the old scan path.
                     if psl.byte_bitmap[2] == 0 && psl.byte_bitmap[3] == 0 {
-                        (psl.byte_bitmap[0], psl.byte_bitmap[1])
+                        [psl.byte_bitmap[0], psl.byte_bitmap[1]]
                     } else {
-                        (0, 0)
+                        [0, 0]
                     }
                 }
             })
@@ -2329,7 +2354,7 @@ impl Tdfa {
     /// Per-state ASCII bitmap pair for the PSL byte set.  `(0,0)` for PSL-None
     /// states or PSL sets that include non-ASCII bytes.  Indexed by state ID;
     /// 16-byte stride (`state << 4`), no multiply.
-    pub(crate) fn psl_ascii_bms(&self) -> &[(u64, u64)] {
+    pub(crate) fn psl_ascii_bms(&self) -> &[u64] {
         &self.psl_ascii_bms
     }
 
@@ -2480,8 +2505,8 @@ impl Tdfa {
             move_ops_total: self
                 .transition_moves
                 .cells
-                .iter()
-                .map(|&(_, len)| len as usize)
+                .chunks_exact(2)
+                .map(|c| c[1] as usize)
                 .sum(),
             move_ops_arena: self.transition_moves.arena.len(),
             heap_bytes: self.heap_bytes(),
@@ -2509,10 +2534,10 @@ impl Tdfa {
             .iter()
             .map(smallvec_bytes)
             .sum::<usize>();
-        bytes += self.transition_moves.cells.len() * size_of::<(u32, u32)>()
+        bytes += self.transition_moves.cells.len() * size_of::<u32>()
             + self.transition_moves.arena.len() * size_of::<MoveOp>();
         bytes += self.accepting.len() + self.accept_fallback.len();
-        bytes += self.finals.cells.len() * size_of::<(u32, u32)>()
+        bytes += self.finals.cells.len() * size_of::<u32>()
             + self.finals.arena.len() * size_of::<FinalCommand>();
         bytes += self.guard_index.len() * size_of::<u32>();
         for g in self.guard_table.iter() {
@@ -2528,7 +2553,7 @@ impl Tdfa {
         }
         bytes += self.psl_index.len() * size_of::<u32>()
             + self.psl_table.len() * size_of::<PosStampLoopFlat>();
-        bytes += self.psl_ascii_bms.len() * size_of::<(u64, u64)>();
+        bytes += self.psl_ascii_bms.len() * size_of::<u64>();
         bytes += self.scan_skip_index.len() * size_of::<u32>()
             + self.scan_skip_table.len() * size_of::<ScanSkipFlat>();
         bytes += self.stamp_arena.len() * size_of::<u16>();
@@ -2549,6 +2574,11 @@ impl Tdfa {
 
     pub fn finals(&self, state: TdfaStateId) -> &[FinalCommand] {
         self.finals.iat(state as usize)
+    }
+
+    /// The finals table as raw `(cells, arena)` CSR slices (table-tier emit).
+    pub(crate) fn finals_raw(&self) -> (&[u32], &[FinalCommand]) {
+        self.finals.as_raw()
     }
 
     /// Entry commands paired with the chosen initial state for the given

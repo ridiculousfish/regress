@@ -42,7 +42,17 @@ const CODEGEN_MAX_STATES: usize = 4096;
 /// `has_moves` u16 ceiling (65,532 marks).
 const CODEGEN_MAX_MARKS: usize = 4096;
 
+/// Unrolled-tier threshold: above this many states the emitter switches to
+/// the table tier (automaton as `static` data + the shared interpreter loop)
+/// instead of states-as-code. The unrolled form costs rustc's *frontend*
+/// roughly 45 B/state·class of source at ~10 KB/s — ~2 s of `cargo check` per
+/// 256 Unicode-`.` states — while the same tables as array literals are
+/// near-free; real-world patterns sit comfortably below this line and keep
+/// the unrolled tier's ~40% match-speed edge.
+const CODEGEN_UNROLL_MAX_STATES: usize = 256;
+
 mod prefilter;
+mod table;
 mod verify;
 
 #[cfg(test)]
@@ -165,12 +175,19 @@ fn emit_expansion(
             "multiline anchors and word boundaries are not yet supported by the ahead-of-time compiler",
         ));
     }
-    if tdfa.num_states() > CODEGEN_MAX_STATES {
+    // Tier heuristic: past the unrolled threshold, emit the automaton as
+    // static tables driven by the shared interpreter loop — compile cost then
+    // scales with data, not code, so the ceiling is the TDFA build budget.
+    // The table tier needs compiled moves and (v1) no EOI accepts; patterns
+    // outside that stay on the unrolled tier with its hard caps.
+    let table_ok = !tdfa.has_eoi_accepts() && tdfa.has_moves();
+    let use_table = table_ok && tdfa.num_states() > CODEGEN_UNROLL_MAX_STATES;
+    if !use_table && tdfa.num_states() > CODEGEN_MAX_STATES {
         return Err(EmitError::Unsupported(
             "pattern is too large to compile ahead of time (generated-code size cap)",
         ));
     }
-    if !capture_free {
+    if !use_table && !capture_free {
         // Capture-tier gates (JIT parity): the "read live marks at scan end"
         // scheme needs every `$` accept ruled out, and the marks lowered to
         // locals need compiled moves and a bounded mark file.
@@ -198,7 +215,9 @@ fn emit_expansion(
     let _ = writeln!(w, "    use ::regress::__codegen as __rt;");
     prefilter::emit_prefilter_static(w, program.strategy(), re)?;
     emit_group_names_static(w, program.group_names());
-    if capture_free {
+    if use_table {
+        table::emit_table(w, tdfa, skip);
+    } else if capture_free {
         verify::emit_capture_free(w, tdfa, skip);
     } else {
         verify::emit_capture(w, tdfa, skip);

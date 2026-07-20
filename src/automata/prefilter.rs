@@ -902,17 +902,29 @@ impl TdfaProgram {
         // candidate could cost O(n)) keep the linear, if large, scan.
         let prefix_usable =
             !matches!(pred, StartPredicate::Arbitrary | StartPredicate::StartAnchored);
-        let mut unanchored = match Tdfa::try_from(&nfa) {
+        // Budget the Scan attempt down when we could recover from a blowup
+        // anyway (bounded width + usable prefix): the subset explosion then
+        // dies in milliseconds instead of grinding to the full build budget —
+        // this is most of `regex!`'s expansion time for window patterns
+        // (`a.{512}b`: ~20 s → instant). The margin over MAX_SCAN_STATES
+        // absorbs pre-optimize state counts; a bounded pattern landing between
+        // the two gets the Prefix fallback slightly earlier than the
+        // post-optimize check would have decided, which the fallback's
+        // O(n·width) bound keeps safe.
+        let bounded = node_width(&re.node).is_some();
+        let scan_budget = if prefix_usable && bounded {
+            4 * MAX_SCAN_STATES
+        } else {
+            tdfa::TDFA_STATE_BUDGET
+        };
+        let mut unanchored = match Tdfa::try_from_with_budget(&nfa, scan_budget) {
             Err(tdfa::Error::BudgetExceeded) if prefix_usable => {
                 return Self::build_prefix(re, pred);
             }
             other => other?,
         };
         unanchored.optimize();
-        if prefix_usable
-            && unanchored.num_states() > MAX_SCAN_STATES
-            && node_width(&re.node).is_some()
-        {
+        if prefix_usable && unanchored.num_states() > MAX_SCAN_STATES && bounded {
             return Self::build_prefix(re, pred);
         }
         let group_names = unanchored.group_names().to_vec().into_boxed_slice();

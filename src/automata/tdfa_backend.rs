@@ -331,7 +331,7 @@ pub(crate) trait TdfaTables {
     fn accepting(&self) -> &[bool];
     fn accept_fallback(&self) -> &[bool];
     /// The compiled move table as raw `(cells, arena)` CSR slices.
-    fn moves_raw(&self) -> (&[(u32, u32)], &[MoveOp]);
+    fn moves_raw(&self) -> (&[u32], &[MoveOp]);
     /// Scalar-fallback command lists; may be empty when `has_moves()`.
     fn transition_commands(&self) -> &[TagCommandList];
     fn entry_moves(&self, start: usize) -> &[MoveOp];
@@ -344,7 +344,7 @@ pub(crate) trait TdfaTables {
     fn psl_tables(&self) -> (&[u32], &[PosStampLoopFlat]);
     fn scan_skip_tables(&self) -> (&[u32], &[ScanSkipFlat]);
     fn stamp_arena(&self) -> &[u16];
-    fn psl_ascii_bms(&self) -> &[(u64, u64)];
+    fn psl_ascii_bms(&self) -> &[u64];
 }
 
 impl TdfaTables for Tdfa {
@@ -364,7 +364,7 @@ impl TdfaTables for Tdfa {
     fn exec_transitions(&self) -> &[u32] { Tdfa::exec_transitions(self) }
     fn accepting(&self) -> &[bool] { Tdfa::accepting(self) }
     fn accept_fallback(&self) -> &[bool] { Tdfa::accept_fallback(self) }
-    fn moves_raw(&self) -> (&[(u32, u32)], &[MoveOp]) { self.transition_moves().as_raw() }
+    fn moves_raw(&self) -> (&[u32], &[MoveOp]) { self.transition_moves().as_raw() }
     fn transition_commands(&self) -> &[TagCommandList] { Tdfa::transition_commands(self) }
     fn entry_moves(&self, start: usize) -> &[MoveOp] { Tdfa::entry_moves(self, start) }
     fn entry_commands(&self, start: usize) -> &[TagCommand] { Tdfa::entry_commands(self, start) }
@@ -373,7 +373,7 @@ impl TdfaTables for Tdfa {
     fn psl_tables(&self) -> (&[u32], &[PosStampLoopFlat]) { Tdfa::psl_tables(self) }
     fn scan_skip_tables(&self) -> (&[u32], &[ScanSkipFlat]) { Tdfa::scan_skip_tables(self) }
     fn stamp_arena(&self) -> &[u16] { Tdfa::stamp_arena(self) }
-    fn psl_ascii_bms(&self) -> &[(u64, u64)] { Tdfa::psl_ascii_bms(self) }
+    fn psl_ascii_bms(&self) -> &[u64] { Tdfa::psl_ascii_bms(self) }
 }
 
 /// `num_marks + 3`: the mark-file width (real marks, then `clear`,
@@ -572,11 +572,11 @@ impl Scratch {
 /// fully-literal regex `post_state` is already accepting and the next byte
 /// dead-ends, so the match is produced with no transition-table work at all.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct PrefixSkip {
+pub struct PrefixSkip {
     /// The state to resume the byte loop in, after the prefix is skipped.
-    pub(crate) post_state: u32,
+    pub post_state: u32,
     /// How many bytes the prefilter-matched prefix spans.
-    pub(crate) len: usize,
+    pub len: usize,
 }
 
 /// Try to build a [`PrefixSkip`] for `literal` (the prefilter's exact byte
@@ -812,7 +812,7 @@ fn run_anchored<C: TdfaExecConfig, T: TdfaTables>(
         (&[], &[])
     };
     let stamp_arena = tdfa.stamp_arena();
-    let psl_ascii_bms: &[(u64, u64)] = if !C::HAS_PERBYTE_GUARDS && !C::SKIP_MARKS && C::HAS_MOVES {
+    let psl_ascii_bms: &[u64] = if !C::HAS_PERBYTE_GUARDS && !C::SKIP_MARKS && C::HAS_MOVES {
         tdfa.psl_ascii_bms()
     } else {
         &[]
@@ -903,10 +903,12 @@ fn run_anchored<C: TdfaExecConfig, T: TdfaTables>(
             // record_accept. If it is in-set, run the scan and record once at
             // the final position (eliminating the wasted record_accept at pos+1
             // that the old two-call path always emitted).
-            let (psl_bm0, psl_bm1) = psl_ascii_bms
-                .get(state as usize)
-                .copied()
-                .unwrap_or((0, 0));
+            let s2 = state as usize * 2;
+            let (psl_bm0, psl_bm1) = if s2 + 1 < psl_ascii_bms.len() {
+                (psl_ascii_bms[s2], psl_ascii_bms[s2 + 1])
+            } else {
+                (0, 0)
+            };
             if (psl_bm0 | psl_bm1) != 0 {
                 let start = pos + 1;
                 let next_in_set = start < input.len() && {

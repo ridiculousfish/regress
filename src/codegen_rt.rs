@@ -494,3 +494,173 @@ fn make_match(
         group_names: group_names.iter().map(|&s| Box::from(s)).collect(),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Table tier: static automaton tables + the shared interpreter loop.
+// ---------------------------------------------------------------------------
+
+pub use crate::automata::tdfa::{
+    ACCEL_NONE, FinalCommand, InputMark, MarkValue, MoveOp, PosStampLoopFlat, ScanFast,
+    ScanSkipFlat,
+};
+pub use crate::automata::tdfa_backend::PrefixSkip;
+use crate::automata::tdfa::{StateGuards, TagCommand, TagCommandList};
+use crate::automata::tdfa_backend::{self, Scratch, TdfaTables};
+
+/// The table tier's automaton: every table the executor reads, borrowed from
+/// `static` data the `regex!` expansion carries. The emitter guarantees the
+/// same invariants a built `Tdfa` upholds (shapes, premultiplication, CSR
+/// validity) plus the tier's restrictions: compiled moves present, no
+/// zero-width guards of any kind (`has_perbyte_guards`/`has_eoi_accepts`
+/// would be false — such patterns are rejected at expansion time).
+#[derive(Debug)]
+pub struct StaticTdfa {
+    pub num_classes: usize,
+    pub num_marks: usize,
+    pub num_states: usize,
+    pub num_capture_groups: usize,
+    pub has_captures: bool,
+    pub start_fixed: bool,
+    pub start_anchored: u32,
+    pub start_unanchored: u32,
+    pub byte_to_class: &'static [u8; 256],
+    pub transitions: &'static [u32],
+    pub trans_flags: &'static [u8],
+    pub exec_transitions: &'static [u32],
+    pub accepting: &'static [bool],
+    pub accept_fallback: &'static [bool],
+    pub mv_cells: &'static [u32],
+    pub mv_arena: &'static [MoveOp],
+    pub entry_moves_anchored: &'static [MoveOp],
+    pub entry_moves_unanchored: &'static [MoveOp],
+    pub finals_cells: &'static [u32],
+    /// Flat `(tag, mark)` `u32` pairs — `FinalCommand::src` is always
+    /// `MarkValue::Copy` in a finals list (never `CurrentPos`, matching the
+    /// interpreter's own `finalize` invariant), so this is a lossless raw
+    /// form. Decoded once into `finals_cache` on first use rather than a
+    /// literal `[FinalCommand; N]`: `FinalCommand` holds an enum, whose
+    /// layout isn't guaranteed the way a plain-data blob cast needs.
+    pub finals_raw: &'static [u32],
+    pub finals_cache: &'static OnceLock<Vec<FinalCommand>>,
+    pub psl_index: &'static [u32],
+    pub psl_table: &'static [PosStampLoopFlat],
+    pub scan_skip_index: &'static [u32],
+    pub scan_skip_table: &'static [ScanSkipFlat],
+    pub stamp_arena: &'static [u16],
+    pub psl_ascii_bms: &'static [u64],
+    pub prefix_skip: Option<PrefixSkip>,
+}
+
+impl TdfaTables for StaticTdfa {
+    fn num_classes(&self) -> usize { self.num_classes }
+    fn num_marks(&self) -> usize { self.num_marks }
+    fn num_states(&self) -> usize { self.num_states }
+    fn has_captures(&self) -> bool { self.has_captures }
+    fn has_moves(&self) -> bool { true }
+    fn has_perbyte_guards(&self) -> bool { false }
+    fn has_eoi_accepts(&self) -> bool { false }
+    fn word_icase(&self) -> bool { false }
+    fn start_fixed(&self) -> bool { self.start_fixed }
+    fn start(&self, start: usize) -> u32 {
+        if start == 0 { self.start_anchored } else { self.start_unanchored }
+    }
+    fn byte_to_class(&self) -> &[u8; 256] { self.byte_to_class }
+    fn transitions(&self) -> &[u32] { self.transitions }
+    fn trans_flags(&self) -> &[u8] { self.trans_flags }
+    fn exec_transitions(&self) -> &[u32] { self.exec_transitions }
+    fn accepting(&self) -> &[bool] { self.accepting }
+    fn accept_fallback(&self) -> &[bool] { self.accept_fallback }
+    fn moves_raw(&self) -> (&[u32], &[MoveOp]) { (self.mv_cells, self.mv_arena) }
+    fn transition_commands(&self) -> &[TagCommandList] { &[] }
+    fn entry_moves(&self, start: usize) -> &[MoveOp] {
+        if start == 0 { self.entry_moves_anchored } else { self.entry_moves_unanchored }
+    }
+    fn entry_commands(&self, _start: usize) -> &[TagCommand] { &[] }
+    fn finals(&self, state: u32) -> &[FinalCommand] {
+        let arena = self.finals_cache.get_or_init(|| {
+            self.finals_raw
+                .chunks_exact(2)
+                .map(|c| FinalCommand { tag: c[0], src: MarkValue::Copy(InputMark(c[1])) })
+                .collect()
+        });
+        crate::automata::tdfa::csr_iat(self.finals_cells, arena, state as usize)
+    }
+    fn guards(&self, _state: u32) -> Option<&StateGuards> { None }
+    fn psl_tables(&self) -> (&[u32], &[PosStampLoopFlat]) { (self.psl_index, self.psl_table) }
+    fn scan_skip_tables(&self) -> (&[u32], &[ScanSkipFlat]) {
+        (self.scan_skip_index, self.scan_skip_table)
+    }
+    fn stamp_arena(&self) -> &[u16] { self.stamp_arena }
+    fn psl_ascii_bms(&self) -> &[u64] { self.psl_ascii_bms }
+}
+
+/// Drive the shared interpreter loop over static tables — the table tier's
+/// verify function (same contract as [`VerifyFn`]). The per-search scratch is
+/// thread-local and reused across calls; it is rebuilt only when a
+/// differently-sized automaton last used this thread (interleaving two table
+/// matchers on one thread re-sizes per switch — acceptable churn for keeping
+/// the verify signature a plain fn pointer).
+pub fn table_verify(
+    t: &StaticTdfa,
+    input: &[u8],
+    start: usize,
+    caps: &mut [usize],
+) -> Option<(usize, usize)> {
+    use std::cell::RefCell;
+    thread_local! {
+        static SCRATCH: RefCell<Option<(usize, usize, Scratch)>> = const { RefCell::new(None) };
+    }
+    let width = tdfa_backend::mark_file_width(t);
+    SCRATCH.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        let rebuild = !matches!(&*slot, Some((w, g, _)) if *w == width && *g == t.num_capture_groups);
+        if rebuild {
+            *slot = Some((
+                width,
+                t.num_capture_groups,
+                Scratch::new(width, t.num_capture_groups),
+            ));
+        }
+        let (_, _, scratch) = slot.as_mut().expect("scratch just installed");
+        let m = tdfa_backend::execute_reuse_warm(t, input, start, scratch, t.prefix_skip)?;
+        let n = caps.len().min(scratch.norm_buf.len());
+        caps[..n].copy_from_slice(&scratch.norm_buf[..n]);
+        Some((m.range.start, m.range.end))
+    })
+}
+
+/// 8-aligned storage for byte-string-encoded tables. A byte-string literal is
+/// a *single token* through the proc-macro bridge, where an equivalent array
+/// literal is hundreds of thousands — the difference between seconds and
+/// minutes of `regex!` expansion for large automata.
+#[repr(C, align(8))]
+pub struct AlignedBytes<const N: usize>(pub [u8; N]);
+
+macro_rules! le_cast {
+    ($name:ident, $ty:ty) => {
+        /// Reinterpret little-endian bytes as a typed table slice. Const, so
+        /// `StaticTdfa` initializers stay `static`-evaluable. Compile-fails on
+        /// big-endian targets (emit numeric literals there instead — the
+        /// emitter currently assumes an LE build host and target).
+        pub const fn $name<const N: usize>(b: &'static AlignedBytes<N>) -> &'static [$ty] {
+            assert!(cfg!(target_endian = "little"), "table tier requires a little-endian target");
+            assert!(N % core::mem::size_of::<$ty>() == 0);
+            // SAFETY: alignment guaranteed by AlignedBytes(align 8) and every
+            // bit pattern is a valid $ty; length is in-bounds by construction.
+            unsafe {
+                core::slice::from_raw_parts(
+                    b.0.as_ptr().cast::<$ty>(),
+                    N / core::mem::size_of::<$ty>(),
+                )
+            }
+        }
+    };
+}
+le_cast!(le_u16s, u16);
+le_cast!(le_u32s, u32);
+le_cast!(le_u64s, u64);
+// Sound: MoveOp is `#[repr(C)]` two `u16`s with no padding/niches, so any
+// blob the emitter writes (dst.to_le_bytes() ++ src.to_le_bytes() per entry)
+// reinterprets validly. `MoveOp` is on the per-byte hot path, so this cast —
+// not a lazy per-search rebuild — is what keeps it zero-cost.
+le_cast!(le_moveops, MoveOp);

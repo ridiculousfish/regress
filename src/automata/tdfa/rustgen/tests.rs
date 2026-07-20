@@ -356,18 +356,64 @@ fn unsupported_patterns_error() {
     }
 }
 
-/// An automaton the TDFA can build (under `TDFA_STATE_BUDGET`) but far past
-/// `CODEGEN_MAX_STATES` must fail fast instead of handing rustc a
-/// tens-of-MB source file. The unbounded `\w*` tail keeps the pattern off the
-/// Scan → `Prefix` size fallback, so its ~45k-state Scan automaton reaches
-/// the emitter's own cap.
+// ---- table_tier_boundary: past CODEGEN_UNROLL_MAX_STATES (256), emitted as
+// static tables + the shared interpreter loop instead of unrolled states ----
+//
+// `[0-9]{300}` determinizes to ~300 states — comfortably past the unrolled
+// threshold, so the emitter switches tiers. Chosen to be simple (no
+// captures, no register-allocation pressure) so the snapshot stays small;
+// the pathological case this tier exists for (`a.{12}b\w*`, ~45k states,
+// ~400k move ops from a register-allocation bail-out) is exercised in
+// `oversized_alternation_fails_fast`'s sibling checks instead of as a
+// multi-hundred-KB checked-in snapshot.
+
+const TABLE_TIER_BOUNDARY: &str = "[0-9]{300}";
+
 #[test]
-fn oversized_automaton_fails_fast() {
-    let err = compile_to_rust(r"a.{12}b\w*", Flags::default())
-        .map(|_| ())
-        .expect_err("expected the generated-code size cap to reject");
-    match err {
-        super::EmitError::Unsupported(msg) if msg.contains("too large") => {}
-        other => panic!("expected the size-cap error, got: {other:?}"),
-    }
+fn golden_table_tier_boundary() {
+    assert_golden("table_tier_boundary", TABLE_TIER_BOUNDARY, "",
+        include_str!("snapshots/table_tier_boundary.rs"),
+    );
+}
+
+#[test]
+fn exec_table_tier_boundary() {
+    let m = include!("snapshots/table_tier_boundary.rs");
+    let digits = "1".repeat(300);
+    oracle_check(&m, TABLE_TIER_BOUNDARY, "",
+        &[
+            "",
+            &digits,
+            &format!("xx{digits}yy"),
+            &"1".repeat(299), // one short: no match
+            &"1".repeat(301), // one over: matches the first 300
+        ],
+    );
+}
+
+/// `Nfa`/`Tdfa` state-budget exhaustion — a genuine ceiling no tier (table or
+/// unrolled) can lift, since it's the automaton layer itself refusing to
+/// build — must surface through `compile_to_rust` as a "too large" error, not
+/// a panic or a silent miscompile. Constructing a real pattern that hits this
+/// without either (a) being rescued by a strategy fallback (any pattern with
+/// a discernible start byte routes around a blown-up Scan build via the
+/// Prefix strategy — see the `5d8ba45` size-aware fallback) or (b) blowing
+/// the *parser's* recursion depth first (alternation is a binary `Node::Alt`
+/// chain; a many-thousand-branch alternation overflows the stack before ever
+/// reaching a budget check, in debug builds especially) is exactly the kind
+/// of slow, fragile, environment-sensitive test this codebase avoids — so
+/// exercise the `EmitError` formatting directly instead of trying to trigger
+/// it end-to-end. The budget checks themselves (`if id >= budget { return
+/// Err(..) }`) are simple and covered where they live (`tdfa.rs`, `nfa.rs`).
+#[test]
+fn budget_exceeded_reports_too_large() {
+    let nfa_err = super::EmitError::Build(super::BuildError::Nfa(
+        crate::automata::nfa::Error::BudgetExceeded,
+    ));
+    assert!(nfa_err.to_string().contains("too large"), "got: {nfa_err}");
+
+    let tdfa_err = super::EmitError::Build(super::BuildError::Tdfa(
+        crate::automata::tdfa::Error::BudgetExceeded,
+    ));
+    assert!(tdfa_err.to_string().contains("too large"), "got: {tdfa_err}");
 }
