@@ -1394,13 +1394,17 @@ pub struct Tdfa {
     // executor records the accept cheaply and reads the registers at scan end.
     accept_fallback: Box<[bool]>,
 
-    // Tag commands to apply when a transition fires. Same shape as
-    // `transitions` (indexed by `state * num_classes + class`). Each entry
-    // is a list of `TagCommand`s — CurrentPos writes first, then Copy writes
-    // from canonicalization. May be empty when a transition has no tag effect.
-    // Retained for display/debug and the scalar fallback; the executor's hot
-    // loop applies `transition_moves`.
-    transition_commands: Box<[TagCommandList]>,
+    // Tag commands to apply when a transition fires (CSR: per-transition cell
+    // into a shared, interned arena — see [`CsrTable`]). Each entry is a list
+    // of `TagCommand`s — CurrentPos writes first, then Copy writes from
+    // canonicalization. May be empty when a transition has no tag effect,
+    // which is the overwhelming majority of cells; that emptiness is why this
+    // moved off a dense `Box<[TagCommandList]>` (64 bytes of `SmallVec`
+    // baseline per cell regardless of content — measured at ~79% of a built
+    // automaton's `heap_bytes` for a capture-free pattern). Retained for
+    // display/debug and the scalar fallback; the executor's hot loop applies
+    // `transition_moves`.
+    transition_commands: CsrTable<TagCommand>,
 
     // Precompiled in-place move sequence per transition, same indexing as
     // `transition_commands` (arena + per-cell range — see [`MoveTable`]).
@@ -1641,7 +1645,7 @@ fn accept_fallback_structural(
 fn compute_accept_fallback(
     accepting: &[bool],
     transitions: &[TdfaStateId],
-    transition_commands: &[TagCommandList],
+    transition_commands: &CsrTable<TagCommand>,
     finals: &CsrTable<FinalCommand>,
     num_classes: usize,
     num_marks: usize,
@@ -1667,7 +1671,7 @@ fn compute_accept_fallback(
             if t == TDFA_DEAD_STATE || accepting[t as usize] {
                 continue;
             }
-            for cmd in &transition_commands[s * k + c] {
+            for cmd in transition_commands.iat(s * k + c) {
                 bs_set(&mut rw[s * words..(s + 1) * words], cmd.dst.0);
             }
             preds[t as usize].push(s as u32);
@@ -1931,10 +1935,11 @@ impl Tdfa {
 
         let num_marks = build.alloc.count() as usize;
         let finals = CsrTable::from_lists(build.finals.iter());
+        let transition_commands = CsrTable::from_lists(build.transition_commands.iter());
         let accept_fallback = compute_accept_fallback(
             &build.accepting,
             &build.transitions,
-            &build.transition_commands,
+            &transition_commands,
             &finals,
             num_classes,
             num_marks,
@@ -1968,7 +1973,7 @@ impl Tdfa {
             transitions: build.transitions.into_boxed_slice(),
             accepting: build.accepting.into_boxed_slice(),
             accept_fallback,
-            transition_commands: build.transition_commands.into_boxed_slice(),
+            transition_commands,
             transition_moves: MoveTable::default(),
             finals,
             guard_index,
@@ -2022,9 +2027,8 @@ impl Tdfa {
         // Compile each command list and intern the result: identical sequences
         // (exact after canonical emission) share one arena range.
         let moves = MoveTable::from_lists(
-            self.transition_commands
-                .iter()
-                .map(|cmds| compile_moves(cmds, num_marks)),
+            (0..self.transitions.len())
+                .map(|i| compile_moves(self.transition_commands.iat(i), num_marks)),
         );
         self.transition_moves = moves;
         self.entry_moves_anchored =
@@ -2321,8 +2325,8 @@ impl Tdfa {
         }
         !self
             .transition_commands
+            .arena
             .iter()
-            .flat_map(|cmds| cmds.iter())
             .any(|cmd| start_marks.contains(&cmd.dst.0))
     }
 
@@ -2484,8 +2488,8 @@ impl Tdfa {
         };
         tally(&self.entry_commands_anchored);
         tally(&self.entry_commands_unanchored);
-        for cmds in self.transition_commands.iter() {
-            tally(cmds);
+        for i in 0..self.transitions.len() {
+            tally(self.transition_commands.iat(i));
         }
         for g in self.guard_table.iter() {
             for sw in &g.switches {
@@ -2529,11 +2533,8 @@ impl Tdfa {
         bytes += self.transitions.len() * size_of::<TdfaStateId>();
         bytes += self.trans_flags.len();
         bytes += self.exec_transitions.len() * size_of::<u32>();
-        bytes += self
-            .transition_commands
-            .iter()
-            .map(smallvec_bytes)
-            .sum::<usize>();
+        bytes += self.transition_commands.cells.len() * size_of::<u32>()
+            + self.transition_commands.arena.len() * size_of::<TagCommand>();
         bytes += self.transition_moves.cells.len() * size_of::<u32>()
             + self.transition_moves.arena.len() * size_of::<MoveOp>();
         bytes += self.accepting.len() + self.accept_fallback.len();
@@ -2560,8 +2561,8 @@ impl Tdfa {
         bytes
     }
 
-    pub fn transition_commands(&self) -> &[TagCommandList] {
-        &self.transition_commands
+    pub fn transition_commands(&self, idx: usize) -> &[TagCommand] {
+        self.transition_commands.iat(idx)
     }
 
     /// Precompiled in-place move sequences for each transition, same indexing

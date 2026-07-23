@@ -504,7 +504,7 @@ pub use crate::automata::tdfa::{
     ScanSkipFlat,
 };
 pub use crate::automata::tdfa_backend::PrefixSkip;
-use crate::automata::tdfa::{StateGuards, TagCommand, TagCommandList};
+use crate::automata::tdfa::{StateGuards, TagCommand};
 use crate::automata::tdfa_backend::{self, Scratch, TdfaTables};
 
 /// The table tier's automaton: every table the executor reads, borrowed from
@@ -571,7 +571,7 @@ impl TdfaTables for StaticTdfa {
     fn accepting(&self) -> &[bool] { self.accepting }
     fn accept_fallback(&self) -> &[bool] { self.accept_fallback }
     fn moves_raw(&self) -> (&[u32], &[MoveOp]) { (self.mv_cells, self.mv_arena) }
-    fn transition_commands(&self) -> &[TagCommandList] { &[] }
+    fn transition_commands(&self, _idx: usize) -> &[TagCommand] { &[] }
     fn entry_moves(&self, start: usize) -> &[MoveOp] {
         if start == 0 { self.entry_moves_anchored } else { self.entry_moves_unanchored }
     }

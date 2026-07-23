@@ -86,7 +86,6 @@ pub fn to_readable_string(tdfa: &Tdfa) -> String {
     let num_states = tdfa.accepting().len();
     let num_classes = tdfa.num_classes();
     let transitions = tdfa.transitions();
-    let trans_cmds = tdfa.transition_commands();
     let accepting = tdfa.accepting();
     let start = tdfa.start(0);
 
@@ -142,7 +141,7 @@ pub fn to_readable_string(tdfa: &Tdfa) -> String {
             if target == TDFA_DEAD_STATE {
                 continue;
             }
-            let cmds: &[TagCommand] = &trans_cmds[row + class];
+            let cmds: &[TagCommand] = tdfa.transition_commands(row + class);
             match by_edge
                 .iter_mut()
                 .find(|(t, c, _)| *t == target && *c == cmds)

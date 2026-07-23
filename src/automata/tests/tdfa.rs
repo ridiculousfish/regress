@@ -302,7 +302,8 @@ fn optimized_commands_fold_post_ra_stamped_temporaries() {
     let mut t = make_tdfa("(?:(a)|(b)|(c))*");
     t.optimize();
 
-    for cmds in t.transition_commands() {
+    for idx in 0..t.num_states() * t.num_classes() {
+        let cmds = t.transition_commands(idx);
         let copy_sources: Vec<_> = cmds
             .iter()
             .filter_map(|cmd| match cmd.src {

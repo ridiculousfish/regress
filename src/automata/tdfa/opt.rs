@@ -9,6 +9,14 @@
 //! dense renumbering + register allocation), then state minimization. Running
 //! register cleanup first empties tag-free transition command lists, making more
 //! equivalent states byte-identical for minimization.
+//!
+//! `t.transition_commands` is stored as a packed [`super::CsrTable`] (see its
+//! field doc), which — unlike a plain `Box<[TagCommandList]>` — can't be
+//! mutated cell-by-cell in place (interned cells may alias). So every pass
+//! here works on `cmds: &mut Vec<TagCommandList>`, a materialized scratch
+//! copy threaded alongside `t` instead of reading `t.transition_commands`
+//! directly; `optimize` (the sole entry point) unpacks it once at the top and
+//! repacks it once at the bottom.
 
 use super::{
     FinalCommand, InputMark, MarkValue, NO_PRUNE, StateGuards, TDFA_DEAD_STATE, TagCommand,
@@ -21,9 +29,18 @@ use std::collections::HashSet;
 /// Run every optimization pass, in order, on `t`. `compact_marks` runs first:
 /// folding and dead-mark elimination empty the tag-free transition commands, so
 /// equivalent states become byte-identical and `minimize` can merge them.
+///
+/// Unpacks `t.transition_commands` into a scratch `Vec` for every pass to work
+/// on, then repacks the (possibly shrunk/rewritten) result back into the CSR
+/// form once at the end — see the module doc for why passes can't mutate the
+/// packed form cell-by-cell.
 pub(crate) fn optimize(t: &mut Tdfa) {
-    compact_marks(t);
-    minimize(t);
+    let mut cmds: Vec<TagCommandList> = (0..t.transitions.len())
+        .map(|i| t.transition_commands.iat(i).iter().cloned().collect())
+        .collect();
+    compact_marks(t, &mut cmds);
+    minimize(t, &mut cmds);
+    t.transition_commands = super::CsrTable::from_lists(cmds.iter());
 }
 
 /// Exact-equality state minimization (Moore partition refinement). Merges
@@ -36,7 +53,7 @@ pub(crate) fn optimize(t: &mut Tdfa) {
 /// States carrying anchor conditionals/alts (`$`, multiline `^`, `\b`) are
 /// pinned to their own block (those structures aren't compared here); they're
 /// rare.
-pub(crate) fn minimize(t: &mut Tdfa) {
+pub(crate) fn minimize(t: &mut Tdfa, cmds: &mut Vec<TagCommandList>) {
     let n = t.accepting.len();
     let k = t.num_classes;
     if n <= 1 {
@@ -50,12 +67,12 @@ pub(crate) fn minimize(t: &mut Tdfa) {
     let mut cmd_intern: HashMap<TagCommandList, u32> = HashMap::new();
     let mut cmd_id = vec![0u32; n * k];
     for (idx, slot) in cmd_id.iter_mut().enumerate() {
-        let cmds = &t.transition_commands[idx];
-        *slot = match cmd_intern.get(cmds) {
+        let c = &cmds[idx];
+        *slot = match cmd_intern.get(c) {
             Some(&id) => id,
             None => {
                 let id = cmd_intern.len() as u32;
-                cmd_intern.insert(cmds.clone(), id);
+                cmd_intern.insert(c.clone(), id);
                 id
             }
         };
@@ -164,7 +181,7 @@ pub(crate) fn minimize(t: &mut Tdfa) {
     let mut finals: Vec<Vec<FinalCommand>> = vec![Vec::new(); nn];
     let mut guards = vec![StateGuards::default(); nn];
     let mut transitions = vec![TDFA_DEAD_STATE; nn * k];
-    let mut transition_commands: Vec<TagCommandList> = vec![SmallVec::new(); nn * k];
+    let mut new_cmds: Vec<TagCommandList> = vec![SmallVec::new(); nn * k];
     for (nid, &r) in rep.iter().enumerate() {
         accepting[nid] = t.accepting[r];
         finals[nid] = t.finals[r].to_vec();
@@ -180,7 +197,7 @@ pub(crate) fn minimize(t: &mut Tdfa) {
         guards[nid] = g;
         for c in 0..k {
             transitions[nid * k + c] = old_to_new[t.transitions[r * k + c] as usize];
-            transition_commands[nid * k + c] = t.transition_commands[r * k + c].clone();
+            new_cmds[nid * k + c] = cmds[r * k + c].clone();
         }
     }
 
@@ -190,7 +207,7 @@ pub(crate) fn minimize(t: &mut Tdfa) {
     t.guard_index = guard_index;
     t.guard_table = guard_table;
     t.transitions = transitions.into_boxed_slice();
-    t.transition_commands = transition_commands.into_boxed_slice();
+    *cmds = new_cmds;
     t.start_anchored = old_to_new[t.start_anchored as usize];
     t.start_unanchored = old_to_new[t.start_unanchored as usize];
 }
@@ -199,14 +216,14 @@ pub(crate) fn minimize(t: &mut Tdfa) {
 /// renumbering. Value-preserving — see `tdfa_backend::apply_commands` for the
 /// two-phase (simultaneous) semantics this must respect. Shrinks `num_marks`
 /// (the per-search marks Vec) and the per-transition command lists.
-pub(crate) fn compact_marks(t: &mut Tdfa) {
-    fold_currentpos_copies(t);
-    eliminate_dead_marks(t);
-    renumber_marks(t);
-    register_allocate(t);
-    fold_currentpos_copies(t);
-    eliminate_dead_marks(t);
-    renumber_marks(t);
+pub(crate) fn compact_marks(t: &mut Tdfa, cmds: &mut [TagCommandList]) {
+    fold_currentpos_copies(t, cmds);
+    eliminate_dead_marks(t, cmds);
+    renumber_marks(t, cmds);
+    register_allocate(t, cmds);
+    fold_currentpos_copies(t, cmds);
+    eliminate_dead_marks(t, cmds);
+    renumber_marks(t, cmds);
 }
 
 /// Marks of redundancy (above the `num_tags` floor) below which RA is skipped.
@@ -238,14 +255,15 @@ const MAX_RA_MARKS: usize = 1 << 14;
 /// shrink below the gather cap anyway.
 const MAX_RA_INTERFERENCE: u128 = 8_000_000;
 
-/// Apply `f` to every `TagCommandList` in `t` (entry commands, per-transition
-/// commands, and every switch/accept command list in the guards). Centralises the
-/// "visit all command lists" traversal so each optimization pass is one call.
-fn for_each_cmd_list_mut(t: &mut Tdfa, mut f: impl FnMut(&mut TagCommandList)) {
+/// Apply `f` to every `TagCommandList` in `t`/`cmds` (entry commands,
+/// per-transition commands, and every switch/accept command list in the
+/// guards). Centralises the "visit all command lists" traversal so each
+/// optimization pass is one call.
+fn for_each_cmd_list_mut(t: &mut Tdfa, cmds: &mut [TagCommandList], mut f: impl FnMut(&mut TagCommandList)) {
     f(&mut t.entry_commands_anchored);
     f(&mut t.entry_commands_unanchored);
-    for cmds in t.transition_commands.iter_mut() {
-        f(cmds);
+    for c in cmds.iter_mut() {
+        f(c);
     }
     for g in t.guard_table.iter_mut() {
         for sw in g.switches.iter_mut() {
@@ -259,11 +277,11 @@ fn for_each_cmd_list_mut(t: &mut Tdfa, mut f: impl FnMut(&mut TagCommandList)) {
 }
 
 /// Read-only sibling of [`for_each_cmd_list_mut`].
-fn for_each_cmd_list(t: &Tdfa, mut f: impl FnMut(&TagCommandList)) {
+fn for_each_cmd_list(t: &Tdfa, cmds: &[TagCommandList], mut f: impl FnMut(&TagCommandList)) {
     f(&t.entry_commands_anchored);
     f(&t.entry_commands_unanchored);
-    for cmds in t.transition_commands.iter() {
-        f(cmds);
+    for c in cmds.iter() {
+        f(c);
     }
     for g in t.guard_table.iter() {
         for sw in &g.switches {
@@ -286,23 +304,23 @@ fn for_each_cmd_list(t: &Tdfa, mut f: impl FnMut(&TagCommandList)) {
 /// not be a `Copy` source within this same list, otherwise moving `c`'s write
 /// from phase 2 to phase 1 would change what a sibling copy reads from `c` (the
 /// parallel-shift case; those marks stay).
-fn fold_currentpos_copies(t: &mut Tdfa) {
-    for_each_cmd_list_mut(t, fold_list);
+fn fold_currentpos_copies(t: &mut Tdfa, cmds: &mut [TagCommandList]) {
+    for_each_cmd_list_mut(t, cmds, fold_list);
 }
 
 /// Dead-mark elimination to a fixpoint: a command whose destination is read
 /// nowhere is dead; removing a `Copy` can make its source dead too.
-fn eliminate_dead_marks(t: &mut Tdfa) {
+fn eliminate_dead_marks(t: &mut Tdfa, cmds: &mut [TagCommandList]) {
     // `used` is a dense bitmap indexed by mark id (all `< num_marks`), reused
     // across fixpoint rounds — no hashing, no per-round reallocation.
     let mut used = vec![false; t.num_marks];
     loop {
-        read_marks(t, &mut used);
+        read_marks(t, cmds, &mut used);
         let mut changed = false;
-        for_each_cmd_list_mut(t, |cmds| {
-            let before = cmds.len();
-            cmds.retain(|c| used[c.dst.0 as usize]);
-            changed |= cmds.len() != before;
+        for_each_cmd_list_mut(t, cmds, |c| {
+            let before = c.len();
+            c.retain(|c| used[c.dst.0 as usize]);
+            changed |= c.len() != before;
         });
         if !changed {
             break;
@@ -313,9 +331,9 @@ fn eliminate_dead_marks(t: &mut Tdfa) {
 /// Set of marks read anywhere — as a `Copy` source in any command or as a
 /// `FinalCommand` source. A conservative (never per-path) global use-set, so a
 /// mark absent here is read on no path and its writes are dead.
-fn read_marks(t: &Tdfa, used: &mut [bool]) {
+fn read_marks(t: &Tdfa, cmds: &[TagCommandList], used: &mut [bool]) {
     used.fill(false);
-    for_each_cmd_list(t, |cmds| collect_cmd_srcs(cmds, used));
+    for_each_cmd_list(t, cmds, |c| collect_cmd_srcs(c, used));
     collect_final_srcs(&t.finals.arena, used);
     for g in t.guard_table.iter() {
         for ac in &g.accepts {
@@ -326,8 +344,8 @@ fn read_marks(t: &Tdfa, used: &mut [bool]) {
 
 /// Visit every `InputMark` slot (each command `dst`, and each `Copy` source in
 /// commands and finals) across all command-bearing structures.
-fn for_each_mark_mut(t: &mut Tdfa, mut f: impl FnMut(&mut InputMark)) {
-    for_each_cmd_list_mut(t, |cmds| visit_cmd_marks(cmds, &mut f));
+fn for_each_mark_mut(t: &mut Tdfa, cmds: &mut [TagCommandList], mut f: impl FnMut(&mut InputMark)) {
+    for_each_cmd_list_mut(t, cmds, |c| visit_cmd_marks(c, &mut f));
     visit_final_marks(&mut t.finals.arena, &mut f);
     for g in t.guard_table.iter_mut() {
         for ac in g.accepts.iter_mut() {
@@ -338,12 +356,12 @@ fn for_each_mark_mut(t: &mut Tdfa, mut f: impl FnMut(&mut InputMark)) {
 
 /// Renumber surviving marks densely (`0..k`) by first appearance in a fixed
 /// walk, rewriting every reference, and set `num_marks = k`.
-fn renumber_marks(t: &mut Tdfa) {
+fn renumber_marks(t: &mut Tdfa, cmds: &mut [TagCommandList]) {
     // Old ids are all `< num_marks`, so a plain array (sentinel = unassigned)
     // remaps in O(1) without hashing.
     let mut remap = vec![u32::MAX; t.num_marks];
     let mut next = 0u32;
-    for_each_mark_mut(t, |m| {
+    for_each_mark_mut(t, cmds, |m| {
         let old = m.0 as usize;
         if remap[old] == u32::MAX {
             remap[old] = next;
@@ -390,7 +408,7 @@ fn bits_to_vec(bits: &[u64], out: &mut Vec<u32>) {
     }
 }
 
-fn register_allocate(t: &mut Tdfa) {
+fn register_allocate(t: &mut Tdfa, cmds: &mut [TagCommandList]) {
     let m = t.num_marks;
     // Skip when the mark file has no redundancy to coalesce — within a small
     // slack of the `num_tags` floor (see `RA_REDUNDANCY_SLACK`) — so RA's
@@ -477,12 +495,12 @@ fn register_allocate(t: &mut Tdfa) {
             // Per-edge: live_before = use ∪ (live[tgt] \ def), computed in `tmp`
             // then unioned into `acc` (so edges don't corrupt each other). Over-
             // approximate: def = all dsts, use = all Copy srcs of this edge.
-            let edge_flow = |tgt: usize, cmds: &TagCommandList, acc: &mut [u64], tmp: &mut [u64]| {
+            let edge_flow = |tgt: usize, edge_cmds: &TagCommandList, acc: &mut [u64], tmp: &mut [u64]| {
                 tmp.copy_from_slice(&live[tgt * words..(tgt + 1) * words]);
-                for cmd in cmds {
+                for cmd in edge_cmds {
                     bs_clear(tmp, cmd.dst.0); // kill def
                 }
-                for cmd in cmds {
+                for cmd in edge_cmds {
                     if let MarkValue::Copy(src) = cmd.src {
                         // A `Copy` source stamped by a `CurrentPos` in this same list
                         // reads the fresh stamp (two-phase: CurrentPos = phase 1, Copy
@@ -490,7 +508,7 @@ fn register_allocate(t: &mut Tdfa) {
                         // avoids spurious interference from canonicalize's parallel-
                         // shift pattern (`m := pos; x := m`), which otherwise keeps
                         // every per-state stamp mark mutually live and defeats RA.
-                        let stamped_here = cmds
+                        let stamped_here = edge_cmds
                             .iter()
                             .any(|d| d.dst == src && matches!(d.src, MarkValue::CurrentPos));
                         if !stamped_here {
@@ -507,7 +525,7 @@ fn register_allocate(t: &mut Tdfa) {
                 if tgt == TDFA_DEAD_STATE {
                     continue;
                 }
-                edge_flow(tgt as usize, &t.transition_commands[s * k + c], &mut acc, &mut tmp);
+                edge_flow(tgt as usize, &cmds[s * k + c], &mut acc, &mut tmp);
             }
             // Guard edges (switch alts, accept prunes) flow like transitions.
             if let Some(g) = t.guards(s as u32) {
@@ -605,12 +623,12 @@ fn register_allocate(t: &mut Tdfa) {
             if tgt == TDFA_DEAD_STATE {
                 continue;
             }
-            let cmds = &t.transition_commands[s * k + c];
-            if cmds.is_empty() {
+            let edge_cmds = &cmds[s * k + c];
+            if edge_cmds.is_empty() {
                 continue; // covered by the state cliques of s and tgt
             }
             edgeset.copy_from_slice(&live[tgt as usize * words..(tgt as usize + 1) * words]);
-            for cmd in cmds {
+            for cmd in edge_cmds {
                 bs_set(&mut edgeset, cmd.dst.0);
                 if let MarkValue::Copy(src) = cmd.src {
                     bs_set(&mut edgeset, src.0);
@@ -643,9 +661,9 @@ fn register_allocate(t: &mut Tdfa) {
     let num_colors = color.iter().map(|&c| c + 1).max().unwrap_or(0) as usize;
 
     // --- Rewrite every mark reference to its color, then drop self-copies.
-    for_each_mark_mut(t, |mk| mk.0 = color[mk.0 as usize]);
+    for_each_mark_mut(t, cmds, |mk| mk.0 = color[mk.0 as usize]);
     t.num_marks = num_colors;
-    drop_identity_copies(t);
+    drop_identity_copies(t, cmds);
 }
 
 #[inline]
@@ -655,9 +673,9 @@ fn bs_clear(bits: &mut [u64], i: u32) {
 
 /// After register coloring, a `Copy` whose source and destination map to the
 /// same slot is a no-op; remove such commands everywhere.
-fn drop_identity_copies(t: &mut Tdfa) {
-    for_each_cmd_list_mut(t, |cmds| {
-        cmds.retain(|c| !matches!(c.src, MarkValue::Copy(s) if s == c.dst));
+fn drop_identity_copies(t: &mut Tdfa, cmds: &mut [TagCommandList]) {
+    for_each_cmd_list_mut(t, cmds, |c| {
+        c.retain(|c| !matches!(c.src, MarkValue::Copy(s) if s == c.dst));
     });
 }
 

@@ -16,7 +16,7 @@ use crate::automata::nfa::FULL_MATCH_START;
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::{
     EXEC_ACCEPT_FLAG, EXEC_STATE_MASK, FinalCommand, MarkValue, MoveOp, StateGuards,
-    TDFA_DEAD_STATE, TagCommand, TagCommandList, Tdfa, csr_iat,
+    TDFA_DEAD_STATE, TagCommand, Tdfa, csr_iat,
     ACCEL_NONE, PosStampLoopFlat, ScanFast, ScanSkipFlat, SCAN_MAX_RANGES,
     NO_PRUNE, TF_ACCEPT, TF_ACCEPTS, TF_FALLBACK, TF_SWITCHES,
 };
@@ -333,7 +333,7 @@ pub(crate) trait TdfaTables {
     /// The compiled move table as raw `(cells, arena)` CSR slices.
     fn moves_raw(&self) -> (&[u32], &[MoveOp]);
     /// Scalar-fallback command lists; may be empty when `has_moves()`.
-    fn transition_commands(&self) -> &[TagCommandList];
+    fn transition_commands(&self, idx: usize) -> &[TagCommand];
     fn entry_moves(&self, start: usize) -> &[MoveOp];
     fn entry_commands(&self, start: usize) -> &[TagCommand];
     fn finals(&self, state: u32) -> &[FinalCommand];
@@ -365,7 +365,7 @@ impl TdfaTables for Tdfa {
     fn accepting(&self) -> &[bool] { Tdfa::accepting(self) }
     fn accept_fallback(&self) -> &[bool] { Tdfa::accept_fallback(self) }
     fn moves_raw(&self) -> (&[u32], &[MoveOp]) { self.transition_moves().as_raw() }
-    fn transition_commands(&self) -> &[TagCommandList] { Tdfa::transition_commands(self) }
+    fn transition_commands(&self, idx: usize) -> &[TagCommand] { Tdfa::transition_commands(self, idx) }
     fn entry_moves(&self, start: usize) -> &[MoveOp] { Tdfa::entry_moves(self, start) }
     fn entry_commands(&self, start: usize) -> &[TagCommand] { Tdfa::entry_commands(self, start) }
     fn finals(&self, state: u32) -> &[FinalCommand] { Tdfa::finals(self, state) }
@@ -770,7 +770,6 @@ fn run_anchored<C: TdfaExecConfig, T: TdfaTables>(
     let byte_to_class = tdfa.byte_to_class();
     let transitions = tdfa.transitions();
     let (mv_cells, mv_arena) = tdfa.moves_raw();
-    let trans_cmds = tdfa.transition_commands();
     let accepting = tdfa.accepting();
     let trans_flags = tdfa.trans_flags();
     let num_classes = tdfa.num_classes();
@@ -866,7 +865,7 @@ fn run_anchored<C: TdfaExecConfig, T: TdfaTables>(
                     }
                 }
             } else {
-                apply_cmds_scalar(src_buf, trans_cmds.iat(idx), pos + 1);
+                apply_cmds_scalar(src_buf, tdfa.transition_commands(idx), pos + 1);
             }
         }
         state = next;
