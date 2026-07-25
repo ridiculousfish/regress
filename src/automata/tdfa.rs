@@ -88,6 +88,91 @@ pub struct FinalCommand {
     pub src: MarkValue,
 }
 
+/// Scratch instrumentation for estimating TDFA construction-time memory: how
+/// many live NFA threads accumulate per registered TDFA state as construction
+/// progresses. Opt-in via `REGRESS_TDFA_MEM_TRACE=<n>` (report every `n`
+/// newly-registered states to stderr); zero cost when unset. Temporary —
+/// not part of the public API, delete once the quadratic-peak-memory
+/// investigation (see automata/CLAUDE.md) is resolved.
+#[cfg(feature = "std")]
+struct MemTrace {
+    interval: usize,
+    states: usize,
+    thread_sum: u64,
+    thread_max: usize,
+    slot_sum: u64,
+    populated_sum: u64,
+}
+
+#[cfg(feature = "std")]
+impl MemTrace {
+    fn init() -> Option<Self> {
+        let n: usize = std::env::var("REGRESS_TDFA_MEM_TRACE").ok()?.parse().ok()?;
+        (n > 0).then_some(Self {
+            interval: n,
+            states: 0,
+            thread_sum: 0,
+            thread_max: 0,
+            slot_sum: 0,
+            populated_sum: 0,
+        })
+    }
+
+    fn record(&mut self, cfg: &TdfaState, num_marks: u32, interner: &TagMapStore) {
+        let num_threads = cfg.0.len();
+        self.states += 1;
+        self.thread_sum += num_threads as u64;
+        self.thread_max = self.thread_max.max(num_threads);
+        for t in &cfg.0 {
+            let tag_map = interner.get(t.tag_map);
+            self.slot_sum += tag_map.len() as u64;
+            self.populated_sum += tag_map.iter().filter(|m| m.is_some()).count() as u64;
+        }
+        if self.states % self.interval == 0 {
+            eprintln!(
+                "tdfa_mem_trace states={:7} threads_last={:5} avg_threads={:8.2} max_threads={:6} marks={:8} tag_slots_populated={:6.2}%",
+                self.states,
+                num_threads,
+                self.thread_sum as f64 / self.states as f64,
+                self.thread_max,
+                num_marks,
+                100.0 * self.populated_sum as f64 / self.slot_sum.max(1) as f64,
+            );
+        }
+    }
+}
+
+/// Scratch counters: of every `tag_map` handle copy performed during
+/// construction, how many are pure duplicates (shared `TagMapId`, no interning
+/// needed) versus how many are a genuine write (needs `TagMapStore::intern`)?
+/// Same temporary-instrumentation status as [`MemTrace`].
+#[cfg(feature = "std")]
+static TAGMAP_BYTE_STEP_CLONES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(feature = "std")]
+static TAGMAP_EPS_CLONES_EMPTY_OPS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+#[cfg(feature = "std")]
+static TAGMAP_EPS_CLONES_NONEMPTY_OPS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(feature = "std")]
+fn report_tagmap_clone_counts() {
+    use std::sync::atomic::Ordering::Relaxed;
+    if std::env::var("REGRESS_TDFA_MEM_TRACE").is_err() {
+        return;
+    }
+    let byte_step = TAGMAP_BYTE_STEP_CLONES.load(Relaxed);
+    let eps_empty = TAGMAP_EPS_CLONES_EMPTY_OPS.load(Relaxed);
+    let eps_write = TAGMAP_EPS_CLONES_NONEMPTY_OPS.load(Relaxed);
+    let shared = byte_step + eps_empty;
+    let total = shared + eps_write;
+    eprintln!(
+        "tdfa_tagmap_clones byte_step={byte_step} eps_empty_ops={eps_empty} eps_write_ops={eps_write} \
+         shared={shared} ({:.2}% of {total} total copies needed no interning)",
+        100.0 * shared as f64 / total.max(1) as f64,
+    );
+}
+
 /// Mints fresh, globally-unique `InputMark` IDs during construction.
 struct MarkAlloc(u32);
 impl MarkAlloc {
@@ -109,6 +194,65 @@ impl MarkAlloc {
 /// (Phase B) maps many `InputMark`s onto a smaller set of physical registers.
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Ord, PartialOrd)]
 pub struct InputMark(pub u32);
+
+/// Per-tag version map: indexed by the TNFA's global tag/register index,
+/// `None` where the tag hasn't been written on the path reaching this thread.
+type TagMap = SmallVec<[Option<InputMark>; 4]>;
+
+/// Interned handle to a [`TagMap`] value. Threads that carry the same tag
+/// values — the overwhelming majority; a byte-consuming transition never
+/// writes a tag, and most eps edges don't either — share the same id instead
+/// of each holding their own copy.
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+struct TagMapId(u32);
+
+/// Interning arena for every distinct `TagMap` value minted during one
+/// `Tdfa::try_from_with_budget` call.
+///
+/// Equal `TagMap`s must always get the same `TagMapId` — this is load-bearing,
+/// not just a memory optimization. `TdfaState`'s `Eq`/`Hash` need to recognize
+/// value-identical configurations regardless of how they were built (e.g. a
+/// loop's steady-state iteration re-deriving the same canonical tag pattern
+/// via a different construction path each time around); comparing raw ids
+/// instead of values would only be a valid shortcut if equal values always
+/// shared an id, which is exactly what `intern` guarantees. Without it,
+/// determinization could fail to recognize a repeated state and never
+/// converge. See automata/CLAUDE.md.
+struct TagMapStore {
+    /// `TagMapId` -> value.
+    arena: Vec<TagMap>,
+    /// value -> `TagMapId`, for `intern`'s dedup check. Necessarily holds a
+    /// second copy of each unique value (a plain `HashMap` must own its
+    /// keys); at the unique-value counts observed in practice (thousands,
+    /// not millions — one entry per genuine write, not per thread) this is
+    /// noise next to what interning saves overall.
+    index: HashMap<TagMap, TagMapId>,
+}
+
+impl TagMapStore {
+    fn new() -> Self {
+        Self {
+            arena: Vec::new(),
+            index: HashMap::new(),
+        }
+    }
+
+    /// Return `value`'s id, minting a fresh one only if this exact value
+    /// hasn't been seen before.
+    fn intern(&mut self, value: TagMap) -> TagMapId {
+        if let Some(&id) = self.index.get(&value) {
+            return id;
+        }
+        let id = TagMapId(self.arena.len() as u32);
+        self.arena.push(value.clone());
+        self.index.insert(value, id);
+        id
+    }
+
+    fn get(&self, id: TagMapId) -> &TagMap {
+        &self.arena[id.0 as usize]
+    }
+}
 
 /// Source operand of a tag command: what value to write into the destination
 /// `InputMark`. A tag command is a single assignment executed when the TDFA
@@ -513,15 +657,16 @@ fn guards_word_icase(guards: &[StateGuards]) -> bool {
 /// One member of a TDFA configuration: an NFA state plus the per-tag version
 /// map recording which `InputMark` currently holds each tag's value in this
 /// entry.
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub struct TaggedNfaState {
     pub state: StateHandle,
-    /// Indexed by the TNFA's global tag/register index. Length equals the
-    /// automaton's total tag count and is uniform across every entry in a
-    /// configuration (so index-by-index comparison in equality and
-    /// canonicalization is well-defined). `None` means the tag has not been
-    /// written on the path reaching this state.
-    pub tag_map: SmallVec<[Option<InputMark>; 4]>,
+    /// Interned handle to this thread's [`TagMap`] (see [`TagMapStore`]).
+    /// Comparing/hashing the raw id is equivalent to comparing/hashing the
+    /// underlying value, because `intern` guarantees equal values always
+    /// share an id — that's what makes deriving `Eq`/`Hash` here still
+    /// correct for `TdfaState`'s dedup, without needing interner access at
+    /// comparison time.
+    tag_map: TagMapId,
 }
 
 /// One TDFA state: an ordered list of `TaggedNfaState` threads. Order encodes
@@ -545,7 +690,10 @@ pub struct TdfaState(pub SmallVec<[TaggedNfaState; 4]>);
 /// raw→canonical mapping (used by callers to retroactively renumber
 /// per-state conditionals' tag references — see
 /// `rewrite_conditional_finals`).
-pub fn canonicalize(cfg: TdfaState) -> (TdfaState, TagCommandList, HashMap<InputMark, InputMark>) {
+fn canonicalize(
+    cfg: TdfaState,
+    interner: &mut TagMapStore,
+) -> (TdfaState, TagCommandList, HashMap<InputMark, InputMark>) {
     // `mapping[raw] = canon` records which canonical id each raw mark was
     // assigned. A single raw mark may appear in multiple entries / tag slots;
     // all occurrences must rewrite to the same canonical id, so we memoize.
@@ -567,15 +715,24 @@ pub fn canonicalize(cfg: TdfaState) -> (TdfaState, TagCommandList, HashMap<Input
     // tag slots in index order (inner loop). This fixed traversal is what
     // makes "first appearance" a well-defined notion.
     for entry in cfg.0 {
-        let mut tag_map = SmallVec::with_capacity(entry.tag_map.len());
-        for &slot in &entry.tag_map {
+        let src = interner.get(entry.tag_map);
+        let mut new_tag_map = TagMap::with_capacity(src.len());
+        for &slot in src.iter() {
             // `None` (unset tag) passes through unchanged — only real marks
             // get renumbered. First sight of a raw mark mints a fresh
             // canonical id; subsequent sights reuse the memoized one.
             let canon = slot.map(|raw| *mapping.entry(raw).or_insert_with(&mut next_canonical));
-            tag_map.push(canon);
+            new_tag_map.push(canon);
         }
-        tag_map.shrink_to_fit();
+        // This is the retained (permanent, one-per-live-thread) copy — the
+        // transient values built in `close_priority` are only reachable via
+        // the interner, which lives for the whole build. Renumbering is a
+        // no-op whenever every raw mark already equals its canonical id (the
+        // common case for a thread that isn't the newest one this step, or
+        // whose ids were already canonical from a prior pass): `intern`
+        // finds the source value already registered under `entry.tag_map`
+        // and hands back that same id instead of growing the arena.
+        let tag_map = interner.intern(new_tag_map);
         entries.push(TaggedNfaState {
             state: entry.state,
             tag_map,
@@ -642,6 +799,7 @@ fn rewrite_conditional_finals(
 /// caller stitches these onto the incoming TDFA transition's command list.
 fn close_priority(
     alloc: &mut MarkAlloc,
+    interner: &mut TagMapStore,
     nfa: &Nfa,
     seeds: &[TaggedNfaState],
     num_tags: usize,
@@ -746,10 +904,11 @@ fn close_priority(
                         // Otherwise (mark was inherited from a prior closure, or
                         // the slot is empty) → predicate HOLDS.
                         let sentinel_idx = *sentinel as usize;
-                        let written_in_this_closure = match parent_tag_map.get(sentinel_idx) {
-                            Some(Some(m)) => m.0 >= closure_start_mark,
-                            _ => false,
-                        };
+                        let written_in_this_closure =
+                            match interner.get(parent_tag_map).get(sentinel_idx) {
+                                Some(Some(m)) => m.0 >= closure_start_mark,
+                                _ => false,
+                            };
                         if written_in_this_closure {
                             continue;
                         }
@@ -761,9 +920,9 @@ fn close_priority(
                         // terminate at `GOAL_STATE` via only-eps; otherwise the
                         // path can't be captured by a per-position accept and
                         // we have to bail.
-                        let mut sub_tag_map = parent_tag_map.clone();
+                        let mut sub_tag_map = parent_tag_map;
                         let mut pre_cmds = TagCommandList::new();
-                        apply_eps_ops(&edge.ops, alloc, &mut sub_tag_map, &mut pre_cmds);
+                        apply_eps_ops(&edge.ops, alloc, interner, &mut sub_tag_map, &mut pre_cmds);
                         let seed = TaggedNfaState {
                             state: edge.target,
                             tag_map: sub_tag_map,
@@ -771,6 +930,7 @@ fn close_priority(
                         let mut sub_conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
                         let (sub_closure, sub_cmds) = close_priority(
                             alloc,
+                            interner,
                             nfa,
                             &[seed],
                             num_tags,
@@ -800,7 +960,7 @@ fn close_priority(
                         let mut all_cmds = TagCommandList::new();
                         all_cmds.extend(pre_cmds);
                         all_cmds.extend(sub_cmds);
-                        let finals = synthesize_finals(&sub_closure, num_tags);
+                        let finals = synthesize_finals(&sub_closure, num_tags, interner);
                         conditionals.push(AnchorConditional {
                             cond: edge.cond.clone(),
                             commands: all_cmds,
@@ -824,8 +984,17 @@ fn close_priority(
                 if seen[edge.target as usize] {
                     continue;
                 }
-                let mut child_tag_map = parent_tag_map.clone();
-                apply_eps_ops(&edge.ops, alloc, &mut child_tag_map, &mut commands);
+                #[cfg(feature = "std")]
+                {
+                    use std::sync::atomic::Ordering::Relaxed;
+                    if edge.ops.is_empty() {
+                        TAGMAP_EPS_CLONES_EMPTY_OPS.fetch_add(1, Relaxed);
+                    } else {
+                        TAGMAP_EPS_CLONES_NONEMPTY_OPS.fetch_add(1, Relaxed);
+                    }
+                }
+                let mut child_tag_map = parent_tag_map;
+                apply_eps_ops(&edge.ops, alloc, interner, &mut child_tag_map, &mut commands);
                 stack.push(TaggedNfaState {
                     state: edge.target,
                     tag_map: child_tag_map,
@@ -838,37 +1007,48 @@ fn close_priority(
 }
 
 /// Build an all-`None` tag map of length `num_tags` for seeding a new entry.
-fn empty_tag_map(num_tags: usize) -> SmallVec<[Option<InputMark>; 4]> {
-    let mut v = SmallVec::with_capacity(num_tags);
+fn empty_tag_map(num_tags: usize, interner: &mut TagMapStore) -> TagMapId {
+    let mut v = TagMap::with_capacity(num_tags);
     v.resize(num_tags, None);
-    v
+    interner.intern(v)
 }
 
 /// Apply an eps edge's tag-write ops to the child tag_map.
 /// `CurrentPos` mints a fresh mark and emits a `TagCommand` so the
 /// executor writes the input position at runtime. `Nil` clears the
 /// slot to `None` directly — no mark, no command.
+///
+/// An empty `ops` (the common case — most eps edges write no tags) is a pure
+/// no-op that leaves `child_tag_map`'s id untouched, i.e. still shared with
+/// its source. Only a real write pays for cloning the current value out of
+/// the interner, mutating the clone, and re-interning it.
 fn apply_eps_ops(
     ops: &[TagOp],
     alloc: &mut MarkAlloc,
-    child_tag_map: &mut SmallVec<[Option<InputMark>; 4]>,
+    interner: &mut TagMapStore,
+    child_tag_map: &mut TagMapId,
     commands: &mut TagCommandList,
 ) {
+    if ops.is_empty() {
+        return;
+    }
+    let mut v = interner.get(*child_tag_map).clone();
     for op in ops {
         match op.kind {
             OpKind::CurrentPos => {
                 let m = alloc.next();
-                child_tag_map[op.tag as usize] = Some(m);
+                v[op.tag as usize] = Some(m);
                 commands.push(TagCommand {
                     dst: m,
                     src: MarkValue::CurrentPos,
                 });
             }
             OpKind::Nil => {
-                child_tag_map[op.tag as usize] = None;
+                v[op.tag as usize] = None;
             }
         }
     }
+    *child_tag_map = interner.intern(v);
 }
 
 /// Working state for the TDFA construction. Bundles every per-state Vec
@@ -877,6 +1057,7 @@ fn apply_eps_ops(
 struct Build<'a> {
     nfa: &'a Nfa,
     alloc: &'a mut MarkAlloc,
+    tag_interner: TagMapStore,
     num_tags: usize,
     num_classes: usize,
     state_map: HashMap<TdfaState, TdfaStateId>,
@@ -913,7 +1094,7 @@ impl Build<'_> {
             return Err(Error::BudgetExceeded);
         }
         let is_accepting = canon.0.iter().any(|t| t.state == GOAL_STATE);
-        let state_finals = synthesize_finals(&canon, self.num_tags);
+        let state_finals = synthesize_finals(&canon, self.num_tags, &self.tag_interner);
         if conds.iter().any(conditional_needs_perbyte) {
             self.pending_prunes.push((id, canon.clone()));
         }
@@ -945,6 +1126,7 @@ impl Build<'_> {
         let mut conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
         let (closure, current_cmds) = close_priority(
             self.alloc,
+            &mut self.tag_interner,
             self.nfa,
             seeds,
             self.num_tags,
@@ -954,7 +1136,7 @@ impl Build<'_> {
             &mut conds,
         )?;
         let closure = truncate_at_first_goal(closure);
-        let (canon, copy_cmds, canon_mapping) = canonicalize(closure);
+        let (canon, copy_cmds, canon_mapping) = canonicalize(closure, &mut self.tag_interner);
         // Conditionals were built during close_priority using *raw* mark
         // ids; the standard transition's `Copy(raw → canon)` commands
         // move values into canonical slots, but a self-loop into the same
@@ -1053,7 +1235,7 @@ impl Build<'_> {
         if canon_alt == *canon {
             return Ok(());
         }
-        let switch_commands = compute_alt_switch_commands(canon, &canon_alt);
+        let switch_commands = compute_alt_switch_commands(canon, &canon_alt, &self.tag_interner);
         let (alt_id, _is_new) = self.register_or_get_state(canon_alt, conds_alt)?;
         self.anchor_alts[id as usize].push(AnchorAlt {
             cond,
@@ -1087,7 +1269,7 @@ impl Build<'_> {
             let seeds: Vec<TaggedNfaState> = canon.0[..count].to_vec();
             let (canon_prune, _entry, conds_prune) =
                 self.closure_from_seeds(&seeds, false, false, &[])?;
-            let switch_commands = compute_alt_switch_commands(canon, &canon_prune);
+            let switch_commands = compute_alt_switch_commands(canon, &canon_prune, &self.tag_interner);
             let canon_for_alt = canon_prune.clone();
             let (prune_id, is_new) = self.register_or_get_state(canon_prune, conds_prune)?;
             if is_new {
@@ -1110,10 +1292,14 @@ impl Build<'_> {
 /// differ). For entries only in the alt — added by the ^-extension —
 /// emit a `CurrentPos`, since their values are the position at which
 /// ^ just fired.
-fn compute_alt_switch_commands(canon_next: &TdfaState, canon_alt: &TdfaState) -> TagCommandList {
+fn compute_alt_switch_commands(
+    canon_next: &TdfaState,
+    canon_alt: &TdfaState,
+    interner: &TagMapStore,
+) -> TagCommandList {
     let mut next_map: HashMap<(StateHandle, usize), InputMark> = HashMap::new();
     for thread in &canon_next.0 {
-        for (idx, slot) in thread.tag_map.iter().enumerate() {
+        for (idx, slot) in interner.get(thread.tag_map).iter().enumerate() {
             if let Some(mark) = slot {
                 next_map.insert((thread.state, idx), *mark);
             }
@@ -1128,7 +1314,7 @@ fn compute_alt_switch_commands(canon_next: &TdfaState, canon_alt: &TdfaState) ->
     // correct Copy with a CurrentPos.
     let mut written: HashSet<InputMark> = HashSet::new();
     for thread in &canon_alt.0 {
-        for (idx, slot) in thread.tag_map.iter().enumerate() {
+        for (idx, slot) in interner.get(thread.tag_map).iter().enumerate() {
             let Some(alt_mark) = slot else { continue };
             if written.contains(alt_mark) {
                 continue;
@@ -1167,7 +1353,7 @@ fn seed_initial_state(
 ) -> Result<(TdfaStateId, TagCommandList), Error> {
     let seed = TaggedNfaState {
         state: build.nfa.start(),
-        tag_map: empty_tag_map(build.num_tags),
+        tag_map: empty_tag_map(build.num_tags, &mut build.tag_interner),
     };
     let seeds = [seed];
     let (canon, entry_commands, conds) = build.closure_from_seeds(
@@ -1188,17 +1374,22 @@ fn seed_initial_state(
 /// first GOAL thread's `tag_map` — leftmost-greedy / leftmost-first semantics
 /// already baked in by truncate-at-first-GOAL. Non-accepting states get an
 /// empty list.
-fn synthesize_finals(canon: &TdfaState, num_tags: usize) -> SmallVec<[FinalCommand; 4]> {
+fn synthesize_finals(
+    canon: &TdfaState,
+    num_tags: usize,
+    interner: &TagMapStore,
+) -> SmallVec<[FinalCommand; 4]> {
     let goal = match canon.0.iter().find(|t| t.state == GOAL_STATE) {
         Some(t) => t,
         None => return SmallVec::new(),
     };
+    let goal_tag_map = interner.get(goal.tag_map);
     let mut out: SmallVec<[FinalCommand; 4]> = SmallVec::new();
     for tag in 0..num_tags {
         // Skip tags with no surviving thread holding them. The executor
         // initializes tag values to TEXT_POS_NO_MATCH, so absence of a
         // FinalCommand is equivalent to writing "unset".
-        if let Some(mark) = goal.tag_map.get(tag).copied().flatten() {
+        if let Some(mark) = goal_tag_map.get(tag).copied().flatten() {
             out.push(FinalCommand {
                 tag: tag as TagIdx,
                 src: MarkValue::Copy(mark),
@@ -1830,6 +2021,13 @@ impl Tdfa {
     /// `regex!` expansion time that's the difference between instant and
     /// tens of seconds per pattern.
     pub fn try_from_with_budget(nfa: &Nfa, budget: usize) -> Result<Self, Error> {
+        #[cfg(feature = "std")]
+        {
+            use std::sync::atomic::Ordering::Relaxed;
+            TAGMAP_BYTE_STEP_CLONES.store(0, Relaxed);
+            TAGMAP_EPS_CLONES_EMPTY_OPS.store(0, Relaxed);
+            TAGMAP_EPS_CLONES_NONEMPTY_OPS.store(0, Relaxed);
+        }
         let (byte_to_class, num_classes) = compute_byte_classes(nfa);
         let rep_bytes = representative_bytes(&byte_to_class, num_classes);
         let num_tags = nfa.num_tags();
@@ -1838,6 +2036,7 @@ impl Tdfa {
         let mut build = Build {
             nfa,
             alloc: &mut alloc,
+            tag_interner: TagMapStore::new(),
             num_tags,
             num_classes,
             state_map: HashMap::new(),
@@ -1877,6 +2076,9 @@ impl Tdfa {
         let (start_unanchored, entry_commands_unanchored) =
             seed_initial_state(&mut build, /* at_start_of_input */ false)?;
 
+        #[cfg(feature = "std")]
+        let mut mem_trace = MemTrace::init();
+
         // Outer fixpoint: drain the transition worklist, then resolve one
         // state's accept prunes (which may register new states, refilling the
         // worklist — and those states may carry prunable accepts of their
@@ -1897,6 +2099,8 @@ impl Tdfa {
                 let mut seeds: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
                 for thread in &state.0 {
                     if let Some(tgt) = nfa.states[thread.state as usize].transition_for_byte(rep) {
+                        #[cfg(feature = "std")]
+                        TAGMAP_BYTE_STEP_CLONES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         seeds.push(TaggedNfaState {
                             state: tgt,
                             tag_map: thread.tag_map.clone(),
@@ -1918,6 +2122,10 @@ impl Tdfa {
                 build.transitions[row_offset + class] = target_id;
                 build.transition_commands[row_offset + class] = combined;
                 if is_new {
+                    #[cfg(feature = "std")]
+                    if let Some(mt) = mem_trace.as_mut() {
+                        mt.record(&canon_for_alt, build.alloc.count(), &build.tag_interner);
+                    }
                     build.compute_anchor_alt_for(
                         &canon_for_alt,
                         &seeds,
@@ -1996,6 +2204,8 @@ impl Tdfa {
         tdfa.compile_moves_all();
         // Build after compile_moves_all so accept_fallback (computed above) is current.
         tdfa.build_trans_flags();
+        #[cfg(feature = "std")]
+        report_tagmap_clone_counts();
         Ok(tdfa)
     }
 
@@ -2628,31 +2838,31 @@ impl Tdfa {
 mod tests {
     use super::*;
 
-    fn entry(state: StateHandle, tags: &[u32]) -> TaggedNfaState {
-        TaggedNfaState {
-            state,
-            tag_map: tags.iter().map(|&v| Some(InputMark(v))).collect(),
-        }
+    fn entry(interner: &mut TagMapStore, state: StateHandle, tags: &[u32]) -> TaggedNfaState {
+        let tag_map = interner.intern(tags.iter().map(|&v| Some(InputMark(v))).collect());
+        TaggedNfaState { state, tag_map }
     }
 
     fn cfg(entries: &[TaggedNfaState]) -> TdfaState {
-        TdfaState(entries.iter().cloned().collect())
+        TdfaState(entries.iter().copied().collect())
     }
 
     #[test]
     fn configuration_eq_is_order_sensitive() {
-        let a = entry(1, &[3, 5]);
-        let b = entry(2, &[3, 5]);
-        assert_ne!(cfg(&[a.clone(), b.clone()]), cfg(&[b, a]));
+        let mut interner = TagMapStore::new();
+        let a = entry(&mut interner, 1, &[3, 5]);
+        let b = entry(&mut interner, 2, &[3, 5]);
+        assert_ne!(cfg(&[a, b]), cfg(&[b, a]));
     }
 
     #[test]
     fn configuration_hash_is_order_sensitive() {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        let a = entry(1, &[3, 5]);
-        let b = entry(2, &[3, 5]);
-        let ab = cfg(&[a.clone(), b.clone()]);
+        let mut interner = TagMapStore::new();
+        let a = entry(&mut interner, 1, &[3, 5]);
+        let b = entry(&mut interner, 2, &[3, 5]);
+        let ab = cfg(&[a, b]);
         let ba = cfg(&[b, a]);
         let mut ha = DefaultHasher::new();
         let mut hb = DefaultHasher::new();
@@ -2664,32 +2874,39 @@ mod tests {
     #[test]
     fn canonicalize_first_appearance_order() {
         // Raw versions 7, 3, 7, 9 canonicalize to 0, 1, 0, 2.
-        let c = cfg(&[entry(0, &[7, 3]), entry(1, &[7, 9])]);
-        let (canon, _, _) = canonicalize(c);
-        assert_eq!(canon, cfg(&[entry(0, &[0, 1]), entry(1, &[0, 2])]));
+        let mut interner = TagMapStore::new();
+        let c = cfg(&[entry(&mut interner, 0, &[7, 3]), entry(&mut interner, 1, &[7, 9])]);
+        let (canon, _, _) = canonicalize(c, &mut interner);
+        let expected = cfg(&[entry(&mut interner, 0, &[0, 1]), entry(&mut interner, 1, &[0, 2])]);
+        assert_eq!(canon, expected);
     }
 
     #[test]
     fn canonicalize_is_idempotent() {
-        let c = cfg(&[entry(0, &[7, 3]), entry(1, &[7, 9])]);
-        let (once, _, _) = canonicalize(c.clone());
-        let (twice, cmds, _) = canonicalize(once.clone());
+        let mut interner = TagMapStore::new();
+        let c = cfg(&[entry(&mut interner, 0, &[7, 3]), entry(&mut interner, 1, &[7, 9])]);
+        let (once, _, _) = canonicalize(c, &mut interner);
+        let (twice, cmds, _) = canonicalize(once.clone(), &mut interner);
         assert_eq!(once, twice);
         assert!(cmds.is_empty());
     }
 
     #[test]
     fn canonicalize_iso_configs_collapse() {
-        let a = cfg(&[entry(0, &[3, 5]), entry(1, &[5, 3])]);
-        let b = cfg(&[entry(0, &[100, 200]), entry(1, &[200, 100])]);
-        assert_eq!(canonicalize(a).0, canonicalize(b).0);
+        let mut interner = TagMapStore::new();
+        let a = cfg(&[entry(&mut interner, 0, &[3, 5]), entry(&mut interner, 1, &[5, 3])]);
+        let b = cfg(&[entry(&mut interner, 0, &[100, 200]), entry(&mut interner, 1, &[200, 100])]);
+        let (canon_a, ..) = canonicalize(a, &mut interner);
+        let (canon_b, ..) = canonicalize(b, &mut interner);
+        assert_eq!(canon_a, canon_b);
     }
 
     #[test]
     fn canonicalize_emits_copy_commands_in_canonical_order() {
         // Raw 7 -> canonical 0, raw 3 -> canonical 1.
-        let c = cfg(&[entry(0, &[7, 3])]);
-        let (_, cmds, _) = canonicalize(c);
+        let mut interner = TagMapStore::new();
+        let c = cfg(&[entry(&mut interner, 0, &[7, 3])]);
+        let (_, cmds, _) = canonicalize(c, &mut interner);
         assert_eq!(
             cmds.as_slice(),
             &[
@@ -2707,16 +2924,19 @@ mod tests {
 
     #[test]
     fn canonicalize_already_canonical_emits_no_commands() {
-        let c = cfg(&[entry(0, &[0, 1]), entry(1, &[0, 2])]);
-        let (canon, cmds, _) = canonicalize(c.clone());
-        assert_eq!(canon, c);
+        let mut interner = TagMapStore::new();
+        let c = cfg(&[entry(&mut interner, 0, &[0, 1]), entry(&mut interner, 1, &[0, 2])]);
+        let (canon, cmds, _) = canonicalize(c, &mut interner);
+        let expected = cfg(&[entry(&mut interner, 0, &[0, 1]), entry(&mut interner, 1, &[0, 2])]);
+        assert_eq!(canon, expected);
         assert!(cmds.is_empty());
     }
 
     #[test]
     fn empty_configuration_canonicalizes_to_empty() {
+        let mut interner = TagMapStore::new();
         let empty = TdfaState::default();
-        let (canon, cmds, _) = canonicalize(empty.clone());
+        let (canon, cmds, _) = canonicalize(empty.clone(), &mut interner);
         assert_eq!(canon, empty);
         assert!(cmds.is_empty());
     }
