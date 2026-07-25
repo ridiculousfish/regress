@@ -219,38 +219,66 @@ struct TagMapId(u32);
 /// determinization could fail to recognize a repeated state and never
 /// converge. See automata/CLAUDE.md.
 struct TagMapStore {
-    /// `TagMapId` -> value.
-    arena: Vec<TagMap>,
+    /// Every interned `TagMap`'s payload, back to back, `num_tags` slots per
+    /// value — *not* one `Vec` entry per value. Every `TagMap` minted during
+    /// one build has exactly `num_tags` elements (see [`TagMap`]'s own doc),
+    /// so unlike `CsrTable` elsewhere in this file there's no need for a
+    /// per-entry `(offset, len)` cell: entry `i`'s slice always starts at
+    /// `i * num_tags`. `TagMapId(i)` is that entry index `i`, *not* a byte
+    /// offset and *not* an index into anything ragged — `get` below is the
+    /// only place that arithmetic should happen.
+    ///
+    /// This is the payoff over storing `Vec<TagMap>` directly: a `TagMap`
+    /// (`SmallVec<[Option<InputMark>; 4]>`) costs 48 bytes per value
+    /// regardless of `num_tags` (padded out to the inline capacity, or to
+    /// the spilled-pointer layout, whichever the type needs room for); flat
+    /// storage costs exactly `num_tags * 8` bytes per value, no headroom,
+    /// no per-value allocation.
+    arena: Vec<Option<InputMark>>,
+    /// Every `TagMap` minted in this build has this many tags — fixed once
+    /// per `Tdfa::try_from_with_budget` call. What makes the flat, fixed-
+    /// stride `arena` above possible instead of needing per-entry lengths.
+    num_tags: usize,
     /// value -> `TagMapId`, for `intern`'s dedup check. Necessarily holds a
     /// second copy of each unique value (a plain `HashMap` must own its
-    /// keys); at the unique-value counts observed in practice (thousands,
-    /// not millions — one entry per genuine write, not per thread) this is
-    /// noise next to what interning saves overall.
+    /// keys) in its own `SmallVec`-shaped representation, separate from
+    /// `arena`'s flat one; at the unique-value counts observed in practice
+    /// (thousands, not millions — one entry per genuine write, not per
+    /// thread) this is noise next to what interning saves overall.
     index: HashMap<TagMap, TagMapId>,
 }
 
 impl TagMapStore {
-    fn new() -> Self {
+    fn new(num_tags: usize) -> Self {
         Self {
             arena: Vec::new(),
+            num_tags,
             index: HashMap::new(),
         }
     }
 
     /// Return `value`'s id, minting a fresh one only if this exact value
-    /// hasn't been seen before.
+    /// hasn't been seen before. `value.len()` must equal `num_tags` (true of
+    /// every `TagMap` this module ever constructs).
     fn intern(&mut self, value: TagMap) -> TagMapId {
         if let Some(&id) = self.index.get(&value) {
             return id;
         }
-        let id = TagMapId(self.arena.len() as u32);
-        self.arena.push(value.clone());
+        // The new entry's index is "how many entries are already in the flat
+        // arena", i.e. `arena.len() / num_tags` — *not* `arena.len()` itself,
+        // since arena.len() counts individual `Option<InputMark>` slots, not
+        // `TagMap` values.
+        debug_assert_eq!(self.arena.len() % self.num_tags.max(1), 0);
+        let id = TagMapId((self.arena.len() / self.num_tags.max(1)) as u32);
+        self.arena.extend_from_slice(&value);
         self.index.insert(value, id);
         id
     }
 
-    fn get(&self, id: TagMapId) -> &TagMap {
-        &self.arena[id.0 as usize]
+    /// The `num_tags`-long slice of marks `id` was interned with.
+    fn get(&self, id: TagMapId) -> &[Option<InputMark>] {
+        let start = id.0 as usize * self.num_tags;
+        &self.arena[start..start + self.num_tags]
     }
 }
 
@@ -1032,7 +1060,7 @@ fn apply_eps_ops(
     if ops.is_empty() {
         return;
     }
-    let mut v = interner.get(*child_tag_map).clone();
+    let mut v: TagMap = TagMap::from_slice(interner.get(*child_tag_map));
     for op in ops {
         match op.kind {
             OpKind::CurrentPos => {
@@ -2036,7 +2064,7 @@ impl Tdfa {
         let mut build = Build {
             nfa,
             alloc: &mut alloc,
-            tag_interner: TagMapStore::new(),
+            tag_interner: TagMapStore::new(num_tags),
             num_tags,
             num_classes,
             state_map: HashMap::new(),
@@ -2205,7 +2233,19 @@ impl Tdfa {
         // Build after compile_moves_all so accept_fallback (computed above) is current.
         tdfa.build_trans_flags();
         #[cfg(feature = "std")]
-        report_tagmap_clone_counts();
+        {
+            report_tagmap_clone_counts();
+            if std::env::var("REGRESS_TDFA_MEM_TRACE").is_ok() {
+                let n = build.tag_interner.arena.len() / build.num_tags.max(1);
+                let arena_bytes = build.tag_interner.arena.len() * size_of::<Option<InputMark>>();
+                let index_bytes = n * (size_of::<TagMap>() + size_of::<TagMapId>());
+                eprintln!(
+                    "tdfa_tagmap_store unique_values={n} arena_bytes(flat)={arena_bytes} \
+                     index_bytes(approx)={index_bytes} total(approx)={} bytes",
+                    arena_bytes + index_bytes,
+                );
+            }
+        }
         Ok(tdfa)
     }
 
@@ -2849,7 +2889,7 @@ mod tests {
 
     #[test]
     fn configuration_eq_is_order_sensitive() {
-        let mut interner = TagMapStore::new();
+        let mut interner = TagMapStore::new(2);
         let a = entry(&mut interner, 1, &[3, 5]);
         let b = entry(&mut interner, 2, &[3, 5]);
         assert_ne!(cfg(&[a, b]), cfg(&[b, a]));
@@ -2859,7 +2899,7 @@ mod tests {
     fn configuration_hash_is_order_sensitive() {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        let mut interner = TagMapStore::new();
+        let mut interner = TagMapStore::new(2);
         let a = entry(&mut interner, 1, &[3, 5]);
         let b = entry(&mut interner, 2, &[3, 5]);
         let ab = cfg(&[a, b]);
@@ -2874,7 +2914,7 @@ mod tests {
     #[test]
     fn canonicalize_first_appearance_order() {
         // Raw versions 7, 3, 7, 9 canonicalize to 0, 1, 0, 2.
-        let mut interner = TagMapStore::new();
+        let mut interner = TagMapStore::new(2);
         let c = cfg(&[entry(&mut interner, 0, &[7, 3]), entry(&mut interner, 1, &[7, 9])]);
         let (canon, _, _) = canonicalize(c, &mut interner);
         let expected = cfg(&[entry(&mut interner, 0, &[0, 1]), entry(&mut interner, 1, &[0, 2])]);
@@ -2883,7 +2923,7 @@ mod tests {
 
     #[test]
     fn canonicalize_is_idempotent() {
-        let mut interner = TagMapStore::new();
+        let mut interner = TagMapStore::new(2);
         let c = cfg(&[entry(&mut interner, 0, &[7, 3]), entry(&mut interner, 1, &[7, 9])]);
         let (once, _, _) = canonicalize(c, &mut interner);
         let (twice, cmds, _) = canonicalize(once.clone(), &mut interner);
@@ -2893,7 +2933,7 @@ mod tests {
 
     #[test]
     fn canonicalize_iso_configs_collapse() {
-        let mut interner = TagMapStore::new();
+        let mut interner = TagMapStore::new(2);
         let a = cfg(&[entry(&mut interner, 0, &[3, 5]), entry(&mut interner, 1, &[5, 3])]);
         let b = cfg(&[entry(&mut interner, 0, &[100, 200]), entry(&mut interner, 1, &[200, 100])]);
         let (canon_a, ..) = canonicalize(a, &mut interner);
@@ -2904,7 +2944,7 @@ mod tests {
     #[test]
     fn canonicalize_emits_copy_commands_in_canonical_order() {
         // Raw 7 -> canonical 0, raw 3 -> canonical 1.
-        let mut interner = TagMapStore::new();
+        let mut interner = TagMapStore::new(2);
         let c = cfg(&[entry(&mut interner, 0, &[7, 3])]);
         let (_, cmds, _) = canonicalize(c, &mut interner);
         assert_eq!(
@@ -2924,7 +2964,7 @@ mod tests {
 
     #[test]
     fn canonicalize_already_canonical_emits_no_commands() {
-        let mut interner = TagMapStore::new();
+        let mut interner = TagMapStore::new(2);
         let c = cfg(&[entry(&mut interner, 0, &[0, 1]), entry(&mut interner, 1, &[0, 2])]);
         let (canon, cmds, _) = canonicalize(c, &mut interner);
         let expected = cfg(&[entry(&mut interner, 0, &[0, 1]), entry(&mut interner, 1, &[0, 2])]);
@@ -2934,7 +2974,7 @@ mod tests {
 
     #[test]
     fn empty_configuration_canonicalizes_to_empty() {
-        let mut interner = TagMapStore::new();
+        let mut interner = TagMapStore::new(2);
         let empty = TdfaState::default();
         let (canon, cmds, _) = canonicalize(empty.clone(), &mut interner);
         assert_eq!(canon, empty);
