@@ -283,7 +283,13 @@ struct TagMapStore {
     /// `arena`'s flat one; at the unique-value counts observed in practice
     /// (thousands, not millions — one entry per genuine write, not per
     /// thread) this is noise next to what interning saves overall.
-    index: HashMap<TagMap, TagMapId>,
+    ///
+    /// `FxBuildHasher`, not the default SipHash: `intern` is called on
+    /// every eps-op write during construction (see `apply_eps_ops`), far
+    /// more often than `state_map` is touched, and these keys have the same
+    /// "internal to construction, never independently attacker-controlled"
+    /// trust profile as `state_map`'s — see `FxHasher`'s doc comment.
+    index: HashMap<TagMap, TagMapId, FxBuildHasher>,
 }
 
 impl TagMapStore {
@@ -291,7 +297,7 @@ impl TagMapStore {
         Self {
             arena: Vec::new(),
             num_tags,
-            index: HashMap::new(),
+            index: HashMap::default(),
         }
     }
 
@@ -723,7 +729,7 @@ fn guards_word_icase(guards: &[StateGuards]) -> bool {
 /// One member of a TDFA configuration: an NFA state plus the per-tag version
 /// map recording which `InputMark` currently holds each tag's value in this
 /// entry.
-#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub struct TaggedNfaState {
     pub state: StateHandle,
     /// Interned handle to this thread's [`TagMap`] (see [`TagMapStore`]).
@@ -733,6 +739,20 @@ pub struct TaggedNfaState {
     /// correct for `TdfaState`'s dedup, without needing interner access at
     /// comparison time.
     tag_map: TagMapId,
+}
+
+// Manual (not derived) `Hash`: both fields are `u32`, so packing them into
+// one `u64` and issuing a single hasher call halves the number of
+// mix-rounds `FxHasher` does per thread versus deriving (which would hash
+// `state` and `tag_map` as two separate calls). `TdfaState` keys in
+// `state_map` can hold thousands of these for the patterns this file cares
+// most about, so this is the hottest per-element cost in the build.
+impl core::hash::Hash for TaggedNfaState {
+    #[inline]
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        let packed = ((self.state as u64) << 32) | self.tag_map.0 as u64;
+        state.write_u64(packed);
+    }
 }
 
 /// One TDFA state: an ordered list of `TaggedNfaState` threads. Order encodes
@@ -1032,6 +1052,15 @@ fn close_priority(
     // makes. Same technique as `CanonWalk`.
     seen_gen: &mut [u32],
     seen_gen_counter: &mut u32,
+    // Reused DFS stack -- see `Build::close_stack`'s doc comment. Always
+    // empty on entry (the while loop below fully drains it before this
+    // function returns, including on every early exit) and always empty on
+    // return, so the caller can hand back the same buffer next call without
+    // clearing it. The recursive mini-closure call below (for `$`) passes a
+    // fresh local `Vec` instead of this one -- it fires while the caller's
+    // `stack` may still hold other pending entries, so reusing the same
+    // buffer there would let the recursive call's own pops clobber them.
+    stack: &mut Vec<TaggedNfaState>,
 ) -> Result<(TdfaState, TagCommandList), Error> {
     let mut threads: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
     let mut commands = TagCommandList::new();
@@ -1064,7 +1093,6 @@ fn close_priority(
     // Seeds are drained one at a time, in priority order, so a higher-
     // priority seed's closure claims any shared state before a later seed is
     // considered — needed for adjacent loops like `(a*)(a{1,2})`.
-    let mut stack: Vec<TaggedNfaState> = Vec::new();
     for seed in seeds {
         stack.push(seed.clone());
         while let Some(thread) = stack.pop() {
@@ -1161,6 +1189,7 @@ fn close_priority(
                             &mut sub_conds,
                             seen_gen,
                             seen_gen_counter,
+                            &mut Vec::new(),
                         )?;
                         let sub_closure = truncate_at_first_goal(sub_closure);
                         // Bail iff the mini-closure could continue consuming
@@ -1355,6 +1384,15 @@ struct Build<'a> {
     /// build) and never reallocated.
     seen_gen: Vec<u32>,
     seen_gen_counter: u32,
+    /// Reused DFS stack for `close_priority`'s top-level (non-recursive)
+    /// traversal -- for the pathological patterns this file cares about,
+    /// this grows to thousands of entries and would otherwise be a fresh
+    /// heap allocation (grown by repeated reallocation) on every one of the
+    /// thousands of calls a large build makes. Always emptied by the time
+    /// `close_priority` returns, so it's safe to hand the same buffer back
+    /// in on the next call. The rare recursive mini-closure call (for `$`)
+    /// does *not* share this buffer -- see `close_priority`'s doc comment.
+    close_stack: Vec<TaggedNfaState>,
     transitions: Vec<TdfaStateId>,
     accepting: Vec<bool>,
     transition_commands: Vec<TagCommandList>,
@@ -1477,6 +1515,7 @@ impl Build<'_> {
             &mut conds,
             &mut self.seen_gen,
             &mut self.seen_gen_counter,
+            &mut self.close_stack,
         )?;
         #[cfg(feature = "std")]
         if let (Some(pt), Some(t)) = (self.phase_trace.as_mut(), t) {
@@ -2394,6 +2433,7 @@ impl Tdfa {
             state_map: HashMap::default(),
             seen_gen: vec![0u32; nfa.states.len()],
             seen_gen_counter: 0,
+            close_stack: Vec::new(),
             transitions: Vec::new(),
             accepting: Vec::new(),
             transition_commands: Vec::new(),
