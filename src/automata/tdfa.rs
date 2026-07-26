@@ -155,6 +155,78 @@ static TAGMAP_EPS_CLONES_EMPTY_OPS: std::sync::atomic::AtomicU64 =
 static TAGMAP_EPS_CLONES_NONEMPTY_OPS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
+/// Scratch verification counters (temporary — for confirming a proposed
+/// `canonicalize` optimization before implementing it, not a landed
+/// feature): of every thread `canonicalize` processes, how many turn out to
+/// already be in canonical form (every populated tag slot's newly-computed
+/// canonical id equals what it already held) versus how many genuinely need
+/// renumbering?
+#[cfg(feature = "std")]
+static CANON_THREADS_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(feature = "std")]
+static CANON_THREADS_NOOP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Scratch instrumentation: which phase of `Tdfa::try_from_with_budget`
+/// actually costs the time? Opt-in via `REGRESS_TDFA_PHASE_TRACE=<anything>`
+/// (reports once, at the end of the build, to stderr); zero cost when unset.
+/// Same temporary-instrumentation status as [`MemTrace`] — not part of the
+/// public API, delete once the quadratic/cubic-cost investigation (see
+/// automata/CLAUDE.md and the `tdfa-size-limits` design note) is resolved.
+///
+/// Distinguishes the per-(state, byte-class) construction-loop phases
+/// (`lookup` = the worklist-pop `state_map` rehash, `byte_step` = gathering
+/// seeds from the current thread list, `closure_dfs`/`truncate`/`canon` =
+/// `closure_from_seeds`'s three sub-phases — `close_priority`'s
+/// priority-ordered eps-DFS, `truncate_at_first_goal`, `canonicalize` —
+/// `register` = `register_or_get_state`, `anchor_alt` =
+/// `compute_anchor_alt_for`) from the one-shot finalization phases
+/// (`csr_tables`, `accept_fallback`, `compile_moves`, `trans_flags`) — the
+/// latter turned out to dominate for some pattern shapes
+/// (`compute_accept_fallback`'s dataflow fixpoint is cubic-ish below its
+/// `MAX_FALLBACK_MARKS` cutoff), which the per-state counters in `MemTrace`
+/// can't reveal on their own.
+#[cfg(feature = "std")]
+#[derive(Default)]
+struct PhaseTrace {
+    lookup: std::time::Duration,
+    byte_step: std::time::Duration,
+    closure_dfs: std::time::Duration,
+    truncate: std::time::Duration,
+    canon: std::time::Duration,
+    register: std::time::Duration,
+    anchor_alt: std::time::Duration,
+    csr_tables: std::time::Duration,
+    accept_fallback: std::time::Duration,
+    compile_moves: std::time::Duration,
+    trans_flags: std::time::Duration,
+}
+
+#[cfg(feature = "std")]
+impl PhaseTrace {
+    fn init() -> Option<Self> {
+        std::env::var("REGRESS_TDFA_PHASE_TRACE").ok().map(|_| Self::default())
+    }
+
+    fn report(&self) {
+        eprintln!(
+            "tdfa_phase_trace lookup={:?} byte_step={:?} closure_dfs={:?} truncate={:?} \
+             canon={:?} register={:?} anchor_alt={:?} csr_tables={:?} accept_fallback={:?} \
+             compile_moves={:?} trans_flags={:?}",
+            self.lookup,
+            self.byte_step,
+            self.closure_dfs,
+            self.truncate,
+            self.canon,
+            self.register,
+            self.anchor_alt,
+            self.csr_tables,
+            self.accept_fallback,
+            self.compile_moves,
+            self.trans_flags,
+        );
+    }
+}
+
 #[cfg(feature = "std")]
 fn report_tagmap_clone_counts() {
     use std::sync::atomic::Ordering::Relaxed;
@@ -170,6 +242,13 @@ fn report_tagmap_clone_counts() {
         "tdfa_tagmap_clones byte_step={byte_step} eps_empty_ops={eps_empty} eps_write_ops={eps_write} \
          shared={shared} ({:.2}% of {total} total copies needed no interning)",
         100.0 * shared as f64 / total.max(1) as f64,
+    );
+    let canon_total = CANON_THREADS_TOTAL.load(Relaxed);
+    let canon_noop = CANON_THREADS_NOOP.load(Relaxed);
+    eprintln!(
+        "tdfa_canon_verify total={canon_total} already_canonical={canon_noop} \
+         ({:.2}% would skip rebuild+intern)",
+        100.0 * canon_noop as f64 / canon_total.max(1) as f64,
     );
 }
 
@@ -708,64 +787,176 @@ pub struct TaggedNfaState {
 #[derive(Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct TdfaState(pub SmallVec<[TaggedNfaState; 4]>);
 
+/// Per-`canonicalize`-call state for the priority-ordered canonical-id walk.
+/// Exists to let `canonicalize_entry` share the walk across every thread in
+/// the configuration without a long parameter list, and to bundle the three-
+/// case fast path documented on [`CanonWalk::assign`].
+///
+/// Canonical ids are dense and handed out *sequentially* — 0, 1, 2, ... in
+/// strict first-appearance order (see `canonicalize`'s doc comment) — which
+/// is what makes that fast path sound: a raw mark that simply equals "the
+/// next id due to be handed out" is *provably* a first sighting in exactly
+/// the right position, without needing to consult any lookup structure to
+/// know that.
+struct CanonWalk {
+    /// Next canonical id to hand out on a fresh assignment.
+    next: InputMark,
+    /// True for as long as every populated slot seen so far in this walk —
+    /// across *every* thread processed, not just the current one — has been
+    /// exactly the next sequential canonical id. That means canonical id `v`
+    /// has, up to this point, only ever been handed to raw mark `v` itself:
+    /// nothing has diverged from raw-equals-canonical yet. Once a slot
+    /// breaks that pattern, this goes false for the rest of the call.
+    still_clean: bool,
+    /// `next`'s value at the moment `still_clean` first went false, frozen
+    /// from then on. Any raw mark below this value is *guaranteed* to
+    /// already be self-mapped (canon == raw): while `still_clean` held,
+    /// canonical id `v` was only ever handed to raw mark `v` — so any later
+    /// reference to a mark in `0..clean_prefix_len`, even one appearing
+    /// after the break, even a genuine duplicate (the same raw mark
+    /// inherited by two different threads via eps without rewriting, e.g.
+    /// `\b` alt closures — see `close_priority`), resolves to itself with a
+    /// plain comparison. No lookup needed, ever, for values in this range.
+    clean_prefix_len: InputMark,
+    /// Lazily populated: only raw marks that need real renumbering — i.e.
+    /// fall outside *both* "still extending the clean run" and "already
+    /// covered by the clean prefix" — ever land here. For the common case
+    /// (a handful of new marks per state, everything else already
+    /// canonical, measured 52%-99.77% of threads across a range of
+    /// patterns — see `CANON_THREADS_TOTAL`/`_NOOP`) this stays empty or
+    /// holds only a couple of entries, which is why a plain `HashMap` is
+    /// fine here: it's touched rarely enough that its cost doesn't matter.
+    remap: HashMap<InputMark, InputMark>,
+}
+
+impl CanonWalk {
+    fn new() -> Self {
+        Self {
+            next: InputMark(0),
+            still_clean: true,
+            clean_prefix_len: InputMark(0),
+            remap: HashMap::new(),
+        }
+    }
+
+    /// Returns the canonical id for `raw`. Exactly one of three cases fires:
+    ///
+    /// 1. **Still extending the clean run** (`still_clean` holds and `raw`
+    ///    is exactly the next id due to be handed out): trivial, no lookup —
+    ///    `canon = raw`, advance `next`, extend `clean_prefix_len` to match.
+    /// 2. **Already covered by the established clean prefix** (`raw` is
+    ///    below `clean_prefix_len`): also trivial and lookup-free, per the
+    ///    invariant documented on `clean_prefix_len` — this is what lets a
+    ///    duplicate reference into the clean range resolve correctly even
+    ///    after the run has broken.
+    /// 3. **Otherwise**: a genuinely new mark, or a duplicate of one minted
+    ///    after the break — falls back to `remap`, the only place this
+    ///    struct ever allocates or hashes anything.
+    fn assign(&mut self, raw: InputMark) -> InputMark {
+        if self.still_clean && raw == self.next {
+            let canon = self.next;
+            self.next.0 += 1;
+            self.clean_prefix_len = self.next;
+            return canon;
+        }
+        if raw < self.clean_prefix_len {
+            self.still_clean = false;
+            return raw;
+        }
+        self.still_clean = false;
+        if let Some(&canon) = self.remap.get(&raw) {
+            return canon;
+        }
+        let canon = self.next;
+        self.next.0 += 1;
+        self.remap.insert(raw, canon);
+        canon
+    }
+}
+
+/// Canonicalize one thread's tag map against `walk`'s running assignment
+/// (shared across every thread in the configuration, so a raw mark seen in
+/// an earlier thread reuses its already-assigned id — see [`CanonWalk`]).
+/// Returns `entry` completely unchanged — same `tag_map` id, no allocation,
+/// no `intern()` call — when every populated slot's raw mark already equals
+/// its canonical assignment. That's the overwhelming common case (see
+/// `CanonWalk`'s docs) because priority order — and therefore canonical
+/// numbering — is stable for any thread that survived unchanged from the
+/// previous state. Only a thread that actually needs renumbering pays for
+/// building a fresh `TagMap` and interning it.
+fn canonicalize_entry(
+    entry: TaggedNfaState,
+    interner: &mut TagMapStore,
+    walk: &mut CanonWalk,
+) -> TaggedNfaState {
+    let src = interner.get(entry.tag_map);
+
+    // One pass: assign/confirm canonical ids for every populated slot. This
+    // bookkeeping is unavoidable (it's what makes "first appearance" well
+    // defined for threads visited later, and `CanonWalk::assign` has walk-
+    // wide side effects that must fire exactly once per raw mark) — but
+    // `canon_slots` caches the result so a rebuild, if one turns out to be
+    // needed, doesn't have to call `assign` a second time.
+    let mut any_changed = false;
+    let mut canon_slots: SmallVec<[Option<InputMark>; 4]> = SmallVec::with_capacity(src.len());
+    for &slot in src {
+        match slot {
+            Some(raw) => {
+                let canon = walk.assign(raw);
+                any_changed |= canon != raw;
+                canon_slots.push(Some(canon));
+            }
+            None => canon_slots.push(None),
+        }
+    }
+    #[cfg(feature = "std")]
+    {
+        use std::sync::atomic::Ordering::Relaxed;
+        CANON_THREADS_TOTAL.fetch_add(1, Relaxed);
+        if !any_changed {
+            CANON_THREADS_NOOP.fetch_add(1, Relaxed);
+        }
+    }
+    if !any_changed {
+        return entry; // Nothing to do — hand back exactly what we were given.
+    }
+
+    // Rare: rebuild from the already-computed `canon_slots` and intern.
+    let mut new_tag_map = TagMap::with_capacity(canon_slots.len());
+    new_tag_map.extend(canon_slots);
+    TaggedNfaState {
+        state: entry.state,
+        tag_map: interner.intern(new_tag_map),
+    }
+}
+
 /// Renumber the `InputMark`s in `cfg` into a canonical form. Canonical ids are
 /// assigned in order of first appearance when walking the configuration in
 /// priority order (entries in order, within each entry `tag_map` in index
-/// order).
+/// order) — see [`CanonWalk`] for the fast path this enables.
 ///
 /// Returns the canonical configuration, the command sequence that moves
 /// each raw `InputMark`'s value into its canonical destination, and the
 /// raw→canonical mapping (used by callers to retroactively renumber
 /// per-state conditionals' tag references — see
-/// `rewrite_conditional_finals`).
+/// `rewrite_conditional_finals`). The returned mapping only ever contains
+/// the (rare) entries `CanonWalk::remap` collected — entries that were
+/// self-mapped via the fast path are absent, but that's harmless for every
+/// consumer: "not found, left as raw" and "found, mapped to itself" are
+/// observably identical.
 fn canonicalize(
     cfg: TdfaState,
     interner: &mut TagMapStore,
 ) -> (TdfaState, TagCommandList, HashMap<InputMark, InputMark>) {
-    // `mapping[raw] = canon` records which canonical id each raw mark was
-    // assigned. A single raw mark may appear in multiple entries / tag slots;
-    // all occurrences must rewrite to the same canonical id, so we memoize.
-    let mut mapping: HashMap<InputMark, InputMark> = HashMap::new();
+    let mut walk = CanonWalk::new();
     let mut entries: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
 
-    // Canonical ids are handed out 0, 1, 2, ... in the order raw marks are
-    // first encountered during the priority-order walk below. Two states
-    // that differ only in raw numbering end up byte-identical after this,
-    // which is what makes the determinization loop's dedup map work.
-    let mut next_canonical_mark = InputMark(0);
-    let mut next_canonical = || -> InputMark {
-        let res = next_canonical_mark;
-        next_canonical_mark.0 += 1;
-        res
-    };
-
-    // Walk threads in priority order (outer loop) and, within each thread,
-    // tag slots in index order (inner loop). This fixed traversal is what
-    // makes "first appearance" a well-defined notion.
+    // Walk threads in priority order. This fixed traversal is what makes
+    // "first appearance" a well-defined notion for canonical-id assignment.
     for entry in cfg.0 {
-        let src = interner.get(entry.tag_map);
-        let mut new_tag_map = TagMap::with_capacity(src.len());
-        for &slot in src.iter() {
-            // `None` (unset tag) passes through unchanged — only real marks
-            // get renumbered. First sight of a raw mark mints a fresh
-            // canonical id; subsequent sights reuse the memoized one.
-            let canon = slot.map(|raw| *mapping.entry(raw).or_insert_with(&mut next_canonical));
-            new_tag_map.push(canon);
-        }
-        // This is the retained (permanent, one-per-live-thread) copy — the
-        // transient values built in `close_priority` are only reachable via
-        // the interner, which lives for the whole build. Renumbering is a
-        // no-op whenever every raw mark already equals its canonical id (the
-        // common case for a thread that isn't the newest one this step, or
-        // whose ids were already canonical from a prior pass): `intern`
-        // finds the source value already registered under `entry.tag_map`
-        // and hands back that same id instead of growing the arena.
-        let tag_map = interner.intern(new_tag_map);
-        entries.push(TaggedNfaState {
-            state: entry.state,
-            tag_map,
-        });
+        entries.push(canonicalize_entry(entry, interner, &mut walk));
     }
+    let mapping = walk.remap;
 
     // The caller attaches these commands to the incoming DFA edge: they
     // copy the values currently held in raw marks into the canonical slots
@@ -1103,6 +1294,10 @@ struct Build<'a> {
     /// awaiting leftmost-cut resolution (see `resolve_accept_prunes`). Kept
     /// with their canonical thread lists so the prune prefix can be re-closed.
     pending_prunes: Vec<(TdfaStateId, TdfaState)>,
+    /// Scratch timing breakdown — see [`PhaseTrace`]. `None` unless
+    /// `REGRESS_TDFA_PHASE_TRACE` is set.
+    #[cfg(feature = "std")]
+    phase_trace: Option<PhaseTrace>,
 }
 
 impl Build<'_> {
@@ -1152,6 +1347,8 @@ impl Build<'_> {
         wb_fires: &[(bool, bool)],
     ) -> Result<(TdfaState, TagCommandList, SmallVec<[AnchorConditional; 1]>), Error> {
         let mut conds: SmallVec<[AnchorConditional; 1]> = SmallVec::new();
+        #[cfg(feature = "std")]
+        let t = self.phase_trace.as_ref().map(|_| std::time::Instant::now());
         let (closure, current_cmds) = close_priority(
             self.alloc,
             &mut self.tag_interner,
@@ -1163,8 +1360,24 @@ impl Build<'_> {
             wb_fires,
             &mut conds,
         )?;
+        #[cfg(feature = "std")]
+        if let (Some(pt), Some(t)) = (self.phase_trace.as_mut(), t) {
+            pt.closure_dfs += t.elapsed();
+        }
+        #[cfg(feature = "std")]
+        let t = self.phase_trace.as_ref().map(|_| std::time::Instant::now());
         let closure = truncate_at_first_goal(closure);
+        #[cfg(feature = "std")]
+        if let (Some(pt), Some(t)) = (self.phase_trace.as_mut(), t) {
+            pt.truncate += t.elapsed();
+        }
+        #[cfg(feature = "std")]
+        let t = self.phase_trace.as_ref().map(|_| std::time::Instant::now());
         let (canon, copy_cmds, canon_mapping) = canonicalize(closure, &mut self.tag_interner);
+        #[cfg(feature = "std")]
+        if let (Some(pt), Some(t)) = (self.phase_trace.as_mut(), t) {
+            pt.canon += t.elapsed();
+        }
         // Conditionals were built during close_priority using *raw* mark
         // ids; the standard transition's `Copy(raw → canon)` commands
         // move values into canonical slots, but a self-loop into the same
@@ -2055,6 +2268,8 @@ impl Tdfa {
             TAGMAP_BYTE_STEP_CLONES.store(0, Relaxed);
             TAGMAP_EPS_CLONES_EMPTY_OPS.store(0, Relaxed);
             TAGMAP_EPS_CLONES_NONEMPTY_OPS.store(0, Relaxed);
+            CANON_THREADS_TOTAL.store(0, Relaxed);
+            CANON_THREADS_NOOP.store(0, Relaxed);
         }
         let (byte_to_class, num_classes) = compute_byte_classes(nfa);
         let rep_bytes = representative_bytes(&byte_to_class, num_classes);
@@ -2077,6 +2292,8 @@ impl Tdfa {
             worklist: Vec::new(),
             pending_prunes: Vec::new(),
             budget,
+            #[cfg(feature = "std")]
+            phase_trace: PhaseTrace::init(),
         };
 
         // State 0 = dead state (self-loops, not accepting). Represented as
@@ -2114,7 +2331,13 @@ impl Tdfa {
         // the loop.
         loop {
         while let Some(state) = build.worklist.pop() {
+            #[cfg(feature = "std")]
+            let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
             let dfa_state = build.state_map[&state];
+            #[cfg(feature = "std")]
+            if let (Some(pt), Some(t)) = (build.phase_trace.as_mut(), t) {
+                pt.lookup += t.elapsed();
+            }
             let row_offset = dfa_state as usize * num_classes;
 
             for class in 0..num_classes {
@@ -2124,6 +2347,8 @@ impl Tdfa {
                 // byte transition, seed the next closure. Threads carry their
                 // tag_map verbatim across the byte step (byte transitions
                 // don't write registers in the NFA).
+                #[cfg(feature = "std")]
+                let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
                 let mut seeds: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
                 for thread in &state.0 {
                     if let Some(tgt) = nfa.states[thread.state as usize].transition_for_byte(rep) {
@@ -2135,10 +2360,16 @@ impl Tdfa {
                         });
                     }
                 }
+                #[cfg(feature = "std")]
+                if let (Some(pt), Some(t)) = (build.phase_trace.as_mut(), t) {
+                    pt.byte_step += t.elapsed();
+                }
                 if seeds.is_empty() {
                     continue; // Already TDFA_DEAD_STATE.
                 }
 
+                // `closure_from_seeds` times its own sub-phases (closure_dfs /
+                // truncate / canon) directly against `build.phase_trace`.
                 let (canon_next, combined, next_conds) = build.closure_from_seeds(
                     &seeds,
                     /* at_start_of_input */ false,
@@ -2146,7 +2377,13 @@ impl Tdfa {
                     /* wb_fires */ &[],
                 )?;
                 let canon_for_alt = canon_next.clone();
+                #[cfg(feature = "std")]
+                let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
                 let (target_id, is_new) = build.register_or_get_state(canon_next, next_conds)?;
+                #[cfg(feature = "std")]
+                if let (Some(pt), Some(t)) = (build.phase_trace.as_mut(), t) {
+                    pt.register += t.elapsed();
+                }
                 build.transitions[row_offset + class] = target_id;
                 build.transition_commands[row_offset + class] = combined;
                 if is_new {
@@ -2154,12 +2391,18 @@ impl Tdfa {
                     if let Some(mt) = mem_trace.as_mut() {
                         mt.record(&canon_for_alt, build.alloc.count(), &build.tag_interner);
                     }
+                    #[cfg(feature = "std")]
+                    let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
                     build.compute_anchor_alt_for(
                         &canon_for_alt,
                         &seeds,
                         /* at_start_of_input */ false,
                         target_id,
                     )?;
+                    #[cfg(feature = "std")]
+                    if let (Some(pt), Some(t)) = (build.phase_trace.as_mut(), t) {
+                        pt.anchor_alt += t.elapsed();
+                    }
                 }
             }
         }
@@ -2170,8 +2413,16 @@ impl Tdfa {
         }
 
         let num_marks = build.alloc.count() as usize;
+        #[cfg(feature = "std")]
+        let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
         let finals = CsrTable::from_lists(build.finals.iter());
         let transition_commands = CsrTable::from_lists(build.transition_commands.iter());
+        #[cfg(feature = "std")]
+        if let (Some(pt), Some(t)) = (build.phase_trace.as_mut(), t) {
+            pt.csr_tables += t.elapsed();
+        }
+        #[cfg(feature = "std")]
+        let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
         let accept_fallback = compute_accept_fallback(
             &build.accepting,
             &build.transitions,
@@ -2180,6 +2431,10 @@ impl Tdfa {
             num_classes,
             num_marks,
         );
+        #[cfg(feature = "std")]
+        if let (Some(pt), Some(t)) = (build.phase_trace.as_mut(), t) {
+            pt.accept_fallback += t.elapsed();
+        }
 
         // Fuse the two per-state construction lists into the unified guard table
         // (switches = alts, accepts = conditionals), then pack it sparse.
@@ -2229,9 +2484,25 @@ impl Tdfa {
             scan_skip_table: Box::default(),
             stamp_arena: Box::default(),
         };
+        #[cfg(feature = "std")]
+        let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
         tdfa.compile_moves_all();
+        #[cfg(feature = "std")]
+        if let (Some(pt), Some(t)) = (build.phase_trace.as_mut(), t) {
+            pt.compile_moves += t.elapsed();
+        }
         // Build after compile_moves_all so accept_fallback (computed above) is current.
+        #[cfg(feature = "std")]
+        let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
         tdfa.build_trans_flags();
+        #[cfg(feature = "std")]
+        if let (Some(pt), Some(t)) = (build.phase_trace.as_mut(), t) {
+            pt.trans_flags += t.elapsed();
+        }
+        #[cfg(feature = "std")]
+        if let Some(pt) = build.phase_trace.as_ref() {
+            pt.report();
+        }
         #[cfg(feature = "std")]
         {
             report_tagmap_clone_counts();
