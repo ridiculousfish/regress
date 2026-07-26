@@ -925,7 +925,7 @@ fn canonicalize(
     interner: &mut TagMapStore,
 ) -> (TdfaState, TagCommandList, HashMap<InputMark, InputMark>) {
     let mut walk = CanonWalk::new();
-    let mut entries: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
+    let mut entries: SmallVec<[TaggedNfaState; 4]> = SmallVec::with_capacity(cfg.0.len());
 
     // Walk threads in priority order. This fixed traversal is what makes
     // "first appearance" a well-defined notion for canonical-id assignment.
