@@ -174,8 +174,8 @@ static CANON_THREADS_NOOP: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 /// automata/CLAUDE.md and the `tdfa-size-limits` design note) is resolved.
 ///
 /// Distinguishes the per-(state, byte-class) construction-loop phases
-/// (`lookup` = the worklist-pop `state_map` rehash, `byte_step` = gathering
-/// seeds from the current thread list, `closure_dfs`/`truncate`/`canon` =
+/// (`byte_step` = gathering seeds from the current thread list via the
+/// worklist's `configs`-indexed lookup, `closure_dfs`/`truncate`/`canon` =
 /// `closure_from_seeds`'s three sub-phases — `close_priority`'s
 /// priority-ordered eps-DFS, `truncate_at_first_goal`, `canonicalize` —
 /// `register` = `register_or_get_state`, `anchor_alt` =
@@ -194,6 +194,11 @@ struct PhaseTrace {
     truncate: std::time::Duration,
     canon: std::time::Duration,
     register: std::time::Duration,
+    /// Scratch split of `register`: the `state_map.get` hash+lookup that
+    /// happens on *every* call (hit or miss) vs. the rest of the work that
+    /// only happens on a genuine new-state registration (miss).
+    register_lookup: std::time::Duration,
+    register_new: std::time::Duration,
     anchor_alt: std::time::Duration,
     csr_tables: std::time::Duration,
     accept_fallback: std::time::Duration,
@@ -211,7 +216,7 @@ impl PhaseTrace {
         eprintln!(
             "tdfa_phase_trace lookup={:?} byte_step={:?} \
              closure_dfs={:?} truncate={:?} \
-             canon={:?} register={:?} anchor_alt={:?} csr_tables={:?} accept_fallback={:?} \
+             canon={:?} register={:?} (lookup={:?} new={:?}) anchor_alt={:?} csr_tables={:?} accept_fallback={:?} \
              compile_moves={:?} trans_flags={:?}",
             self.lookup,
             self.byte_step,
@@ -219,6 +224,8 @@ impl PhaseTrace {
             self.truncate,
             self.canon,
             self.register,
+            self.register_lookup,
+            self.register_new,
             self.anchor_alt,
             self.csr_tables,
             self.accept_fallback,
@@ -1068,10 +1075,20 @@ fn close_priority(
     // skipped, leaving the predicate to fire at runtime via anchor_alt.
     wb_fires: &[(bool, bool)],
     conditionals: &mut SmallVec<[AnchorConditional; 1]>,
+    // Reused, generation-stamped substitute for a fresh `vec![false;
+    // nfa.states.len()]` every call: `seen_gen[i] == *seen_gen_counter`
+    // means "visited this call" (including the recursive mini-closure call
+    // below, which bumps the counter again for its own, independent
+    // generation) -- avoids reallocating and zeroing an nfa.states.len()
+    // buffer on every one of the many thousands of calls a large build
+    // makes. Same technique as `CanonWalk`.
+    seen_gen: &mut [u32],
+    seen_gen_counter: &mut u32,
 ) -> Result<(TdfaState, TagCommandList), Error> {
     let mut threads: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
     let mut commands = TagCommandList::new();
-    let mut seen = vec![false; nfa.states.len()];
+    *seen_gen_counter += 1;
+    let my_gen = *seen_gen_counter;
     // Marks allocated below this id existed before this closure started.
     // Any mark with id >= closure_start_mark was created within this
     // closure — used by `ProgressSince` to detect "sentinel was written
@@ -1103,10 +1120,10 @@ fn close_priority(
     for seed in seeds {
         stack.push(seed.clone());
         while let Some(thread) = stack.pop() {
-            if seen[thread.state as usize] {
+            if seen_gen[thread.state as usize] == my_gen {
                 continue;
             }
-            seen[thread.state as usize] = true;
+            seen_gen[thread.state as usize] = my_gen;
             let parent_tag_map = thread.tag_map.clone();
             let state = thread.state;
             threads.push(thread);
@@ -1194,6 +1211,8 @@ fn close_priority(
                             multiline_start_fires,
                             wb_fires,
                             &mut sub_conds,
+                            seen_gen,
+                            seen_gen_counter,
                         )?;
                         let sub_closure = truncate_at_first_goal(sub_closure);
                         // Bail iff the mini-closure could continue consuming
@@ -1237,7 +1256,7 @@ fn close_priority(
                 // popped duplicates are allowed onto the stack; the pop-time
                 // `seen` check keeps the first (highest-priority) one and
                 // drops the rest.
-                if seen[edge.target as usize] {
+                if seen_gen[edge.target as usize] == my_gen {
                     continue;
                 }
                 #[cfg(feature = "std")]
@@ -1307,6 +1326,79 @@ fn apply_eps_ops(
     *child_tag_map = interner.intern(v);
 }
 
+/// Minimal FxHash-style hasher (the algorithm rustc and Firefox use
+/// internally for their own hash maps) for `state_map`. Its keys
+/// (`TdfaState`) can be large — up to thousands of `TaggedNfaState` entries
+/// for a pathological pattern — and get hashed on every dedup check during
+/// construction, which is the dominant cost once other redundant work is
+/// removed (see `register_or_get_state`). `std::collections::HashMap`'s
+/// default `SipHash` is designed for DoS resistance against attacker-chosen
+/// keys; that's the wrong trade here — these keys are internal to
+/// construction, never independently attacker-controlled (an attacker who
+/// controls the pattern already controls far more than a hash-flooding
+/// attack could achieve), so the extra cryptographic strength buys nothing
+/// and is pure overhead on the hot path.
+#[derive(Default)]
+struct FxHasher {
+    hash: u64,
+}
+
+const FX_SEED: u64 = 0x51_7c_c1_b7_27_22_0a_95;
+
+impl FxHasher {
+    #[inline]
+    fn add(&mut self, word: u64) {
+        self.hash = (self.hash.rotate_left(5) ^ word).wrapping_mul(FX_SEED);
+    }
+}
+
+impl core::hash::Hasher for FxHasher {
+    #[inline]
+    fn write(&mut self, mut bytes: &[u8]) {
+        while bytes.len() >= 8 {
+            self.add(u64::from_ne_bytes(bytes[..8].try_into().unwrap()));
+            bytes = &bytes[8..];
+        }
+        if bytes.len() >= 4 {
+            self.add(u32::from_ne_bytes(bytes[..4].try_into().unwrap()) as u64);
+            bytes = &bytes[4..];
+        }
+        if bytes.len() >= 2 {
+            self.add(u16::from_ne_bytes(bytes[..2].try_into().unwrap()) as u64);
+            bytes = &bytes[2..];
+        }
+        if let Some(&b) = bytes.first() {
+            self.add(b as u64);
+        }
+    }
+    #[inline]
+    fn write_u8(&mut self, i: u8) {
+        self.add(i as u64);
+    }
+    #[inline]
+    fn write_u16(&mut self, i: u16) {
+        self.add(i as u64);
+    }
+    #[inline]
+    fn write_u32(&mut self, i: u32) {
+        self.add(i as u64);
+    }
+    #[inline]
+    fn write_u64(&mut self, i: u64) {
+        self.add(i);
+    }
+    #[inline]
+    fn write_usize(&mut self, i: usize) {
+        self.add(i as u64);
+    }
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.hash
+    }
+}
+
+type FxBuildHasher = core::hash::BuildHasherDefault<FxHasher>;
+
 /// Working state for the TDFA construction. Bundles every per-state Vec
 /// so `register_or_get_state` and friends don't need a dozen
 /// out-parameters.
@@ -1316,7 +1408,14 @@ struct Build<'a> {
     tag_interner: TagMapStore,
     num_tags: usize,
     num_classes: usize,
-    state_map: HashMap<TdfaState, TdfaStateId>,
+    state_map: HashMap<TdfaState, TdfaStateId, FxBuildHasher>,
+    /// Reused, generation-stamped substitute for `close_priority`'s
+    /// `seen: Vec<bool>` (which used to be a fresh `nfa.states.len()`
+    /// allocation on *every* call — see `close_priority`'s doc comment).
+    /// Sized once, up front, to `nfa.states.len()` (fixed for the whole
+    /// build) and never reallocated.
+    seen_gen: Vec<u32>,
+    seen_gen_counter: u32,
     transitions: Vec<TdfaStateId>,
     accepting: Vec<bool>,
     transition_commands: Vec<TagCommandList>,
@@ -1346,15 +1445,45 @@ impl Build<'_> {
         canon: TdfaState,
         conds: SmallVec<[AnchorConditional; 1]>,
     ) -> Result<(TdfaStateId, bool), Error> {
-        if let Some(&id) = self.state_map.get(&canon) {
-            return Ok((id, false));
+        use std::collections::hash_map::Entry;
+        // `entry()` hashes `canon` exactly once, regardless of hit or miss --
+        // `get()` followed by a separate `insert()` on a miss would hash the
+        // (potentially thousands-of-threads-large) key twice for every new
+        // state. `VacantEntry::key()` gives read access to the pending key
+        // for everything below that only needs to *read* `canon`; the move
+        // into the map happens once, at `vacant.insert(id)`.
+        #[cfg(feature = "std")]
+        let t = self.phase_trace.as_ref().map(|_| std::time::Instant::now());
+        let entry = self.state_map.entry(canon);
+        #[cfg(feature = "std")]
+        if let (Some(pt), Some(t)) = (self.phase_trace.as_mut(), t) {
+            pt.register_lookup += t.elapsed();
         }
+        let vacant = match entry {
+            Entry::Occupied(e) => return Ok((*e.get(), false)),
+            Entry::Vacant(e) => e,
+        };
+        #[cfg(feature = "std")]
+        let t = self.phase_trace.as_ref().map(|_| std::time::Instant::now());
         let id = self.accepting.len() as TdfaStateId;
         if id as usize >= self.budget {
             return Err(Error::BudgetExceeded);
         }
-        let is_accepting = canon.0.iter().any(|t| t.state == GOAL_STATE);
-        let state_finals = synthesize_finals(&canon, self.num_tags, &self.tag_interner);
+        let canon = vacant.key();
+        // O(1), not O(count): `closure_from_seeds` always runs
+        // `truncate_at_first_goal` before `canonicalize`, which guarantees a
+        // GOAL entry, if present, is the *last* entry in `canon.0` (and
+        // `canonicalize` preserves order) -- no need to scan the whole
+        // thread list to answer "does this configuration accept."
+        let is_accepting = matches!(canon.0.last(), Some(t) if t.state == GOAL_STATE);
+        // Skip `synthesize_finals`'s own scan entirely for the (overwhelming
+        // majority) non-accepting case -- it would just rediscover the same
+        // "no GOAL here" fact via a second full pass.
+        let state_finals = if is_accepting {
+            synthesize_finals(canon, self.num_tags, &self.tag_interner)
+        } else {
+            SmallVec::new()
+        };
         if conds.iter().any(conditional_needs_perbyte) {
             self.pending_prunes.push((id, canon.clone()));
         }
@@ -1368,8 +1497,19 @@ impl Build<'_> {
             self.transition_commands.len() + self.num_classes,
             SmallVec::new(),
         );
-        self.state_map.insert(canon.clone(), id);
-        self.worklist.push(canon);
+        // One clone is unavoidable: the map needs to own its key, and the
+        // worklist needs its own copy to process later. (An earlier version
+        // of this also kept a third copy, indexed by id, to avoid the
+        // worklist-pop lookup below -- that doubled peak memory for exactly
+        // the pathological patterns this file cares most about, for a small
+        // time win; reverted.)
+        let canon_for_worklist = canon.clone();
+        vacant.insert(id);
+        self.worklist.push(canon_for_worklist);
+        #[cfg(feature = "std")]
+        if let (Some(pt), Some(t)) = (self.phase_trace.as_mut(), t) {
+            pt.register_new += t.elapsed();
+        }
         Ok((id, true))
     }
 
@@ -1396,6 +1536,8 @@ impl Build<'_> {
             multiline_start_fires,
             wb_fires,
             &mut conds,
+            &mut self.seen_gen,
+            &mut self.seen_gen_counter,
         )?;
         #[cfg(feature = "std")]
         if let (Some(pt), Some(t)) = (self.phase_trace.as_mut(), t) {
@@ -2319,7 +2461,9 @@ impl Tdfa {
             tag_interner: TagMapStore::new(num_tags),
             num_tags,
             num_classes,
-            state_map: HashMap::new(),
+            state_map: HashMap::default(),
+            seen_gen: vec![0u32; nfa.states.len()],
+            seen_gen_counter: 0,
             transitions: Vec::new(),
             accepting: Vec::new(),
             transition_commands: Vec::new(),
