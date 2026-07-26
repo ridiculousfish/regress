@@ -16,7 +16,7 @@ pub(crate) mod plan;
 #[cfg(feature = "codegen")]
 pub(crate) mod rustgen;
 
-use crate::automata::dfa::{compute_byte_classes, representative_bytes};
+use crate::automata::dfa::compute_byte_classes;
 use crate::automata::nfa::{
     EpsCondition, FULL_MATCH_START, GOAL_STATE, Nfa, OpKind, StateHandle, TagIdx, TagOp,
 };
@@ -209,7 +209,8 @@ impl PhaseTrace {
 
     fn report(&self) {
         eprintln!(
-            "tdfa_phase_trace lookup={:?} byte_step={:?} closure_dfs={:?} truncate={:?} \
+            "tdfa_phase_trace lookup={:?} byte_step={:?} \
+             closure_dfs={:?} truncate={:?} \
              canon={:?} register={:?} anchor_alt={:?} csr_tables={:?} accept_fallback={:?} \
              compile_moves={:?} trans_flags={:?}",
             self.lookup,
@@ -1005,6 +1006,42 @@ fn rewrite_conditional_finals(
             }
         }
     }
+}
+
+/// Precomputed once per build: for each NFA state, its outgoing byte
+/// transitions expressed directly as `(class, target)` pairs instead of byte
+/// ranges. `compute_byte_classes` places a class cut at every transition
+/// boundary in the *whole* NFA, so a single transition's byte range always
+/// decomposes into a contiguous run of whole classes — no need to probe
+/// byte by byte to find them, and no need for a representative byte either.
+///
+/// This is what lets the main worklist's seed-gathering loop visit each
+/// thread once per state — touching only the classes it actually has a
+/// transition for, typically a handful — instead of rescanning every live
+/// thread once per byte class regardless of whether it responds to that
+/// class at all. Measured on an unanchored non-selective repeat (e.g.
+/// `[a-zA-Z0-9]{8000}`): ~20 byte classes total, but only ~3 are ever
+/// relevant to any single unrolled-body state — the rest were being
+/// rescanned across the *entire* live thread list for nothing. See the
+/// `tdfa-size-limits` design note.
+fn build_class_transitions(
+    nfa: &Nfa,
+    byte_to_class: &[u8; 256],
+) -> Vec<SmallVec<[(u32, StateHandle); 4]>> {
+    nfa.states
+        .iter()
+        .map(|s| {
+            let mut out: SmallVec<[(u32, StateHandle); 4]> = SmallVec::new();
+            for &(range, target) in &s.transitions {
+                let lo = byte_to_class[range.start as usize];
+                let hi = byte_to_class[range.end as usize];
+                for class in lo..=hi {
+                    out.push((class as u32, target));
+                }
+            }
+            out
+        })
+        .collect()
 }
 
 /// Priority-ordered epsilon closure. Pre-order DFS: first visit to an NFA
@@ -2272,7 +2309,7 @@ impl Tdfa {
             CANON_THREADS_NOOP.store(0, Relaxed);
         }
         let (byte_to_class, num_classes) = compute_byte_classes(nfa);
-        let rep_bytes = representative_bytes(&byte_to_class, num_classes);
+        let class_transitions = build_class_transitions(nfa, &byte_to_class);
         let num_tags = nfa.num_tags();
 
         let mut alloc = MarkAlloc::new();
@@ -2324,6 +2361,14 @@ impl Tdfa {
         #[cfg(feature = "std")]
         let mut mem_trace = MemTrace::init();
 
+        // Per-class seed accumulators, persistent across states: gathered in
+        // one pass over `state.0` per state (see below) instead of one pass
+        // per class. Reused (cleared, not reallocated) state to state, so a
+        // class whose accumulator grows large once keeps that capacity for
+        // the rest of the build.
+        let mut seeds_by_class: Vec<SmallVec<[TaggedNfaState; 4]>> =
+            vec![SmallVec::new(); num_classes];
+
         // Outer fixpoint: drain the transition worklist, then resolve one
         // state's accept prunes (which may register new states, refilling the
         // worklist — and those states may carry prunable accepts of their
@@ -2340,38 +2385,39 @@ impl Tdfa {
             }
             let row_offset = dfa_state as usize * num_classes;
 
-            for class in 0..num_classes {
-                let rep = rep_bytes[class];
+            // Priority-ordered step, one pass over all live threads: each
+            // thread contributes to every class it actually has a
+            // transition for (via the precomputed `class_transitions`,
+            // typically a handful) instead of being individually re-checked
+            // against every one of the `num_classes` byte classes. Threads
+            // carry their tag_map verbatim across the byte step (byte
+            // transitions don't write registers in the NFA).
+            #[cfg(feature = "std")]
+            let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
+            for thread in &state.0 {
+                for &(class, tgt) in &class_transitions[thread.state as usize] {
+                    #[cfg(feature = "std")]
+                    TAGMAP_BYTE_STEP_CLONES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    seeds_by_class[class as usize].push(TaggedNfaState {
+                        state: tgt,
+                        tag_map: thread.tag_map.clone(),
+                    });
+                }
+            }
+            #[cfg(feature = "std")]
+            if let (Some(pt), Some(t)) = (build.phase_trace.as_mut(), t) {
+                pt.byte_step += t.elapsed();
+            }
 
-                // Priority-ordered step: walk threads in order, take each
-                // byte transition, seed the next closure. Threads carry their
-                // tag_map verbatim across the byte step (byte transitions
-                // don't write registers in the NFA).
-                #[cfg(feature = "std")]
-                let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
-                let mut seeds: SmallVec<[TaggedNfaState; 4]> = SmallVec::new();
-                for thread in &state.0 {
-                    if let Some(tgt) = nfa.states[thread.state as usize].transition_for_byte(rep) {
-                        #[cfg(feature = "std")]
-                        TAGMAP_BYTE_STEP_CLONES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        seeds.push(TaggedNfaState {
-                            state: tgt,
-                            tag_map: thread.tag_map.clone(),
-                        });
-                    }
-                }
-                #[cfg(feature = "std")]
-                if let (Some(pt), Some(t)) = (build.phase_trace.as_mut(), t) {
-                    pt.byte_step += t.elapsed();
-                }
-                if seeds.is_empty() {
+            for class in 0..num_classes {
+                if seeds_by_class[class].is_empty() {
                     continue; // Already TDFA_DEAD_STATE.
                 }
 
                 // `closure_from_seeds` times its own sub-phases (closure_dfs /
                 // truncate / canon) directly against `build.phase_trace`.
                 let (canon_next, combined, next_conds) = build.closure_from_seeds(
-                    &seeds,
+                    &seeds_by_class[class],
                     /* at_start_of_input */ false,
                     /* multiline_start_fires */ false,
                     /* wb_fires */ &[],
@@ -2395,7 +2441,7 @@ impl Tdfa {
                     let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
                     build.compute_anchor_alt_for(
                         &canon_for_alt,
-                        &seeds,
+                        &seeds_by_class[class],
                         /* at_start_of_input */ false,
                         target_id,
                     )?;
@@ -2404,6 +2450,10 @@ impl Tdfa {
                         pt.anchor_alt += t.elapsed();
                     }
                 }
+                // Reset for the next state's use of this same accumulator --
+                // `clear` keeps the allocated capacity, so a class that grew
+                // large once doesn't pay to regrow later.
+                seeds_by_class[class].clear();
             }
         }
         let Some((sid, canon)) = build.pending_prunes.pop() else {
