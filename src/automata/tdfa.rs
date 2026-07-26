@@ -142,30 +142,6 @@ impl MemTrace {
     }
 }
 
-/// Scratch counters: of every `tag_map` handle copy performed during
-/// construction, how many are pure duplicates (shared `TagMapId`, no interning
-/// needed) versus how many are a genuine write (needs `TagMapStore::intern`)?
-/// Same temporary-instrumentation status as [`MemTrace`].
-#[cfg(feature = "std")]
-static TAGMAP_BYTE_STEP_CLONES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-#[cfg(feature = "std")]
-static TAGMAP_EPS_CLONES_EMPTY_OPS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-#[cfg(feature = "std")]
-static TAGMAP_EPS_CLONES_NONEMPTY_OPS: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-/// Scratch verification counters (temporary — for confirming a proposed
-/// `canonicalize` optimization before implementing it, not a landed
-/// feature): of every thread `canonicalize` processes, how many turn out to
-/// already be in canonical form (every populated tag slot's newly-computed
-/// canonical id equals what it already held) versus how many genuinely need
-/// renumbering?
-#[cfg(feature = "std")]
-static CANON_THREADS_TOTAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-#[cfg(feature = "std")]
-static CANON_THREADS_NOOP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
 /// Scratch instrumentation: which phase of `Tdfa::try_from_with_budget`
 /// actually costs the time? Opt-in via `REGRESS_TDFA_PHASE_TRACE=<anything>`
 /// (reports once, at the end of the build, to stderr); zero cost when unset.
@@ -233,31 +209,6 @@ impl PhaseTrace {
             self.trans_flags,
         );
     }
-}
-
-#[cfg(feature = "std")]
-fn report_tagmap_clone_counts() {
-    use std::sync::atomic::Ordering::Relaxed;
-    if std::env::var("REGRESS_TDFA_MEM_TRACE").is_err() {
-        return;
-    }
-    let byte_step = TAGMAP_BYTE_STEP_CLONES.load(Relaxed);
-    let eps_empty = TAGMAP_EPS_CLONES_EMPTY_OPS.load(Relaxed);
-    let eps_write = TAGMAP_EPS_CLONES_NONEMPTY_OPS.load(Relaxed);
-    let shared = byte_step + eps_empty;
-    let total = shared + eps_write;
-    eprintln!(
-        "tdfa_tagmap_clones byte_step={byte_step} eps_empty_ops={eps_empty} eps_write_ops={eps_write} \
-         shared={shared} ({:.2}% of {total} total copies needed no interning)",
-        100.0 * shared as f64 / total.max(1) as f64,
-    );
-    let canon_total = CANON_THREADS_TOTAL.load(Relaxed);
-    let canon_noop = CANON_THREADS_NOOP.load(Relaxed);
-    eprintln!(
-        "tdfa_canon_verify total={canon_total} already_canonical={canon_noop} \
-         ({:.2}% would skip rebuild+intern)",
-        100.0 * canon_noop as f64 / canon_total.max(1) as f64,
-    );
 }
 
 /// Mints fresh, globally-unique `InputMark` IDs during construction.
@@ -831,9 +782,9 @@ struct CanonWalk {
     /// covered by the clean prefix" — ever land here. For the common case
     /// (a handful of new marks per state, everything else already
     /// canonical, measured 52%-99.77% of threads across a range of
-    /// patterns — see `CANON_THREADS_TOTAL`/`_NOOP`) this stays empty or
-    /// holds only a couple of entries, which is why a plain `HashMap` is
-    /// fine here: it's touched rarely enough that its cost doesn't matter.
+    /// patterns) this stays empty or holds only a couple of entries, which
+    /// is why a plain `HashMap` is fine here: it's touched rarely enough
+    /// that its cost doesn't matter.
     remap: HashMap<InputMark, InputMark>,
 }
 
@@ -899,39 +850,36 @@ fn canonicalize_entry(
 ) -> TaggedNfaState {
     let src = interner.get(entry.tag_map);
 
-    // One pass: assign/confirm canonical ids for every populated slot. This
-    // bookkeeping is unavoidable (it's what makes "first appearance" well
-    // defined for threads visited later, and `CanonWalk::assign` has walk-
-    // wide side effects that must fire exactly once per raw mark) — but
-    // `canon_slots` caches the result so a rebuild, if one turns out to be
-    // needed, doesn't have to call `assign` a second time.
+    // First pass: assign/confirm canonical ids for every populated slot, for
+    // side effects only. This bookkeeping is unavoidable (it's what makes
+    // "first appearance" well defined for threads visited later, and
+    // `CanonWalk::assign` has walk-wide side effects that must fire exactly
+    // once per raw mark) — but we don't build a new tag map yet, since the
+    // overwhelming common case needs none.
     let mut any_changed = false;
-    let mut canon_slots: SmallVec<[Option<InputMark>; 4]> = SmallVec::with_capacity(src.len());
     for &slot in src {
-        match slot {
-            Some(raw) => {
-                let canon = walk.assign(raw);
-                any_changed |= canon != raw;
-                canon_slots.push(Some(canon));
-            }
-            None => canon_slots.push(None),
-        }
-    }
-    #[cfg(feature = "std")]
-    {
-        use std::sync::atomic::Ordering::Relaxed;
-        CANON_THREADS_TOTAL.fetch_add(1, Relaxed);
-        if !any_changed {
-            CANON_THREADS_NOOP.fetch_add(1, Relaxed);
+        if let Some(raw) = slot {
+            any_changed |= walk.assign(raw) != raw;
         }
     }
     if !any_changed {
         return entry; // Nothing to do — hand back exactly what we were given.
     }
 
-    // Rare: rebuild from the already-computed `canon_slots` and intern.
-    let mut new_tag_map = TagMap::with_capacity(canon_slots.len());
-    new_tag_map.extend(canon_slots);
+    // Rare: a genuine renumbering happened somewhere in this thread. Replay
+    // the now-settled assignment: any raw mark below `clean_prefix_len` is
+    // guaranteed self-mapped (see `CanonWalk::clean_prefix_len`), so only
+    // marks at or past it need the `remap` lookup.
+    let mut new_tag_map = TagMap::with_capacity(src.len());
+    new_tag_map.extend(src.iter().map(|&slot| {
+        slot.map(|raw| {
+            if raw < walk.clean_prefix_len {
+                raw
+            } else {
+                walk.remap[&raw]
+            }
+        })
+    }));
     TaggedNfaState {
         state: entry.state,
         tag_map: interner.intern(new_tag_map),
@@ -1258,15 +1206,6 @@ fn close_priority(
                 // drops the rest.
                 if seen_gen[edge.target as usize] == my_gen {
                     continue;
-                }
-                #[cfg(feature = "std")]
-                {
-                    use std::sync::atomic::Ordering::Relaxed;
-                    if edge.ops.is_empty() {
-                        TAGMAP_EPS_CLONES_EMPTY_OPS.fetch_add(1, Relaxed);
-                    } else {
-                        TAGMAP_EPS_CLONES_NONEMPTY_OPS.fetch_add(1, Relaxed);
-                    }
                 }
                 let mut child_tag_map = parent_tag_map;
                 apply_eps_ops(&edge.ops, alloc, interner, &mut child_tag_map, &mut commands);
@@ -2441,15 +2380,6 @@ impl Tdfa {
     /// `regex!` expansion time that's the difference between instant and
     /// tens of seconds per pattern.
     pub fn try_from_with_budget(nfa: &Nfa, budget: usize) -> Result<Self, Error> {
-        #[cfg(feature = "std")]
-        {
-            use std::sync::atomic::Ordering::Relaxed;
-            TAGMAP_BYTE_STEP_CLONES.store(0, Relaxed);
-            TAGMAP_EPS_CLONES_EMPTY_OPS.store(0, Relaxed);
-            TAGMAP_EPS_CLONES_NONEMPTY_OPS.store(0, Relaxed);
-            CANON_THREADS_TOTAL.store(0, Relaxed);
-            CANON_THREADS_NOOP.store(0, Relaxed);
-        }
         let (byte_to_class, num_classes) = compute_byte_classes(nfa);
         let class_transitions = build_class_transitions(nfa, &byte_to_class);
         let num_tags = nfa.num_tags();
@@ -2540,8 +2470,6 @@ impl Tdfa {
             let t = build.phase_trace.as_ref().map(|_| std::time::Instant::now());
             for thread in &state.0 {
                 for &(class, tgt) in &class_transitions[thread.state as usize] {
-                    #[cfg(feature = "std")]
-                    TAGMAP_BYTE_STEP_CLONES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     seeds_by_class[class as usize].push(TaggedNfaState {
                         state: tgt,
                         tag_map: thread.tag_map.clone(),
@@ -2699,7 +2627,6 @@ impl Tdfa {
         }
         #[cfg(feature = "std")]
         {
-            report_tagmap_clone_counts();
             if std::env::var("REGRESS_TDFA_MEM_TRACE").is_ok() {
                 let n = build.tag_interner.arena.len() / build.num_tags.max(1);
                 let arena_bytes = build.tag_interner.arena.len() * size_of::<Option<InputMark>>();
