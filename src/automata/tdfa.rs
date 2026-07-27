@@ -1126,6 +1126,23 @@ fn close_priority(
     // priority seed's closure claims any shared state before a later seed is
     // considered — needed for adjacent loops like `(a*)(a{1,2})`.
     for seed in seeds {
+        // Fast path: skip the stack push/pop round trip entirely when the
+        // seed's own state has no epsilon edges to expand -- measured (temp
+        // counters) that this covers ~99.9% of closures for a pattern like
+        // `[a-zA-Z0-9]{8000}`, where each per-position NFA state is a plain
+        // byte-consuming state with no captures/boundary predicates. The
+        // `seen_gen` check must still run first, exactly as it would on the
+        // first pop in the general path below: a seed can arrive already
+        // claimed by an earlier seed's own closure in this same call
+        // (adjacent loops like `(a*)(a{1,2})` share states).
+        if seen_gen[seed.state as usize] == my_gen {
+            continue;
+        }
+        if nfa.states[seed.state as usize].eps.is_empty() {
+            seen_gen[seed.state as usize] = my_gen;
+            threads.push(*seed);
+            continue;
+        }
         stack.push(seed.clone());
         while let Some(thread) = stack.pop() {
             if seen_gen[thread.state as usize] == my_gen {
