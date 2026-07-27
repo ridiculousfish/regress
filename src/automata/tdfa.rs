@@ -939,15 +939,24 @@ fn canonicalize_entry(
 fn canonicalize(
     cfg: TdfaState,
     interner: &mut TagMapStore,
+    // Recycles `cfg.0`'s allocation back to the caller once this function is
+    // done draining it -- see `Build::raw_closure_buf`'s doc comment. `cfg.0`
+    // itself becomes the recycled buffer (via `drain`, which empties it
+    // without releasing its capacity); `entries` is a separate, freshly
+    // sized buffer for the canonical result, since callers still need
+    // `cfg.0`'s *original* (pre-canonicalization) contents up to that point.
+    reuse_buf: &mut Vec<TaggedNfaState>,
 ) -> (TdfaState, TagCommandList, HashMap<InputMark, InputMark>) {
     let mut walk = CanonWalk::new();
-    let mut entries: SmallVec<[TaggedNfaState; 16]> = SmallVec::with_capacity(cfg.0.len());
+    let mut raw = cfg.0;
+    let mut entries: SmallVec<[TaggedNfaState; 16]> = SmallVec::with_capacity(raw.len());
 
     // Walk threads in priority order. This fixed traversal is what makes
     // "first appearance" a well-defined notion for canonical-id assignment.
-    for entry in cfg.0 {
+    for entry in raw.drain(..) {
         entries.push(canonicalize_entry(entry, interner, &mut walk));
     }
+    *reuse_buf = raw.into_vec();
     let mapping = walk.remap;
 
     // The caller attaches these commands to the incoming DFA edge: they
@@ -1077,8 +1086,15 @@ fn close_priority(
     // `stack` may still hold other pending entries, so reusing the same
     // buffer there would let the recursive call's own pops clobber them.
     stack: &mut Vec<TaggedNfaState>,
+    // Reused output accumulator -- see `Build::raw_closure_buf`'s doc
+    // comment. Taken by `mem::take` here (so the caller's slot goes empty
+    // for the duration of this call); `canonicalize` hands a recycled
+    // buffer back to the same slot once it's done consuming this one's
+    // contents. The recursive mini-closure call below passes a fresh local
+    // `Vec` instead of this one, same reasoning as `stack`.
+    threads_buf: &mut Vec<TaggedNfaState>,
 ) -> Result<(TdfaState, TagCommandList), Error> {
-    let mut threads: SmallVec<[TaggedNfaState; 16]> = SmallVec::new();
+    let mut threads = core::mem::take(threads_buf);
     let mut commands = TagCommandList::new();
     *seen_gen_counter += 1;
     let my_gen = *seen_gen_counter;
@@ -1206,6 +1222,7 @@ fn close_priority(
                             seen_gen,
                             seen_gen_counter,
                             &mut Vec::new(),
+                            &mut Vec::new(),
                         )?;
                         let sub_closure = truncate_at_first_goal(sub_closure);
                         // Bail iff the mini-closure could continue consuming
@@ -1262,7 +1279,7 @@ fn close_priority(
         }
     }
 
-    Ok((TdfaState(threads), commands))
+    Ok((TdfaState(threads.into()), commands))
 }
 
 /// Build an all-`None` tag map of length `num_tags` for seeding a new entry.
@@ -1409,6 +1426,27 @@ struct Build<'a> {
     /// in on the next call. The rare recursive mini-closure call (for `$`)
     /// does *not* share this buffer -- see `close_priority`'s doc comment.
     close_stack: Vec<TaggedNfaState>,
+    /// Reused accumulator for `close_priority`'s output. Unlike
+    /// `close_stack`, this one *does* leave the function as part of the
+    /// result (`TdfaState`), so it can't just be a plain `&mut` scratch
+    /// buffer -- `close_priority` takes it out via `mem::take` (leaving an
+    /// empty placeholder here), and `canonicalize` -- the one place that
+    /// consumes the raw closure's contents -- hands the now-drained-but-
+    /// still-allocated buffer back here once it's done, for the *next*
+    /// `close_priority` call to reuse. Since state sizes vary between calls,
+    /// a buffer recycled from a large state can serve several later small
+    /// ones (or the reverse -- it just grows further) with no new
+    /// allocation either way; only genuine peak growth costs a realloc.
+    ///
+    /// Plain `Vec`, not `SmallVec` -- unlike `TdfaState`'s own field (built
+    /// fresh every call, so its inline capacity earns its keep), this
+    /// buffer is long-lived: once any call causes it to spill, it *stays*
+    /// spilled for the rest of the build (recycling never shrinks
+    /// capacity), so the inline array is dead weight after a brief warm-up.
+    /// `SmallVec::{from_vec,into_vec}` are zero-cost exactly when spilled
+    /// (they just move the raw parts, no copy), so the conversion at
+    /// `TdfaState`'s boundary costs nothing in the steady state.
+    raw_closure_buf: Vec<TaggedNfaState>,
     transitions: Vec<TdfaStateId>,
     accepting: Vec<bool>,
     transition_commands: Vec<TagCommandList>,
@@ -1532,6 +1570,7 @@ impl Build<'_> {
             &mut self.seen_gen,
             &mut self.seen_gen_counter,
             &mut self.close_stack,
+            &mut self.raw_closure_buf,
         )?;
         #[cfg(feature = "std")]
         if let (Some(pt), Some(t)) = (self.phase_trace.as_mut(), t) {
@@ -1546,7 +1585,8 @@ impl Build<'_> {
         }
         #[cfg(feature = "std")]
         let t = self.phase_trace.as_ref().map(|_| std::time::Instant::now());
-        let (canon, copy_cmds, canon_mapping) = canonicalize(closure, &mut self.tag_interner);
+        let (canon, copy_cmds, canon_mapping) =
+            canonicalize(closure, &mut self.tag_interner, &mut self.raw_closure_buf);
         #[cfg(feature = "std")]
         if let (Some(pt), Some(t)) = (self.phase_trace.as_mut(), t) {
             pt.canon += t.elapsed();
@@ -2450,6 +2490,7 @@ impl Tdfa {
             seen_gen: vec![0u32; nfa.states.len()],
             seen_gen_counter: 0,
             close_stack: Vec::new(),
+            raw_closure_buf: Vec::new(),
             transitions: Vec::new(),
             accepting: Vec::new(),
             transition_commands: Vec::new(),
@@ -3364,7 +3405,7 @@ mod tests {
         // Raw versions 7, 3, 7, 9 canonicalize to 0, 1, 0, 2.
         let mut interner = TagMapStore::new(2);
         let c = cfg(&[entry(&mut interner, 0, &[7, 3]), entry(&mut interner, 1, &[7, 9])]);
-        let (canon, _, _) = canonicalize(c, &mut interner);
+        let (canon, _, _) = canonicalize(c, &mut interner, &mut Vec::new());
         let expected = cfg(&[entry(&mut interner, 0, &[0, 1]), entry(&mut interner, 1, &[0, 2])]);
         assert_eq!(canon, expected);
     }
@@ -3373,8 +3414,8 @@ mod tests {
     fn canonicalize_is_idempotent() {
         let mut interner = TagMapStore::new(2);
         let c = cfg(&[entry(&mut interner, 0, &[7, 3]), entry(&mut interner, 1, &[7, 9])]);
-        let (once, _, _) = canonicalize(c, &mut interner);
-        let (twice, cmds, _) = canonicalize(once.clone(), &mut interner);
+        let (once, _, _) = canonicalize(c, &mut interner, &mut Vec::new());
+        let (twice, cmds, _) = canonicalize(once.clone(), &mut interner, &mut Vec::new());
         assert_eq!(once, twice);
         assert!(cmds.is_empty());
     }
@@ -3384,8 +3425,8 @@ mod tests {
         let mut interner = TagMapStore::new(2);
         let a = cfg(&[entry(&mut interner, 0, &[3, 5]), entry(&mut interner, 1, &[5, 3])]);
         let b = cfg(&[entry(&mut interner, 0, &[100, 200]), entry(&mut interner, 1, &[200, 100])]);
-        let (canon_a, ..) = canonicalize(a, &mut interner);
-        let (canon_b, ..) = canonicalize(b, &mut interner);
+        let (canon_a, ..) = canonicalize(a, &mut interner, &mut Vec::new());
+        let (canon_b, ..) = canonicalize(b, &mut interner, &mut Vec::new());
         assert_eq!(canon_a, canon_b);
     }
 
@@ -3394,7 +3435,7 @@ mod tests {
         // Raw 7 -> canonical 0, raw 3 -> canonical 1.
         let mut interner = TagMapStore::new(2);
         let c = cfg(&[entry(&mut interner, 0, &[7, 3])]);
-        let (_, cmds, _) = canonicalize(c, &mut interner);
+        let (_, cmds, _) = canonicalize(c, &mut interner, &mut Vec::new());
         assert_eq!(
             cmds.as_slice(),
             &[
@@ -3414,7 +3455,7 @@ mod tests {
     fn canonicalize_already_canonical_emits_no_commands() {
         let mut interner = TagMapStore::new(2);
         let c = cfg(&[entry(&mut interner, 0, &[0, 1]), entry(&mut interner, 1, &[0, 2])]);
-        let (canon, cmds, _) = canonicalize(c, &mut interner);
+        let (canon, cmds, _) = canonicalize(c, &mut interner, &mut Vec::new());
         let expected = cfg(&[entry(&mut interner, 0, &[0, 1]), entry(&mut interner, 1, &[0, 2])]);
         assert_eq!(canon, expected);
         assert!(cmds.is_empty());
@@ -3424,7 +3465,7 @@ mod tests {
     fn empty_configuration_canonicalizes_to_empty() {
         let mut interner = TagMapStore::new(2);
         let empty = TdfaState::default();
-        let (canon, cmds, _) = canonicalize(empty.clone(), &mut interner);
+        let (canon, cmds, _) = canonicalize(empty.clone(), &mut interner, &mut Vec::new());
         assert_eq!(canon, empty);
         assert!(cmds.is_empty());
     }
