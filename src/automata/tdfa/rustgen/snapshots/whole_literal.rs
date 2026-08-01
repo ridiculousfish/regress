@@ -13,5 +13,5 @@
     ) -> ::core::option::Option<(usize, usize)> {
         ::core::option::Option::None
     }
-    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 0usize, __GROUP_NAMES)
+    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 0usize, __GROUP_NAMES, __rt::MatcherTier::Literal)
 }

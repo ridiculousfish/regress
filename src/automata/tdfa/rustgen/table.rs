@@ -16,49 +16,12 @@
 //! per-byte guards, no EOI (`$`) accepts.
 
 use crate::automata::tdfa::{
-    FinalCommand, MarkValue, MoveOp, PosStampLoopFlat, ScanFast, ScanSkipFlat, Tdfa,
+    FinalCommand, MarkValue, MoveOp, PosStampLoopFlat, ScanSkipFlat, Tdfa,
 };
 use crate::automata::tdfa_backend::PrefixSkip;
 use core::fmt::Write;
 
-fn write_scan_fast(w: &mut String, f: &ScanFast) {
-    match f {
-        ScanFast::Bitmap => {
-            let _ = write!(w, "__rt::ScanFast::Bitmap");
-        }
-        ScanFast::Memchr { count, bytes } => {
-            let _ = write!(
-                w,
-                "__rt::ScanFast::Memchr{{count:{count},bytes:[{},{},{}]}}",
-                bytes[0], bytes[1], bytes[2]
-            );
-        }
-        ScanFast::AsciiBarrier { count, bytes } => {
-            let _ = write!(
-                w,
-                "__rt::ScanFast::AsciiBarrier{{count:{count},bytes:[{},{},{}]}}",
-                bytes[0], bytes[1], bytes[2]
-            );
-        }
-        ScanFast::AsciiRanges { count, pairs, bm0, bm1 } => {
-            let _ = write!(w, "__rt::ScanFast::AsciiRanges{{count:{count},pairs:[");
-            for (i, p) in pairs.iter().enumerate() {
-                let _ = write!(w, "{}{p}", if i > 0 { "," } else { "" });
-            }
-            let _ = write!(w, "],bm0:{bm0},bm1:{bm1}}}");
-        }
-        ScanFast::AsciiRangesStop { count, pairs, bm0, bm1 } => {
-            let _ = write!(w, "__rt::ScanFast::AsciiRangesStop{{count:{count},pairs:[");
-            for (i, p) in pairs.iter().enumerate() {
-                let _ = write!(w, "{}{p}", if i > 0 { "," } else { "" });
-            }
-            let _ = write!(w, "],bm0:{bm0},bm1:{bm1}}}");
-        }
-        ScanFast::BitmapAscii { bm0, bm1 } => {
-            let _ = write!(w, "__rt::ScanFast::BitmapAscii{{bm0:{bm0},bm1:{bm1}}}");
-        }
-    }
-}
+use super::write_scan_fast;
 
 /// `static NAME: [TY; n] = [..];` — for the *small* structured tables only
 /// (each element is tokens through the proc-macro bridge).

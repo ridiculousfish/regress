@@ -17,7 +17,16 @@ regress = { path = "..", version = "=0.11.1", features = ["codegen"] }
 syn = { version = "2", default-features = false, features = ["parsing", "proc-macro", "printing"] }
 proc-macro2 = "1"
 
+[features]
+# Forwards to regress's tdfa-jit backend, for the `tdfa-jit` column in the
+# `aot_bench` example (a sibling comparison, not exercised by regex! itself).
+tdfa-jit = ["regress/tdfa-jit"]
+
 [dev-dependencies]
 # The integration tests link generated code against the same regress.
 regress = { path = "..", version = "=0.11.1", features = ["codegen"] }
 trybuild = "1"
+# Reference engine for the `aot_bench` example only; dev-only, path points
+# outside the repo so its own cargo workspace doesn't collide with ours (same
+# pattern as regress's own dev-dependency on this vendored clone).
+regex = { path = "../../regress-vendor-regex" }

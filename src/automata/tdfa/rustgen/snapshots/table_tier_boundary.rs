@@ -513,5 +513,5 @@
     ) -> ::core::option::Option<(usize, usize)> {
         __rt::table_verify(&__TDFA, input, start, caps)
     }
-    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 0usize, __GROUP_NAMES)
+    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 0usize, __GROUP_NAMES, __rt::MatcherTier::Table)
 }

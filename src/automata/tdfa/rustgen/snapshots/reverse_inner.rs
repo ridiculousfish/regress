@@ -178,5 +178,5 @@
             _ => ::core::unreachable!(),
         }
     }
-    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 2usize, __GROUP_NAMES)
+    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 2usize, __GROUP_NAMES, __rt::MatcherTier::Unrolled)
 }

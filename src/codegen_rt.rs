@@ -287,6 +287,25 @@ pub struct CompiledMatcher {
     verify: VerifyFn,
     num_groups: usize,
     group_names: &'static [&'static str],
+    tier: MatcherTier,
+}
+
+/// Which code shape `emit_expansion` chose for a pattern, mirroring its
+/// three-way branch. Not meaningful for correctness (all tiers agree on
+/// matches by construction) — purely an introspection aid, e.g. for
+/// benchmarks that want to report which shape ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatcherTier {
+    /// No verify automaton at all: the prefilter span IS the match
+    /// (`Strategy::WholeLiteral` / `MultiLiteral`).
+    Literal,
+    /// Fully unrolled `match`/`while` control flow (states/peels/moves as
+    /// Rust source) — the default tier below `CODEGEN_UNROLL_MAX_STATES`.
+    Unrolled,
+    /// The automaton emitted as `static` data driven by the shared
+    /// interpreter loop (`tdfa_backend::execute_reuse_warm`) — used past the
+    /// unrolled-tier state threshold.
+    Table,
 }
 
 impl CompiledMatcher {
@@ -295,18 +314,47 @@ impl CompiledMatcher {
         verify: VerifyFn,
         num_groups: usize,
         group_names: &'static [&'static str],
+        tier: MatcherTier,
     ) -> Self {
         Self {
             prefilter,
             verify,
             num_groups,
             group_names,
+            tier,
         }
+    }
+
+    /// Which code shape this matcher was emitted as. See [`MatcherTier`].
+    pub const fn tier(&self) -> MatcherTier {
+        self.tier
     }
 
     /// Searches `text` to find the first match.
     pub fn find(&self, text: &str) -> Option<Match> {
         self.find_iter(text).next()
+    }
+
+    /// Like [`find_iter`](Self::find_iter), but each match borrows its
+    /// captures from a buffer reused across the whole scan instead of
+    /// allocating a [`Match`] (`Vec` of captures, plus re-cloning
+    /// `group_names`) per match. Mirrors
+    /// [`TdfaMatches`](crate::automata::tdfa_backend)'s relationship to the
+    /// `Match`-producing executors — use this when profiling/benchmarking
+    /// match throughput in isolation from `Match` construction cost, which
+    /// otherwise dominates on capture-heavy patterns.
+    pub fn find_iter_raw<'r, 't>(&'r self, text: &'t str) -> RawMatches<'r, 't> {
+        self.find_from_raw(text, 0)
+    }
+
+    /// Like [`find_iter_raw`](Self::find_iter_raw), starting at byte offset `start`.
+    pub fn find_from_raw<'r, 't>(&'r self, text: &'t str, start: usize) -> RawMatches<'r, 't> {
+        RawMatches {
+            matcher: self,
+            text,
+            caps: vec![usize::MAX; 2 * self.num_groups],
+            position: (start <= text.len()).then_some(start),
+        }
     }
 
     /// Returns an iterator over the matches in `text`.
@@ -495,6 +543,61 @@ fn make_match(
     }
 }
 
+/// A match produced by [`CompiledMatcher::find_iter_raw`], borrowing its
+/// captures from the iterator's reused buffer. Zero allocation per match —
+/// mirrors [`TdfaMatch`](crate::automata::tdfa_backend::TdfaMatch). Unlike
+/// [`Match`], there is no `group_names` here (named-group lookup needs an
+/// owned `Match`; use [`CompiledMatcher::find_iter`] for that).
+#[derive(Debug)]
+pub struct CompiledMatch<'a> {
+    /// The full match range.
+    pub range: crate::api::Range,
+    captures: &'a [usize],
+}
+
+impl CompiledMatch<'_> {
+    /// Number of capture groups (not counting the full match).
+    pub fn num_captures(&self) -> usize {
+        self.captures.len() / 2
+    }
+
+    /// Capture group `i` (0-indexed). `None` if the group did not participate.
+    pub fn capture(&self, i: usize) -> Option<crate::api::Range> {
+        let s = self.captures[2 * i];
+        if s == usize::MAX {
+            None
+        } else {
+            Some(s..self.captures[2 * i + 1])
+        }
+    }
+}
+
+/// A lending iterator over [`CompiledMatch`]es (see
+/// [`CompiledMatcher::find_iter_raw`]). Each match borrows from `self`: drop
+/// it before calling [`next`](Self::next) again.
+#[derive(Debug)]
+pub struct RawMatches<'r, 't> {
+    matcher: &'r CompiledMatcher,
+    text: &'t str,
+    caps: Vec<usize>,
+    position: Option<usize>,
+}
+
+impl RawMatches<'_, '_> {
+    /// Advance to the next match. Returns `None` when exhausted.
+    pub fn next(&mut self) -> Option<CompiledMatch<'_>> {
+        let offset = self.position?;
+        let bytes = self.text.as_bytes();
+        let (start, end) = self.matcher.find_at(bytes, offset, &mut self.caps)?;
+        self.position = if end == start {
+            self.text[end..].chars().next().map(|c| end + c.len_utf8())
+        } else {
+            Some(end)
+        };
+        Some(CompiledMatch { range: start..end, captures: &self.caps })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Table tier: static automaton tables + the shared interpreter loop.
 // ---------------------------------------------------------------------------
@@ -506,6 +609,17 @@ pub use crate::automata::tdfa::{
 pub use crate::automata::tdfa_backend::PrefixSkip;
 use crate::automata::tdfa::{StateGuards, TagCommand};
 use crate::automata::tdfa_backend::{self, Scratch, TdfaTables};
+
+/// Advance `pos` through `input` while bytes stay in the self-loop set
+/// described by `fast`/`byte_bitmap` — the interpreter's accelerated scan
+/// (SIMD range masks, `memchr`, etc. depending on what the set classifies
+/// as), exposed for the unrolled tier's peeled self-loops. A `regex!`
+/// expansion's peeled state calls this instead of a from-scratch scalar
+/// byte loop, so it gets the same acceleration the table tier and
+/// interpreter already share via `tdfa_backend::scan_fast`.
+pub fn scan_fast(fast: &ScanFast, byte_bitmap: &[u64; 4], input: &[u8], pos: usize) -> usize {
+    tdfa_backend::scan_fast(fast, byte_bitmap, input, pos)
+}
 
 /// The table tier's automaton: every table the executor reads, borrowed from
 /// `static` data the `regex!` expansion carries. The emitter guarantees the

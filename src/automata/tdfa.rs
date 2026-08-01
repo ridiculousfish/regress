@@ -2452,8 +2452,10 @@ fn compute_accept_fallback(
 
 /// Classify a 256-bit self-loop `byte_bitmap` into the fastest available
 /// [`ScanFast`] variant.  Called by both `compute_scan_skips` and
-/// `compute_pos_stamp_loops` so the logic stays in one place.
-fn classify_scan_fast(byte_bitmap: &[u64; 4]) -> ScanFast {
+/// `compute_pos_stamp_loops` so the logic stays in one place. `pub(crate)`
+/// so the AoT emitter (`rustgen/verify.rs`) can classify a peeled state's
+/// byte set the same way, instead of re-deriving its own notion of "fast".
+pub(crate) fn classify_scan_fast(byte_bitmap: &[u64; 4]) -> ScanFast {
     let mut ascii_excl_bytes = [0u8; 3];
     let mut ascii_excl_count = 0u8;
     let mut ascii_excl_overflow = false;

@@ -148,7 +148,7 @@ fn emit_expansion(
         verify::emit_stub(w);
         let _ = writeln!(
             w,
-            "    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 0usize, __GROUP_NAMES)"
+            "    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 0usize, __GROUP_NAMES, __rt::MatcherTier::Literal)"
         );
         let _ = write!(w, "}}");
         return Ok(out);
@@ -222,9 +222,10 @@ fn emit_expansion(
     } else {
         verify::emit_capture(w, tdfa, skip);
     }
+    let tier = if use_table { "Table" } else { "Unrolled" };
     let _ = writeln!(
         w,
-        "    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, {}usize, __GROUP_NAMES)",
+        "    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, {}usize, __GROUP_NAMES, __rt::MatcherTier::{tier})",
         program.num_capture_groups()
     );
     let _ = write!(w, "}}");
@@ -263,5 +264,52 @@ fn fmt_run(lo: u8, hi: u8) -> String {
         fmt_byte(lo)
     } else {
         format!("{}..={}", fmt_byte(lo), fmt_byte(hi))
+    }
+}
+
+/// Format a `__rt::ScanFast::Variant{..}` literal — the same accelerated
+/// self-loop classification the interpreter picks at runtime
+/// (`tdfa::classify_scan_fast`), serialized as a `const`-evaluable
+/// expression. Shared by the table tier (whole automaton as static data) and
+/// the unrolled tier's peeled self-loops (`verify.rs`), so a peeled `\w+`
+/// gets the exact same SSE2 range-mask scan the interpreter and table tier
+/// already use instead of a from-scratch scalar byte loop.
+fn write_scan_fast(w: &mut String, f: &crate::automata::tdfa::ScanFast) {
+    use crate::automata::tdfa::ScanFast;
+    match f {
+        ScanFast::Bitmap => {
+            let _ = write!(w, "__rt::ScanFast::Bitmap");
+        }
+        ScanFast::Memchr { count, bytes } => {
+            let _ = write!(
+                w,
+                "__rt::ScanFast::Memchr{{count:{count},bytes:[{},{},{}]}}",
+                bytes[0], bytes[1], bytes[2]
+            );
+        }
+        ScanFast::AsciiBarrier { count, bytes } => {
+            let _ = write!(
+                w,
+                "__rt::ScanFast::AsciiBarrier{{count:{count},bytes:[{},{},{}]}}",
+                bytes[0], bytes[1], bytes[2]
+            );
+        }
+        ScanFast::AsciiRanges { count, pairs, bm0, bm1 } => {
+            let _ = write!(w, "__rt::ScanFast::AsciiRanges{{count:{count},pairs:[");
+            for (i, p) in pairs.iter().enumerate() {
+                let _ = write!(w, "{}{p}", if i > 0 { "," } else { "" });
+            }
+            let _ = write!(w, "],bm0:{bm0},bm1:{bm1}}}");
+        }
+        ScanFast::AsciiRangesStop { count, pairs, bm0, bm1 } => {
+            let _ = write!(w, "__rt::ScanFast::AsciiRangesStop{{count:{count},pairs:[");
+            for (i, p) in pairs.iter().enumerate() {
+                let _ = write!(w, "{}{p}", if i > 0 { "," } else { "" });
+            }
+            let _ = write!(w, "],bm0:{bm0},bm1:{bm1}}}");
+        }
+        ScanFast::BitmapAscii { bm0, bm1 } => {
+            let _ = write!(w, "__rt::ScanFast::BitmapAscii{{bm0:{bm0},bm1:{bm1}}}");
+        }
     }
 }

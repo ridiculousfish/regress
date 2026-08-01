@@ -1499,5 +1499,5 @@
             ::core::option::Option::Some((start, acc))
         }
     }
-    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 0usize, __GROUP_NAMES)
+    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 0usize, __GROUP_NAMES, __rt::MatcherTier::Unrolled)
 }

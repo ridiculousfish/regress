@@ -149,9 +149,11 @@ fn scan_ascii_ranges_stop_sse2(
 /// Advance `pos` through `input` while bytes remain in the self-loop set
 /// described by `fast` (and, for the `Bitmap` variant, `byte_bitmap`).
 /// Returns the first position outside the set, or `input.len()` if the entire
-/// remaining input is in-set.
-#[inline(always)]
-fn scan_fast(fast: &ScanFast, byte_bitmap: &[u64; 4], input: &[u8], pos: usize) -> usize {
+/// remaining input is in-set. `pub(crate)` so `codegen_rt.rs` can wrap it for
+/// the AoT tier's peeled self-loops (`regex!`-generated code calls the
+/// wrapper via `__codegen::scan_fast`) — the exact same accelerated scan the
+/// interpreter and table tier already use.
+pub(crate) fn scan_fast(fast: &ScanFast, byte_bitmap: &[u64; 4], input: &[u8], pos: usize) -> usize {
     match fast {
         ScanFast::Memchr { count, bytes } => match count {
             0 => input.len(),

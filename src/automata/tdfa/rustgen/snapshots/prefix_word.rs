@@ -118,9 +118,9 @@
                     };
                 }
                 10 => {
-                    while pos < len && matches!(input[pos], b'0'..=b'9' | b'A'..=b'Z' | b'_' | b'a'..=b'z') {
-                        pos += 1;
-                    }
+                    static __PEEL_FAST: __rt::ScanFast = __rt::ScanFast::AsciiRanges{count:4,pairs:[48,57,65,90,95,95,97,122],bm0:287948901175001088,bm1:576460745995190270};
+                    static __PEEL_BM: [u64; 4] = [287948901175001088, 576460745995190270, 0, 0];
+                    pos = __rt::scan_fast(&__PEEL_FAST, &__PEEL_BM, input, pos);
                     acc = pos;
                     if pos >= len {
                         break 'scan;
@@ -141,5 +141,5 @@
             ::core::option::Option::Some((start, acc))
         }
     }
-    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 0usize, __GROUP_NAMES)
+    __rt::CompiledMatcher::from_parts(&__PREFILTER, __verify, 0usize, __GROUP_NAMES, __rt::MatcherTier::Unrolled)
 }

@@ -2,21 +2,42 @@
 //!
 //! Mirrors the JIT's `emit_capture_free` / `emit_capture` drivers: each
 //! reachable state becomes a `match state` arm holding its accept record, EOI
-//! check, and per-byte dispatch; dominant self-loops are peeled into `while`
-//! loops (LLVM vectorizes the byte-range membership test, replacing the JIT's
-//! hand-rolled SIMD skip). Non-multiline `$` accepts record in the state's
-//! EOI branch — the analog of the JIT's EOI landing pads. In the capture
-//! tier, mark-file lanes become local variables (LLVM register-allocates
-//! them), `MoveOp` sequences become inline assignments, and `finalize` is
-//! unrolled per winning state. All lowering decisions come from the shared
-//! [`plan`] module so the two backends agree.
+//! check, and per-byte dispatch. Non-multiline `$` accepts record in the
+//! state's EOI branch — the analog of the JIT's EOI landing pads. In the
+//! capture tier, mark-file lanes become local variables (LLVM
+//! register-allocates them), `MoveOp` sequences become inline assignments,
+//! and `finalize` is unrolled per winning state. All lowering decisions come
+//! from the shared [`plan`] module so the two backends agree.
+//!
+//! Capture-free dominant self-loops are peeled into a call to the runtime's
+//! [`scan_fast`](crate::__codegen::scan_fast) — the same accelerated scan
+//! (SIMD range masks, `memchr`, etc., picked by
+//! [`classify_scan_fast`](crate::automata::tdfa::classify_scan_fast)) the
+//! interpreter and the table tier already share, rather than a from-scratch
+//! scalar `while` loop hoping LLVM vectorizes it (it generally doesn't: a
+//! byte-at-a-time scan with a data-dependent early exit isn't a shape LLVM's
+//! auto-vectorizer recognizes). See `src/automata/CLAUDE.md` /
+//! `tdfa_backend.rs`'s module doc for why this needs a real accelerated
+//! primitive rather than source restructuring.
 
-use super::fmt_run;
+use super::{fmt_run, write_scan_fast};
 use crate::automata::tdfa::plan::{self, Dispatch};
-use crate::automata::tdfa::{MoveOp, TDFA_DEAD_STATE, Tdfa};
+use crate::automata::tdfa::{MoveOp, TDFA_DEAD_STATE, Tdfa, classify_scan_fast};
 use crate::automata::tdfa_backend::PrefixSkip;
 use core::fmt::Write;
 use std::collections::HashMap;
+
+/// Build the 256-bit self-loop bitmap `classify_scan_fast` expects from a
+/// peel's `(lo, hi)` runs (the same shape `plan::peel_capture_free` returns).
+fn bitmap_from_runs(runs: &[(u8, u8)]) -> [u64; 4] {
+    let mut bm = [0u64; 4];
+    for &(lo, hi) in runs {
+        for b in lo..=hi {
+            bm[b as usize >> 6] |= 1u64 << (b as usize & 63);
+        }
+    }
+    bm
+}
 
 /// A dispatch target in the emitted source: a state id to assign, or `Done`
 /// (`break 'scan`).
@@ -132,14 +153,27 @@ fn emit_state_arm(
 ) {
     let _ = writeln!(w, "                {s} => {{");
     if let Some(runs) = peel {
-        // Peeled self-loop: consume the whole self-run, record the accept once
-        // at the exit (covers zero self bytes: `acc` is then the entry `pos`),
-        // then dispatch the exit byte through the regular tail. `peel` is
-        // gated off for `$`-accept states, so EOI here is a plain stop.
-        let pat = runs.iter().map(|&(lo, hi)| fmt_run(lo, hi)).collect::<Vec<_>>().join(" | ");
-        let _ = writeln!(w, "                    while pos < len && matches!(input[pos], {pat}) {{");
-        let _ = writeln!(w, "                        pos += 1;");
-        let _ = writeln!(w, "                    }}");
+        // Peeled self-loop: consume the whole self-run via the runtime's
+        // accelerated scan (SIMD range masks / memchr / bitmap, whichever
+        // `classify_scan_fast` picks for this byte set — the same
+        // classification the interpreter and table tier use), record the
+        // accept once at the exit (covers zero self bytes: `acc` is then the
+        // entry `pos`), then dispatch the exit byte through the regular
+        // tail. `peel` is gated off for `$`-accept states, so EOI here is a
+        // plain stop.
+        let bitmap = bitmap_from_runs(runs);
+        let mut fast_expr = String::new();
+        write_scan_fast(&mut fast_expr, &classify_scan_fast(&bitmap));
+        let _ = writeln!(w, "                    static __PEEL_FAST: __rt::ScanFast = {fast_expr};");
+        let _ = writeln!(
+            w,
+            "                    static __PEEL_BM: [u64; 4] = [{}, {}, {}, {}];",
+            bitmap[0], bitmap[1], bitmap[2], bitmap[3]
+        );
+        let _ = writeln!(
+            w,
+            "                    pos = __rt::scan_fast(&__PEEL_FAST, &__PEEL_BM, input, pos);"
+        );
         if accepting {
             let _ = writeln!(w, "                    acc = pos;");
         }
