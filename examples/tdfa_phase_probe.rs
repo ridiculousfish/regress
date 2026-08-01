@@ -1,8 +1,6 @@
-//! Reproduce the `[a-zA-Z0-9]{N}` construction-time phase breakdown from the
-//! `tdfa-size-limits` investigation: which part of `Tdfa::try_from` actually
-//! costs the time, and how that shifts once `num_marks` crosses
-//! `MAX_FALLBACK_MARKS` (16384) and `compute_accept_fallback` falls back to
-//! its cheap conservative approximation.
+//! Measure the `[a-zA-Z0-9]{N}` TDFA construction-time phase breakdown.
+//! This shape previously exposed the quadratic fallback-register fixpoint; it
+//! remains useful for guarding the exact SCC-based analysis against regressions.
 //!
 //! Run: `cargo run --release --example tdfa_phase_probe --features nfa -- 500 1000 2000 2300 2500 8000`
 //! (defaults to that same set if no sizes are given).

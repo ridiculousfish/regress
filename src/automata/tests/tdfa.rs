@@ -759,3 +759,19 @@ fn multiline_dollar_prune_cross_check() {
         }
     }
 }
+
+#[test]
+fn fallback_accept_preserves_clobbered_capture_values() {
+    // After accepting `abc`, the greedy `+` consumes the trailing `a` while
+    // attempting another iteration and overwrites the inner group's start.
+    // Failure on the missing `b` must restore the earlier accept's captures.
+    let raw = make_tdfa(r"((abc)+)");
+    let mut opt = make_tdfa(r"((abc)+)");
+    opt.optimize();
+    for t in [&raw, &opt] {
+        assert!(t.accept_fallback().iter().any(|&fallback| fallback));
+        let m = execute_tdfa(t, b"abca").expect("match");
+        assert_eq!(m.range, 0..3);
+        assert_eq!(m.captures, vec![Some(0..3), Some(0..3)]);
+    }
+}

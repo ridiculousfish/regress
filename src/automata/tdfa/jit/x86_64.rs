@@ -360,21 +360,11 @@ impl Assembler for X86_64Asm {
         self.cap_record_state(state_id, is_fallback);
     }
 
-    fn cap_snapshot(&mut self, width: u32) {
-        // for i in 0..width { best_snap[i] = marks[i] }  (u64 lanes)
-        self.emit(&[0x31, 0xC0]); // xor eax, eax   (i = 0)
-        let loop_top = self.code.len() as u32;
-        self.emit(&[0x4C, 0x8B, 0x1C, 0xC1]); // mov r11, [rcx + rax*8]
-        self.emit(&[0x4C, 0x89, 0x1C, 0xC3]); // mov [rbx + rax*8], r11
-        self.emit(&[0xFF, 0xC0]); // inc eax
-        self.emit(&[0x3D]); // cmp eax, imm32
-        self.emit_u32(width);
-        // jb loop_top   (0F 82 <rel32>, backward)
-        self.emit(&[0x0F, 0x82]);
-        let field = self.code.len() as u32;
-        self.emit(&[0, 0, 0, 0]);
-        let rel = (loop_top as i64 - (field as i64 + 4)) as i32 as u32;
-        write_u32(&mut self.code, field, rel);
+    fn cap_snapshot(&mut self, copies: &[(u16, u16)]) {
+        for &(src, tag) in copies {
+            self.mark_mem(0x8B, 0b000_000, src); // rax = marks[src]
+            self.best_mem(0x89, 0b000_000, tag); // best_snap[tag] = rax
+        }
     }
 
     fn cap_stamp_curpos(&mut self, dsts: &[u16]) {
@@ -467,6 +457,17 @@ impl X86_64Asm {
             // or r10d, 0x8000_0000  (snapshot flag -> bit 63 of the return)
             self.emit(&[0x41, 0x81, 0xCA]);
             self.emit_u32(0x8000_0000);
+        }
+    }
+
+    /// Access a u64 lane in the compact final-value snapshot based at `rbx`.
+    fn best_mem(&mut self, op: u8, reg_bits: u8, lane: u16) {
+        let off = lane as u32 * 8;
+        if off < 128 {
+            self.emit(&[0x48, op, 0x40 | reg_bits | 0x03, off as u8]);
+        } else {
+            self.emit(&[0x48, op, 0x80 | reg_bits | 0x03]);
+            self.emit_u32(off);
         }
     }
 

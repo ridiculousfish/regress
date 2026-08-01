@@ -523,7 +523,8 @@ pub(crate) struct Scratch {
     /// The working mark file, mutated in place by each transition. Reset to
     /// `usize::MAX` (NO_MATCH) at the start of every `run_anchored`.
     src_buf: Box<[usize]>,
-    /// Snapshot of the winning accept's marks (copied in on replace only).
+    /// Observable final-tag values for the winning fallback accept. Indexed by
+    /// tag, and therefore independent of the usually much larger mark file.
     best_snap: Box<[usize]>,
     /// Scratch for applying a `$`-conditional's commands before snapshotting.
     cond_buf: Box<[usize]>,
@@ -543,9 +544,8 @@ impl Scratch {
         self.src_buf.as_mut_ptr()
     }
 
-    /// Raw pointer to the accept-snapshot buffer, handed to JIT-compiled capture
-    /// code (which copies the live marks here on a fallback accept). Valid until
-    /// the next mutation of `self`.
+    /// Raw pointer to the final-value snapshot, handed to JIT-compiled capture
+    /// code. Valid until the next mutation of `self`.
     pub(crate) fn best_snap_mut_ptr(&mut self) -> *mut usize {
         self.best_snap.as_mut_ptr()
     }
@@ -553,13 +553,15 @@ impl Scratch {
 
 impl Scratch {
     /// `width` = `num_marks + 3` (real marks, then `clear`, `current_pos`,
-    /// `scratch`); `num_capture_groups` sizes the normalized capture buffer.
+    /// `scratch`); `num_capture_groups` sizes both the observable-tag snapshot
+    /// (full match plus capture endpoints) and the normalized capture buffer.
     pub(crate) fn new(width: usize, num_capture_groups: usize) -> Self {
+        let num_output_tags = 2 + 2 * num_capture_groups;
         Self {
-            src_buf:   vec![usize::MAX; width].into_boxed_slice(),
-            best_snap: vec![usize::MAX; width].into_boxed_slice(),
-            cond_buf:  vec![usize::MAX; width].into_boxed_slice(),
-            norm_buf:  vec![usize::MAX; 2 * num_capture_groups].into_boxed_slice(),
+            src_buf: vec![usize::MAX; width].into_boxed_slice(),
+            best_snap: vec![usize::MAX; num_output_tags].into_boxed_slice(),
+            cond_buf: vec![usize::MAX; width].into_boxed_slice(),
+            norm_buf: vec![usize::MAX; 2 * num_capture_groups].into_boxed_slice(),
         }
     }
 }
@@ -1053,19 +1055,22 @@ fn run_anchored<C: TdfaExecConfig, T: TdfaTables>(
     }
 
     match last_accept {
-        Some((end, finals, start)) => {
-            let marks: &[usize] = if read_live { src_buf } else { best_snap };
-            Some(if has_captures {
-                finalize(finals, marks, end, norm_buf)
+        Some((end, finals, start)) => Some(if has_captures {
+            finalize(
+                finals,
+                src_buf,
+                (!read_live).then_some(&*best_snap),
+                end,
+                norm_buf,
+            )
+        } else {
+            let s = if read_live {
+                snapshot_match_start(finals, src_buf)
             } else {
-                let s = if read_live {
-                    snapshot_match_start(finals, marks)
-                } else {
-                    start
-                };
-                finalize_nocap(s, end)
-            })
-        }
+                start
+            };
+            finalize_nocap(s, end)
+        }),
         None => None,
     }
 }
@@ -1197,10 +1202,26 @@ fn consider_accept<'a>(
         }
     }
     if has_captures {
-        best_snap.copy_from_slice(marks);
+        snapshot_final_values(finals, marks, best_snap);
     }
     *last_accept = Some((end, finals, new_start));
     *read_live = false;
+}
+
+/// Materialize the observable final values of an accept into tag-indexed
+/// storage. Predicate-sentinel tags are intentionally omitted: they are not
+/// part of the returned match and may lie beyond `values`.
+fn snapshot_final_values(finals: &[FinalCommand], marks: &[usize], values: &mut [usize]) {
+    for cmd in finals {
+        let tag = cmd.tag as usize;
+        if tag >= values.len() {
+            continue;
+        }
+        let MarkValue::Copy(src) = cmd.src else {
+            unreachable!("finals never use CurrentPos")
+        };
+        values[tag] = marks[src.0 as usize];
+    }
 }
 
 /// Build a capture-free match directly from the recorded start and end.
@@ -1223,6 +1244,7 @@ fn finalize_nocap(start: usize, end: usize) -> NfaMatch {
 fn finalize(
     finals: &[FinalCommand],
     marks: &[usize],
+    final_values: Option<&[usize]>,
     end: usize,
     norm_buf: &mut [usize],
 ) -> NfaMatch {
@@ -1230,23 +1252,24 @@ fn finalize(
 
     let mut full_start = usize::MAX;
     let mut full_end = usize::MAX;
+    let num_output_tags = norm_buf.len() + 2;
 
     for cmd in finals {
+        let tag = cmd.tag as usize;
+        if tag >= num_output_tags {
+            continue;
+        }
         let MarkValue::Copy(src) = cmd.src else {
             unreachable!("finals never use CurrentPos")
         };
-        let val = marks[src.0 as usize];
-        match cmd.tag as usize {
+        let val = match final_values {
+            Some(values) => values[tag],
+            None => marks[src.0 as usize],
+        };
+        match tag {
             0 => full_start = val,
             1 => full_end = val,
-            tag => {
-                let norm_idx = tag - 2;
-                // Sentinel tags (ProgressSince for nullable loops) have indices
-                // beyond the capture range; norm_buf is sized to captures only.
-                if norm_idx < norm_buf.len() {
-                    norm_buf[norm_idx] = val;
-                }
-            }
+            tag => norm_buf[tag - 2] = val,
         }
     }
 
@@ -1273,12 +1296,14 @@ pub(crate) fn jit_finalize(
     end: usize,
     read_live: bool,
 ) -> NfaMatch {
-    let marks: &[usize] = if read_live {
-        &scratch.src_buf
-    } else {
-        &scratch.best_snap
-    };
-    finalize(tdfa.finals(state), marks, end, &mut scratch.norm_buf)
+    let final_values = (!read_live).then_some(&*scratch.best_snap);
+    finalize(
+        tdfa.finals(state),
+        &scratch.src_buf,
+        final_values,
+        end,
+        &mut scratch.norm_buf,
+    )
 }
 
 /// A TDFA match that borrows captures from the owning iterator's `Scratch.norm_buf`.
@@ -1320,5 +1345,19 @@ impl<'a> From<TdfaMatch<'a>> for NfaMatch {
             .map(|c| if c[0] == usize::MAX { None } else { Some(c[0]..c[1]) })
             .collect();
         NfaMatch { range: m.range, captures }
+    }
+}
+
+#[cfg(test)]
+mod scratch_tests {
+    use super::Scratch;
+
+    #[test]
+    fn fallback_snapshot_scales_with_output_tags() {
+        let scratch = Scratch::new(10_003, 2);
+        assert_eq!(scratch.src_buf.len(), 10_003);
+        assert_eq!(scratch.cond_buf.len(), 10_003);
+        assert_eq!(scratch.best_snap.len(), 6);
+        assert_eq!(scratch.norm_buf.len(), 4);
     }
 }

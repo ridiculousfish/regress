@@ -48,7 +48,7 @@ pub const EXEC_STATE_MASK: u32 = !EXEC_ACCEPT_FLAG;
 /// Bit 0 of `trans_flags[idx]`: the transition's target state is accepting.
 pub(crate) const TF_ACCEPT: u8 = 1;
 /// Bit 1 of `trans_flags[idx]`: the target accepting state has `accept_fallback`
-/// (an eager mark snapshot is needed on acceptance).
+/// (an eager final-value snapshot is needed on acceptance).
 pub(crate) const TF_FALLBACK: u8 = 2;
 /// Bit 2 of `trans_flags[idx]`: the target state carries switch guards
 /// (multiline `^`, `\b`/`\B`). Read by the per-byte-guards loop so the common
@@ -156,11 +156,8 @@ impl MemTrace {
 /// priority-ordered eps-DFS, `truncate_at_first_goal`, `canonicalize` —
 /// `register` = `register_or_get_state`, `anchor_alt` =
 /// `compute_anchor_alt_for`) from the one-shot finalization phases
-/// (`csr_tables`, `accept_fallback`, `compile_moves`, `trans_flags`) — the
-/// latter turned out to dominate for some pattern shapes
-/// (`compute_accept_fallback`'s dataflow fixpoint is cubic-ish below its
-/// `MAX_FALLBACK_MARKS` cutoff), which the per-state counters in `MemTrace`
-/// can't reveal on their own.
+/// (`csr_tables`, `accept_fallback`, `compile_moves`, `trans_flags`), which the
+/// per-state counters in `MemTrace` cannot reveal on their own.
 #[cfg(feature = "std")]
 #[derive(Default)]
 struct PhaseTrace {
@@ -2016,9 +2013,8 @@ pub struct Tdfa {
     num_classes: usize, // Number of byte equivalence classes.
     num_tags: usize,    // Number of semantic tags (capture positions).
     /// Whether the pattern has user capture groups (beyond the full match). When
-    /// false, the executor's accept path skips the per-byte mark snapshot — the
-    /// match is just `[start, end]` — which is a big win for accept-heavy
-    /// capture-free patterns like `.*`.
+    /// false, the executor records only `[start, end]`, avoiding final-value
+    /// materialization for accept-heavy capture-free patterns like `.*`.
     has_captures: bool,
     // Number of user-visible capture groups (not counting the full match,
     // not counting sentinel tags). Equals (nfa.num_capture_tags - 2) / 2.
@@ -2048,12 +2044,9 @@ pub struct Tdfa {
     // matches when scanning ends in that state.
     accepting: Box<[bool]>,
 
-    // Per-state "fallback" flag. Indexed by state ID. True for an accepting
-    // state that has a transition to a non-dead, non-accepting state — i.e. the
-    // automaton can accept here, read further, clobber registers, then fail and
-    // need to rewind. Only such accepts need the eager mark snapshot; for the
-    // rest (e.g. `.*`, whose accept self-loops to an accepting state) the
-    // executor records the accept cheaply and reads the registers at scan end.
+    // Per-state fallback flag. True exactly when a continuation before the next
+    // accept can clobber an observable final register. Such accepts materialize
+    // tag-indexed final values; all others read the live mark file at scan end.
     accept_fallback: Box<[bool]>,
 
     // Tag commands to apply when a transition fires (CSR: per-transition cell
@@ -2080,7 +2073,7 @@ pub struct Tdfa {
     // interned arena). For accepting states this is `num_tags` commands (one
     // per tag) describing how to read the final capture positions out of the
     // mark file. For non-accepting states it's empty. Run once at scan end
-    // against the last-accepted state's mark snapshot.
+    // against live marks or the last accept's compact final-value snapshot.
     finals: CsrTable<FinalCommand>,
 
     // Per-state zero-width guards: the unified table for `^ $ \b \B`. Each
@@ -2245,65 +2238,24 @@ fn bs_set(bits: &mut [u64], i: u32) {
     bits[(i >> 6) as usize] |= 1u64 << (i & 63);
 }
 
-/// Largest mark count for which the precise [`compute_accept_fallback`] dataflow
-/// runs. Above it we keep the conservative structural flag (always sound — it
-/// only over-snapshots) to bound the size-proportional fixpoint. Mirrors the
-/// register allocator's `MAX_RA_MARKS`; such automata are rare and already on the
-/// scalar command fallback.
-const MAX_FALLBACK_MARKS: usize = 1 << 14;
-
-/// Structural over-approximation of [`compute_accept_fallback`]: flag an
-/// accepting state whenever *any* transition leaves it to a non-dead,
-/// non-accepting state. Always sound (it only ever over-snapshots); used as the
-/// fallback when the precise analysis is over budget or there are no marks.
-fn accept_fallback_structural(
-    accepting: &[bool],
-    transitions: &[TdfaStateId],
-    num_classes: usize,
-) -> Box<[bool]> {
-    let mut out = vec![false; accepting.len()].into_boxed_slice();
-    for (s, &acc) in accepting.iter().enumerate() {
-        if !acc {
-            continue;
-        }
-        let row = &transitions[s * num_classes..(s + 1) * num_classes];
-        out[s] = row
-            .iter()
-            .any(|&t| t != TDFA_DEAD_STATE && !accepting[t as usize]);
-    }
-    out
-}
-
-/// Per-state fallback flag: an accepting state `S` needs the eager mark snapshot
-/// only when some register the accept reads (a `Copy` source in `finals[S]`) can
-/// be overwritten on a continuation from `S` that passes through non-accepting
-/// states before the run ends or reaches another accept. If no such write is
-/// possible, the winner's registers survive untouched in the live mark file and
-/// the executor reads them at scan end (the cheap `read_live` path) — no
-/// snapshot. See `tdfa_backend::run_anchored` / `record_accept`.
+/// Per-state fallback flag: an accepting state `S` needs an eager final-value
+/// snapshot only when some observable register the accept reads can be overwritten
+/// on a continuation through non-accepting states before the run ends or reaches
+/// another accept. If no such write is possible, finalization reads the live mark
+/// file at scan end.
 ///
-/// This refines the older purely-structural check (any live non-accepting
-/// successor), which flagged states whose continuation writes only *other*
-/// registers (e.g. `(\w+)(\s+\w+)?`, where the trailing group's transitions never
-/// touch group 1's registers). We compute, per state, the set of registers
-/// writable before the next accept:
+/// We compute the registers writable before the next accept:
 ///
 /// ```text
 /// RW(s) = ⋃ over edges s→t with t ≠ DEAD and t non-accepting:
 ///            written(s→t) ∪ RW(t)
 /// ```
 ///
-/// where `written(s→t)` is the edge command list's `dst` marks. Edges into
-/// accepting targets contribute nothing: reaching that accept makes it the winner
-/// (last accept wins), so `R_S` no longer matters. `S` is a fallback iff
-/// `RW(S) ∩ R_S ≠ ∅`.
-///
-/// Soundness: any runtime path from `S` either dead-ends / hits end-of-input at a
-/// non-accepting state — every write along it is in `RW(S)`, including the
-/// stranding edge, since end-of-input can strand at *any* non-accepting state —
-/// or reaches a later accept that supersedes `S` and is analyzed independently.
-/// So `RW(S) ∩ R_S = ∅` guarantees the accept's registers still hold their
-/// accept-time values at scan end.
+/// The bit universe contains only marks read by observable final tags (full match
+/// and capture endpoints), not every physical mark minted by determinization.
+/// The continuation graph is condensed into SCCs, then the sets are propagated
+/// once over the resulting DAG. This keeps the analysis exact without a mark-count
+/// cutoff or a potentially quadratic worklist fixpoint.
 fn compute_accept_fallback(
     accepting: &[bool],
     transitions: &[TdfaStateId],
@@ -2311,80 +2263,189 @@ fn compute_accept_fallback(
     finals: &CsrTable<FinalCommand>,
     num_classes: usize,
     num_marks: usize,
+    num_output_tags: usize,
 ) -> Box<[bool]> {
     let n = accepting.len();
     let k = num_classes;
-    // No marks → nothing to clobber; a huge mark file keeps the conservative
-    // structural flag to bound the fixpoint (opt.rs's `register_allocate` caps
-    // itself the same way).
-    if num_marks == 0 || num_marks > MAX_FALLBACK_MARKS {
-        return accept_fallback_structural(accepting, transitions, num_classes);
-    }
-    let words = num_marks.div_ceil(64);
-
-    // `rw[s]` seeded with the marks written by edges leaving `s` to a non-dead,
-    // non-accepting target; `preds` collects those same edges' sources for the
-    // backward worklist that unions successors' `rw` in.
-    let mut rw = vec![0u64; n * words];
-    let mut preds: Vec<Vec<u32>> = vec![Vec::new(); n];
-    for s in 0..n {
-        for c in 0..k {
-            let t = transitions[s * k + c];
-            if t == TDFA_DEAD_STATE || accepting[t as usize] {
-                continue;
-            }
-            for cmd in transition_commands.iat(s * k + c) {
-                bs_set(&mut rw[s * words..(s + 1) * words], cmd.dst.0);
-            }
-            preds[t as usize].push(s as u32);
-        }
+    if num_marks == 0 {
+        return vec![false; n].into_boxed_slice();
     }
 
-    // Worklist fixpoint: `rw[s] |= rw[t]` for every edge `s→t` to a non-accepting
-    // `t`; when `rw[s]` grows, re-enqueue its predecessors. `acc` is reused.
-    let mut in_wl = vec![true; n];
-    let mut wl: std::collections::VecDeque<u32> = (0..n as u32).collect();
-    let mut acc = vec![0u64; words];
-    while let Some(s) = wl.pop_front() {
-        let s = s as usize;
-        in_wl[s] = false;
-        acc.copy_from_slice(&rw[s * words..(s + 1) * words]);
-        for c in 0..k {
-            let t = transitions[s * k + c];
-            if t == TDFA_DEAD_STATE || accepting[t as usize] {
-                continue;
-            }
-            let t = t as usize;
-            for w in 0..words {
-                acc[w] |= rw[t * words + w];
-            }
-        }
-        if acc[..] != rw[s * words..(s + 1) * words] {
-            rw[s * words..(s + 1) * words].copy_from_slice(&acc);
-            for &p in &preds[s] {
-                if !in_wl[p as usize] {
-                    in_wl[p as usize] = true;
-                    wl.push_back(p);
-                }
-            }
-        }
-    }
-
-    // An accepting state is a fallback iff a register it reads can be clobbered.
-    let mut out = vec![false; n].into_boxed_slice();
-    let mut reads = vec![0u64; words];
+    let mut mark_bit = vec![u32::MAX; num_marks];
+    let mut relevant_marks = 0usize;
     for s in 0..n {
         if !accepting[s] {
             continue;
         }
-        reads.iter_mut().for_each(|w| *w = 0);
         for fc in &finals[s] {
-            if let MarkValue::Copy(mk) = fc.src {
-                bs_set(&mut reads, mk.0);
+            if fc.tag as usize >= num_output_tags {
+                continue;
+            }
+            let MarkValue::Copy(mk) = fc.src else {
+                continue;
+            };
+            let slot = &mut mark_bit[mk.0 as usize];
+            if *slot == u32::MAX {
+                *slot = relevant_marks as u32;
+                relevant_marks += 1;
             }
         }
-        let rw_s = &rw[s * words..(s + 1) * words];
-        out[s] = reads.iter().zip(rw_s).any(|(&r, &w)| r & w != 0);
+    }
+    if relevant_marks == 0 {
+        return vec![false; n].into_boxed_slice();
+    }
+    let words = relevant_marks.div_ceil(64);
+
+    // Continuation edges stop at dead and accepting targets. Deduplicating the
+    // reverse rows avoids revisiting a predecessor once per equivalent byte class.
+    let mut preds: Vec<Vec<u32>> = vec![Vec::new(); n];
+    for s in 0..n {
+        for c in 0..k {
+            let t = transitions[s * k + c];
+            if t != TDFA_DEAD_STATE && !accepting[t as usize] {
+                preds[t as usize].push(s as u32);
+            }
+        }
+    }
+    for ps in &mut preds {
+        ps.sort_unstable();
+        ps.dedup();
+    }
+
+    // Kosaraju first pass: forward finishing order. The explicit stack avoids
+    // overflowing on long counted repetitions.
+    let mut seen = vec![false; n];
+    let mut order = Vec::with_capacity(n);
+    for root in 0..n {
+        if seen[root] {
+            continue;
+        }
+        seen[root] = true;
+        let mut stack = vec![(root as u32, 0usize)];
+        while !stack.is_empty() {
+            let top = stack.len() - 1;
+            let s = stack[top].0;
+            let mut descended = false;
+            while stack[top].1 < k {
+                let c = stack[top].1;
+                stack[top].1 += 1;
+                let t = transitions[s as usize * k + c];
+                if t == TDFA_DEAD_STATE || accepting[t as usize] || seen[t as usize] {
+                    continue;
+                }
+                seen[t as usize] = true;
+                stack.push((t, 0));
+                descended = true;
+                break;
+            }
+            if !descended {
+                order.push(s);
+                stack.pop();
+            }
+        }
+    }
+
+    // Reverse pass: assign SCC IDs.
+    let mut component = vec![u32::MAX; n];
+    let mut component_count = 0usize;
+    for &root in order.iter().rev() {
+        if component[root as usize] != u32::MAX {
+            continue;
+        }
+        component[root as usize] = component_count as u32;
+        let mut stack = vec![root];
+        while let Some(s) = stack.pop() {
+            for &p in &preds[s as usize] {
+                if component[p as usize] == u32::MAX {
+                    component[p as usize] = component_count as u32;
+                    stack.push(p);
+                }
+            }
+        }
+        component_count += 1;
+    }
+
+    // Seed component-local writes and build the condensation DAG.
+    let mut rw = vec![0u64; component_count * words];
+    let mut successors: Vec<Vec<u32>> = vec![Vec::new(); component_count];
+    for s in 0..n {
+        let cs = component[s] as usize;
+        for c in 0..k {
+            let idx = s * k + c;
+            let t = transitions[idx];
+            if t == TDFA_DEAD_STATE || accepting[t as usize] {
+                continue;
+            }
+            for cmd in transition_commands.iat(idx) {
+                let bit = mark_bit[cmd.dst.0 as usize];
+                if bit != u32::MAX {
+                    bs_set(&mut rw[cs * words..(cs + 1) * words], bit);
+                }
+            }
+            let ct = component[t as usize];
+            if ct != cs as u32 {
+                successors[cs].push(ct);
+            }
+        }
+    }
+
+    let mut indegree = vec![0usize; component_count];
+    for succ in &mut successors {
+        succ.sort_unstable();
+        succ.dedup();
+        for &t in succ.iter() {
+            indegree[t as usize] += 1;
+        }
+    }
+    let mut queue: std::collections::VecDeque<u32> = indegree
+        .iter()
+        .enumerate()
+        .filter_map(|(c, &d)| (d == 0).then_some(c as u32))
+        .collect();
+    let mut topo = Vec::with_capacity(component_count);
+    while let Some(c) = queue.pop_front() {
+        topo.push(c);
+        for &t in &successors[c as usize] {
+            indegree[t as usize] -= 1;
+            if indegree[t as usize] == 0 {
+                queue.push_back(t);
+            }
+        }
+    }
+    debug_assert_eq!(topo.len(), component_count);
+
+    for &c in topo.iter().rev() {
+        let c = c as usize;
+        for &t in &successors[c] {
+            let t = t as usize;
+            for w in 0..words {
+                let reachable = rw[t * words + w];
+                rw[c * words + w] |= reachable;
+            }
+        }
+    }
+
+    let mut out = vec![false; n].into_boxed_slice();
+    for s in 0..n {
+        if !accepting[s] {
+            continue;
+        }
+        let cs = component[s] as usize;
+        let rw_s = &rw[cs * words..(cs + 1) * words];
+        for fc in &finals[s] {
+            if fc.tag as usize >= num_output_tags {
+                continue;
+            }
+            let MarkValue::Copy(mk) = fc.src else {
+                continue;
+            };
+            let bit = mark_bit[mk.0 as usize];
+            debug_assert_ne!(bit, u32::MAX);
+            if rw_s[(bit >> 6) as usize] & (1u64 << (bit & 63)) != 0 {
+                out[s] = true;
+                break;
+            }
+        }
     }
     out
 }
@@ -2666,6 +2727,7 @@ impl Tdfa {
             &finals,
             num_classes,
             num_marks,
+            nfa.num_capture_tags(),
         );
         #[cfg(feature = "std")]
         if let (Some(pt), Some(t)) = (build.phase_trace.as_mut(), t) {
@@ -3159,6 +3221,7 @@ impl Tdfa {
             &self.finals,
             self.num_classes,
             self.num_marks,
+            2 + 2 * self.num_capture_groups,
         );
         // Rebuild after accept_fallback is refreshed (compile_moves_all above used the stale value).
         self.build_trans_flags();

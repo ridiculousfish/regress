@@ -202,10 +202,9 @@ pub(crate) trait Assembler {
     );
 
     /// Record an accept at the current position in state `state_id`:
-    /// `acc_end = pos`, `acc_state = state_id`. When `is_fallback`, the winning
-    /// marks may be clobbered before scan end, so the snapshot flag (high bit)
-    /// is folded into `acc_state` (the caller then reads `best_snap`); the
-    /// driver emits a following [`cap_snapshot`](Self::cap_snapshot).
+    /// `acc_end = pos`, `acc_state = state_id`. When `is_fallback`, observable
+    /// final values are materialized into `best_snap`; the high snapshot bit in
+    /// `acc_state` tells the caller to finalize from them.
     fn cap_record_accept(&mut self, state_id: u32, is_fallback: bool);
 
     /// Like [`cap_record_accept`](Self::cap_record_accept), but at the
@@ -214,10 +213,9 @@ pub(crate) trait Assembler {
     /// the byte that left the state.
     fn cap_record_accept_prev(&mut self, state_id: u32, is_fallback: bool);
 
-    /// Copy `width` u32 lanes from the live mark file into `best_snap` (a
-    /// fallback accept's eager snapshot). Emitted at the top of fallback
-    /// accepting blocks, right after [`cap_record_accept`](Self::cap_record_accept).
-    fn cap_snapshot(&mut self, width: u32);
+    /// Materialize `(mark source, final-tag destination)` pairs into the compact
+    /// fallback snapshot. Emitted immediately after recording a fallback accept.
+    fn cap_snapshot(&mut self, copies: &[(u16, u16)]);
 
     /// Position stamps for a peeled stamping self-loop: `marks[dst] = pos` for
     /// each lane in `dsts` (u64 lanes; no-op when empty). The inline equivalent

@@ -41,13 +41,11 @@ const ACC_END: u32 = 9;
 const ACC_STATE: u32 = 10;
 const BEST_SNAP: u32 = 11; // capture tier: snapshot destination (from arg 4)
 const MOVE_TMP: u32 = 7; // shared with OFF; only used in move/snapshot code
-const SNAP_CTR: u32 = 6; // snapshot loop counter (shared with BYTE; free at accept)
 
 const XZR: u32 = 31;
 
 // AArch64 condition codes.
 const COND_EQ: u32 = 0;
-const COND_LO: u32 = 3; // unsigned lower (<)
 const COND_LS: u32 = 9; // unsigned lower or same (<=)
 
 /// The 4th integer argument register (x4) — holds `best_snap` on entry, before
@@ -205,16 +203,6 @@ impl Aarch64Asm {
     /// `CMN Xn, #1` (ADDS XZR, Xn, #1): sets Z iff `Xn == u64::MAX`.
     fn cmn_x1(&mut self, rn: u32) {
         self.emit_u32(0xB100_0000 | (1 << 10) | (rn << 5) | XZR);
-    }
-
-    /// `LDR Xt, [Xn, Xm, LSL #3]` (64-bit register offset).
-    fn ldr_x_idx(&mut self, rt: u32, rn: u32, rm: u32) {
-        self.emit_u32(0xF860_7800 | (rm << 16) | (rn << 5) | rt);
-    }
-
-    /// `STR Xt, [Xn, Xm, LSL #3]` (64-bit register offset).
-    fn str_x_idx(&mut self, rt: u32, rn: u32, rm: u32) {
-        self.emit_u32(0xF820_7800 | (rm << 16) | (rn << 5) | rt);
     }
 
     /// `STR Xt, [Xn, #imm12*8]` (64-bit, unsigned scaled offset).
@@ -423,18 +411,11 @@ impl Assembler for Aarch64Asm {
         self.cap_record_state(state_id, is_fallback);
     }
 
-    fn cap_snapshot(&mut self, width: u32) {
-        // for i in 0..width { best_snap[i] = marks[i] }  (u64 lanes)
-        self.movz_x(SNAP_CTR, 0); // i = 0
-        let loop_top = self.code.len() as u32;
-        self.ldr_x_idx(MOVE_TMP, MARKS, SNAP_CTR); // tmp = marks[i]
-        self.str_x_idx(MOVE_TMP, BEST_SNAP, SNAP_CTR); // best_snap[i] = tmp
-        self.add_imm(SNAP_CTR, SNAP_CTR, 1); // i += 1
-        self.cmp_imm_w(SNAP_CTR, width); // cmp i, width
-        // b.lo loop_top  (backward branch; compute the displacement directly)
-        let at = self.here();
-        let imm19 = (((loop_top as i64 - at as i64) >> 2) as u32) & 0x7_FFFF;
-        self.emit_u32(0x5400_0000 | (imm19 << 5) | COND_LO);
+    fn cap_snapshot(&mut self, copies: &[(u16, u16)]) {
+        for &(src, tag) in copies {
+            self.ldr_x(MOVE_TMP, MARKS, src as u32);
+            self.str_x(MOVE_TMP, BEST_SNAP, tag as u32);
+        }
     }
 
     fn cap_stamp_curpos(&mut self, dsts: &[u16]) {

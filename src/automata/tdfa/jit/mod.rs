@@ -8,11 +8,9 @@
 //! become branches/jump-tables, accepts become inline stores, and the hot
 //! values (`pos`, `end`, `input`, `last_accept`) are pinned in registers.
 //!
-//! Tiers supported: the capture-free fast path (no marks, `start_fixed`, no
-//! conditionals/anchor-alts) and the anchored capture path (per-transition
-//! `MoveOp` stores + `finalize`, no fallback accepts). Automata outside these
-//! (unanchored scan, `$`-conditionals, multiline-`^` alts, fallback accepts)
-//! return an error so the caller falls back to the interpreter backend.
+//! Tiers supported: the capture-free fast path and the capture path with
+//! per-transition `MoveOp` stores, deferred finalization, and compact fallback
+//! snapshots. Zero-width guard automata fall back to the interpreter backend.
 
 // JIT codegen, executable memory, and calling generated code are inherently
 // unsafe, so the backend is fundamentally incompatible with `prohibit-unsafe`.
@@ -29,7 +27,7 @@ mod x86_64;
 
 use crate::automata::nfa_backend::NfaMatch;
 use crate::automata::tdfa::plan::{self, Dispatch};
-use crate::automata::tdfa::{TDFA_DEAD_STATE, Tdfa};
+use crate::automata::tdfa::{MarkValue, TDFA_DEAD_STATE, Tdfa};
 use crate::automata::tdfa_backend::{self, PrefixSkip, Scratch};
 use asm::{Assembler, Label};
 use mem::ExecBuffer;
@@ -55,15 +53,13 @@ struct CaptureResult {
 }
 
 /// Capture C ABI: `(input, len, start, marks, best_snap) -> CaptureResult`. The
-/// mark file `marks` (u64 lanes) is prepared by the caller (reset + entry
-/// commands) and filled in place by the generated code; `best_snap` receives an
-/// eager copy of the marks on a fallback accept. See [`CaptureResult`] for the
-/// return encoding.
+/// mark file `marks` is prepared by the caller and filled by generated code;
+/// `best_snap` receives tag-indexed final values on a fallback accept.
 type CaptureFn =
     extern "C" fn(*const u8, usize, usize, *mut usize, *mut usize) -> CaptureResult;
 
-/// Bit of `CaptureResult::meta`: set when the winning marks live in `best_snap`
-/// (a fallback accept), clear when live in `marks`. Bit 31 (above every valid
+/// Bit of `CaptureResult::meta`: set when compact final values live in
+/// `best_snap`, clear when finalization should read live marks. Bit 31 (above every valid
 /// state id, which the codegen caps at `u16::MAX`).
 const SNAPSHOT_FLAG: u64 = 1 << 31;
 
@@ -443,9 +439,9 @@ enum PeelAccept {
     No,
     /// Capture-free tier: `acc = pos - 1` on exit / `acc = pos` at EOI.
     End,
-    /// Capture tier: record `(acc_end, acc_state)`, plus the eager mark
-    /// snapshot (`width` lanes) when the accept is a fallback.
-    Capture { state: u32, fallback: bool, width: u32 },
+    /// Capture tier: record `(acc_end, acc_state)` and materialize observable
+    /// final values when the accept is a fallback.
+    Capture { state: u32, copies: Vec<(u16, u16)> },
 }
 
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
@@ -457,7 +453,7 @@ impl PeelAccept {
     /// Emit the accept record; `prev` picks `pos - 1` (loop exit, `pos` already
     /// advanced past the exit byte) over `pos` (EOI pad, `pos == end`).
     fn emit<A: Assembler>(&self, asm: &mut A, prev: bool) {
-        match *self {
+        match self {
             PeelAccept::No => {}
             PeelAccept::End => {
                 if prev {
@@ -466,15 +462,14 @@ impl PeelAccept {
                     asm.record_accept();
                 }
             }
-            PeelAccept::Capture { state, fallback, width } => {
+            PeelAccept::Capture { state, copies } => {
+                let fallback = !copies.is_empty();
                 if prev {
-                    asm.cap_record_accept_prev(state, fallback);
+                    asm.cap_record_accept_prev(*state, fallback);
                 } else {
-                    asm.cap_record_accept(state, fallback);
+                    asm.cap_record_accept(*state, fallback);
                 }
-                if fallback {
-                    asm.cap_snapshot(width);
-                }
+                asm.cap_snapshot(copies);
             }
         }
     }
@@ -783,13 +778,34 @@ fn emit_capture_free<A: Assembler>(
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 const JIT_MAX_MARK_LANES: usize = 4095;
 
-/// Codegen driver for the **anchored capture tier**: like
-/// [`emit_capture_free`], but threads the u32 mark file through (arg 3), applies
-/// each transition's `MoveOp` sequence as an inlined move stub, and tracks the
-/// winning `(end, state)` for the caller to `finalize`. Supported only when the
-/// "read live registers at scan end" scheme is valid — i.e. no fallback accepts,
-/// no `$`-conditionals or anchor alts, a fixed start, and a small-enough mark
-/// file (see gating).
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+fn final_snapshot_copies(tdfa: &Tdfa, state: usize, fallback: bool) -> Vec<(u16, u16)> {
+    if !fallback {
+        return Vec::new();
+    }
+    let num_output_tags = 2 + 2 * tdfa.num_capture_groups();
+    tdfa.finals(state as u32)
+        .iter()
+        .filter_map(|cmd| {
+            let tag = cmd.tag as usize;
+            if tag >= num_output_tags {
+                return None;
+            }
+            let MarkValue::Copy(src) = cmd.src else {
+                unreachable!("finals never use CurrentPos")
+            };
+            Some((
+                u16::try_from(src.0).expect("JIT mark source exceeds u16"),
+                u16::try_from(tag).expect("JIT final tag exceeds u16"),
+            ))
+        })
+        .collect()
+}
+
+/// Codegen driver for the capture tier: threads the mark file through arg 3,
+/// applies transition moves, records the winning `(end, state)`, and materializes
+/// compact final values for fallback accepts. Guarded automata and mark files
+/// beyond the architecture's immediate-offset range are declined.
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 #[allow(clippy::needless_range_loop)] // state id indexes several parallel arrays
 fn emit_capture<A: Assembler>(
@@ -830,7 +846,6 @@ fn emit_capture<A: Assembler>(
     let trans_moves = tdfa.transition_moves();
     let byte_to_class = tdfa.byte_to_class();
     let curpos_idx = (num_marks + 1) as u32;
-    let mark_width = (num_marks + 3) as u32;
     let start_anchored = tdfa.start(0) as usize;
     let start_unanchored = tdfa.start(1) as usize;
 
@@ -922,8 +937,7 @@ fn emit_capture<A: Assembler>(
             let accept = if accepting[s] {
                 PeelAccept::Capture {
                     state: s as u32,
-                    fallback: fallback[s],
-                    width: mark_width,
+                    copies: final_snapshot_copies(tdfa, s, fallback[s]),
                 }
             } else {
                 PeelAccept::No
@@ -940,7 +954,8 @@ fn emit_capture<A: Assembler>(
             // marks (they may be clobbered before scan end).
             asm.cap_record_accept(s as u32, fallback[s]);
             if fallback[s] {
-                asm.cap_snapshot(mark_width);
+                let copies = final_snapshot_copies(tdfa, s, true);
+                asm.cap_snapshot(&copies);
             }
         }
         // The capture tier still declines `has_eoi_accepts`, so every state's
@@ -1458,7 +1473,7 @@ mod tests {
             Scratch::new(tdfa_backend::mark_file_width(&tdfa), tdfa.num_capture_groups());
             let inputs = [
                 "foo123", "12-345", "aaabb", "xpq", "ababab", "9", "b7", "", "zzz", "abab",
-                "a b  c ", "1,2,3,", "ab a",
+                "a b  c ", "1,2,3,", "ab a", "aba",
             ];
             for input in inputs {
                 let bytes = input.as_bytes();

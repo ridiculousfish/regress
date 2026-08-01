@@ -491,7 +491,7 @@ pub(super) fn emit_capture(w: &mut String, tdfa: &Tdfa, skip: Option<PrefixSkip>
         let _ = writeln!(w, "        let mut tmp = usize::MAX;");
     }
     if any_fallback {
-        let _ = writeln!(w, "        let mut s = [usize::MAX; {}];", marks.num_marks);
+        let _ = writeln!(w, "        let mut s = [usize::MAX; {}];", num_caps + 2);
     }
     let _ = writeln!(w, "        let mut acc_end = usize::MAX;");
     let _ = writeln!(w, "        let mut acc_state = u32::MAX;");
@@ -565,34 +565,25 @@ pub(super) fn emit_capture(w: &mut String, tdfa: &Tdfa, skip: Option<PrefixSkip>
     let _ = writeln!(w, "    }}");
 }
 
-/// The mark lanes state `s`'s finals read.
-fn finals_lanes(tdfa: &Tdfa, s: usize) -> Vec<usize> {
-    use crate::automata::tdfa::MarkValue;
-    tdfa.finals(s as u32)
-        .iter()
-        .map(|cmd| {
-            let MarkValue::Copy(src) = cmd.src else {
-                unreachable!("finals never use CurrentPos")
-            };
-            src.0 as usize
-        })
-        .collect()
-}
-
 /// The accept record for capture-tier accepting state `s`: `(acc_end,
-/// acc_state)` plus, for a fallback accept, an eager snapshot of the mark
-/// lanes its finals read (they may be clobbered before scan end).
+/// acc_state)` plus, for a fallback accept, observable final values stored by
+/// tag rather than a snapshot of the physical mark file.
 fn emit_cap_accept(w: &mut String, indent: &str, s: usize, tdfa: &Tdfa, is_fallback: bool) {
+    use crate::automata::tdfa::MarkValue;
     let _ = writeln!(w, "{indent}acc_end = pos;");
     let _ = writeln!(w, "{indent}acc_state = {s};");
     if is_fallback {
-        let mut lanes = finals_lanes(tdfa, s);
-        lanes.sort_unstable();
-        lanes.dedup();
-        for lane in lanes {
-            if lane < tdfa.num_marks() {
-                let _ = writeln!(w, "{indent}s[{lane}] = m[{lane}];");
+        let num_output_tags = 2 + 2 * tdfa.num_capture_groups();
+        for cmd in tdfa.finals(s as u32) {
+            let tag = cmd.tag as usize;
+            if tag >= num_output_tags {
+                continue;
             }
+            let MarkValue::Copy(src) = cmd.src else {
+                unreachable!("finals never use CurrentPos")
+            };
+            let lane = src.0 as usize;
+            let _ = writeln!(w, "{indent}s[{tag}] = m[{lane}];");
         }
     }
 }
@@ -767,10 +758,9 @@ fn emit_finalize_arm(
     is_fallback: bool,
 ) {
     use crate::automata::tdfa::MarkValue;
-    // A fallback accept reads its snapshot lanes; others read live marks.
-    let lane_expr = |lane: usize| -> String {
-        if is_fallback && lane < marks.num_marks {
-            format!("s[{lane}]")
+    let value_expr = |tag: usize, lane: usize| -> String {
+        if is_fallback {
+            format!("s[{tag}]")
         } else {
             marks.read(lane)
         }
@@ -779,19 +769,21 @@ fn emit_finalize_arm(
     let mut end_expr: Option<String> = None;
     let _ = writeln!(w, "            {s} => {{");
     for cmd in tdfa.finals(s as u32) {
+        let tag = cmd.tag as usize;
+        // Sentinel tags (ProgressSince) exceed the observable result.
+        if tag >= num_caps + 2 {
+            continue;
+        }
         let MarkValue::Copy(src) = cmd.src else {
             unreachable!("finals never use CurrentPos")
         };
-        let val = lane_expr(src.0 as usize);
-        match cmd.tag as usize {
+        let val = value_expr(tag, src.0 as usize);
+        match tag {
             0 => start_expr = Some(val),
             1 => end_expr = Some(val),
             tag => {
                 let idx = tag - 2;
-                // Sentinel tags (ProgressSince) exceed the capture range.
-                if idx < num_caps {
-                    let _ = writeln!(w, "                caps[{idx}] = {val};");
-                }
+                let _ = writeln!(w, "                caps[{idx}] = {val};");
             }
         }
     }
