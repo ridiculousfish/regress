@@ -101,17 +101,29 @@ impl From<&str> for Flags {
 
 impl fmt::Display for Flags {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.multiline {
+        // Destrucutre so we don't forget to print a field if new ones are added.
+        let Self {
+            icase,
+            multiline,
+            dot_all,
+            no_opt: _,
+            unicode,
+            unicode_sets,
+        } = *self;
+        if multiline {
             f.write_str("m")?;
         }
-        if self.icase {
+        if icase {
             f.write_str("i")?;
         }
-        if self.dot_all {
+        if dot_all {
             f.write_str("s")?;
         }
-        if self.unicode {
+        if unicode {
             f.write_str("u")?;
+        }
+        if unicode_sets {
+            f.write_str("v")?;
         }
         Ok(())
     }
