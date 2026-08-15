@@ -394,7 +394,7 @@ impl Regex {
     /// An Error may be returned if the syntax is invalid.
     //
     /// Note it is preferable to cache a Regex which is intended to be used more
-    /// than once, as the parse may be expensive. For example:
+    /// than once, as the parse may be expensive.
     #[inline]
     pub fn with_flags<F>(pattern: &str, flags: F) -> Result<Regex, Error>
     where
