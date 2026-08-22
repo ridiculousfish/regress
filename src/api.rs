@@ -397,7 +397,6 @@ impl Regex {
     /// An Error may be returned if the syntax is invalid.
     /// Note that this is rather expensive; prefer to cache a Regex which is
     /// intended to be used more than once.
-    #[inline]
     pub fn new(pattern: &str) -> Result<Regex, Error> {
         Self::with_flags(pattern, Flags::default())
     }
@@ -435,7 +434,6 @@ impl Regex {
     }
 
     /// Searches `text` to find the first match.
-    #[inline]
     pub fn find(&self, text: &str) -> Option<Match> {
         self.find_iter(text).next()
     }
@@ -480,7 +478,6 @@ impl Regex {
     /// Searches `text` to find the first match.
     /// The input text is expected to be ascii-only: only ASCII case-folding is
     /// supported.
-    #[inline]
     pub fn find_ascii(&self, text: &str) -> Option<Match> {
         self.find_iter_ascii(text).next()
     }
