@@ -73,6 +73,12 @@ pub(crate) struct MatchAttempter<'a, Input: InputIndexer> {
     re: &'a CompiledRegex,
     bts: Vec<BacktrackInsn<Input>>,
     s: State<Input::Position>,
+    /// Backtracking steps left before this attempter gives up, or `u64::MAX`
+    /// for "unlimited" — the default, and the historical behaviour.
+    budget: u64,
+    /// Set when [`Self::budget`] ran out during the last attempt, so a caller
+    /// can tell "gave up" apart from "no match".
+    pub(crate) budget_exhausted: bool,
 }
 
 impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
@@ -84,12 +90,38 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 loops: vec![LoopData::new(entry); re.loops as usize],
                 groups: vec![GroupData::new(); re.groups as usize],
             },
+            budget: u64::MAX,
+            budget_exhausted: false,
         }
+    }
+
+    /// Limit how many backtracks one match attempt may take. `u64::MAX` (the
+    /// default) is unlimited.
+    pub(crate) fn set_backtrack_budget(&mut self, budget: u64) {
+        self.budget = budget;
     }
 
     #[inline(always)]
     fn push_backtrack(&mut self, bt: BacktrackInsn<Input>) {
         self.bts.push(bt)
+    }
+
+    /// Charge one backtrack against the budget.
+    ///
+    /// `false` means the budget is spent and the attempt must unwind. Charged
+    /// on the backtrack path, not the instruction path: forward progress is
+    /// bounded by the subject, only backtracking is not.
+    #[inline(always)]
+    fn charge_backtrack(&mut self) -> bool {
+        if self.budget == u64::MAX {
+            return true;
+        }
+        if self.budget == 0 {
+            self.budget_exhausted = true;
+            return false;
+        }
+        self.budget -= 1;
+        true
     }
 
     #[inline(always)]
@@ -980,6 +1012,14 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
 
             // This after the backtrack loop.
             // A break 'backtrack will jump here.
+            //
+            // The one place a backtrack is taken, so the one place to charge
+            // the budget. Running out unwinds to the sentinel and reports no
+            // match, with `budget_exhausted` set.
+            if !self.charge_backtrack() {
+                self.bts.truncate(1);
+                return None;
+            }
             if self.try_backtrack(input, &mut ip, &mut pos, dir) {
                 continue 'nextinsn;
             } else {
@@ -1089,6 +1129,20 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
             // Didn't find it at this position, try the next one.
             pos = inp.next_right_pos(pos)?;
         }
+    }
+}
+
+impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
+    /// Limit how many backtracks one search may take. `u64::MAX` (the default)
+    /// is unlimited.
+    pub fn set_backtrack_budget(&mut self, budget: u64) {
+        self.matcher.set_backtrack_budget(budget);
+    }
+
+    /// Did the last search stop because the budget ran out rather than because
+    /// there is no match?
+    pub fn budget_exhausted(&self) -> bool {
+        self.matcher.budget_exhausted
     }
 }
 

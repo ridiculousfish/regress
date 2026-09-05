@@ -141,6 +141,16 @@ pub type Matches<'r, 't> = exec::Matches<backends::DefaultExecutor<'r, 't>>;
 pub type AsciiMatches<'r, 't> = exec::Matches<backends::DefaultAsciiExecutor<'r, 't>>;
 
 /// A Match represents a portion of a string which was found to match a Regex.
+/// The outcome of a budgeted search — see [`Regex::find_from_budgeted`].
+pub enum BudgetedMatch {
+    /// A match was found.
+    Match(Match),
+    /// The search completed and there is no match.
+    NoMatch,
+    /// The backtracking budget ran out; the answer is unknown.
+    BudgetExhausted,
+}
+
 #[derive(Debug, Clone)]
 pub struct Match {
     /// The total range of the match. Note this may be empty, if the regex
@@ -436,6 +446,43 @@ impl Regex {
     /// Searches `text` to find the first match.
     pub fn find(&self, text: &str) -> Option<Match> {
         self.find_iter(text).next()
+    }
+
+    /// Search `text` from byte offset `start`, giving up after `budget`
+    /// backtracks.
+    ///
+    /// A classical backtracker has no bound on the work one search can do —
+    /// `/^(a+)+$/` against `"a" * n + "!"` doubles with each added character —
+    /// so an engine used on untrusted patterns or untrusted input needs a way
+    /// to stop. Returns [`BudgetedMatch::BudgetExhausted`] rather than a wrong
+    /// `None`, because "I gave up" and "there is no match" call for different
+    /// responses from the caller.
+    ///
+    /// The budget is per call; [`Regex::find`] and the iterators are
+    /// unaffected and stay unbudgeted.
+    ///
+    /// ```rust
+    /// use regress::{BudgetedMatch, Regex};
+    /// let re = Regex::new(r"^(a+)+$").unwrap();
+    /// let hay = "a".repeat(40) + "!";
+    /// assert!(matches!(
+    ///     re.find_from_budgeted(&hay, 0, 100_000),
+    ///     BudgetedMatch::BudgetExhausted
+    /// ));
+    /// ```
+    pub fn find_from_budgeted(&self, text: &str, start: usize, budget: u64) -> BudgetedMatch {
+        use crate::exec::{Executor, MatchProducer};
+        let mut exec = <backends::DefaultExecutor as Executor>::new(&self.cr, text);
+        exec.set_backtrack_budget(budget);
+        let Some(pos) = exec.initial_position(start) else {
+            return BudgetedMatch::NoMatch;
+        };
+        let mut next_start = None;
+        match exec.next_match(pos, &mut next_start) {
+            Some(m) => BudgetedMatch::Match(m),
+            None if exec.budget_exhausted() => BudgetedMatch::BudgetExhausted,
+            None => BudgetedMatch::NoMatch,
+        }
     }
 
     /// Searches `text`, returning an iterator over non-overlapping matches.
