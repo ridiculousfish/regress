@@ -113,9 +113,6 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
     /// bounded by the subject, only backtracking is not.
     #[inline(always)]
     fn charge_backtrack(&mut self) -> bool {
-        if self.budget == u64::MAX {
-            return true;
-        }
         if self.budget == 0 {
             self.budget_exhausted = true;
             return false;
