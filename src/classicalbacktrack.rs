@@ -1127,9 +1127,7 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
             pos = inp.next_right_pos(pos)?;
         }
     }
-}
 
-impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
     /// Limit how many backtracks one search may take. `u64::MAX` (the default)
     /// is unlimited.
     pub fn set_backtrack_budget(&mut self, budget: u64) {
