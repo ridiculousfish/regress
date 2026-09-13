@@ -454,6 +454,8 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
             group_names: Box::new([]),
             flags: n.flags,
             start_pred: startpredicate::predicate_for_re(n),
+            #[cfg(feature = "utf16")]
+            unit_start_pred: startpredicate::unit_predicate_for_re(n),
         },
     };
     emitter.emit_node(&n.node);
