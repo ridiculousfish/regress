@@ -120,6 +120,17 @@ where
         search: &Search,
     ) -> Option<Self::Position>;
 
+    /// Find the next position at or after \p pos which a code unit searcher
+    /// accepts, and at which matching could start.
+    /// \return the new position, or None on failure.
+    /// This panics if CODE_UNITS_ARE_BYTES is true.
+    #[cfg(feature = "utf16")]
+    fn find_units<Search: bytesearch::UnitSearcher + ?Sized>(
+        &self,
+        pos: Self::Position,
+        search: &Search,
+    ) -> Option<Self::Position>;
+
     /// Peek at the char to the right of a position, without changing that position.
     #[inline(always)]
     fn peek_right(&self, mut pos: Self::Position) -> Option<Self::Element> {
@@ -487,6 +498,15 @@ impl<'a> InputIndexer for Utf8Input<'a> {
         Some(pos + idx)
     }
 
+    #[cfg(feature = "utf16")]
+    fn find_units<Search: bytesearch::UnitSearcher + ?Sized>(
+        &self,
+        _pos: Self::Position,
+        _search: &Search,
+    ) -> Option<Self::Position> {
+        panic!("Should never be finding code units for bytes");
+    }
+
     fn subrange_eq<Dir: Direction>(
         &self,
         _dir: Dir,
@@ -769,6 +789,15 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         let rem = self.slice(pos, self.right_end());
         let idx = search.find_in(rem)?;
         Some(pos + idx)
+    }
+
+    #[cfg(feature = "utf16")]
+    fn find_units<Search: bytesearch::UnitSearcher + ?Sized>(
+        &self,
+        _pos: Self::Position,
+        _search: &Search,
+    ) -> Option<Self::Position> {
+        panic!("Should never be finding code units for bytes");
     }
 
     fn subrange_eq<Dir: Direction>(
@@ -1079,6 +1108,28 @@ impl<'a> InputIndexer for Utf16Input<'a> {
         panic!("Should never be finding bytes for utf16");
     }
 
+    fn find_units<Search: bytesearch::UnitSearcher + ?Sized>(
+        &self,
+        pos: Self::Position,
+        search: &Search,
+    ) -> Option<Self::Position> {
+        let start = self.pos_to_offset(pos);
+        let mut from = start;
+        loop {
+            let idx = from + search.find_in_units(&self.input[from..])?;
+            // Past the starting position, matching steps over whole surrogate
+            // pairs, so a unit between a high and a low surrogate is never a
+            // position it would try.
+            if idx == start
+                || !(Self::is_low_surrogate(self.input[idx])
+                    && Self::is_high_surrogate(self.input[idx - 1]))
+            {
+                return Some(pos + (idx - start));
+            }
+            from = idx + 1;
+        }
+    }
+
     fn subrange_eq<Dir: Direction>(
         &self,
         _dir: Dir,
@@ -1250,6 +1301,16 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
         _search: &Search,
     ) -> Option<Self::Position> {
         panic!("Should never be finding bytes for ucs2");
+    }
+
+    fn find_units<Search: bytesearch::UnitSearcher + ?Sized>(
+        &self,
+        pos: Self::Position,
+        search: &Search,
+    ) -> Option<Self::Position> {
+        let rem = &self.input[self.pos_to_offset(pos)..];
+        let idx = search.find_in_units(rem)?;
+        Some(pos + idx)
     }
 
     fn subrange_eq<Dir: Direction>(

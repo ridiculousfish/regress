@@ -329,6 +329,68 @@ impl fmt::Debug for ByteBitmap {
     }
 }
 
+/// Facilities for searching UTF-16 code units.
+#[cfg(feature = "utf16")]
+pub trait UnitSearcher {
+    /// Search for ourselves in a slice of code units.
+    /// The length of the slice is unspecified and may be 0.
+    /// \return the next index of ourselves in the slice, or None.
+    fn find_in_units(&self, rhs: &[u16]) -> Option<usize>;
+}
+
+#[cfg(feature = "utf16")]
+impl UnitSearcher for [u16; 1] {
+    #[inline(always)]
+    fn find_in_units(&self, rhs: &[u16]) -> Option<usize> {
+        rhs.iter().position(|&u| u == self[0])
+    }
+}
+
+#[cfg(feature = "utf16")]
+impl UnitSearcher for [u16; 2] {
+    #[inline(always)]
+    fn find_in_units(&self, rhs: &[u16]) -> Option<usize> {
+        rhs.iter().position(|&u| u == self[0] || u == self[1])
+    }
+}
+
+#[cfg(feature = "utf16")]
+impl UnitSearcher for [u16; 3] {
+    #[inline(always)]
+    fn find_in_units(&self, rhs: &[u16]) -> Option<usize> {
+        rhs.iter()
+            .position(|&u| u == self[0] || u == self[1] || u == self[2])
+    }
+}
+
+/// A sequence of code units.
+#[cfg(feature = "utf16")]
+impl UnitSearcher for [u16] {
+    fn find_in_units(&self, rhs: &[u16]) -> Option<usize> {
+        let Some((&first, rest)) = self.split_first() else {
+            return Some(0);
+        };
+        let mut from = 0;
+        loop {
+            let idx = from + rhs[from..].iter().position(|&u| u == first)?;
+            if rhs[idx + 1..].starts_with(rest) {
+                return Some(idx);
+            }
+            from = idx + 1;
+        }
+    }
+}
+
+/// A bitmap over code units below 0x100; no code unit above that matches.
+#[cfg(feature = "utf16")]
+impl UnitSearcher for ByteBitmap {
+    #[inline(always)]
+    fn find_in_units(&self, rhs: &[u16]) -> Option<usize> {
+        rhs.iter()
+            .position(|&u| u <= 0xFF && self.contains(u as u8))
+    }
+}
+
 /// A trivial ByteSearcher corresponding to the empty string.
 #[derive(Debug, Copy, Clone)]
 pub struct EmptyString {}
