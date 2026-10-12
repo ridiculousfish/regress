@@ -1227,6 +1227,11 @@ where
                 let mut result = self.consume_class_set_expression()?;
                 if negate_set {
                     result.prepare_negation()?;
+                    // With the i flag, the complement is computed after case
+                    // folding, so close the set under case before inverting.
+                    if self.flags.icase {
+                        result.codepoints = unicode::add_icase_code_points(result.codepoints);
+                    }
                     result.codepoints = result.codepoints.inverted();
                 }
                 self.depth -= 1;
