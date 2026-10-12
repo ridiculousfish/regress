@@ -3287,3 +3287,17 @@ fn unicode_sets_negated_class_may_contain_strings() {
     test_parse_fails_flags(r"[[^\q{ab}]]", "v");
     test_parse_fails_flags(r"[^\p{RGI_Emoji}]", "v");
 }
+
+/// With the i flag, the complement of a nested class is computed after case
+/// folding. So `[[^a]]` excludes both `a` and `A`.
+#[test]
+fn unicode_sets_negated_nested_class_icase() {
+    test_with_configs(|tc| {
+        tc.compilef("[[^a]]", "vi").test_fails("a");
+        tc.compilef("[[^a]]", "vi").test_fails("A");
+        tc.compilef("[[^a]]", "vi").test_succeeds("b");
+        tc.compilef("[^[^a]&&[A]]", "vi").test_succeeds("a");
+        tc.compilef("[^[^a]&&[A]]", "vi").test_succeeds("A");
+        tc.compilef(r"[^[^\q{a}]&&[A]]", "vi").test_succeeds("a");
+    });
+}
