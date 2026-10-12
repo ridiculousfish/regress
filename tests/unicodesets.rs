@@ -3212,3 +3212,46 @@ fn unicode_sets_negated_nested_class() {
         test_parse_fails_flags("[[a-z]--[^aeiou]]", "u");
     });
 }
+
+/// A negated class inverts the single code points of a `\q{}` string disjunction.
+#[test]
+fn unicode_sets_negated_string_disjunction() {
+    test_with_configs(|tc| {
+        test_unicode_sets_matches(tc, r"[^\q{a}]", &["b", "&", "\u{1F600}"], &["a"]);
+        test_unicode_sets_matches(tc, r"[^\q{a|b}]", &["c", "A", "!"], &["a", "b"]);
+        test_unicode_sets_matches(tc, r"[[^\q{a}]]", &["b", "&"], &["a"]);
+        test_unicode_sets_matches(tc, r"[^[^\q{a}]]", &["a"], &["b", "&"]);
+        assert_eq!(tc.compilef(r"[^\q{a}]", "v").match1f("ab"), "b");
+        tc.test_match_fails(r"[^\q{a|b}]", "vi", "A");
+        tc.test_match_succeeds(r"[^\q{a|b}]", "vi", "c");
+        // A subtraction can remove the strings, so this class is valid.
+        test_unicode_sets_matches(tc, r"[^a--\p{RGI_Emoji}]", &["b", "&"], &["a"]);
+    });
+}
+
+/// The empty string in a `\q{}` string disjunction matches the empty string.
+#[test]
+fn unicode_sets_empty_string_disjunction() {
+    test_with_configs(|tc| {
+        assert_eq!(tc.compilef(r"[\q{}]", "v").match1f("a"), "");
+        assert_eq!(tc.compilef(r"[\q{|a}]", "v").match1f("b"), "");
+        assert_eq!(tc.compilef(r"[\q{|a}]", "v").match1f("a"), "a");
+        assert_eq!(tc.compilef(r"[\q{a|}b]", "v").match1f("b"), "b");
+        assert_eq!(tc.compilef(r"[\q{a|}b]", "v").match1f("c"), "");
+        assert_eq!(tc.compilef(r"[\q{a|ab|}]", "v").match1f("ab"), "ab");
+    });
+}
+
+/// A negated class must not contain strings (MayContainStrings).
+#[test]
+fn unicode_sets_negated_class_may_contain_strings() {
+    test_parse_fails_flags(r"[^\q{ab}]", "v");
+    test_parse_fails_flags(r"[^\q{}]", "v");
+    test_parse_fails_flags(r"[^\q{a|}]", "v");
+    test_parse_fails_flags(r"[^[\q{ab}]--[\q{ab}]]", "v");
+    test_parse_fails_flags(r"[^[\q{ab}]&&[\q{cd}]]", "v");
+    test_parse_fails_flags(r"[^[^\q{ab}]&&[a]]", "v");
+    test_parse_fails_flags(r"[^[\q{}]--[a]]", "v");
+    test_parse_fails_flags(r"[[^\q{ab}]]", "v");
+    test_parse_fails_flags(r"[^\p{RGI_Emoji}]", "v");
+}
