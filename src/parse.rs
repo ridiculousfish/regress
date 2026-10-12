@@ -62,6 +62,9 @@ enum ClassAtom {
 struct ClassSet {
     codepoints: CodePointSet,
     alternatives: ClassSetAlternativeStrings,
+    /// The MayContainStrings static semantics. This can be true when no
+    /// alternative remains, for example after a subtraction.
+    may_contain_strings: bool,
 }
 
 impl ClassSet {
@@ -69,10 +72,24 @@ impl ClassSet {
         ClassSet {
             codepoints: CodePointSet::new(),
             alternatives: ClassSetAlternativeStrings::new(),
+            may_contain_strings: false,
         }
     }
 
-    fn node(self, icase: bool, negate_set: bool) -> ir::Node {
+    /// Prepare this set to be inverted.
+    /// A negated class must not contain strings. The remaining alternatives
+    /// are single code points, so move them to the code point set.
+    fn prepare_negation(&mut self) -> Result<(), Error> {
+        if self.may_contain_strings {
+            return error("Negated character class may contain strings");
+        }
+        for alternative in mem::take(&mut self.alternatives.0) {
+            self.codepoints.add_one(alternative[0]);
+        }
+        Ok(())
+    }
+
+    fn node(mut self, icase: bool, negate_set: bool) -> ir::Node {
         let codepoints = if icase {
             unicode::add_icase_code_points(self.codepoints)
         } else {
@@ -88,11 +105,24 @@ impl ClassSet {
         } else if codepoints_empty {
             self.alternatives.into_node(icase)
         } else {
-            make_alt(Vec::from([self.alternatives.into_node(icase), bracket]))
+            // The empty string is the shortest alternative, so it must come
+            // after the single code points.
+            let has_empty = self.alternatives.0.iter().any(|s| s.is_empty());
+            self.alternatives.0.retain(|s| !s.is_empty());
+            let mut nodes = Vec::new();
+            if !self.alternatives.0.is_empty() {
+                nodes.push(self.alternatives.into_node(icase));
+            }
+            nodes.push(bracket);
+            if has_empty {
+                nodes.push(ir::Node::Empty);
+            }
+            make_alt(nodes)
         }
     }
 
     fn union_operand(&mut self, operand: ClassSetOperand) {
+        self.may_contain_strings |= operand.may_contain_strings();
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
                 self.codepoints.add_one(c);
@@ -104,13 +134,14 @@ impl ClassSet {
                 self.codepoints.add_set(class.codepoints);
                 self.alternatives.extend(class.alternatives);
             }
-            ClassSetOperand::ClassStringDisjunction(s) => {
+            ClassSetOperand::ClassStringDisjunction(s, _) => {
                 self.alternatives.extend(s);
             }
         }
     }
 
     fn intersect_operand(&mut self, operand: ClassSetOperand) {
+        self.may_contain_strings &= operand.may_contain_strings();
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
                 if self.codepoints.contains(c) {
@@ -162,7 +193,7 @@ impl ClassSet {
                 self.alternatives.intersect(&class.alternatives);
                 self.alternatives.extend(retained_alternatives);
             }
-            ClassSetOperand::ClassStringDisjunction(s) => {
+            ClassSetOperand::ClassStringDisjunction(s, _) => {
                 let mut retained = CodePointSet::new();
                 for alternative in &s.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
@@ -209,7 +240,7 @@ impl ClassSet {
                 self.alternatives.remove(&alternatives_removed);
                 self.alternatives.remove(&class.alternatives);
             }
-            ClassSetOperand::ClassStringDisjunction(s) => {
+            ClassSetOperand::ClassStringDisjunction(s, _) => {
                 let mut to_remove = CodePointSet::new();
                 for alternative in &s.0 {
                     if alternative.len() == 1 && self.codepoints.contains(alternative[0]) {
@@ -229,7 +260,20 @@ enum ClassSetOperand {
     ClassSetCharacter(CodePoint),
     CharacterClassEscape(CodePointSet),
     Class(ClassSet),
-    ClassStringDisjunction(ClassSetAlternativeStrings),
+    /// The flag is the MayContainStrings static semantics of the operand.
+    ClassStringDisjunction(ClassSetAlternativeStrings, bool),
+}
+
+impl ClassSetOperand {
+    fn may_contain_strings(&self) -> bool {
+        match self {
+            ClassSetOperand::ClassSetCharacter(_) | ClassSetOperand::CharacterClassEscape(_) => {
+                false
+            }
+            ClassSetOperand::Class(class) => class.may_contain_strings,
+            ClassSetOperand::ClassStringDisjunction(_, may_contain_strings) => *may_contain_strings,
+        }
+    }
 }
 
 /// A list of strings matching some property, for use in 'v' regular expressions.
@@ -680,10 +724,11 @@ where
                 '[' if self.flags.unicode_sets => {
                     self.consume('[');
                     let negate_set = self.try_consume('^');
-                    result.push(
-                        self.consume_class_set_expression(negate_set)?
-                            .node(self.flags.icase, negate_set),
-                    );
+                    let mut class_set = self.consume_class_set_expression()?;
+                    if negate_set {
+                        class_set.prepare_negation()?;
+                    }
+                    result.push(class_set.node(self.flags.icase, negate_set));
                 }
 
                 '[' => {
@@ -1023,8 +1068,7 @@ where
     }
 
     // CharacterClass :: ClassContents :: ClassSetExpression
-    // `in_negated_class` forbids string operands. It does not invert the result.
-    fn consume_class_set_expression(&mut self, in_negated_class: bool) -> Result<ClassSet, Error> {
+    fn consume_class_set_expression(&mut self) -> Result<ClassSet, Error> {
         let mut result = ClassSet::new();
 
         let first = match self.peek() {
@@ -1032,7 +1076,7 @@ where
                 self.consume(']');
                 return Ok(result);
             }
-            Some(_) => self.consume_class_set_operand(in_negated_class)?,
+            Some(_) => self.consume_class_set_operand()?,
             None => {
                 return error("Unbalanced class set bracket");
             }
@@ -1064,7 +1108,7 @@ where
                     match first {
                         ClassSetOperand::ClassSetCharacter(first) => {
                             let ClassSetOperand::ClassSetCharacter(last) =
-                                self.consume_class_set_operand(in_negated_class)?
+                                self.consume_class_set_operand()?
                             else {
                                 return error("Invalid class set range");
                             };
@@ -1097,7 +1141,7 @@ where
                             self.consume(']');
                             return Ok(result);
                         }
-                        Some(_) => self.consume_class_set_operand(in_negated_class)?,
+                        Some(_) => self.consume_class_set_operand()?,
                         None => return error("Unbalanced class set bracket"),
                     };
                     if self.peek() == Some(0x2D /* - */) {
@@ -1105,7 +1149,7 @@ where
                         match operand {
                             ClassSetOperand::ClassSetCharacter(first) => {
                                 let ClassSetOperand::ClassSetCharacter(last) =
-                                    self.consume_class_set_operand(in_negated_class)?
+                                    self.consume_class_set_operand()?
                                 else {
                                     return error("Invalid class set range");
                                 };
@@ -1126,7 +1170,7 @@ where
             // ClassIntersection :: ClassSetOperand && [lookahead ≠ &]
             ClassSetOperator::Intersection => {
                 loop {
-                    let operand = self.consume_class_set_operand(in_negated_class)?;
+                    let operand = self.consume_class_set_operand()?;
                     result.intersect_operand(operand);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
@@ -1142,7 +1186,7 @@ where
             // ClassSubtraction :: ClassSubtraction -- ClassSetOperand
             ClassSetOperator::Subtraction => {
                 loop {
-                    let operand = self.consume_class_set_operand(in_negated_class)?;
+                    let operand = self.consume_class_set_operand()?;
                     result.subtract_operand(operand);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
@@ -1158,10 +1202,7 @@ where
         }
     }
 
-    fn consume_class_set_operand(
-        &mut self,
-        in_negated_class: bool,
-    ) -> Result<ClassSetOperand, Error> {
+    fn consume_class_set_operand(&mut self) -> Result<ClassSetOperand, Error> {
         use ClassSetOperand::*;
         let Some(cp) = self.peek() else {
             return error("Empty class set operand");
@@ -1176,8 +1217,9 @@ where
                 }
                 self.consume('[');
                 let negate_set = self.try_consume('^');
-                let mut result = self.consume_class_set_expression(negate_set)?;
+                let mut result = self.consume_class_set_expression()?;
                 if negate_set {
+                    result.prepare_negation()?;
                     result.codepoints = result.codepoints.inverted();
                 }
                 self.depth -= 1;
@@ -1201,22 +1243,20 @@ where
                         }
                         let mut alternatives = Vec::new();
                         let mut alternative = Vec::new();
+                        // ClassString :: [empty] is a string, so it may contain strings too.
+                        let mut may_contain_strings = false;
                         loop {
                             match self.peek() {
                                 Some(0x7D /* } */) => {
                                     self.consume('}');
-                                    if !alternative.is_empty() {
-                                        alternatives.push(alternative.into_boxed_slice());
-                                    }
+                                    may_contain_strings |= alternative.len() != 1;
+                                    alternatives.push(alternative.into_boxed_slice());
                                     break;
                                 }
                                 Some(0x7C /* | */) => {
                                     self.consume('|');
-                                    if !alternative.is_empty() {
-                                        let alternative = mem::take(&mut alternative).into_boxed_slice();
-                                        alternatives.push(alternative);
-
-                                    }
+                                    may_contain_strings |= alternative.len() != 1;
+                                    alternatives.push(mem::take(&mut alternative).into_boxed_slice());
                                 }
                                 Some(_) => {
                                     alternative.push(self.consume_class_set_character()?);
@@ -1226,7 +1266,7 @@ where
                                 }
                             }
                         }
-                        Ok(ClassStringDisjunction(ClassSetAlternativeStrings(alternatives)))
+                        Ok(ClassStringDisjunction(ClassSetAlternativeStrings(alternatives), may_contain_strings))
                     }
                     // CharacterClassEscape :: d
                     0x64 /* d */ => {
@@ -1267,9 +1307,8 @@ where
                                     intervals.to_vec(),
                                 )))
                             }
-                            PropertyEscapeKind::StringSet(_) if in_negated_class => error("Invalid character escape"),
                             PropertyEscapeKind::StringSet(strings) => {
-                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| Box::from(*s)).collect())))
+                                Ok(ClassStringDisjunction(ClassSetAlternativeStrings(strings.iter().map(|s| Box::from(*s)).collect()), true))
                             }
                         }
                     }
