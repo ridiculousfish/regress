@@ -2262,23 +2262,24 @@ fn test_duplicate_named_groups_tc(tc: TestConfig) {
     let ng = m.named_groups();
     assert!(ng.eq([("x", Some(0..1)), ("y", Some(1..2))]));
 
-    // Backreferences with duplicate names
-    // TODO: Backreferences with duplicate named groups require additional work
-    // in the matcher to determine which group participated. This is deferred.
-    //let m = tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
-    //    .find("xx")
-    //    .unwrap();
-    //assert_eq!(m.group(0), Some(0..2));
+    // A backreference to a duplicate name refers to the group that participated.
+    // A group that did not participate must not cause an empty match.
+    let re = tc.compile(r"(?:(?<x>aa)|(?<x>ab))\k<x>");
+    assert_eq!(re.match1_vec("abab"), vec![Some("abab"), None, Some("ab")]);
+    let re = tc.compilef(r"(?:(?<x>a)|(?<x>b))\k<x>", "i");
+    assert_eq!(re.match1_vec("bB"), vec![Some("bB"), None, Some("b")]);
+    assert!(tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>").find("xy").is_none());
 
-    //let m = tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
-    //    .find("yy")
-    //    .unwrap();
-    //assert_eq!(m.group(0), Some(0..2));
+    // Each iteration of a quantifier resets the groups, so the last iteration decides.
+    let re = tc.compile(r"^(?:(?<x>a)|(?<x>b))+\k<x>$");
+    assert_eq!(re.match1_vec("abb"), vec![Some("abb"), None, Some("b")]);
+    assert_eq!(re.match1_vec("baa"), vec![Some("baa"), Some("a"), None]);
 
-    //// Should NOT match when backreference doesn't match
-    //assert!(tc.compile(r"(?:(?<a>x)|(?<a>y))\k<a>")
-    //    .find("xy")
-    //    .is_none());
+    // Groups captured in lookarounds.
+    let re = tc.compile(r"(?=(?:(?<x>a)|(?<x>b)))\k<x>");
+    assert_eq!(re.match1_vec("b"), vec![Some("b"), None, Some("b")]);
+    let re = tc.compile(r"(?<=(?:(?<x>a)|(?<x>b)))\k<x>");
+    assert_eq!(re.find("bb").unwrap().range(), 1..2);
 }
 
 #[test]

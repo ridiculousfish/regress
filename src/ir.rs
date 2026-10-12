@@ -84,7 +84,7 @@ pub enum Node {
     /// Indices are 1-based. That is, it matches JS syntax: \1 is the first capture group,
     /// not everything.
     /// A backreference that logically may match multiple capture groups (through shared names)
-    /// are emitted through alternations of backreferences.
+    /// is emitted as a concatenation of backreferences.
     BackRef { group: u32, icase: bool },
 
     /// A bracket.
