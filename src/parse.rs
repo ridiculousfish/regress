@@ -1050,16 +1050,9 @@ where
                 result.union_operand(first);
                 return Ok(result);
             }
-            Some(0x26 /* & */) => {
-                self.consume('&');
-                if self.peek() == Some(0x26 /* & */) {
-                    self.consume('&');
-                    result.union_operand(first.clone());
-                    ClassSetOperator::Intersection
-                } else {
-                    result.codepoints.add_one(0x26 /* & */);
-                    ClassSetOperator::Union
-                }
+            Some(0x26 /* & */) if self.try_consume_str("&&") => {
+                result.union_operand(first.clone());
+                ClassSetOperator::Intersection
             }
             Some(0x2D /* - */) => {
                 self.consume('-');

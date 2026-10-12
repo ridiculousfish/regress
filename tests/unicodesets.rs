@@ -3212,3 +3212,18 @@ fn unicode_sets_negated_nested_class() {
         test_parse_fails_flags("[[a-z]--[^aeiou]]", "u");
     });
 }
+
+/// A single `&` is a class set character, not an operator.
+#[test]
+fn unicode_sets_single_ampersand_after_first_operand() {
+    test_with_configs(|tc| {
+        test_unicode_sets_matches(tc, "[a&]", &["a", "&"], &["b"]);
+        test_unicode_sets_matches(tc, "[a&bc]", &["a", "&", "b", "c"], &["d"]);
+        test_unicode_sets_matches(tc, "[[ab]&]", &["a", "b", "&"], &["c"]);
+        test_unicode_sets_matches(tc, r"[\d&]", &["1", "&"], &["a"]);
+        test_unicode_sets_matches(tc, "[a&-z]", &["a", "&", "m", "z"], &["%"]);
+        assert_eq!(tc.compilef(r"[\q{ab|cd}&]", "v").match1f("cd"), "cd");
+        assert_eq!(tc.compilef("[a&]", "vi").match1f("A"), "A");
+        assert_eq!(tc.compilef("[^a&]", "v").match1f("ab"), "b");
+    });
+}
