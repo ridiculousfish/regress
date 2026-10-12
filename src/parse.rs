@@ -1714,20 +1714,21 @@ where
                         }
                     }
                     _ => {
-                        // Unusual case of multiple groups sharing a name: the backref should try each in turn.
-                        // Lower to alternations of backreferences. Reverse to keep it right-associative: a | (b | (c | d))...
+                        // Unusual case of multiple groups sharing a name. These groups are in
+                        // different alternatives, so at most one of them can participate. A
+                        // backreference to a group that did not participate matches the empty
+                        // string, so a concatenation of the backreferences matches exactly the
+                        // group that participated.
                         let icase = self.flags.icase;
-                        let backrefs =
+                        make_cat(
                             group_indices
                                 .iter()
-                                .rev()
                                 .map(|group_index| ir::Node::BackRef {
                                     group: *group_index + 1,
                                     icase,
-                                });
-                        backrefs
-                            .reduce(|right, left| ir::Node::Alt(Box::new(left), Box::new(right)))
-                            .unwrap()
+                                })
+                                .collect(),
+                        )
                     }
                 };
                 Ok(node)
