@@ -12,6 +12,7 @@ fn backtracks_across_nested_counted_repetition() {
         )
         .unwrap();
         assert_eq!(re.find("aa").map(|m| m.range()), Some(0..2));
+        #[cfg(feature = "utf16")]
         assert_eq!(
             re.find_from_ucs2(&[b'a' as u16, b'a' as u16], 0)
                 .next()
