@@ -949,6 +949,17 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                             ip: secondary as IP,
                             pos,
                         });
+                        // A failed branch may backtrack past loop undo records before
+                        // resuming this alternative, so preserve the enclosing loops here.
+                        for id in 0..self.s.loops.len() {
+                            let data = self.s.loops[id];
+                            if data.iters > 0 {
+                                self.push_backtrack(BacktrackInsn::SetLoopData {
+                                    id: id as LoopID,
+                                    data,
+                                });
+                            }
+                        }
                         next_or_bt!(true);
                     }
 
