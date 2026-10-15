@@ -62,8 +62,18 @@ enum ClassAtom {
 struct ClassSet {
     codepoints: CodePointSet,
     alternatives: ClassSetAlternativeStrings,
-    /// The MayContainStrings static semantics. This can be true when no
-    /// alternative remains, for example after a subtraction.
+    /// Whether this ClassSet "may match strings."
+    /// This is required to emit errors when certain string-bearing ClassSets are negated.
+    /// This implements the "MayContainStrings" semantics from ECMA-262 - whether
+    /// the class always matches one character (false), or may match strings (true).
+    /// Note (per the spec) this does NOT interrogate the resulting class, but rather the
+    /// flag is flipped to true whenever a string-bearing operand is found in a position
+    /// that can contribute strings (e.g. union). Refer to the ECMA-262 spec for the gory details.
+    /// Note this can be true EVEN IF the ClassSet only ever matches one character;
+    /// the set `[\q{a|ab}--\q{ab}]` leaves only "a" but `may_contain_strings` is still
+    /// true because of the contribution of the string-bearing item.
+    /// In short, this is used exclusively to report syntax errors per the spec. It does not affect
+    /// what the class matches.
     may_contain_strings: bool,
 }
 
@@ -78,12 +88,15 @@ impl ClassSet {
 
     /// Prepare this set to be inverted.
     /// A negated class must not contain strings. The remaining alternatives
-    /// are single code points, so move them to the code point set.
+    /// are single code points, so move them to the code point set, and clear
+    /// the alternatives set.
     fn prepare_negation(&mut self) -> Result<(), Error> {
         if self.may_contain_strings {
             return error("Negated character class may contain strings");
         }
         for alternative in mem::take(&mut self.alternatives.0) {
+            // Should not contain an alternative with multiple code points, i.e. a string.
+            debug_assert_eq!(alternative.len(), 1, "Should only have single code points");
             self.codepoints.add_one(alternative[0]);
         }
         Ok(())

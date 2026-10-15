@@ -3241,6 +3241,11 @@ fn unicode_sets_negated_string_disjunction() {
         tc.test_match_succeeds(r"[^\q{a|b}]", "vi", "c");
         // A subtraction can remove the strings, so this class is valid.
         test_unicode_sets_matches(tc, r"[^a--\p{RGI_Emoji}]", &["b", "&"], &["a"]);
+        // An intersection with a single-character operand removes the strings, so
+        // these classes are valid. The first intersection is empty, so its negation
+        // matches any character.
+        test_unicode_sets_matches(tc, r"[^\q{ab}&&a]", &["a", "b"], &[]);
+        test_unicode_sets_matches(tc, r"[^\q{a|}&&\q{a}]", &["b"], &["a"]);
     });
 }
 
@@ -3254,6 +3259,16 @@ fn unicode_sets_empty_string_disjunction() {
         assert_eq!(tc.compilef(r"[\q{a|}b]", "v").match1f("b"), "b");
         assert_eq!(tc.compilef(r"[\q{a|}b]", "v").match1f("c"), "");
         assert_eq!(tc.compilef(r"[\q{a|ab|}]", "v").match1f("ab"), "ab");
+        // Set operations keep or remove the empty string.
+        assert_eq!(tc.compilef(r"[\q{}&&\q{|a}]", "v").match1f("a"), "");
+        assert_eq!(tc.compilef(r"[\q{|a}--\q{}]", "v").match1f("a"), "a");
+        tc.test_match_fails(r"[\q{|a}--\q{}]", "v", "b");
+        // Quantifiers and lookbehind.
+        assert_eq!(tc.compilef(r"[\q{}]*", "v").match1f("a"), "");
+        assert_eq!(tc.compilef(r"[\q{|a}]+", "v").match1f("aab"), "aa");
+        assert_eq!(tc.compilef(r"[\q{|a}]*?b", "v").match1f("aab"), "aab");
+        assert_eq!(tc.compilef(r"(?<=[\q{|a}])b", "v").match1f("ab"), "b");
+        assert_eq!(tc.compilef(r"x[\q{}]y", "v").match1f("xy"), "xy");
     });
 }
 
@@ -3264,6 +3279,8 @@ fn unicode_sets_negated_class_may_contain_strings() {
     test_parse_fails_flags(r"[^\q{}]", "v");
     test_parse_fails_flags(r"[^\q{a|}]", "v");
     test_parse_fails_flags(r"[^[\q{ab}]--[\q{ab}]]", "v");
+    // Only "a" remains, but the first operand of the subtraction may contain strings.
+    test_parse_fails_flags(r"[^\q{a|ab}--\q{ab}]", "v");
     test_parse_fails_flags(r"[^[\q{ab}]&&[\q{cd}]]", "v");
     test_parse_fails_flags(r"[^[^\q{ab}]&&[a]]", "v");
     test_parse_fails_flags(r"[^[\q{}]--[a]]", "v");
