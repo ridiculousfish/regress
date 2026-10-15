@@ -67,3 +67,37 @@ fn budgeted_search_honours_the_start_offset() {
         _ => panic!("expected the second occurrence"),
     }
 }
+
+/// Abort the entire match if we exhaust the budget at a start position.
+#[test]
+fn exhaustion_does_not_skip_to_a_later_start() {
+    // At 0, the middle branch explodes before `a*c` would match 0..31.
+    // The `b` at 31 matches without backtracking.
+    let re = Regex::new(r"b|(?:a+)+!|a*c").unwrap();
+    let hay = "a".repeat(30) + "cb";
+    assert!(matches!(
+        re.find_from_budgeted(&hay, 0, 100_000),
+        BudgetedMatch::BudgetExhausted
+    ));
+}
+
+/// Abort the entire match if we exhaust the budget inside a lookaround, even a
+/// negative one.
+#[test]
+fn exhaustion_in_a_lookaround_aborts_the_search() {
+    // The lookahead body matches via `a*c`, so the correct answer is no match.
+    let re = Regex::new(r"^(?!(?:a+)+!|a*c)").unwrap();
+    let hay = "a".repeat(30) + "c";
+    assert!(matches!(
+        re.find_from_budgeted(&hay, 0, 100_000),
+        BudgetedMatch::BudgetExhausted
+    ));
+    // Same for a negative lookbehind, which runs backwards. The body matches
+    // via `ax`, so the correct answer is again no match.
+    let re = Regex::new(r"x(?<!!(?:a+)+x|ax)").unwrap();
+    let hay = "c".to_string() + &"a".repeat(30) + "x";
+    assert!(matches!(
+        re.find_from_budgeted(&hay, 0, 100_000),
+        BudgetedMatch::BudgetExhausted
+    ));
+}

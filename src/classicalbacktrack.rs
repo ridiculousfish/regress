@@ -502,6 +502,14 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         // Put back our bts.
         core::mem::swap(&mut self.bts, &mut saved_bts);
 
+        // If the budget ran out, the lookaround's result is unknown. Fail it
+        // regardless of negation; the caller's backtrack then finds the budget
+        // spent and abandons the whole attempt.
+        if self.budget_exhausted {
+            self.s.groups.splice(range, saved_groups);
+            return false;
+        }
+
         // If we are a positive lookahead that successfully matched, retain the
         // capture groups (but we need to set up backtracking). Otherwise restore
         // them.
@@ -1122,6 +1130,11 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
                     *next_start = inp.next_right_pos(end);
                 }
                 return Some(self.successful_match(pos, end));
+            }
+            // Abort the match if the budget was exhausted, as we don't know if
+            // this position may have matched.
+            if self.matcher.budget_exhausted {
+                return None;
             }
             // Didn't find it at this position, try the next one.
             pos = inp.next_right_pos(pos)?;
