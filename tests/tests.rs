@@ -6,6 +6,14 @@ pub mod common;
 use common::*;
 use regress::Regex;
 
+#[test]
+fn issue_5572_nested_empty_alternative() {
+    test_with_configs(|tc| {
+        tc.compile(r"^(?:(?:\s(?:(?:){0,1}|a))+)+$")
+            .test_succeeds("\u{2028}a");
+    });
+}
+
 fn test_zero_length_matches_tc(tc: TestConfig) {
     tc.compile(".*?").match_all("a").test_eq(vec!["", ""]);
     tc.compile(".*?")
