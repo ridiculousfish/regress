@@ -3301,3 +3301,31 @@ fn unicode_sets_negated_nested_class_icase() {
         tc.compilef(r"[^[^\q{a}]&&[A]]", "vi").test_succeeds("a");
     });
 }
+
+/// Under the i flag with unicode sets, set operations (intersection and subtraction)
+/// operate on case-folded operands.
+#[test]
+fn unicode_sets_operations_icase() {
+    test_with_configs(|tc| {
+        tc.compilef("^[s[^a]]$", "vi").test_fails("a");
+        tc.compilef("^[s[^a]]$", "vi").test_fails("A");
+        tc.compilef("^[s[^a]]$", "vi").test_succeeds("s");
+        tc.compilef("^[s[^a]]$", "vi").test_succeeds("S");
+        tc.compilef("[[A-Z]&&[a]]", "vi").test_succeeds("a");
+        tc.compilef("[[A-Z]&&[a]]", "vi").test_succeeds("A");
+        tc.compilef("[[A-Z]&&[a]]", "vi").test_fails("b");
+        tc.compilef("[[A-Z]--[a]]", "vi").test_fails("a");
+        tc.compilef("[[A-Z]--[a]]", "vi").test_fails("A");
+        tc.compilef("[[A-Z]--[a]]", "vi").test_succeeds("b");
+        tc.compilef("[[A-Z]--[a]]", "vi").test_succeeds("B");
+        tc.compilef(r"^[\W]$", "vi").test_fails("a");
+        tc.compilef(r"^[\W]$", "vi").test_fails("A");
+        tc.compilef(r"^[\W]$", "vi").test_succeeds("!");
+        tc.compilef(r"^[\P{Uppercase_Letter}]$", "vi")
+            .test_fails("a");
+        tc.compilef(r"^[\P{Uppercase_Letter}]$", "vi")
+            .test_fails("A");
+        tc.compilef(r"^[\P{Uppercase_Letter}]$", "vi")
+            .test_succeeds("1");
+    });
+}
