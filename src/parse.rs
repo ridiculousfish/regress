@@ -2163,6 +2163,12 @@ pub fn try_parse<I>(pattern: I, flags: api::Flags) -> Result<ir::Regex, Error>
 where
     I: Iterator<Item = u32> + Clone,
 {
+    // The `v` flag also selects Unicode mode, like `u`: the same syntax rules outside
+    // classes, Unicode case folding and matching by code point.
+    let flags = api::Flags {
+        unicode: flags.unicode || flags.unicode_sets,
+        ..flags
+    };
     let mut p = Parser {
         input: pattern.peekable(),
         flags,

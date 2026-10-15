@@ -3301,3 +3301,29 @@ fn unicode_sets_negated_nested_class_icase() {
         tc.compilef(r"[^[^\q{a}]&&[A]]", "vi").test_succeeds("a");
     });
 }
+
+/// The v flag selects Unicode mode, like the u flag: Unicode case folding and
+/// the Unicode syntax rules outside classes.
+#[test]
+fn unicode_sets_unicode_mode() {
+    test_with_configs(|tc| {
+        // Simple case folding: U+212A KELVIN SIGN folds to k, and U+1E9E to U+00DF.
+        // U+0131 has no simple case folding, so it does not match I.
+        tc.test_match_succeeds("\u{212A}", "vi", "k");
+        tc.test_match_succeeds("K", "vi", "\u{212A}");
+        tc.test_match_succeeds("\u{DF}", "vi", "\u{1E9E}");
+        tc.test_match_succeeds("\u{1E9E}", "vi", "\u{DF}");
+        tc.test_match_fails("\u{131}", "vi", "I");
+        tc.test_match_fails("I", "vi", "\u{131}");
+        // With the i flag, U+017F is a word character, because it folds to s.
+        tc.test_match_succeeds(r"\b", "vi", "\u{17F}");
+        tc.test_match_fails(r"\B", "vi", "\u{17F}");
+        // An escaped class set punctuator is valid only inside a class.
+        for c in [
+            '-', '&', '!', '#', '%', ',', ':', ';', '<', '=', '>', '@', '`', '~',
+        ] {
+            test_parse_fails_flags(&format!(r"\{c}"), "v");
+            tc.test_match_succeeds(&format!(r"[\{c}]"), "v", &c.to_string());
+        }
+    });
+}
