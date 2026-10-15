@@ -6,8 +6,9 @@ use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
-#[cfg(not(feature = "utf16"))]
 use crate::insn::StartPredicate;
+#[cfg(feature = "utf16")]
+use crate::insn::UnitStartPredicate;
 use crate::insn::{CompiledRegex, Insn, LoopFields};
 use crate::matchers;
 use crate::matchers::CharProperties;
@@ -1076,7 +1077,6 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
 
     /// \return the next match for an anchored regex that only matches at the start.
     /// This avoids any string searching and only tries matching at the given position.
-    #[cfg(not(feature = "utf16"))]
     fn next_match_anchored(
         &mut self,
         pos: Input::Position,
@@ -1128,6 +1128,33 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
         }
     }
 
+    /// \return the next match, searching the remaining code units using the
+    /// given searcher to quickly find the first potential match location.
+    #[cfg(feature = "utf16")]
+    fn next_match_with_unit_search<UnitSearch: bytesearch::UnitSearcher + ?Sized>(
+        &mut self,
+        mut pos: Input::Position,
+        next_start: &mut Option<Input::Position>,
+        unit_search: &UnitSearch,
+    ) -> Option<Match> {
+        let inp = self.input;
+        loop {
+            // Find the next start location, or None if none.
+            pos = inp.find_units(pos, unit_search)?;
+            if let Some(end) = self.matcher.try_at_pos(inp, 0, pos, Forward::new()) {
+                // If we matched the empty string, we have to increment.
+                if end != pos {
+                    *next_start = Some(end)
+                } else {
+                    *next_start = inp.next_right_pos(end);
+                }
+                return Some(self.successful_match(pos, end));
+            }
+            // Didn't find it at this position, try the next one.
+            pos = inp.next_right_pos(pos)?;
+        }
+    }
+
     /// Limit how many backtracks one search may take. `u64::MAX` (the default)
     /// is unlimited.
     pub fn set_backtrack_budget(&mut self, budget: u64) {
@@ -1153,11 +1180,34 @@ impl<Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'_, Input> {
         pos: Input::Position,
         next_start: &mut Option<Input::Position>,
     ) -> Option<Match> {
-        // When UTF-16 support is active prefix search is not used due to the different encoding.
+        // UTF-16 and UCS-2 input cannot be searched for bytes, so it is searched
+        // for the predicate's code units instead.
         #[cfg(feature = "utf16")]
-        return self.next_match_with_prefix_search(pos, next_start, &bytesearch::EmptyString {});
+        if !Input::CODE_UNITS_ARE_BYTES
+            && !matches!(self.matcher.re.start_pred, StartPredicate::StartAnchored)
+        {
+            return match &self.matcher.re.unit_start_pred {
+                UnitStartPredicate::Arbitrary => {
+                    self.next_match_with_prefix_search(pos, next_start, &bytesearch::EmptyString {})
+                }
+                UnitStartPredicate::UnitSet1(units) => {
+                    self.next_match_with_unit_search(pos, next_start, units)
+                }
+                UnitStartPredicate::UnitSet2(units) => {
+                    self.next_match_with_unit_search(pos, next_start, units)
+                }
+                UnitStartPredicate::UnitSet3(units) => {
+                    self.next_match_with_unit_search(pos, next_start, units)
+                }
+                UnitStartPredicate::UnitSeq(units) => {
+                    self.next_match_with_unit_search(pos, next_start, units.as_ref())
+                }
+                UnitStartPredicate::Latin1Bracket(bitmap) => {
+                    self.next_match_with_unit_search(pos, next_start, bitmap)
+                }
+            };
+        }
 
-        #[cfg(not(feature = "utf16"))]
         match &self.matcher.re.start_pred {
             StartPredicate::Arbitrary => {
                 self.next_match_with_prefix_search(pos, next_start, &bytesearch::EmptyString {})
