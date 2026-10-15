@@ -140,8 +140,8 @@ pub type Matches<'r, 't> = exec::Matches<backends::DefaultExecutor<'r, 't>>;
 /// only.
 pub type AsciiMatches<'r, 't> = exec::Matches<backends::DefaultAsciiExecutor<'r, 't>>;
 
-/// A Match represents a portion of a string which was found to match a Regex.
 /// The outcome of a budgeted search — see [`Regex::find_from_budgeted`].
+#[derive(Debug, Clone)]
 pub enum BudgetedMatch {
     /// A match was found.
     Match(Match),
@@ -151,6 +151,7 @@ pub enum BudgetedMatch {
     BudgetExhausted,
 }
 
+/// A Match represents a portion of a string which was found to match a Regex.
 #[derive(Debug, Clone)]
 pub struct Match {
     /// The total range of the match. Note this may be empty, if the regex
