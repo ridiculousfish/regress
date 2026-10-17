@@ -10,6 +10,7 @@ use crate::types::MAX_CAPTURE_GROUPS;
 #[cfg(feature = "utf16")]
 use crate::{
     classicalbacktrack::MatchAttempter,
+    exec::MatchProducer,
     indexing::{InputIndexer, Ucs2Input, Utf16Input},
 };
 
@@ -579,6 +580,80 @@ impl Regex {
             ),
             start,
         )
+    }
+
+    /// Attempts to match `text` at exactly the specified UTF-16 code unit index `start`.
+    ///
+    /// Returns `Some(Match)` only if a match begins at `start`.
+    /// Returns `None` if no match exists at that position, without searching forward.
+    /// An out-of-range `start` (`start > text.len()`) safely returns `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use regress::Regex;
+    ///
+    /// let re = Regex::new(r"bc").unwrap();
+    /// let text: Vec<u16> = "abcd".encode_utf16().collect();
+    ///
+    /// // Matches starting at position 1:
+    /// assert_eq!(re.match_at_utf16(&text, 1).unwrap().range(), 1..3);
+    ///
+    /// // Does not match at position 0, even though "bc" occurs later:
+    /// assert!(re.match_at_utf16(&text, 0).is_none());
+    ///
+    /// // Out-of-range position returns None:
+    /// assert!(re.match_at_utf16(&text, 10).is_none());
+    /// ```
+    #[cfg(feature = "utf16")]
+    pub fn match_at_utf16(&self, text: &[u16], start: usize) -> Option<Match> {
+        if start > text.len() {
+            return None;
+        }
+        let input = Utf16Input::new(text, self.cr.flags.unicode);
+        let mut exec = super::classicalbacktrack::BacktrackExecutor::new(
+            input,
+            MatchAttempter::new(&self.cr, input.left_end()),
+        );
+        let pos = exec.initial_position(start)?;
+        exec.match_at(pos)
+    }
+
+    /// Attempts to match `text` at exactly the specified UCS-2 code unit index `start`.
+    ///
+    /// Returns `Some(Match)` only if a match begins at `start`.
+    /// Returns `None` if no match exists at that position, without searching forward.
+    /// An out-of-range `start` (`start > text.len()`) safely returns `None`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use regress::Regex;
+    ///
+    /// let re = Regex::new(r"bc").unwrap();
+    /// let text: Vec<u16> = "abcd".encode_utf16().collect();
+    ///
+    /// // Matches starting at position 1:
+    /// assert_eq!(re.match_at_ucs2(&text, 1).unwrap().range(), 1..3);
+    ///
+    /// // Does not match at position 0, even though "bc" occurs later:
+    /// assert!(re.match_at_ucs2(&text, 0).is_none());
+    ///
+    /// // Out-of-range position returns None:
+    /// assert!(re.match_at_ucs2(&text, 10).is_none());
+    /// ```
+    #[cfg(feature = "utf16")]
+    pub fn match_at_ucs2(&self, text: &[u16], start: usize) -> Option<Match> {
+        if start > text.len() {
+            return None;
+        }
+        let input = Ucs2Input::new(text, self.cr.flags.unicode);
+        let mut exec = super::classicalbacktrack::BacktrackExecutor::new(
+            input,
+            MatchAttempter::new(&self.cr, input.left_end()),
+        );
+        let pos = exec.initial_position(start)?;
+        exec.match_at(pos)
     }
 
     /// Replaces the first match of the regex in `text` with the replacement string.
