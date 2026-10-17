@@ -1180,6 +1180,15 @@ impl<Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'_, Input> {
             }
         }
     }
+
+    fn match_at(&mut self, pos: Self::Position) -> Option<Match> {
+        let inp = self.input;
+        if let Some(end) = self.matcher.try_at_pos(inp, 0, pos, Forward::new()) {
+            Some(self.successful_match(pos, end))
+        } else {
+            None
+        }
+    }
 }
 
 impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, Utf8Input<'t>> {

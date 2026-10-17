@@ -22,6 +22,10 @@ pub trait MatchProducer: core::fmt::Debug {
         pos: Self::Position,
         next_start: &mut Option<Self::Position>,
     ) -> Option<Match>;
+
+    /// Attempt to match at exactly the given position without searching forward.
+    /// \return the Match if a match begins at `pos`, or None otherwise.
+    fn match_at(&mut self, pos: Self::Position) -> Option<Match>;
 }
 
 /// A trait for executing a regex.
