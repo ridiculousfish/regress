@@ -2561,6 +2561,29 @@ fn test_backref_after_backtrack_into_group() {
 }
 
 #[test]
+fn test_nested_loop_reentry_long_inner_run() {
+    // Each inner loop runs 400 iterations. In debug builds that is more than
+    // the backtracker stores inline, so the outer loop re-entering it saves the
+    // old count out of line. The failing cases then unwind back into that
+    // 400-iteration run, which needs the old count restored.
+    test_with_configs(|tc| {
+        let ab = |n: usize| "ab".repeat(n);
+        let input = ab(400) + "c" + &ab(5) + "x";
+        tc.compile(r"^(?:(?:ab)*c)+$").test_fails(&input);
+        tc.compile(r"^(?:(?:ab|a)*c)+$").test_fails(&input);
+        tc.compile(r"^(?:(?:ab|a){0,400}c)+(?:ab)*$")
+            .test_fails(&(input.clone() + "c"));
+        tc.compile(r"^(?:(?:ab|a){0,401}c)+b")
+            .test_fails(&(ab(400) + "c" + &ab(2) + "cx"));
+        tc.compile(r"^(?:(?:ab|a){0,401}?c)+$")
+            .test_fails(&(ab(400) + "c" + &ab(2) + "x"));
+        // A match found by backtracking out of the second outer iteration.
+        tc.compile(r"^(?:(?:ab)*c)+(?:ab)*cx$")
+            .test_succeeds(&(ab(400) + "c" + &ab(5) + "cx"));
+    });
+}
+
+#[test]
 fn test_nested_loop_reentry() {
     // Re-entering an inner loop from an outer loop must not lose the inner
     // loop's iteration count when backtracking into an earlier iteration.

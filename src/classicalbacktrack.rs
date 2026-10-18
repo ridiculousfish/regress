@@ -21,6 +21,18 @@ use crate::util::DebugCheckIndex;
 use alloc::{boxed::Box, vec::Vec};
 use core::ops::Range;
 
+/// BacktrackInsn::SetLoopData is used to restore a position and iteration count.
+/// For size reasons, the iteration count is stored as a u32; should the iterations
+/// exceed that then we fall back to a more expensive path.
+///
+/// Lower the limit in debug builds so that we can exercise the more expensive path
+/// without needing to overflow a u32.
+const MAX_ITERS_STORED_IN_SET_LOOP_DATA: usize = if cfg!(debug_assertions) {
+    300
+} else {
+    u32::MAX as usize
+};
+
 #[derive(Clone, Debug)]
 enum BacktrackInsn<Input: InputIndexer> {
     /// Nothing more to backtrack.
@@ -31,10 +43,23 @@ enum BacktrackInsn<Input: InputIndexer> {
     /// IPs here are u32, matching JumpTarget, to keep this enum small.
     SetPosition { ip: u32, pos: Input::Position },
 
+    /// Undo one LoopAgain: decrement the loop's iteration count and restore
+    /// the position its previous iteration started at.
+    PrevLoopIteration { id: LoopID, entry: Input::Position },
+
+    /// Undo an EnterLoop: restore the loop's state from before this run of it.
+    /// For a loop nested in another loop, that is the state an earlier run
+    /// left behind, which backtracking into that run still needs.
     SetLoopData {
         id: LoopID,
-        data: LoopData<Input::Position>,
+        iters: u32,
+        entry: Input::Position,
     },
+
+    /// Restore only a loop's iteration count. Undoes an EnterLoop whose old
+    /// count is too large for SetLoopData, together with a PrevLoopIteration
+    /// pushed above it.
+    SetLoopIters { id: LoopID, iters: usize },
 
     /// Set the start (or end, if is_start is false) of a capture group to a position.
     /// This is the value the bound held before it was overwritten.
@@ -162,18 +187,48 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         }
     }
 
+    /// Start an iteration of a loop at `pos`, first pushing what undoes it.
+    ///
+    /// `entering` is true for the first iteration of a fresh run of the loop
+    /// (EnterLoop). The loop's slot may then hold an earlier run's state, so
+    /// that whole state is saved. Otherwise (LoopAgain) the count simply goes
+    /// up by one, so undoing it is a decrement and only the entry position is
+    /// saved.
     fn prepare_to_enter_loop(
         bts: &mut Vec<BacktrackInsn<Input>>,
         pos: Input::Position,
-        loop_fields: &LoopFields,
+        id: LoopID,
         loop_data: &mut LoopData<Input::Position>,
-        iteration: usize,
+        entering: bool,
     ) {
-        bts.push(BacktrackInsn::SetLoopData {
-            id: loop_fields.loop_id,
-            data: *loop_data,
-        });
-        loop_data.iters = iteration + 1;
+        if !entering {
+            bts.push(BacktrackInsn::PrevLoopIteration {
+                id,
+                entry: loop_data.entry,
+            });
+            loop_data.iters += 1;
+        } else {
+            if loop_data.iters <= MAX_ITERS_STORED_IN_SET_LOOP_DATA {
+                bts.push(BacktrackInsn::SetLoopData {
+                    id,
+                    iters: loop_data.iters as u32,
+                    entry: loop_data.entry,
+                });
+            } else {
+                core::hint::cold_path();
+                // Unwinding pops the PrevLoopIteration first (count 1 -> 0,
+                // entry restored), then restores the old count.
+                bts.push(BacktrackInsn::SetLoopIters {
+                    id,
+                    iters: loop_data.iters,
+                });
+                bts.push(BacktrackInsn::PrevLoopIteration {
+                    id,
+                    entry: loop_data.entry,
+                });
+            }
+            loop_data.iters = 1;
+        }
         loop_data.entry = pos;
     }
 
@@ -184,9 +239,9 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
     /// * `loop_fields` - Metadata describing the loop.
     /// * `pos` - The current position in the input.
     /// * `ip` - The instruction pointer of the loop itself.
-    /// * `iteration` - Which iteration of the loop this is.
-    ///   This is generally the same as `loop_data.iteration`, except on the `EnterLoop` instruction.
-    ///   In that case `iteration` is 0, and `loop_data.iteration` contains the iteration to restore.
+    /// * `entering` - True for the `EnterLoop` instruction, which starts a fresh
+    ///   run of the loop at iteration 0. False for `LoopAgain`, which continues
+    ///   the current run from the loop's recorded iteration count.
     ///
     /// # Returns
     ///
@@ -196,9 +251,10 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         loop_fields: &'a LoopFields,
         pos: Input::Position,
         ip: IP,
-        iteration: usize,
+        entering: bool,
     ) -> Option<IP> {
         let loop_data = &mut self.s.loops[loop_fields.loop_id as usize];
+        let iteration = if entering { 0 } else { loop_data.iters };
 
         let do_taken = iteration < loop_fields.max_iters;
         let do_not_taken = iteration >= loop_fields.min_iters;
@@ -228,9 +284,9 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 MatchAttempter::prepare_to_enter_loop(
                     &mut self.bts,
                     pos,
-                    loop_fields,
+                    loop_fields.loop_id,
                     loop_data,
-                    iteration,
+                    entering,
                 );
                 Some(loop_taken_ip)
             }
@@ -255,9 +311,9 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 MatchAttempter::prepare_to_enter_loop(
                     &mut self.bts,
                     pos,
-                    loop_fields,
+                    loop_fields.loop_id,
                     loop_data,
-                    iteration,
+                    entering,
                 );
                 Some(loop_taken_ip)
             }
@@ -627,8 +683,21 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     self.pop_backtrack();
                     return true;
                 }
-                BacktrackInsn::SetLoopData { id, data } => {
-                    *self.s.loops.mat(*id as usize) = *data;
+                &mut BacktrackInsn::PrevLoopIteration { id, entry } => {
+                    let loop_data = self.s.loops.mat(id as usize);
+                    debug_assert!(loop_data.iters >= 1, "No iteration to undo");
+                    loop_data.iters -= 1;
+                    loop_data.entry = entry;
+                    self.pop_backtrack();
+                }
+                &mut BacktrackInsn::SetLoopData { id, iters, entry } => {
+                    let loop_data = self.s.loops.mat(id as usize);
+                    loop_data.iters = iters as usize;
+                    loop_data.entry = entry;
+                    self.pop_backtrack();
+                }
+                &mut BacktrackInsn::SetLoopIters { id, iters } => {
+                    self.s.loops.mat(id as usize).iters = iters;
                     self.pop_backtrack();
                 }
                 &mut BacktrackInsn::SetCaptureGroup {
@@ -655,14 +724,20 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         _ => rs_unreachable!("EnterNonGreedyLoop must point at a loop instruction"),
                     };
                     let loop_data = self.s.loops.mat(loop_fields.loop_id as usize);
-                    // prepare_to_enter_loop saves the current loop data (#131, #206)
-                    // before overwriting it for this iteration.
+                    // Iteration 0 means the body was skipped by EnterLoop, so this
+                    // starts a fresh run. Otherwise it continues the run, and
+                    // unwinding has already restored the count to this iteration.
+                    let entering = data.iters == 0;
+                    debug_assert!(
+                        entering || loop_data.iters == data.iters,
+                        "Loop count should have been restored by unwinding"
+                    );
                     MatchAttempter::prepare_to_enter_loop(
                         &mut self.bts,
                         *pos,
-                        loop_fields,
+                        loop_fields.loop_id,
                         loop_data,
-                        data.iters,
+                        entering,
                     );
                     return true;
                 }
@@ -1015,8 +1090,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
 
                     Insn::EnterLoop(fields) => {
                         // Entering a loop, not re-entering it.
-                        // Pass 0 as this is the first iteration.
-                        match self.run_loop(fields, pos, ip, 0) {
+                        match self.run_loop(fields, pos, ip, true) {
                             Some(next_ip) => {
                                 ip = next_ip;
                                 continue 'nextinsn;
@@ -1030,8 +1104,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     &Insn::LoopAgain { begin } => {
                         let act = match re.insns.iat(begin as IP) {
                             Insn::EnterLoop(fields) => {
-                                let iteration = self.s.loops.mat(fields.loop_id as usize).iters;
-                                self.run_loop(fields, pos, begin as IP, iteration)
+                                self.run_loop(fields, pos, begin as IP, false)
                             }
                             _ => rs_unreachable!("EnterLoop should always refer to loop field"),
                         };
