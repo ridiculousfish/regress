@@ -2216,6 +2216,32 @@ fn test_empty_alternation_in_capture_tc(tc: TestConfig) {
     tc.compile("(z|)*?x").match1f("z0x").test_eq("x,");
 }
 
+#[test]
+fn test_nested_loop_reentry() {
+    // Re-entering an inner loop from an outer loop must not lose the inner
+    // loop's iteration count when backtracking into an earlier iteration.
+    test_with_configs(|tc| {
+        // From Boa #5572: the resumed choice point is an alternation.
+        tc.compile(r"^(?:(?:\s(?:(?:){0,1}|a))+)+$")
+            .test_succeeds("\u{2028}a");
+        // The resumed choice point is a non-greedy loop.
+        tc.compile(r"^(?:(?:x(?:a??))+)+$").test_succeeds("xa");
+        tc.compile(r"^(?:(?:\s(?:(?:){0,1}a*?))+)+$")
+            .test_succeeds(" a");
+        tc.compile(r"^(?:(?:x(?:(?:){0,1}(?:ab)*?))+)+$")
+            .test_succeeds("xab");
+        // A lost iteration count disables the empty-iteration check, so the
+        // loop could take empty iterations forever.
+        tc.compile(r"(?:(?:a?)*)*b").test_fails("a");
+        tc.compile(r"(?:(?:a?)*)*b").test_fails("aa");
+        tc.compile(r"(?:(?:a?)?)*b").test_fails("a");
+        tc.compile(r"(?:(?:a*)*)*b").test_fails("a");
+        tc.compile(r"^(?:(?:a*)*)*$").test_fails("ax");
+        tc.compile(r"^(?:(?:a*)+)*$").test_fails("ax");
+        tc.compile(r"^(?:(?:a*)*)+$").test_fails("ax");
+    });
+}
+
 // TC39 proposal: duplicate named capturing groups in different alternatives
 fn test_duplicate_named_groups_tc(tc: TestConfig) {
     // Basic duplicate named groups in alternatives - the example from the TC39 proposal

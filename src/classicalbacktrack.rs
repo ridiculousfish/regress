@@ -137,23 +137,38 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         pos: Input::Position,
         loop_fields: &LoopFields,
         loop_data: &mut LoopData<Input::Position>,
+        iteration: usize,
     ) {
         bts.push(BacktrackInsn::SetLoopData {
             id: loop_fields.loop_id,
             data: *loop_data,
         });
-        loop_data.iters += 1;
+        loop_data.iters = iteration + 1;
         loop_data.entry = pos;
     }
 
+    /// Executes a loop starting at the given instruction pointer.
+    ///
+    /// # Arguments
+    ///
+    /// * `loop_fields` - Metadata describing the loop.
+    /// * `pos` - The current position in the input.
+    /// * `ip` - The instruction pointer of the loop itself.
+    /// * `iteration` - Which iteration of the loop this is.
+    ///   This is generally the same as `loop_data.iteration`, except on the `EnterLoop` instruction.
+    ///   In that case `iteration` is 0, and `loop_data.iteration` contains the iteration to restore.
+    ///
+    /// # Returns
+    ///
+    /// The next instruction pointer, or `None` if execution cannot continue.
     fn run_loop(
         &mut self,
         loop_fields: &'a LoopFields,
         pos: Input::Position,
         ip: IP,
+        iteration: usize,
     ) -> Option<IP> {
         let loop_data = &mut self.s.loops[loop_fields.loop_id as usize];
-        let iteration = loop_data.iters;
 
         let do_taken = iteration < loop_fields.max_iters;
         let do_not_taken = iteration >= loop_fields.min_iters;
@@ -180,7 +195,13 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
             }
             (true, false) => {
                 // Only entering is viable.
-                MatchAttempter::prepare_to_enter_loop(&mut self.bts, pos, loop_fields, loop_data);
+                MatchAttempter::prepare_to_enter_loop(
+                    &mut self.bts,
+                    pos,
+                    loop_fields,
+                    loop_data,
+                    iteration,
+                );
                 Some(loop_taken_ip)
             }
             (true, true) if !loop_fields.greedy => {
@@ -190,7 +211,10 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 self.bts.push(BacktrackInsn::EnterNonGreedyLoop {
                     ip,
                     orig_pos,
-                    data: *loop_data,
+                    data: LoopData {
+                        iters: iteration,
+                        entry: pos,
+                    },
                 });
                 Some(loop_not_taken_ip)
             }
@@ -201,7 +225,13 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     ip: loop_not_taken_ip,
                     pos,
                 });
-                MatchAttempter::prepare_to_enter_loop(&mut self.bts, pos, loop_fields, loop_data);
+                MatchAttempter::prepare_to_enter_loop(
+                    &mut self.bts,
+                    pos,
+                    loop_fields,
+                    loop_data,
+                    iteration,
+                );
                 Some(loop_taken_ip)
             }
         }
@@ -578,11 +608,12 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     };
                     let loop_data = self.s.loops.mat(loop_fields.loop_id as usize);
                     // Need to restore the position should we backtrack out of the loop (#131).
+                    // Also restore the count (#206).
                     *bt = BacktrackInsn::SetLoopData {
                         id: loop_fields.loop_id,
                         data: LoopData {
                             entry: orig_pos,
-                            ..data
+                            iters: loop_data.iters,
                         },
                     };
                     *loop_data = data;
@@ -591,6 +622,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         *pos,
                         loop_fields,
                         loop_data,
+                        data.iters,
                     );
                     return true;
                 }
@@ -962,8 +994,8 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
 
                     Insn::EnterLoop(fields) => {
                         // Entering a loop, not re-entering it.
-                        self.s.loops.mat(fields.loop_id as usize).iters = 0;
-                        match self.run_loop(fields, pos, ip) {
+                        // Pass 0 as this is the first iteration.
+                        match self.run_loop(fields, pos, ip, 0) {
                             Some(next_ip) => {
                                 ip = next_ip;
                                 continue 'nextinsn;
@@ -976,7 +1008,10 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
 
                     &Insn::LoopAgain { begin } => {
                         let act = match re.insns.iat(begin as IP) {
-                            Insn::EnterLoop(fields) => self.run_loop(fields, pos, begin as IP),
+                            Insn::EnterLoop(fields) => {
+                                let iteration = self.s.loops.mat(fields.loop_id as usize).iters;
+                                self.run_loop(fields, pos, begin as IP, iteration)
+                            }
                             _ => rs_unreachable!("EnterLoop should always refer to loop field"),
                         };
                         match act {
