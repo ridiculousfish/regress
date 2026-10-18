@@ -423,7 +423,7 @@ impl Emitter {
                         // optimized to a single forwards ByteSequence("abcd"), which matches left-to-right.
                         // Therefore if we split a byte sequence into multiple instructions,
                         // we need to emit them in reverse order iff in a lookbehind.
-                        let chunks = bytes.as_slice().chunks(MAX_BYTE_SEQ_LENGTH);
+                        let chunks = bytes.chunks(MAX_BYTE_SEQ_LENGTH);
                         if self.in_lookbehind {
                             for chunk in chunks.rev() {
                                 self.emit_byte_sequence_insn(chunk);
