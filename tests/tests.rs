@@ -2217,6 +2217,20 @@ fn test_empty_alternation_in_capture_tc(tc: TestConfig) {
 }
 
 #[test]
+fn test_backref_after_backtrack_into_group() {
+    test_with_configs(|tc: TestConfig| {
+        tc.compile(r"(a|a\1)c").match1f("aac").test_eq("ac,a");
+        tc.compile(r"(.|.\1)c").match1f("aac").test_eq("ac,a");
+        tc.test_match_fails(r"^(.|.\1)c", "", "aac");
+        // Same shape through a non-greedy loop that is skipped and then re-entered.
+        tc.compile(r"(?:(a)|b\1)*?c").match1f("abc").test_eq("abc,");
+        tc.compile(r"(?:(\w)|x\1)*?c")
+            .match1f("aac")
+            .test_eq("aac,a");
+    })
+}
+
+#[test]
 fn test_nested_loop_reentry() {
     // Re-entering an inner loop from an outer loop must not lose the inner
     // loop's iteration count when backtracking into an earlier iteration.

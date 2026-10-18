@@ -897,6 +897,10 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
 
                     &Insn::EndCaptureGroup(cg_idx) => {
                         let cg = self.s.groups.mat(cg_idx as usize);
+                        self.bts.push(BacktrackInsn::SetCaptureGroup {
+                            id: cg_idx,
+                            data: *cg,
+                        });
                         if Dir::FORWARD {
                             debug_assert!(
                                 cg.start_matched(),
