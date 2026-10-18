@@ -74,8 +74,12 @@ enum BacktrackInsn<Input: InputIndexer> {
         // The IP of the loop.
         // This is guaranteed to point to an EnterLoopInsn.
         ip: u32,
-        // The iteration to enter, and the position to enter it at.
-        data: LoopData<Input::Position>,
+        // True if EnterLoop skipped the body, so resuming starts a fresh run of
+        // the loop. False if LoopAgain did, so resuming continues the current
+        // run, whose count unwinding has already restored.
+        entering: bool,
+        // The position to enter the body at.
+        entry: Input::Position,
     },
 
     GreedyLoop1Char {
@@ -294,10 +298,8 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 // Both arms are viable; backtrack into the loop.
                 self.bts.push(BacktrackInsn::EnterNonGreedyLoop {
                     ip: ip as u32,
-                    data: LoopData {
-                        iters: iteration,
-                        entry: pos,
-                    },
+                    entering,
+                    entry: pos,
                 });
                 Some(loop_not_taken_ip)
             }
@@ -714,23 +716,23 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     self.pop_backtrack();
                 }
 
-                &mut BacktrackInsn::EnterNonGreedyLoop { ip: loop_ip, data } => {
+                &mut BacktrackInsn::EnterNonGreedyLoop {
+                    ip: loop_ip,
+                    entering,
+                    entry,
+                } => {
                     self.pop_backtrack();
                     let loop_ip = loop_ip as IP;
                     *ip = loop_ip + 1;
-                    *pos = data.entry;
+                    *pos = entry;
                     let loop_fields = match &self.re.insns.iat(loop_ip) {
                         Insn::EnterLoop(loop_fields) => loop_fields,
                         _ => rs_unreachable!("EnterNonGreedyLoop must point at a loop instruction"),
                     };
                     let loop_data = self.s.loops.mat(loop_fields.loop_id as usize);
-                    // Iteration 0 means the body was skipped by EnterLoop, so this
-                    // starts a fresh run. Otherwise it continues the run, and
-                    // unwinding has already restored the count to this iteration.
-                    let entering = data.iters == 0;
                     debug_assert!(
-                        entering || loop_data.iters == data.iters,
-                        "Loop count should have been restored by unwinding"
+                        entering || loop_data.iters >= 1,
+                        "Continuing a run of a loop that has not been entered"
                     );
                     MatchAttempter::prepare_to_enter_loop(
                         &mut self.bts,
