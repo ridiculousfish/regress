@@ -36,9 +36,12 @@ enum BacktrackInsn<Input: InputIndexer> {
         data: LoopData<Input::Position>,
     },
 
+    /// Set the start (or end, if is_start is false) of a capture group to a position.
+    /// This is the value the bound held before it was overwritten.
     SetCaptureGroup {
         id: CaptureGroupID,
-        data: GroupData<Input::Position>,
+        pos: Option<Input::Position>,
+        is_start: bool,
     },
 
     /// Resume by entering a non-greedy loop whose body was skipped.
@@ -107,6 +110,30 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
     #[inline(always)]
     fn push_backtrack(&mut self, bt: BacktrackInsn<Input>) {
         self.bts.push(bt)
+    }
+
+    /// Set the end (or start, if `is_start`) of a capture group to `pos`, first
+    /// saving the old value so that backtracking restores it.
+    ///
+    /// A write that leaves the value unchanged needs nothing restored, so it
+    /// pushes nothing.
+    #[inline(always)]
+    fn set_capture_bound_with_bt(
+        &mut self,
+        id: CaptureGroupID,
+        is_start: bool,
+        pos: Option<Input::Position>,
+    ) {
+        let cg = self.s.groups.mat(id as usize);
+        let bound = if is_start { &mut cg.start } else { &mut cg.end };
+        if *bound != pos {
+            self.bts.push(BacktrackInsn::SetCaptureGroup {
+                id,
+                pos: *bound,
+                is_start,
+            });
+            *bound = pos;
+        }
     }
 
     /// Charge one backtrack against the budget.
@@ -544,12 +571,26 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         // capture groups (but we need to set up backtracking). Otherwise restore
         // them.
         if matched && !negate {
-            for (idx, cg) in saved_groups.iter().enumerate() {
+            // Save each bound the lookaround changed. A bound it left alone
+            // needs nothing restored.
+            for (idx, old) in saved_groups.iter().enumerate() {
                 debug_assert!(idx + (start_group as usize) < MAX_CAPTURE_GROUPS);
-                self.push_backtrack(BacktrackInsn::SetCaptureGroup {
-                    id: (idx as CaptureGroupID) + start_group,
-                    data: *cg,
-                });
+                let id = (idx as CaptureGroupID) + start_group;
+                let cur = *self.s.groups.iat(id as usize);
+                if cur.start != old.start {
+                    self.push_backtrack(BacktrackInsn::SetCaptureGroup {
+                        id,
+                        pos: old.start,
+                        is_start: true,
+                    });
+                }
+                if cur.end != old.end {
+                    self.push_backtrack(BacktrackInsn::SetCaptureGroup {
+                        id,
+                        pos: old.end,
+                        is_start: false,
+                    });
+                }
             }
         } else {
             self.s.groups.mat(range).copy_from_slice(&saved_groups);
@@ -590,8 +631,17 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     *self.s.loops.mat(*id as usize) = *data;
                     self.pop_backtrack();
                 }
-                BacktrackInsn::SetCaptureGroup { id, data } => {
-                    *self.s.groups.mat(*id as usize) = *data;
+                &mut BacktrackInsn::SetCaptureGroup {
+                    id,
+                    pos: saved_pos,
+                    is_start,
+                } => {
+                    let cg = self.s.groups.mat(id as usize);
+                    if is_start {
+                        cg.start = saved_pos;
+                    } else {
+                        cg.end = saved_pos;
+                    }
                     self.pop_backtrack();
                 }
 
@@ -860,56 +910,36 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     }
 
                     &Insn::BeginCaptureGroup(cg_idx) => {
-                        let cg = self.s.groups.mat(cg_idx as usize);
-                        self.bts.push(BacktrackInsn::SetCaptureGroup {
-                            id: cg_idx,
-                            data: *cg,
-                        });
-                        if Dir::FORWARD {
-                            cg.start = Some(pos);
-                            debug_assert!(
-                                cg.end.is_none(),
-                                "Should not have already exited capture group we are entering"
-                            )
-                        } else {
-                            cg.end = Some(pos);
-                            debug_assert!(
-                                cg.start.is_none(),
-                                "Should not have already exited capture group we are entering"
-                            )
-                        }
+                        // Forwards we enter at the start; backwards, at the end.
+                        debug_assert!(
+                            if Dir::FORWARD {
+                                self.s.groups.iat(cg_idx as usize).end.is_none()
+                            } else {
+                                self.s.groups.iat(cg_idx as usize).start.is_none()
+                            },
+                            "Should not have already exited capture group we are entering"
+                        );
+                        self.set_capture_bound_with_bt(cg_idx, Dir::FORWARD, Some(pos));
                         next_or_bt!(true)
                     }
 
                     &Insn::EndCaptureGroup(cg_idx) => {
-                        let cg = self.s.groups.mat(cg_idx as usize);
-                        self.bts.push(BacktrackInsn::SetCaptureGroup {
-                            id: cg_idx,
-                            data: *cg,
-                        });
-                        if Dir::FORWARD {
-                            debug_assert!(
-                                cg.start_matched(),
-                                "Capture group should have been entered"
-                            );
-                            cg.end = Some(pos);
-                        } else {
-                            debug_assert!(
-                                cg.end_matched(),
-                                "Capture group should have been entered"
-                            );
-                            cg.start = Some(pos)
-                        }
+                        // Forwards we exit at the end; backwards, at the start.
+                        debug_assert!(
+                            if Dir::FORWARD {
+                                self.s.groups.iat(cg_idx as usize).start_matched()
+                            } else {
+                                self.s.groups.iat(cg_idx as usize).end_matched()
+                            },
+                            "Capture group should have been entered"
+                        );
+                        self.set_capture_bound_with_bt(cg_idx, !Dir::FORWARD, Some(pos));
                         next_or_bt!(true)
                     }
 
                     &Insn::ResetCaptureGroup(cg_idx) => {
-                        let cg = self.s.groups.mat(cg_idx as usize);
-                        self.bts.push(BacktrackInsn::SetCaptureGroup {
-                            id: cg_idx,
-                            data: *cg,
-                        });
-                        cg.reset();
+                        self.set_capture_bound_with_bt(cg_idx, true, None);
+                        self.set_capture_bound_with_bt(cg_idx, false, None);
                         next_or_bt!(true)
                     }
 

@@ -2530,6 +2530,23 @@ fn test_empty_alternation_in_capture_tc(tc: TestConfig) {
 }
 
 #[test]
+fn test_capture_bounds_restored_on_backtrack() {
+    test_with_configs(|tc: TestConfig| {
+        // A positive lookaround's captures must be undone when backtracking
+        // past it.
+        tc.compile(r"(?:(?=(a))ab|ac)").match1f("ac").test_eq("ac,");
+        tc.compile(r"(?:(?<=(a))bx|by)")
+            .match1f("aby")
+            .test_eq("by,");
+        // Lookbehind sets a group's end before its start.
+        tc.compile(r"(?<=(a)(b))c").match1f("abc").test_eq("c,a,b");
+        // The third iteration's reset finds the group already unset and saves
+        // nothing; backtracking out of that iteration must still leave it unset.
+        tc.compile(r"(?:(a)|b)*a").match1f("aba").test_eq("aba,");
+    })
+}
+
+#[test]
 fn test_backref_after_backtrack_into_group() {
     test_with_configs(|tc: TestConfig| {
         tc.compile(r"(a|a\1)c").match1f("aac").test_eq("ac,a");
