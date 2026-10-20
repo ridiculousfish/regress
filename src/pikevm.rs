@@ -571,4 +571,125 @@ impl<Input: InputIndexer> exec::MatchProducer for PikeVMExecutor<'_, Input> {
         }
         None
     }
+
+    fn match_at(&mut self, pos: Self::Position) -> Option<Match> {
+        let re = self.matcher.re;
+        let mut state = State {
+            pos,
+            ip: 0,
+            loop1_iters: 0,
+            loops: vec![LoopData::new(pos); re.loops as usize].into(),
+            groups: vec![GroupData::new(); re.groups as usize].into(),
+        };
+        if self
+            .matcher
+            .try_at_pos(self.input, &mut state, Forward::new())
+        {
+            Some(successful_match(
+                self.input,
+                pos,
+                &state,
+                re.group_names.clone(),
+            ))
+        } else {
+            None
+        }
+    }
+}
+
+impl<'r, Input: InputIndexer> PikeVMExecutor<'r, Input> {
+    #[allow(dead_code)]
+    pub(crate) fn new(input: Input, re: &'r CompiledRegex) -> Self {
+        Self {
+            input,
+            matcher: MatchAttempter::new(re),
+        }
+    }
+}
+
+#[cfg(all(test, feature = "utf16"))]
+mod tests {
+    use super::*;
+    use crate::classicalbacktrack::{BacktrackExecutor, MatchAttempter};
+    use crate::exec::MatchProducer;
+    use crate::indexing::{Ucs2Input, Utf16Input};
+
+    fn compile(pattern: &str) -> CompiledRegex {
+        let mut ire =
+            crate::parse::try_parse(pattern.chars().map(u32::from), crate::api::Flags::default())
+                .unwrap();
+        crate::optimizer::optimize(&mut ire);
+        crate::emit::emit(&ire)
+    }
+
+    #[test]
+    fn test_pikevm_match_at_utf16_and_ucs2_matches_backtrack() {
+        let patterns = [
+            "a",
+            "abc",
+            "a(b+)c",
+            "a|b",
+            "a*",
+            "^abc",
+            "abc$",
+            r"(?<foo>\d+)",
+        ];
+        let texts = ["abc", "xabbcz", "", "12345", "a"];
+
+        for pattern in patterns {
+            let cr = compile(pattern);
+            for text_str in texts {
+                let utf16: Vec<u16> = text_str.encode_utf16().collect();
+                // Test UTF-16
+                for start in 0..=utf16.len() + 1 {
+                    let input = Utf16Input::new(&utf16, cr.flags.unicode);
+                    let mut pike = PikeVMExecutor::new(input, &cr);
+                    let mut bt =
+                        BacktrackExecutor::new(input, MatchAttempter::new(&cr, input.left_end()));
+
+                    let pos_opt = pike.initial_position(start);
+                    assert_eq!(pos_opt, bt.initial_position(start));
+
+                    if let Some(pos) = pos_opt {
+                        let m_pike = pike.match_at(pos);
+                        let m_bt = bt.match_at(pos);
+
+                        assert_eq!(
+                            m_pike.as_ref().map(|m| (m.range(), m.captures.clone())),
+                            m_bt.as_ref().map(|m| (m.range(), m.captures.clone())),
+                            "UTF-16 mismatch for pattern {:?} against {:?} at start {}",
+                            pattern,
+                            text_str,
+                            start
+                        );
+                    }
+                }
+
+                // Test UCS-2
+                for start in 0..=utf16.len() + 1 {
+                    let input = Ucs2Input::new(&utf16, cr.flags.unicode);
+                    let mut pike = PikeVMExecutor::new(input, &cr);
+                    let mut bt =
+                        BacktrackExecutor::new(input, MatchAttempter::new(&cr, input.left_end()));
+
+                    let pos_opt = pike.initial_position(start);
+                    assert_eq!(pos_opt, bt.initial_position(start));
+
+                    if let Some(pos) = pos_opt {
+                        let m_pike = pike.match_at(pos);
+                        let m_bt = bt.match_at(pos);
+
+                        assert_eq!(
+                            m_pike.as_ref().map(|m| (m.range(), m.captures.clone())),
+                            m_bt.as_ref().map(|m| (m.range(), m.captures.clone())),
+                            "UCS-2 mismatch for pattern {:?} against {:?} at start {}",
+                            pattern,
+                            text_str,
+                            start
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
