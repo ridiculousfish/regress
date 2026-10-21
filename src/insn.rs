@@ -186,6 +186,26 @@ pub enum StartPredicate {
     StartAnchored,
 }
 
+/// The start predicate resolved to UTF-16 code units rather than UTF-8 bytes,
+/// for UTF-16 and UCS-2 input, which cannot be searched for bytes.
+#[cfg(feature = "utf16")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnitStartPredicate {
+    /// May match an arbitrary sequence.
+    Arbitrary,
+
+    /// Look for the first instance of any of the given code units.
+    UnitSet1([u16; 1]),
+    UnitSet2([u16; 2]),
+    UnitSet3([u16; 3]),
+
+    /// Look for a sequence of code units.
+    UnitSeq(Box<[u16]>),
+
+    /// Look for a code unit below 0x100 which matches the bitmap.
+    Latin1Bracket(ByteBitmap),
+}
+
 #[derive(Debug, Clone)]
 pub struct CompiledRegex {
     // Sequence of instructions.
@@ -196,6 +216,11 @@ pub struct CompiledRegex {
 
     // Predicate to rapidly find the first potential match.
     pub start_pred: StartPredicate,
+
+    // The same predicate in code units, for UTF-16 and UCS-2 input.
+    // An anchored regex is still recognized by `start_pred`.
+    #[cfg(feature = "utf16")]
+    pub unit_start_pred: UnitStartPredicate,
 
     // Number of loops, used to populate loop data.
     pub loops: u32,
