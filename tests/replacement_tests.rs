@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use regress::Regex;
 
 #[test]
@@ -12,6 +14,15 @@ fn test_replace_no_match() {
     let re = Regex::new(r"xyz").unwrap();
     let result = re.replace("hello world", "universe");
     assert_eq!(result, "hello world");
+    assert!(matches!(result, Cow::Borrowed("hello world")));
+}
+
+#[test]
+fn test_replace_match_returns_owned() {
+    let re = Regex::new(r"world").unwrap();
+    let result = re.replace("hello world", "universe");
+    assert_eq!(result, "hello universe");
+    assert!(matches!(result, Cow::Owned(_)));
 }
 
 #[test]
@@ -50,6 +61,14 @@ fn test_replace_all_basic() {
 }
 
 #[test]
+fn test_replace_all_no_match_returns_borrowed() {
+    let re = Regex::new(r"\d+").unwrap();
+    let result = re.replace_all("abc", "X");
+    assert_eq!(result, "abc");
+    assert!(matches!(result, Cow::Borrowed("abc")));
+}
+
+#[test]
 fn test_replace_all_with_groups() {
     let re = Regex::new(r"(\w+)\s+(\w+)").unwrap();
     let result = re.replace_all("hello world foo bar", "$2-$1");
@@ -75,6 +94,14 @@ fn test_replace_with_closure() {
 }
 
 #[test]
+fn test_replace_with_no_match_returns_borrowed() {
+    let re = Regex::new(r"\d+").unwrap();
+    let result = re.replace_with("Price unavailable", |_| "unused".to_string());
+    assert_eq!(result, "Price unavailable");
+    assert!(matches!(result, Cow::Borrowed("Price unavailable")));
+}
+
+#[test]
 fn test_replace_all_with_closure() {
     let re = Regex::new(r"\d+").unwrap();
     let text = "Items: 5, 10, 15";
@@ -83,6 +110,14 @@ fn test_replace_all_with_closure() {
         format!("[{}]", num * 10)
     });
     assert_eq!(result, "Items: [50], [100], [150]");
+}
+
+#[test]
+fn test_replace_all_with_no_match_returns_borrowed() {
+    let re = Regex::new(r"\d+").unwrap();
+    let result = re.replace_all_with("Items: none", |_| "unused".to_string());
+    assert_eq!(result, "Items: none");
+    assert!(matches!(result, Cow::Borrowed("Items: none")));
 }
 
 #[test]
