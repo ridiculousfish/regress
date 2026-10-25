@@ -472,18 +472,9 @@ impl Regex {
     /// ));
     /// ```
     pub fn find_from_budgeted(&self, text: &str, start: usize, budget: u64) -> BudgetedMatch {
-        use crate::exec::{Executor, MatchProducer};
-        let mut exec = <backends::DefaultExecutor as Executor>::new(&self.cr, text);
-        exec.set_backtrack_budget(budget);
-        let Some(pos) = exec.initial_position(start) else {
-            return BudgetedMatch::NoMatch;
-        };
-        let mut next_start = None;
-        match exec.next_match(pos, &mut next_start) {
-            Some(m) => BudgetedMatch::Match(m),
-            None if exec.budget_exhausted() => BudgetedMatch::BudgetExhausted,
-            None => BudgetedMatch::NoMatch,
-        }
+        use crate::exec::Executor;
+        let exec = <backends::DefaultExecutor as Executor>::new(&self.cr, text);
+        run_budgeted(exec, start, budget)
     }
 
     /// Searches `text`, returning an iterator over non-overlapping matches.
@@ -579,6 +570,54 @@ impl Regex {
             ),
             start,
         )
+    }
+
+    /// Search UTF-16 `text` from code unit index `start`, giving up after
+    /// `budget` backtracks. The budgeted counterpart of
+    /// [`Regex::find_from_utf16`]; see [`Regex::find_from_budgeted`] for how
+    /// the budget behaves.
+    ///
+    /// ```rust
+    /// use regress::{BudgetedMatch, Regex};
+    /// let re = Regex::new(r"^(a+)+$").unwrap();
+    /// let hay: Vec<u16> = ("a".repeat(40) + "!").encode_utf16().collect();
+    /// assert!(matches!(
+    ///     re.find_from_utf16_budgeted(&hay, 0, 100_000),
+    ///     BudgetedMatch::BudgetExhausted
+    /// ));
+    /// ```
+    #[cfg(feature = "utf16")]
+    pub fn find_from_utf16_budgeted(
+        &self,
+        text: &[u16],
+        start: usize,
+        budget: u64,
+    ) -> BudgetedMatch {
+        let input = Utf16Input::new(text, self.cr.flags.unicode);
+        let exec = classicalbacktrack::BacktrackExecutor::new(
+            input,
+            MatchAttempter::new(&self.cr, input.left_end()),
+        );
+        run_budgeted(exec, start, budget)
+    }
+
+    /// Search UCS-2 `text` from code unit index `start`, giving up after
+    /// `budget` backtracks. The budgeted counterpart of
+    /// [`Regex::find_from_ucs2`]; see [`Regex::find_from_budgeted`] for how
+    /// the budget behaves.
+    #[cfg(feature = "utf16")]
+    pub fn find_from_ucs2_budgeted(
+        &self,
+        text: &[u16],
+        start: usize,
+        budget: u64,
+    ) -> BudgetedMatch {
+        let input = Ucs2Input::new(text, self.cr.flags.unicode);
+        let exec = classicalbacktrack::BacktrackExecutor::new(
+            input,
+            MatchAttempter::new(&self.cr, input.left_end()),
+        );
+        run_budgeted(exec, start, budget)
     }
 
     /// Replaces the first match of the regex in `text` with the replacement string.
@@ -969,6 +1008,27 @@ mod pattern_impl {
 
 #[cfg(feature = "pattern")]
 pub use pattern_impl::*;
+
+/// Run a single budgeted search from `start`. Shared by the
+/// `find_from*_budgeted` methods so that every input encoding reports
+/// exhaustion the same way.
+fn run_budgeted<Input: indexing::InputIndexer>(
+    mut exec: classicalbacktrack::BacktrackExecutor<'_, Input>,
+    start: usize,
+    budget: u64,
+) -> BudgetedMatch {
+    use crate::exec::MatchProducer;
+    exec.set_backtrack_budget(budget);
+    let Some(pos) = exec.initial_position(start) else {
+        return BudgetedMatch::NoMatch;
+    };
+    let mut next_start = None;
+    match exec.next_match(pos, &mut next_start) {
+        Some(m) => BudgetedMatch::Match(m),
+        None if exec.budget_exhausted() => BudgetedMatch::BudgetExhausted,
+        None => BudgetedMatch::NoMatch,
+    }
+}
 
 // Support for using regress with different regex backends.
 // Currently there is only the classical backtracking, and PikeVM.
