@@ -338,6 +338,7 @@ pub trait UnitSearcher {
     fn find_in_units(&self, rhs: &[u16]) -> Option<usize>;
 }
 
+/// Search for the first occurrence of a code unit.
 #[cfg(feature = "utf16")]
 impl UnitSearcher for [u16; 1] {
     #[inline(always)]
@@ -346,6 +347,7 @@ impl UnitSearcher for [u16; 1] {
     }
 }
 
+/// Search for the first occurrence of either of two code units.
 #[cfg(feature = "utf16")]
 impl UnitSearcher for [u16; 2] {
     #[inline(always)]
@@ -354,6 +356,7 @@ impl UnitSearcher for [u16; 2] {
     }
 }
 
+/// Search for the first occurrence of any of three code units.
 #[cfg(feature = "utf16")]
 impl UnitSearcher for [u16; 3] {
     #[inline(always)]
@@ -363,21 +366,42 @@ impl UnitSearcher for [u16; 3] {
     }
 }
 
-/// A sequence of code units.
+/// Searches for a sequence of code units, in the manner of memmem::Finder.
 #[cfg(feature = "utf16")]
-impl UnitSearcher for [u16] {
-    fn find_in_units(&self, rhs: &[u16]) -> Option<usize> {
-        let Some((&first, rest)) = self.split_first() else {
+#[derive(Debug, Copy, Clone)]
+pub struct UnitSequence<'n> {
+    needle: &'n [u16],
+}
+
+#[cfg(feature = "utf16")]
+impl<'n> UnitSequence<'n> {
+    /// Create a searcher for the given needle.
+    pub fn new(needle: &'n [u16]) -> Self {
+        Self { needle }
+    }
+
+    /// \return the index of the first occurrence of the needle in the
+    /// haystack, or None. An empty needle is found at index 0.
+    // TODO: optimize via Boyer-Moore or etc.
+    pub fn find(&self, haystack: &[u16]) -> Option<usize> {
+        let Some((&first, rest)) = self.needle.split_first() else {
             return Some(0);
         };
         let mut from = 0;
         loop {
-            let idx = from + rhs[from..].iter().position(|&u| u == first)?;
-            if rhs[idx + 1..].starts_with(rest) {
+            let idx = from + haystack[from..].iter().position(|&u| u == first)?;
+            if haystack[idx + 1..].starts_with(rest) {
                 return Some(idx);
             }
             from = idx + 1;
         }
+    }
+}
+
+#[cfg(feature = "utf16")]
+impl UnitSearcher for UnitSequence<'_> {
+    fn find_in_units(&self, rhs: &[u16]) -> Option<usize> {
+        self.find(rhs)
     }
 }
 
