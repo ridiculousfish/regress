@@ -101,3 +101,100 @@ fn exhaustion_in_a_lookaround_aborts_the_search() {
         BudgetedMatch::BudgetExhausted
     ));
 }
+
+/// The UTF-16 and UCS-2 searches take the same budget and report exhaustion
+/// the same way.
+#[cfg(feature = "utf16")]
+#[test]
+fn utf16_and_ucs2_searches_report_exhaustion() {
+    let re = Regex::new(r"^(a+)+$").unwrap();
+    let hay: Vec<u16> = ("a".repeat(40) + "!").encode_utf16().collect();
+    assert!(matches!(
+        re.find_from_utf16_budgeted(&hay, 0, 100_000),
+        BudgetedMatch::BudgetExhausted
+    ));
+    assert!(matches!(
+        re.find_from_ucs2_budgeted(&hay, 0, 100_000),
+        BudgetedMatch::BudgetExhausted
+    ));
+    let ok: Vec<u16> = "aaaa".encode_utf16().collect();
+    assert!(matches!(
+        re.find_from_utf16_budgeted(&ok, 0, 1_000),
+        BudgetedMatch::Match(_)
+    ));
+}
+
+/// The caller's budget is the one applied: a search that only matches after
+/// tens of thousands of backtracks gives up under a small budget and matches
+/// under a large one.
+#[cfg(feature = "utf16")]
+#[test]
+fn utf16_and_ucs2_searches_honour_the_given_budget() {
+    // The first branch explodes before the second matches the whole input.
+    let re = Regex::new(r"^(?:(?:a+)+!|a*c)").unwrap();
+    let hay: Vec<u16> = ("a".repeat(16) + "c").encode_utf16().collect();
+    assert!(matches!(
+        re.find_from_utf16_budgeted(&hay, 0, 1_000),
+        BudgetedMatch::BudgetExhausted
+    ));
+    assert!(matches!(
+        re.find_from_ucs2_budgeted(&hay, 0, 1_000),
+        BudgetedMatch::BudgetExhausted
+    ));
+    match re.find_from_utf16_budgeted(&hay, 0, 10_000_000) {
+        BudgetedMatch::Match(m) => assert_eq!(m.range(), 0..17),
+        _ => panic!("expected a match with a large budget"),
+    }
+    match re.find_from_ucs2_budgeted(&hay, 0, 10_000_000) {
+        BudgetedMatch::Match(m) => assert_eq!(m.range(), 0..17),
+        _ => panic!("expected a match with a large budget"),
+    }
+}
+
+/// With a sufficient budget, the UTF-16 search gives the same answer as the
+/// unbudgeted iterator, in code units: an astral character counts as two, and
+/// a lone surrogate is matched as one unit.
+#[cfg(feature = "utf16")]
+#[test]
+fn utf16_budget_does_not_change_the_answer() {
+    let cases: &[(&str, &str, Vec<u16>, usize)] = &[
+        (
+            r"(\w+)@(\w+)\.com",
+            "",
+            "mail me at bob@example.com ok".encode_utf16().collect(),
+            0,
+        ),
+        (r"b.", "u", "a😀b😀c".encode_utf16().collect(), 0),
+        (r"\uD800.", "", vec![0x61, 0xD800, 0x62, 0x63], 0),
+        (r"(?<=x)y", "", "xyxy".encode_utf16().collect(), 2),
+        (r"z", "", "xyxy".encode_utf16().collect(), 0),
+    ];
+    for (pattern, flags, hay, start) in cases {
+        let re = Regex::with_flags(pattern, *flags).unwrap();
+        let expected = re.find_from_utf16(hay, *start).next();
+        match (
+            re.find_from_utf16_budgeted(hay, *start, 1_000_000),
+            expected,
+        ) {
+            (BudgetedMatch::Match(m), Some(e)) => {
+                assert_eq!(m.range(), e.range(), "{pattern}");
+                assert_eq!(m.captures, e.captures, "{pattern}");
+            }
+            (BudgetedMatch::NoMatch, None) => {}
+            _ => panic!("budgeted and unbudgeted searches disagree for {pattern}"),
+        }
+    }
+}
+
+/// An out-of-range `start` is no match, as for the unbudgeted iterator.
+#[cfg(feature = "utf16")]
+#[test]
+fn utf16_start_past_the_end_is_no_match() {
+    let re = Regex::new("a").unwrap();
+    let hay: Vec<u16> = "aaa".encode_utf16().collect();
+    assert!(re.find_from_utf16(&hay, 10).next().is_none());
+    assert!(matches!(
+        re.find_from_utf16_budgeted(&hay, 10, 1_000),
+        BudgetedMatch::NoMatch
+    ));
+}
