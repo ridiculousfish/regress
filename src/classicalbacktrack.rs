@@ -1188,6 +1188,11 @@ impl<Input: InputIndexer> BacktrackExecutor<'_, Input> {
                 }
                 return Some(self.successful_match(pos, end));
             }
+            // Abort the match if the budget was exhausted, as we don't know if
+            // this position may have matched.
+            if self.matcher.budget_exhausted {
+                return None;
+            }
             // Didn't find it at this position, try the next one.
             pos = inp.next_right_pos(pos)?;
         }
