@@ -261,21 +261,6 @@ mod units {
         Set(Vec<u16>),
     }
 
-    struct Prefix {
-        units: Units,
-
-        /// Whether the node matches exactly `units`, so that the node after it
-        /// in a catenation extends the sequence.
-        exact: bool,
-    }
-
-    fn inexact(units: Units) -> Option<Prefix> {
-        Some(Prefix {
-            units,
-            exact: false,
-        })
-    }
-
     fn set(mut units: Vec<u16>) -> Units {
         units.sort_unstable();
         units.dedup();
@@ -304,21 +289,23 @@ mod units {
         }
     }
 
+    /// Convert the code point set to the set of code units its code points
+    /// begin with.
     fn first_units_of_set(cps: &CodePointSet) -> Units {
         let mut units = Vec::new();
         for iv in cps.intervals() {
-            let mut cp = iv.first;
-            while cp <= iv.last {
-                if units.len() > MAX_SET_UNITS {
-                    return Units::Arbitrary;
+            let ranges = [
+                (iv.first, iv.last.min(0xFFFF)),   // BMP range
+                (iv.first.max(0x1_0000), iv.last), // Supplementary range
+            ];
+            for (first, last) in ranges {
+                if first <= last {
+                    let (first, last) = (first_unit(first), first_unit(last));
+                    if units.len() + usize::from(last - first) >= MAX_SET_UNITS {
+                        return Units::Arbitrary;
+                    }
+                    units.extend(first..=last);
                 }
-                units.push(first_unit(cp));
-                cp = if cp <= 0xFFFF {
-                    cp + 1
-                } else {
-                    // Skip to the first code point with the next high surrogate.
-                    (((cp - 0x1_0000) >> 10) + 1) * 0x400 + 0x1_0000
-                };
             }
         }
         set(units)
@@ -349,32 +336,16 @@ mod units {
 
     /// Compute any start predicate for a node, as `compute_start_predicate`
     /// does for bytes. None means the node is zero-width.
-    fn compute(n: &Node) -> Option<Prefix> {
-        let arbitrary = inexact(Units::Arbitrary);
+    fn compute(n: &Node) -> Option<Units> {
+        let arbitrary = Some(Units::Arbitrary);
         match n {
             Node::Char { c } => {
                 let mut units = Vec::new();
                 push_units(*c, &mut units);
-                Some(Prefix {
-                    units: Units::Sequence(units),
-                    exact: true,
-                })
+                Some(Units::Sequence(units))
             }
 
-            // Literal bytes are only formed without UTF-16 support.
-            Node::ByteSequence(bytes) => match core::str::from_utf8(bytes) {
-                Ok(s) if !s.is_empty() => Some(Prefix {
-                    units: Units::Sequence(s.encode_utf16().collect()),
-                    exact: true,
-                }),
-                _ => arbitrary,
-            },
-            Node::ByteSet(bytes) if bytes.is_ascii() => {
-                inexact(set(bytes.iter().map(|&b| b.into()).collect()))
-            }
-            Node::ByteSet(..) => arbitrary,
-
-            Node::CharSet(chars) => inexact(set(chars.iter().map(|&c| first_unit(c)).collect())),
+            Node::CharSet(chars) => Some(set(chars.iter().map(|&c| first_unit(c)).collect())),
 
             Node::Bracket(bc) => {
                 let storage;
@@ -384,10 +355,13 @@ mod units {
                 } else {
                     &bc.cps
                 };
-                inexact(first_units_of_set(cps))
+                Some(first_units_of_set(cps))
             }
 
-            Node::Empty
+            // Literal bytes are only formed without UTF-16 support.
+            Node::ByteSequence(..)
+            | Node::ByteSet(..)
+            | Node::Empty
             | Node::Goal
             | Node::BackRef { .. }
             | Node::StringSet { .. }
@@ -402,47 +376,40 @@ mod units {
 
             Node::Loop { loopee, quant, .. } | Node::Loop1CharBody { loopee, quant } => {
                 if quant.min > 0 {
-                    compute(loopee).map(|p| Prefix { exact: false, ..p })
+                    compute(loopee)
                 } else {
                     arbitrary
                 }
             }
 
             Node::Alt(left, right) => match (compute(left), compute(right)) {
-                (Some(x), Some(y)) => inexact(disjunction(x.units, y.units)),
+                (Some(x), Some(y)) => Some(disjunction(x, y)),
                 _ => arbitrary,
             },
 
-            // Cats take the first non-None value, and an exact sequence goes on
-            // to take the sequences of the nodes after it.
+            // Cats return the first non-None value, as for bytes. A run of chars
+            // is taken whole, as it would form literal bytes without UTF-16 support.
             Node::Cat(nodes) => {
-                let mut rest = nodes.iter();
-                let mut prefix = rest.by_ref().find_map(compute)?;
-                if let Units::Sequence(seq) = &mut prefix.units {
-                    while prefix.exact {
-                        let Some(node) = rest.next() else { break };
-                        match compute(node) {
-                            // Zero-width; the sequence carries on past it.
-                            None => {}
-                            Some(Prefix {
-                                units: Units::Sequence(more),
-                                exact,
-                            }) => {
-                                seq.extend(more);
-                                prefix.exact = exact;
+                let mut seq = Vec::new();
+                for node in nodes {
+                    match node {
+                        Node::Char { c } => push_units(*c, &mut seq),
+                        _ if !seq.is_empty() => break,
+                        _ => {
+                            if let Some(units) = compute(node) {
+                                return Some(units);
                             }
-                            Some(_) => prefix.exact = false,
                         }
                     }
                 }
-                Some(prefix)
+                (!seq.is_empty()).then_some(Units::Sequence(seq))
             }
         }
     }
 
     /// \return the code unit start predicate for a Regex.
     pub fn predicate_for_re(re: &ir::Regex) -> UnitStartPredicate {
-        match compute(&re.node).map_or(Units::Arbitrary, |p| p.units) {
+        match compute(&re.node).unwrap_or(Units::Arbitrary) {
             Units::Arbitrary => UnitStartPredicate::Arbitrary,
             Units::Sequence(seq) if seq.len() == 1 => UnitStartPredicate::UnitSet1([seq[0]]),
             Units::Sequence(seq) => UnitStartPredicate::UnitSeq(seq.into_boxed_slice()),
@@ -498,7 +465,7 @@ mod units {
                 seq("needle")
             );
             assert_eq!(predicate(r"the\s+harbor", "u"), seq("the"));
-            assert_eq!(predicate(r"a(?=b)bc+d", ""), seq("abc"));
+            assert_eq!(predicate(r"a(?=b)bc+d", ""), UnitSet1([0x61]));
             assert_eq!(predicate("😀x", "u"), seq("😀x"));
             assert_eq!(predicate("😀|😃", "u"), UnitSet1([0xD83D]));
             assert_eq!(predicate("abc|abd", ""), seq("ab"));
