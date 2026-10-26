@@ -2373,6 +2373,25 @@ fn test_ascii_unicode_icase_backref() {
 }
 
 #[test]
+fn test_class_word_escape_unicode_icase() {
+    test_with_configs(|tc| {
+        // With the i flag in Unicode mode, U+017F and U+212A are word characters,
+        // because they fold to s and k. So in a class, \W contains none of the
+        // case variants of s and k, and [^\W] contains all of them.
+        for flags in ["iu", "iv"] {
+            for c in ["s", "S", "\u{17F}", "k", "K", "\u{212A}"] {
+                tc.test_match_fails(r"[\W]", flags, c);
+                tc.test_match_fails(r"[a\W]", flags, c);
+                tc.test_match_succeeds(r"[^\W]", flags, c);
+                tc.test_match_succeeds(r"[\w]", flags, c);
+            }
+            tc.test_match_succeeds(r"[\W]", flags, "!");
+            tc.test_match_fails(r"[^\W]", flags, "!");
+        }
+    })
+}
+
+#[test]
 fn test_duplicate_named_groups_distinct_alternations_backref() {
     test_with_configs(test_duplicate_named_groups_distinct_alternations_backref_tc)
 }
