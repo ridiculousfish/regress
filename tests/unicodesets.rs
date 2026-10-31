@@ -3327,5 +3327,48 @@ fn unicode_sets_operations_icase() {
             .test_fails("A");
         tc.compilef(r"^[\P{Uppercase_Letter}]$", "vi")
             .test_succeeds("1");
+
+        // Non-ASCII folds.
+        tc.compilef("^[k]$", "vi").test_succeeds("\u{212A}");
+        tc.compilef(r"^[\w--k]$", "vi").test_fails("\u{212A}");
+        tc.compilef(r"^[\w--k]$", "vi").test_succeeds("j");
+        tc.compilef(r"^[\W]$", "vi").test_fails("\u{212A}");
+        tc.compilef(r"^[\W]$", "vi").test_fails("\u{17F}");
+        tc.compilef(r"^[^\W]$", "vi").test_succeeds("\u{17F}");
+        tc.compilef(r"^[[a-z]--s]$", "vi").test_fails("\u{17F}");
+        tc.compilef(r"^[\P{Lowercase_Letter}]$", "vi")
+            .test_fails("\u{212A}");
+
+        // Ranges.
+        tc.compilef("^[[a-c]--B]$", "vi").test_fails("b");
+        tc.compilef("^[[a-c]--B]$", "vi").test_fails("B");
+        tc.compilef("^[[a-c]--B]$", "vi").test_succeeds("a");
+        tc.compilef("^[[a-c]--B]$", "vi").test_succeeds("C");
+        tc.compilef("^[[a-c]&&[B]]$", "vi").test_succeeds("b");
+        tc.compilef("^[[a-c]&&[B]]$", "vi").test_fails("c");
+
+        // Property escapes.
+        tc.compilef(r"^[\p{Lowercase_Letter}&&[A]]$", "vi")
+            .test_succeeds("a");
+        tc.compilef(r"^[\p{Lowercase_Letter}&&[A]]$", "vi")
+            .test_succeeds("A");
+        tc.compilef(r"^[\p{Lowercase_Letter}&&[A]]$", "vi")
+            .test_fails("b");
+        tc.compilef(r"^[\p{Lowercase_Letter}--[a]]$", "vi")
+            .test_fails("A");
+        tc.compilef(r"^[\p{Lowercase_Letter}--[a]]$", "vi")
+            .test_succeeds("B");
+        tc.compilef(r"^[\P{Lowercase_Letter}]$", "vi")
+            .test_fails("A");
+        tc.compilef(r"^[\P{Lowercase_Letter}]$", "vi")
+            .test_succeeds("1");
+
+        // Single code point strings in a negated class.
+        tc.compilef(r"^[^\q{a}]$", "vi").test_fails("a");
+        tc.compilef(r"^[^\q{a}]$", "vi").test_fails("A");
+        tc.compilef(r"^[^\q{a}]$", "vi").test_succeeds("b");
+        tc.compilef(r"^[^\q{a|b}]$", "vi").test_fails("B");
+        tc.compilef(r"^[^[\q{a}]]$", "vi").test_fails("A");
+        tc.compilef(r"^[^\q{k}]$", "vi").test_fails("\u{212A}");
     });
 }
