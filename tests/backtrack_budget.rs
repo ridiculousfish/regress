@@ -198,3 +198,31 @@ fn utf16_start_past_the_end_is_no_match() {
         BudgetedMatch::NoMatch
     ));
 }
+
+/// A `start` on a low surrogate begins at the pair's high surrogate, as for
+/// the unbudgeted UTF-16 iterator, so half a pair is never matched alone.
+#[cfg(feature = "utf16")]
+#[test]
+fn utf16_start_inside_a_surrogate_pair_moves_back() {
+    let hay: Vec<u16> = "😀".encode_utf16().collect();
+    let re = Regex::with_flags(r".", "u").unwrap();
+    assert_eq!(re.find_from_utf16(&hay, 1).next().unwrap().range(), 0..2);
+    match re.find_from_utf16_budgeted(&hay, 1, 1_000) {
+        BudgetedMatch::Match(m) => assert_eq!(m.range(), 0..2),
+        _ => panic!("expected a match from the high surrogate"),
+    }
+    let re = Regex::with_flags(r"\uDE00", "u").unwrap();
+    assert!(re.find_from_utf16(&hay, 1).next().is_none());
+    assert!(matches!(
+        re.find_from_utf16_budgeted(&hay, 1, 1_000),
+        BudgetedMatch::NoMatch
+    ));
+}
+
+/// A `start` inside a UTF-8 character panics, as for `find_from`.
+#[test]
+#[should_panic(expected = "start index is not on a char boundary")]
+fn str_start_inside_a_character_panics() {
+    let re = Regex::with_flags(r".", "u").unwrap();
+    let _ = re.find_from_budgeted("é!", 1, 1_000);
+}

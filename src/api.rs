@@ -472,8 +472,18 @@ impl Regex {
     ///     BudgetedMatch::BudgetExhausted
     /// ));
     /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if `start` is not on a UTF-8 character boundary of `text`, as
+    /// for [`Regex::find_from`]. An out-of-range `start` is
+    /// [`BudgetedMatch::NoMatch`].
     pub fn find_from_budgeted(&self, text: &str, start: usize, budget: u64) -> BudgetedMatch {
         use crate::exec::Executor;
+        assert!(
+            start >= text.len() || text.is_char_boundary(start),
+            "start index is not on a char boundary"
+        );
         let exec = <backends::DefaultExecutor as Executor>::new(&self.cr, text);
         run_budgeted(exec, start, budget)
     }
@@ -669,6 +679,9 @@ impl Regex {
     /// [`Regex::find_from_utf16`]; see [`Regex::find_from_budgeted`] for how
     /// the budget behaves.
     ///
+    /// If `start` is the low surrogate of a surrogate pair, searching begins
+    /// at the pair's high surrogate, as for [`Regex::find_from_utf16`].
+    ///
     /// ```rust
     /// use regress::{BudgetedMatch, Regex};
     /// let re = Regex::new(r"^(a+)+$").unwrap();
@@ -690,7 +703,7 @@ impl Regex {
             input,
             MatchAttempter::new(&self.cr, input.left_end()),
         );
-        run_budgeted(exec, start, budget)
+        run_budgeted(exec, input.match_start(start), budget)
     }
 
     /// Search UCS-2 `text` from code unit index `start`, giving up after
