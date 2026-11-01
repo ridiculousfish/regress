@@ -151,12 +151,12 @@ fn utf16_and_ucs2_searches_honour_the_given_budget() {
     }
 }
 
-/// With a sufficient budget, the UTF-16 search gives the same answer as the
-/// unbudgeted iterator, in code units: an astral character counts as two, and
-/// a lone surrogate is matched as one unit.
+/// With a sufficient budget, the UTF-16 and UCS-2 searches give the same
+/// answer as their unbudgeted iterators, in code units: an astral character
+/// counts as two, and a lone surrogate is matched as one unit.
 #[cfg(feature = "utf16")]
 #[test]
-fn utf16_budget_does_not_change_the_answer() {
+fn utf16_and_ucs2_budget_does_not_change_the_answer() {
     let cases: &[(&str, &str, Vec<u16>, usize)] = &[
         (
             r"(\w+)@(\w+)\.com",
@@ -171,17 +171,27 @@ fn utf16_budget_does_not_change_the_answer() {
     ];
     for (pattern, flags, hay, start) in cases {
         let re = Regex::with_flags(pattern, *flags).unwrap();
-        let expected = re.find_from_utf16(hay, *start).next();
-        match (
-            re.find_from_utf16_budgeted(hay, *start, 1_000_000),
-            expected,
-        ) {
-            (BudgetedMatch::Match(m), Some(e)) => {
-                assert_eq!(m.range(), e.range(), "{pattern}");
-                assert_eq!(m.captures, e.captures, "{pattern}");
+        let pairs = [
+            (
+                "UTF-16",
+                re.find_from_utf16_budgeted(hay, *start, 1_000_000),
+                re.find_from_utf16(hay, *start).next(),
+            ),
+            (
+                "UCS-2",
+                re.find_from_ucs2_budgeted(hay, *start, 1_000_000),
+                re.find_from_ucs2(hay, *start).next(),
+            ),
+        ];
+        for (encoding, budgeted, expected) in pairs {
+            match (budgeted, expected) {
+                (BudgetedMatch::Match(m), Some(e)) => {
+                    assert_eq!(m.range(), e.range(), "{encoding} {pattern}");
+                    assert_eq!(m.captures, e.captures, "{encoding} {pattern}");
+                }
+                (BudgetedMatch::NoMatch, None) => {}
+                _ => panic!("budgeted and unbudgeted {encoding} searches disagree for {pattern}"),
             }
-            (BudgetedMatch::NoMatch, None) => {}
-            _ => panic!("budgeted and unbudgeted searches disagree for {pattern}"),
         }
     }
 }
