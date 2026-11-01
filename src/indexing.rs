@@ -919,6 +919,36 @@ impl<'a> Utf16Input<'a> {
     fn code_point_from_surrogates(high: u16, low: u16) -> u32 {
         (((high & 0x3ff) as u32) << 10 | (low & 0x3ff) as u32) + 0x1_0000
     }
+
+    /// \return whether the code unit at \p idx is the low surrogate of a
+    /// surrogate pair.
+    #[inline(always)]
+    fn is_inside_surrogate_pair(&self, idx: usize) -> bool {
+        idx > 0
+            && idx < self.input.len()
+            && Self::is_low_surrogate(self.input[idx])
+            && Self::is_high_surrogate(self.input[idx - 1])
+    }
+
+    /// \return the code unit offset at which to begin matching, for a match
+    /// requested to start at \p offset.
+    ///
+    /// ECMA-262 RegExpBuiltinExec says "If fullUnicode is true, let input be
+    /// StringToCodePoints(string)" and "Let inputIndex be the index into input
+    /// of the character that was obtained from element lastIndex of string."
+    /// If \p offset is the low surrogate of a pair, that character is the
+    /// whole pair, so matching begins at its high surrogate.
+    ///
+    /// Callers report matches at their actual start, including empty matches.
+    /// This follows established engine behavior and the proposed correction to
+    /// RegExpBuiltinExec in https://github.com/tc39/ecma262/issues/128.
+    pub(crate) fn match_start(&self, offset: usize) -> usize {
+        if self.is_inside_surrogate_pair(offset) {
+            offset - 1
+        } else {
+            offset
+        }
+    }
 }
 
 #[cfg(feature = "utf16")]
@@ -1120,10 +1150,7 @@ impl<'a> InputIndexer for Utf16Input<'a> {
             // Past the starting position, matching steps over whole surrogate
             // pairs, so a unit between a high and a low surrogate is never a
             // position it would try.
-            if idx == start
-                || !(Self::is_low_surrogate(self.input[idx])
-                    && Self::is_high_surrogate(self.input[idx - 1]))
-            {
+            if idx == start || !self.is_inside_surrogate_pair(idx) {
                 return Some(pos + (idx - start));
             }
             from = idx + 1;

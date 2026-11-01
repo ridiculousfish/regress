@@ -547,6 +547,14 @@ impl Regex {
     }
 
     /// Returns an iterator for matches found in 'text' starting at index `start`.
+    ///
+    /// If `start` is the low surrogate of a surrogate pair, searching begins
+    /// at the pair's high surrogate. A match found there is reported as
+    /// starting at that high surrogate, which is one code unit before `start`.
+    /// This follows established JavaScript engine behavior and the proposed
+    /// correction to RegExpBuiltinExec in [TC39 issue #128].
+    ///
+    /// [TC39 issue #128]: https://github.com/tc39/ecma262/issues/128
     #[cfg(feature = "utf16")]
     pub fn find_from_utf16<'r, 't>(
         &'r self,
@@ -560,7 +568,7 @@ impl Regex {
                 input,
                 MatchAttempter::new(&self.cr, input.left_end()),
             ),
-            start,
+            input.match_start(start),
         )
     }
 
@@ -584,9 +592,18 @@ impl Regex {
 
     /// Attempts to match `text` at exactly the specified UTF-16 code unit index `start`.
     ///
-    /// Returns `Some(Match)` only if a match begins at `start`.
+    /// Returns `Some(Match)` only if a match begins at `start`, except as
+    /// described below when `start` is inside a surrogate pair.
     /// Returns `None` if no match exists at that position, without searching forward.
     /// An out-of-range `start` (`start > text.len()`) safely returns `None`.
+    ///
+    /// If `start` is the low surrogate of a surrogate pair, matching begins
+    /// at the pair's high surrogate. The returned match is reported as starting
+    /// at that high surrogate, which is one code unit before `start`.
+    /// This follows established JavaScript engine behavior and the proposed
+    /// correction to RegExpBuiltinExec in [TC39 issue #128].
+    ///
+    /// [TC39 issue #128]: https://github.com/tc39/ecma262/issues/128
     ///
     /// # Examples
     ///
@@ -615,7 +632,7 @@ impl Regex {
             input,
             MatchAttempter::new(&self.cr, input.left_end()),
         );
-        let pos = exec.initial_position(start)?;
+        let pos = exec.initial_position(input.match_start(start))?;
         exec.match_at(pos)
     }
 
