@@ -539,7 +539,8 @@ where
         if !self.flags.icase {
             return ir::Node::Char { c };
         }
-        let class = unicode::expand_code_point(c, self.flags.icase, self.flags.unicode);
+        let class =
+            unicode::expand_code_point(c, self.flags.icase, self.flags.unicode_or_unicode_sets());
         match class.len() {
             1 => ir::Node::Char { c: class[0] },
             2..=MAX_CHAR_SET_LENGTH => ir::Node::CharSet(class),
@@ -638,7 +639,8 @@ where
                             self.consume('b');
                             result.push(ir::Node::WordBoundary {
                                 invert: false,
-                                unicode_icase: self.flags.unicode && self.flags.icase,
+                                unicode_icase: self.flags.unicode_or_unicode_sets()
+                                    && self.flags.icase,
                             });
                         }
                         // Term :: Assertion :: \B
@@ -646,12 +648,13 @@ where
                             self.consume('B');
                             result.push(ir::Node::WordBoundary {
                                 invert: true,
-                                unicode_icase: self.flags.unicode && self.flags.icase,
+                                unicode_icase: self.flags.unicode_or_unicode_sets()
+                                    && self.flags.icase,
                             });
                         }
                         // Term :: Atom :: \ AtomEscape :: CharacterEscape :: c AsciiLetter
                         // Term :: ExtendedAtom :: \ [lookahead = c]
-                        'c' if !self.flags.unicode => {
+                        'c' if !self.flags.unicode_or_unicode_sets() => {
                             self.consume('c');
                             if self
                                 .peek()
@@ -687,14 +690,14 @@ where
                 '(' => {
                     if self.try_consume_str("(?=") {
                         // Positive lookahead.
-                        quantifier_allowed = !self.flags.unicode;
+                        quantifier_allowed = !self.flags.unicode_or_unicode_sets();
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: false,
                             backwards: false,
                         })?);
                     } else if self.try_consume_str("(?!") {
                         // Negative lookahead.
-                        quantifier_allowed = !self.flags.unicode;
+                        quantifier_allowed = !self.flags.unicode_or_unicode_sets();
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: true,
                             backwards: false,
@@ -765,7 +768,7 @@ where
                 }
 
                 // Term :: ExtendedAtom :: InvalidBracedQuantifier
-                '{' if !self.flags.unicode => {
+                '{' if !self.flags.unicode_or_unicode_sets() => {
                     if self.try_consume_braced_quantifier().is_some() {
                         return error("Invalid braced quantifier");
                     }
@@ -776,7 +779,7 @@ where
                 }
 
                 // Term :: Atom :: PatternCharacter :: SourceCharacter but not ^ $ \ . * + ? ( ) [ ] { } |
-                '*' | '+' | '?' | ']' | '{' | '}' if self.flags.unicode => {
+                '*' | '+' | '?' | ']' | '{' | '}' if self.flags.unicode_or_unicode_sets() => {
                     return error("Invalid atom character");
                 }
 
@@ -962,7 +965,7 @@ where
                 continue;
             }
 
-            if self.flags.unicode {
+            if self.flags.unicode_or_unicode_sets() {
                 return error("Invalid character range");
             }
 
@@ -998,11 +1001,11 @@ where
                         Ok(Some(ClassAtom::CodePoint(u32::from('\x08'))))
                     }
                     // ClassEscape :: [+UnicodeMode] -
-                    '-' if self.flags.unicode => {
+                    '-' if self.flags.unicode_or_unicode_sets() => {
                         self.consume('-');
                         Ok(Some(ClassAtom::CodePoint(u32::from('-'))))
                     }
-                    'c' if !self.flags.unicode => {
+                    'c' if !self.flags.unicode_or_unicode_sets() => {
                         let input = self.input.clone();
                         self.consume('c');
                         match self.peek().map(to_char_sat) {
@@ -1073,7 +1076,7 @@ where
                     }
                     // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
                     // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] P{ UnicodePropertyValueExpression }
-                    'p' | 'P' if self.flags.unicode => {
+                    'p' | 'P' if self.flags.unicode_or_unicode_sets() => {
                         self.consume(ec);
                         let negate = ec == 'P' as u32;
                         match self.try_consume_unicode_property_escape()? {
@@ -1485,7 +1488,7 @@ where
             Some('{') => {
                 if let Some(quantifier) = self.try_consume_braced_quantifier() {
                     Ok(Some(quantifier))
-                } else if self.flags.unicode {
+                } else if self.flags.unicode_or_unicode_sets() {
                     // if there was a brace '{' that doesn't parse into a valid quantifier,
                     // it's not valid with the unicode flag
                     error("Invalid quantifier")
@@ -1605,7 +1608,7 @@ where
                     (Some(x1), Some(x2)) => Ok(x1 * 16 + x2),
                     // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
                     // Not a valid HexEscapeSequence. Restore the input.
-                    _ if !self.flags.unicode => {
+                    _ if !self.flags.unicode_or_unicode_sets() => {
                         self.input = orig_input;
                         Ok(c)
                     }
@@ -1616,7 +1619,7 @@ where
             'u' => {
                 if let Some(c) = self.try_escape_unicode_sequence() {
                     Ok(c)
-                } else if !self.flags.unicode {
+                } else if !self.flags.unicode_or_unicode_sets() {
                     // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
                     Ok(c)
                 } else {
@@ -1624,7 +1627,7 @@ where
                 }
             }
             // CharacterEscape :: [~UnicodeMode] LegacyOctalEscapeSequence
-            '0'..='7' if !self.flags.unicode => {
+            '0'..='7' if !self.flags.unicode_or_unicode_sets() => {
                 let Some(c1) = self.peek() else {
                     return Ok(c - '0' as u32);
                 };
@@ -1661,7 +1664,7 @@ where
             '^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
             | '/' => Ok(c),
             // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
-            _ if !self.flags.unicode => Ok(c),
+            _ if !self.flags.unicode_or_unicode_sets() => Ok(c),
             _ => error("Invalid character escape"),
         }
     }
@@ -1701,7 +1704,7 @@ where
 
             // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
             // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] P{ UnicodePropertyValueExpression }
-            'p' | 'P' if self.flags.unicode || self.flags.unicode_sets => {
+            'p' | 'P' if self.flags.unicode_or_unicode_sets() => {
                 self.consume(c);
                 let negate = c == 'P' as u32;
                 let property_escape = self.try_consume_unicode_property_escape()?;
@@ -1735,7 +1738,7 @@ where
 
             // [+UnicodeMode] DecimalEscape
             // Note: This is a backreference.
-            '1'..='9' if self.flags.unicode => {
+            '1'..='9' if self.flags.unicode_or_unicode_sets() => {
                 let group = self.try_consume_decimal_integer_literal().unwrap();
                 if group <= self.group_count_max as usize {
                     Ok(ir::Node::BackRef {
@@ -1767,7 +1770,7 @@ where
             }
 
             // [+NamedCaptureGroups] k GroupName
-            'k' if self.flags.unicode || !self.named_group_indices.is_empty() => {
+            'k' if self.flags.unicode_or_unicode_sets() || !self.named_group_indices.is_empty() => {
                 // The sequence `\k` must be the start of a backreference to a named capture group.
                 // Note multiple capture groups may have the same name; we must map all of them to their indices.
                 self.consume('k');
@@ -2177,7 +2180,7 @@ where
         if self.has_lookbehind {
             ir::walk_mut(
                 false,
-                re.flags.unicode,
+                re.flags.unicode_or_unicode_sets(),
                 &mut re.node,
                 &mut ir::Node::reverse_cats,
             );
@@ -2192,12 +2195,6 @@ pub fn try_parse<I>(pattern: I, flags: api::Flags) -> Result<ir::Regex, Error>
 where
     I: Iterator<Item = u32> + Clone,
 {
-    // The `v` flag also selects Unicode mode, like `u`: the same syntax rules outside
-    // classes, Unicode case folding and matching by code point.
-    let flags = api::Flags {
-        unicode: flags.unicode || flags.unicode_sets,
-        ..flags
-    };
     let mut p = Parser {
         input: pattern.peekable(),
         flags,

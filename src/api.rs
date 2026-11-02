@@ -57,6 +57,14 @@ pub struct Flags {
 }
 
 impl Flags {
+    /// Whether the regex is in Unicode mode, which the 'u' and 'v' flags both select:
+    /// Unicode syntax rules outside classes, Unicode case folding and matching by
+    /// code point. This is HasEitherUnicodeFlag in ECMA-262.
+    #[inline]
+    pub(crate) fn unicode_or_unicode_sets(&self) -> bool {
+        self.unicode || self.unicode_sets
+    }
+
     /// Construct a Flags from a Unicode codepoints iterator, using JavaScript field names.
     /// 'i' means to ignore case, 'm' means multiline, 'u' means unicode.
     /// Note the 'g' flag implies a stateful regex and is not supported.
@@ -563,7 +571,7 @@ impl Regex {
         start: usize,
     ) -> exec::Matches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Utf16Input<'t>>>
     {
-        let input = Utf16Input::new(text, self.cr.flags.unicode);
+        let input = Utf16Input::new(text, self.cr.flags.unicode_or_unicode_sets());
         exec::Matches::new(
             super::classicalbacktrack::BacktrackExecutor::new(
                 input,
@@ -581,7 +589,7 @@ impl Regex {
         start: usize,
     ) -> exec::Matches<super::classicalbacktrack::BacktrackExecutor<'r, indexing::Ucs2Input<'t>>>
     {
-        let input = Ucs2Input::new(text, self.cr.flags.unicode);
+        let input = Ucs2Input::new(text, self.cr.flags.unicode_or_unicode_sets());
         exec::Matches::new(
             super::classicalbacktrack::BacktrackExecutor::new(
                 input,
@@ -628,7 +636,7 @@ impl Regex {
         if start > text.len() {
             return None;
         }
-        let input = Utf16Input::new(text, self.cr.flags.unicode);
+        let input = Utf16Input::new(text, self.cr.flags.unicode_or_unicode_sets());
         let mut exec = super::classicalbacktrack::BacktrackExecutor::new(
             input,
             MatchAttempter::new(&self.cr, input.left_end()),
@@ -665,7 +673,7 @@ impl Regex {
         if start > text.len() {
             return None;
         }
-        let input = Ucs2Input::new(text, self.cr.flags.unicode);
+        let input = Ucs2Input::new(text, self.cr.flags.unicode_or_unicode_sets());
         let mut exec = super::classicalbacktrack::BacktrackExecutor::new(
             input,
             MatchAttempter::new(&self.cr, input.left_end()),
@@ -698,7 +706,7 @@ impl Regex {
         start: usize,
         budget: u64,
     ) -> BudgetedMatch {
-        let input = Utf16Input::new(text, self.cr.flags.unicode);
+        let input = Utf16Input::new(text, self.cr.flags.unicode_or_unicode_sets());
         let exec = classicalbacktrack::BacktrackExecutor::new(
             input,
             MatchAttempter::new(&self.cr, input.left_end()),
@@ -717,7 +725,7 @@ impl Regex {
         start: usize,
         budget: u64,
     ) -> BudgetedMatch {
-        let input = Ucs2Input::new(text, self.cr.flags.unicode);
+        let input = Ucs2Input::new(text, self.cr.flags.unicode_or_unicode_sets());
         let exec = classicalbacktrack::BacktrackExecutor::new(
             input,
             MatchAttempter::new(&self.cr, input.left_end()),

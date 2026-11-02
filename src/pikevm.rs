@@ -472,7 +472,7 @@ impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, Utf8Input<'t>> {
     type AsAscii = PikeVMExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
-        let input = Utf8Input::new(text, re.flags.unicode);
+        let input = Utf8Input::new(text, re.flags.unicode_or_unicode_sets());
         Self {
             input,
             matcher: MatchAttempter::new(re),
@@ -484,7 +484,7 @@ impl<'r, 't> exec::Executor<'r, 't> for PikeVMExecutor<'r, AsciiInput<'t>> {
     type AsAscii = PikeVMExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
-        let input = AsciiInput::new(text, re.flags.unicode);
+        let input = AsciiInput::new(text, re.flags.unicode_or_unicode_sets());
         Self {
             input,
             matcher: MatchAttempter::new(re),
@@ -642,7 +642,7 @@ mod tests {
                 let utf16: Vec<u16> = text_str.encode_utf16().collect();
                 // Test UTF-16
                 for start in 0..=utf16.len() + 1 {
-                    let input = Utf16Input::new(&utf16, cr.flags.unicode);
+                    let input = Utf16Input::new(&utf16, cr.flags.unicode_or_unicode_sets());
                     let mut pike = PikeVMExecutor::new(input, &cr);
                     let mut bt =
                         BacktrackExecutor::new(input, MatchAttempter::new(&cr, input.left_end()));
@@ -667,7 +667,7 @@ mod tests {
 
                 // Test UCS-2
                 for start in 0..=utf16.len() + 1 {
-                    let input = Ucs2Input::new(&utf16, cr.flags.unicode);
+                    let input = Ucs2Input::new(&utf16, cr.flags.unicode_or_unicode_sets());
                     let mut pike = PikeVMExecutor::new(input, &cr);
                     let mut bt =
                         BacktrackExecutor::new(input, MatchAttempter::new(&cr, input.left_end()));

@@ -112,7 +112,7 @@ fn run_pass<F>(r: &mut Regex, func: &mut F) -> bool
 where
     F: FnMut(&mut Node, &Walk) -> PassAction,
 {
-    let mut p = Pass::new(func, r.flags.unicode);
+    let mut p = Pass::new(func, r.flags.unicode_or_unicode_sets());
     p.run_to_fixpoint(&mut r.node);
     p.changed
 }

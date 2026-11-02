@@ -105,7 +105,8 @@ impl Emitter {
     // Emit a sequence of code points, lowering to literal bytes (UTF-8).
     #[cfg(not(feature = "utf16"))]
     fn emit_code_point_sequence(&mut self, cps: &[u32], icase: bool) {
-        let pieces = lower_code_point_sequence(cps, icase, self.result.flags.unicode);
+        let pieces =
+            lower_code_point_sequence(cps, icase, self.result.flags.unicode_or_unicode_sets());
         for piece in pieces {
             self.emit_node(&Node::from(piece));
         }
@@ -114,7 +115,7 @@ impl Emitter {
     // Emit a sequence of code points, in a UTF-16 friendly way.
     #[cfg(feature = "utf16")]
     fn emit_code_point_sequence(&mut self, cps: &[u32], icase: bool) {
-        let unicode = self.result.flags.unicode;
+        let unicode = self.result.flags.unicode_or_unicode_sets();
         for &cp in cps {
             let chars = unicode::expand_code_point(cp, icase, unicode);
             let node = match chars.len() {
