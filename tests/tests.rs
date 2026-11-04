@@ -2092,6 +2092,319 @@ mod utf16_tests {
         assert!(matched.is_some());
         assert_eq!(matched.unwrap().range, 1..2);
     }
+
+    #[test]
+    fn test_anchored_match_position_and_forward_search() {
+        let re = regress::Regex::new(r"bc").unwrap();
+        let text = to_utf16("abcdefbc");
+
+        // 1. Successful match at position 1
+        let m = re.match_at_utf16(&text, 1).unwrap();
+        assert_eq!(m.range(), 1..3);
+        let m2 = re.match_at_ucs2(&text, 1).unwrap();
+        assert_eq!(m2.range(), 1..3);
+
+        // 2. Pattern occurs later, but NOT at position 0: must return None
+        assert!(re.match_at_utf16(&text, 0).is_none());
+        assert!(re.match_at_ucs2(&text, 0).is_none());
+
+        // Note that find_from would have searched forward and found it at 1..3:
+        assert_eq!(re.find_from_utf16(&text, 0).next().unwrap().range(), 1..3);
+        assert_eq!(re.find_from_ucs2(&text, 0).next().unwrap().range(), 1..3);
+
+        // 3. Pattern occurs again at index 6:
+        assert!(re.match_at_utf16(&text, 2).is_none());
+        assert!(re.match_at_ucs2(&text, 2).is_none());
+        assert_eq!(re.match_at_utf16(&text, 6).unwrap().range(), 6..8);
+        assert_eq!(re.match_at_ucs2(&text, 6).unwrap().range(), 6..8);
+        assert!(re.match_at_utf16(&text, 7).is_none());
+        assert!(re.match_at_ucs2(&text, 7).is_none());
+
+        // 4. Successful match at position zero
+        let re_start = regress::Regex::new(r"ab").unwrap();
+        assert_eq!(re_start.match_at_utf16(&text, 0).unwrap().range(), 0..2);
+        assert_eq!(re_start.match_at_ucs2(&text, 0).unwrap().range(), 0..2);
+        assert!(re_start.match_at_utf16(&text, 1).is_none());
+        assert!(re_start.match_at_ucs2(&text, 1).is_none());
+    }
+
+    #[test]
+    fn test_anchored_match_out_of_range_and_empty() {
+        let re = regress::Regex::new(r"a").unwrap();
+        let text = to_utf16("abc"); // len = 3
+
+        // At end of input: pattern requires char, so None
+        assert!(re.match_at_utf16(&text, 3).is_none());
+        assert!(re.match_at_ucs2(&text, 3).is_none());
+
+        // Out-of-range positions
+        assert!(re.match_at_utf16(&text, 4).is_none());
+        assert!(re.match_at_utf16(&text, 100).is_none());
+        assert!(re.match_at_utf16(&text, usize::MAX).is_none());
+        assert!(re.match_at_ucs2(&text, 4).is_none());
+        assert!(re.match_at_ucs2(&text, 100).is_none());
+        assert!(re.match_at_ucs2(&text, usize::MAX).is_none());
+
+        // Empty input slice
+        let empty: [u16; 0] = [];
+        assert!(re.match_at_utf16(&empty, 0).is_none());
+        assert!(re.match_at_utf16(&empty, 1).is_none());
+        assert!(re.match_at_ucs2(&empty, 0).is_none());
+        assert!(re.match_at_ucs2(&empty, 1).is_none());
+
+        // Empty matches with empty input
+        let re_empty = regress::Regex::new(r"^$").unwrap();
+        assert_eq!(re_empty.match_at_utf16(&empty, 0).unwrap().range(), 0..0);
+        assert!(re_empty.match_at_utf16(&empty, 1).is_none());
+        assert_eq!(re_empty.match_at_ucs2(&empty, 0).unwrap().range(), 0..0);
+        assert!(re_empty.match_at_ucs2(&empty, 1).is_none());
+    }
+
+    #[test]
+    fn test_anchored_match_empty_patterns() {
+        let re_star = regress::Regex::new(r"a*").unwrap();
+        let text = to_utf16("xyz"); // len = 3
+
+        // At each index, matches 0 characters
+        assert_eq!(re_star.match_at_utf16(&text, 0).unwrap().range(), 0..0);
+        assert_eq!(re_star.match_at_utf16(&text, 1).unwrap().range(), 1..1);
+        assert_eq!(re_star.match_at_utf16(&text, 2).unwrap().range(), 2..2);
+        assert_eq!(re_star.match_at_utf16(&text, 3).unwrap().range(), 3..3);
+        assert!(re_star.match_at_utf16(&text, 4).is_none());
+
+        assert_eq!(re_star.match_at_ucs2(&text, 0).unwrap().range(), 0..0);
+        assert_eq!(re_star.match_at_ucs2(&text, 1).unwrap().range(), 1..1);
+        assert_eq!(re_star.match_at_ucs2(&text, 2).unwrap().range(), 2..2);
+        assert_eq!(re_star.match_at_ucs2(&text, 3).unwrap().range(), 3..3);
+        assert!(re_star.match_at_ucs2(&text, 4).is_none());
+
+        // End anchor $
+        let re_dollar = regress::Regex::new(r"$").unwrap();
+        assert!(re_dollar.match_at_utf16(&text, 0).is_none());
+        assert!(re_dollar.match_at_utf16(&text, 2).is_none());
+        assert_eq!(re_dollar.match_at_utf16(&text, 3).unwrap().range(), 3..3);
+        assert!(re_dollar.match_at_utf16(&text, 4).is_none());
+
+        assert!(re_dollar.match_at_ucs2(&text, 0).is_none());
+        assert_eq!(re_dollar.match_at_ucs2(&text, 3).unwrap().range(), 3..3);
+    }
+
+    #[test]
+    fn test_anchored_match_captures() {
+        let re = regress::Regex::new(r"(?<user>\w+)@(?<host>[a-z]+)\.([a-z]+)").unwrap();
+        let text = to_utf16("email: admin@domain.org end");
+        // "admin@domain.org" starts at index 7, length 16 (range 7..23)
+
+        assert!(re.match_at_utf16(&text, 0).is_none());
+        assert!(re.match_at_ucs2(&text, 0).is_none());
+
+        let m16 = re.match_at_utf16(&text, 7).unwrap();
+        assert_eq!(m16.range(), 7..23);
+        assert_eq!(m16.group(0), Some(7..23));
+        assert_eq!(m16.group(1), Some(7..12)); // admin
+        assert_eq!(m16.group(2), Some(13..19)); // domain
+        assert_eq!(m16.group(3), Some(20..23)); // org
+        assert_eq!(m16.group(4), None);
+        assert_eq!(m16.named_group("user"), Some(7..12));
+        assert_eq!(m16.named_group("host"), Some(13..19));
+        assert_eq!(m16.named_group("missing"), None);
+
+        let m2 = re.match_at_ucs2(&text, 7).unwrap();
+        assert_eq!(m2.range(), 7..23);
+        assert_eq!(m2.group(1), Some(7..12));
+        assert_eq!(m2.group(2), Some(13..19));
+        assert_eq!(m2.group(3), Some(20..23));
+        assert_eq!(m2.named_group("user"), Some(7..12));
+
+        // Untaken group in alternation
+        let re_alt = regress::Regex::new(r"(a)|(b)").unwrap();
+        let text_b = to_utf16("b");
+        let m_alt = re_alt.match_at_utf16(&text_b, 0).unwrap();
+        assert_eq!(m_alt.range(), 0..1);
+        assert_eq!(m_alt.group(1), None);
+        assert_eq!(m_alt.group(2), Some(0..1));
+    }
+
+    #[test]
+    fn test_anchored_match_unicode_and_surrogates() {
+        let text = to_utf16("😀abc"); // 😀 is 2 code units: [0xD83D, 0xDE00]
+        let re_dot = regress::Regex::new(r".").unwrap();
+
+        // In UTF-16, '.' matches full surrogate pair
+        let m16 = re_dot.match_at_utf16(&text, 0).unwrap();
+        assert_eq!(m16.range(), 0..2);
+        // At index 2, matches 'a'
+        let m16_a = re_dot.match_at_utf16(&text, 2).unwrap();
+        assert_eq!(m16_a.range(), 2..3);
+
+        // In UCS-2, '.' matches code unit by code unit
+        let m_ucs_high = re_dot.match_at_ucs2(&text, 0).unwrap();
+        assert_eq!(m_ucs_high.range(), 0..1);
+        let m_ucs_low = re_dot.match_at_ucs2(&text, 1).unwrap();
+        assert_eq!(m_ucs_low.range(), 1..2);
+        let m_ucs_a = re_dot.match_at_ucs2(&text, 2).unwrap();
+        assert_eq!(m_ucs_a.range(), 2..3);
+
+        // High surrogate class
+        let re_high = regress::Regex::new(r"[\uD800-\uDBFF]").unwrap();
+        assert_eq!(re_high.match_at_ucs2(&text, 0).unwrap().range(), 0..1);
+        assert!(re_high.match_at_utf16(&text, 0).is_none());
+
+        // Low surrogate class
+        let re_low = regress::Regex::new(r"[\uDC00-\uDFFF]").unwrap();
+        assert_eq!(re_low.match_at_ucs2(&text, 1).unwrap().range(), 1..2);
+
+        // In UTF-16, a start inside a surrogate pair matches from the start of
+        // the pair, so its low surrogate is never matched alone. Both the
+        // overall match and captures report their actual positions.
+        // This follows the proposed RegExpBuiltinExec correction in TC39 #128:
+        // https://github.com/tc39/ecma262/issues/128
+        assert!(re_low.match_at_utf16(&text, 1).is_none());
+        assert!(re_low.find_from_utf16(&text, 1).next().is_none());
+        assert_eq!(re_dot.match_at_utf16(&text, 1).unwrap().range(), 0..2);
+        let re_not_low = regress::Regex::new(r"[^\uDC00-\uDFFF]").unwrap();
+        assert_eq!(re_not_low.match_at_utf16(&text, 1).unwrap().range(), 0..2);
+        assert_eq!(
+            re_not_low.find_from_utf16(&text, 1).next().unwrap().range(),
+            0..2
+        );
+        let re_cap = regress::Regex::new(r"(.)").unwrap();
+        let m_cap = re_cap.match_at_utf16(&text, 1).unwrap();
+        assert_eq!(m_cap.range(), 0..2);
+        assert_eq!(m_cap.group(1), Some(0..2));
+        let re_empty = regress::Regex::new(r"").unwrap();
+        assert_eq!(re_empty.match_at_utf16(&text, 1).unwrap().range(), 0..0);
+        let dots: Vec<_> = re_dot
+            .find_from_utf16(&text, 1)
+            .map(|m| m.range())
+            .collect();
+        assert_eq!(dots, vec![0..2, 2..3, 3..4, 4..5]);
+        let empties: Vec<_> = re_empty
+            .find_from_utf16(&text, 1)
+            .map(|m| m.range())
+            .collect();
+        assert_eq!(empties, vec![0..0, 2..2, 3..3, 4..4, 5..5]);
+
+        // An unpaired low surrogate is still matched alone.
+        let lone = [0x61, 0xDE00, 0x62];
+        assert_eq!(re_low.match_at_utf16(&lone, 1).unwrap().range(), 1..2);
+        assert_eq!(
+            re_low.find_from_utf16(&lone, 0).next().unwrap().range(),
+            1..2
+        );
+    }
+
+    #[test]
+    fn test_utf16_start_inside_surrogate_pair() {
+        // Cases from the proposed RegExpBuiltinExec correction in
+        // https://github.com/tc39/ecma262/issues/128#issuecomment-6379961289
+        // match_at_utf16 corresponds to the 'y' flag, find_from_utf16 to 'g'.
+        let re = |pattern, flags| regress::Regex::with_flags(pattern, flags).unwrap();
+        let pair = to_utf16("\u{10400}");
+        let pair_a = to_utf16("\u{10400}a");
+        let pair_x = to_utf16("\u{10400}x");
+        let a_pair = to_utf16("a\u{10400}");
+        let mut pair_lone = to_utf16("\u{1D306}");
+        pair_lone.push(0xDF06);
+
+        // Lookbehind sees nothing before the pair.
+        let m = re(r"(?<!a)", "u").match_at_utf16(&pair_a, 1).unwrap();
+        assert_eq!(m.range(), 0..0);
+
+        // Lookbehind into the code point before the pair.
+        let m = re(r"(?<=(.))", "u").match_at_utf16(&a_pair, 2).unwrap();
+        assert_eq!(m.range(), 1..1);
+        assert_eq!(m.group(1), Some(0..1));
+
+        // Assertions are evaluated at the start of the pair.
+        let m = re(r"^", "u").match_at_utf16(&pair, 1).unwrap();
+        assert_eq!(m.range(), 0..0);
+        let m = re(r"\b", "u").match_at_utf16(&a_pair, 2).unwrap();
+        assert_eq!(m.range(), 1..1);
+
+        // The 'v' flag behaves like 'u'.
+        let m = re(r".", "v").match_at_utf16(&pair, 1).unwrap();
+        assert_eq!(m.range(), 0..2);
+
+        // Captures, including a named group, are reported at their positions.
+        let m = re(r"(.)(?<n>x)?", "u")
+            .find_from_utf16(&pair_x, 1)
+            .next()
+            .unwrap();
+        assert_eq!(m.range(), 0..3);
+        assert_eq!(m.group(1), Some(0..2));
+        assert_eq!(m.named_group("n"), Some(2..3));
+
+        // A lone low surrogate after a pair is not part of it.
+        let m = re(r".", "u").find_from_utf16(&pair_lone, 1).next().unwrap();
+        assert_eq!(m.range(), 0..2);
+        let m = re(r"\uDF06", "u")
+            .find_from_utf16(&pair_lone, 1)
+            .next()
+            .unwrap();
+        assert_eq!(m.range(), 2..3);
+        assert!(re(r"\uDF06", "u").match_at_utf16(&pair_lone, 1).is_none());
+
+        // A literal prefix is searched for from the start of the pair.
+        let m = re(r"\u{10400}x", "u")
+            .find_from_utf16(&pair_x, 1)
+            .next()
+            .unwrap();
+        assert_eq!(m.range(), 0..3);
+        let m = re(r"x", "u").find_from_utf16(&pair_x, 1).next().unwrap();
+        assert_eq!(m.range(), 2..3);
+
+        // Matching steps back only to the high surrogate of the same pair.
+        let two_pairs = to_utf16("\u{1F600}\u{1F601}");
+        let m = re(r".", "u").match_at_utf16(&two_pairs, 3).unwrap();
+        assert_eq!(m.range(), 2..4);
+        let high_high_low = [0xD83D, 0xD83D, 0xDE00];
+        let m = re(r".", "u").match_at_utf16(&high_high_low, 2).unwrap();
+        assert_eq!(m.range(), 1..3);
+        let m = re(r".", "u").match_at_utf16(&high_high_low, 1).unwrap();
+        assert_eq!(m.range(), 1..3);
+
+        // The ends of the input are never inside a pair.
+        let m = re(r"$", "u").match_at_utf16(&pair, 2).unwrap();
+        assert_eq!(m.range(), 2..2);
+        let re_low = re(r"[\uDC00-\uDFFF]", "u");
+        assert_eq!(re_low.match_at_utf16(&[0xDE00], 0).unwrap().range(), 0..1);
+
+        // UCS-2 never steps back, as it matches code units.
+        let m = re_low.find_from_ucs2(&pair, 1).next().unwrap();
+        assert_eq!(m.range(), 1..2);
+        let m = re(r".", "u").find_from_ucs2(&pair, 1).next().unwrap();
+        assert_eq!(m.range(), 1..2);
+    }
+
+    #[test]
+    fn test_anchored_match_flags_and_assertions() {
+        // Case-insensitivity (i flag)
+        let re_i = regress::Regex::with_flags(r"abc", "i").unwrap();
+        let text_upper = to_utf16("ABC");
+        assert_eq!(re_i.match_at_utf16(&text_upper, 0).unwrap().range(), 0..3);
+        assert_eq!(re_i.match_at_ucs2(&text_upper, 0).unwrap().range(), 0..3);
+
+        // Multiline anchor ^
+        let re_m = regress::Regex::with_flags(r"^b", "m").unwrap();
+        let text_lines = to_utf16("a\nb");
+        assert!(re_m.match_at_utf16(&text_lines, 0).is_none());
+        assert!(re_m.match_at_utf16(&text_lines, 1).is_none());
+        assert_eq!(re_m.match_at_utf16(&text_lines, 2).unwrap().range(), 2..3);
+        assert_eq!(re_m.match_at_ucs2(&text_lines, 2).unwrap().range(), 2..3);
+
+        // Without multiline, ^ only matches at index 0
+        let re_no_m = regress::Regex::new(r"^b").unwrap();
+        assert!(re_no_m.match_at_utf16(&text_lines, 2).is_none());
+        assert!(re_no_m.match_at_ucs2(&text_lines, 2).is_none());
+
+        // Lookbehind assertion (?<=a)b
+        let re_lb = regress::Regex::new(r"(?<=a)b").unwrap();
+        let text_lb = to_utf16("ab");
+        assert!(re_lb.match_at_utf16(&text_lb, 0).is_none());
+        assert_eq!(re_lb.match_at_utf16(&text_lb, 1).unwrap().range(), 1..2);
+        assert_eq!(re_lb.match_at_ucs2(&text_lb, 1).unwrap().range(), 1..2);
+    }
 }
 
 #[test]

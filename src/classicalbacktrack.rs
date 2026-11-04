@@ -1275,13 +1275,20 @@ impl<Input: InputIndexer> exec::MatchProducer for BacktrackExecutor<'_, Input> {
             }
         }
     }
+
+    fn match_at(&mut self, pos: Self::Position) -> Option<Match> {
+        let inp = self.input;
+        self.matcher
+            .try_at_pos(inp, 0, pos, Forward::new())
+            .map(|end| self.successful_match(pos, end))
+    }
 }
 
 impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, Utf8Input<'t>> {
     type AsAscii = BacktrackExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
-        let input = Utf8Input::new(text, re.flags.unicode);
+        let input = Utf8Input::new(text, re.flags.unicode_or_unicode_sets());
         Self {
             input,
             matcher: MatchAttempter::new(re, input.left_end()),
@@ -1293,7 +1300,7 @@ impl<'r, 't> exec::Executor<'r, 't> for BacktrackExecutor<'r, AsciiInput<'t>> {
     type AsAscii = BacktrackExecutor<'r, AsciiInput<'t>>;
 
     fn new(re: &'r CompiledRegex, text: &'t str) -> Self {
-        let input = AsciiInput::new(text, re.flags.unicode);
+        let input = AsciiInput::new(text, re.flags.unicode_or_unicode_sets());
         Self {
             input,
             matcher: MatchAttempter::new(re, input.left_end()),

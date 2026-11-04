@@ -3301,3 +3301,100 @@ fn unicode_sets_negated_nested_class_icase() {
         tc.compilef(r"[^[^\q{a}]&&[A]]", "vi").test_succeeds("a");
     });
 }
+
+/// Under the i flag with unicode sets, set operations (intersection and subtraction)
+/// operate on case-folded operands.
+#[test]
+fn unicode_sets_operations_icase() {
+    test_with_configs(|tc| {
+        tc.compilef("^[s[^a]]$", "vi").test_fails("a");
+        tc.compilef("^[s[^a]]$", "vi").test_fails("A");
+        tc.compilef("^[s[^a]]$", "vi").test_succeeds("s");
+        tc.compilef("^[s[^a]]$", "vi").test_succeeds("S");
+        tc.compilef("[[A-Z]&&[a]]", "vi").test_succeeds("a");
+        tc.compilef("[[A-Z]&&[a]]", "vi").test_succeeds("A");
+        tc.compilef("[[A-Z]&&[a]]", "vi").test_fails("b");
+        tc.compilef("[[A-Z]--[a]]", "vi").test_fails("a");
+        tc.compilef("[[A-Z]--[a]]", "vi").test_fails("A");
+        tc.compilef("[[A-Z]--[a]]", "vi").test_succeeds("b");
+        tc.compilef("[[A-Z]--[a]]", "vi").test_succeeds("B");
+        tc.compilef(r"^[\W]$", "vi").test_fails("a");
+        tc.compilef(r"^[\W]$", "vi").test_fails("A");
+        tc.compilef(r"^[\W]$", "vi").test_succeeds("!");
+        tc.compilef(r"^[\P{Uppercase_Letter}]$", "vi")
+            .test_fails("a");
+        tc.compilef(r"^[\P{Uppercase_Letter}]$", "vi")
+            .test_fails("A");
+        tc.compilef(r"^[\P{Uppercase_Letter}]$", "vi")
+            .test_succeeds("1");
+
+        // Non-ASCII folds.
+        tc.compilef("^[k]$", "vi").test_succeeds("\u{212A}");
+        tc.compilef(r"^[\w--k]$", "vi").test_fails("\u{212A}");
+        tc.compilef(r"^[\w--k]$", "vi").test_succeeds("j");
+        tc.compilef(r"^[\W]$", "vi").test_fails("\u{212A}");
+        tc.compilef(r"^[\W]$", "vi").test_fails("\u{17F}");
+        tc.compilef(r"^[^\W]$", "vi").test_succeeds("\u{17F}");
+        tc.compilef(r"^[[a-z]--s]$", "vi").test_fails("\u{17F}");
+        tc.compilef(r"^[\P{Lowercase_Letter}]$", "vi")
+            .test_fails("\u{212A}");
+
+        // Ranges.
+        tc.compilef("^[[a-c]--B]$", "vi").test_fails("b");
+        tc.compilef("^[[a-c]--B]$", "vi").test_fails("B");
+        tc.compilef("^[[a-c]--B]$", "vi").test_succeeds("a");
+        tc.compilef("^[[a-c]--B]$", "vi").test_succeeds("C");
+        tc.compilef("^[[a-c]&&[B]]$", "vi").test_succeeds("b");
+        tc.compilef("^[[a-c]&&[B]]$", "vi").test_fails("c");
+
+        // Property escapes.
+        tc.compilef(r"^[\p{Lowercase_Letter}&&[A]]$", "vi")
+            .test_succeeds("a");
+        tc.compilef(r"^[\p{Lowercase_Letter}&&[A]]$", "vi")
+            .test_succeeds("A");
+        tc.compilef(r"^[\p{Lowercase_Letter}&&[A]]$", "vi")
+            .test_fails("b");
+        tc.compilef(r"^[\p{Lowercase_Letter}--[a]]$", "vi")
+            .test_fails("A");
+        tc.compilef(r"^[\p{Lowercase_Letter}--[a]]$", "vi")
+            .test_succeeds("B");
+        tc.compilef(r"^[\P{Lowercase_Letter}]$", "vi")
+            .test_fails("A");
+        tc.compilef(r"^[\P{Lowercase_Letter}]$", "vi")
+            .test_succeeds("1");
+
+        // Single code point strings in a negated class.
+        tc.compilef(r"^[^\q{a}]$", "vi").test_fails("a");
+        tc.compilef(r"^[^\q{a}]$", "vi").test_fails("A");
+        tc.compilef(r"^[^\q{a}]$", "vi").test_succeeds("b");
+        tc.compilef(r"^[^\q{a|b}]$", "vi").test_fails("B");
+        tc.compilef(r"^[^[\q{a}]]$", "vi").test_fails("A");
+        tc.compilef(r"^[^\q{k}]$", "vi").test_fails("\u{212A}");
+    });
+}
+
+/// The v flag selects Unicode mode, like the u flag: Unicode case folding and
+/// the Unicode syntax rules outside classes.
+#[test]
+fn unicode_sets_unicode_mode() {
+    test_with_configs(|tc| {
+        // Simple case folding: U+212A KELVIN SIGN folds to k, and U+1E9E to U+00DF.
+        // U+0131 has no simple case folding, so it does not match I.
+        tc.test_match_succeeds("\u{212A}", "vi", "k");
+        tc.test_match_succeeds("K", "vi", "\u{212A}");
+        tc.test_match_succeeds("\u{DF}", "vi", "\u{1E9E}");
+        tc.test_match_succeeds("\u{1E9E}", "vi", "\u{DF}");
+        tc.test_match_fails("\u{131}", "vi", "I");
+        tc.test_match_fails("I", "vi", "\u{131}");
+        // With the i flag, U+017F is a word character, because it folds to s.
+        tc.test_match_succeeds(r"\b", "vi", "\u{17F}");
+        tc.test_match_fails(r"\B", "vi", "\u{17F}");
+        // An escaped class set punctuator is valid only inside a class.
+        for c in [
+            '-', '&', '!', '#', '%', ',', ':', ';', '<', '=', '>', '@', '`', '~',
+        ] {
+            test_parse_fails_flags(&format!(r"\{c}"), "v");
+            tc.test_match_succeeds(&format!(r"[\{c}]"), "v", &c.to_string());
+        }
+    });
+}

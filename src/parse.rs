@@ -90,24 +90,26 @@ impl ClassSet {
     /// A negated class must not contain strings. The remaining alternatives
     /// are single code points, so move them to the code point set, and clear
     /// the alternatives set.
-    fn prepare_negation(&mut self) -> Result<(), Error> {
+    fn prepare_negation(&mut self, icase: bool) -> Result<(), Error> {
         if self.may_contain_strings {
             return error("Negated character class may contain strings");
         }
         for alternative in mem::take(&mut self.alternatives.0) {
             // Should not contain an alternative with multiple code points, i.e. a string.
             debug_assert_eq!(alternative.len(), 1, "Should only have single code points");
-            self.codepoints.add_one(alternative[0]);
+            if icase {
+                let mut cps = CodePointSet::new();
+                cps.add_one(alternative[0]);
+                self.codepoints.add_set(unicode::add_icase_code_points(cps));
+            } else {
+                self.codepoints.add_one(alternative[0]);
+            }
         }
         Ok(())
     }
 
     fn node(mut self, icase: bool, negate_set: bool) -> ir::Node {
-        let codepoints = if icase {
-            unicode::add_icase_code_points(self.codepoints)
-        } else {
-            self.codepoints
-        };
+        let codepoints = self.codepoints;
         let codepoints_empty = codepoints.is_empty();
         let bracket = ir::Node::Bracket(BracketContents {
             invert: negate_set,
@@ -134,14 +136,24 @@ impl ClassSet {
         }
     }
 
-    fn union_operand(&mut self, operand: ClassSetOperand) {
+    fn union_operand(&mut self, operand: ClassSetOperand, icase: bool) {
         self.may_contain_strings |= operand.may_contain_strings();
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
-                self.codepoints.add_one(c);
+                if icase {
+                    let mut cps = CodePointSet::new();
+                    cps.add_one(c);
+                    self.codepoints.add_set(unicode::add_icase_code_points(cps));
+                } else {
+                    self.codepoints.add_one(c);
+                }
             }
             ClassSetOperand::CharacterClassEscape(cps) => {
-                self.codepoints.add_set(cps);
+                if icase {
+                    self.codepoints.add_set(unicode::add_icase_code_points(cps));
+                } else {
+                    self.codepoints.add_set(cps);
+                }
             }
             ClassSetOperand::Class(class) => {
                 self.codepoints.add_set(class.codepoints);
@@ -153,32 +165,25 @@ impl ClassSet {
         }
     }
 
-    fn intersect_operand(&mut self, operand: ClassSetOperand) {
+    fn intersect_operand(&mut self, operand: ClassSetOperand, icase: bool) {
         self.may_contain_strings &= operand.may_contain_strings();
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
-                if self.codepoints.contains(c) {
-                    self.codepoints =
-                        CodePointSet::from_sorted_disjoint_intervals(Vec::from([Interval {
-                            first: c,
-                            last: c,
-                        }]));
+                let mut cps = CodePointSet::new();
+                cps.add_one(c);
+                let cps = if icase {
+                    unicode::add_icase_code_points(cps)
                 } else {
-                    self.codepoints.clear();
-                }
-                let mut found_alternative = false;
-                for alternative in &mut self.alternatives.0 {
-                    if alternative.len() == 1 && alternative[0] == c {
-                        found_alternative = true;
-                        break;
-                    }
-                }
-                self.alternatives.0.clear();
-                if found_alternative {
-                    self.alternatives.0.push(Box::from([c]));
-                }
+                    cps
+                };
+                self.intersect_operand(ClassSetOperand::CharacterClassEscape(cps), false);
             }
             ClassSetOperand::CharacterClassEscape(cps) => {
+                let cps = if icase {
+                    unicode::add_icase_code_points(cps)
+                } else {
+                    cps
+                };
                 self.codepoints.intersect(cps.intervals());
                 let mut retained = Vec::new();
                 for alternative in &self.alternatives.0 {
@@ -219,13 +224,24 @@ impl ClassSet {
         }
     }
 
-    fn subtract_operand(&mut self, operand: ClassSetOperand) {
+    fn subtract_operand(&mut self, operand: ClassSetOperand, icase: bool) {
         match operand {
             ClassSetOperand::ClassSetCharacter(c) => {
-                self.codepoints.remove(&[Interval { first: c, last: c }]);
-                self.alternatives.remove(&[Box::from([c])]);
+                let mut cps = CodePointSet::new();
+                cps.add_one(c);
+                let cps = if icase {
+                    unicode::add_icase_code_points(cps)
+                } else {
+                    cps
+                };
+                self.subtract_operand(ClassSetOperand::CharacterClassEscape(cps), false);
             }
             ClassSetOperand::CharacterClassEscape(cps) => {
+                let cps = if icase {
+                    unicode::add_icase_code_points(cps)
+                } else {
+                    cps
+                };
                 self.codepoints.remove(cps.intervals());
                 let mut to_remove = ClassSetAlternativeStrings::new();
                 for alternative in &self.alternatives.0 {
@@ -536,7 +552,8 @@ where
         if !self.flags.icase {
             return ir::Node::Char { c };
         }
-        let class = unicode::expand_code_point(c, self.flags.icase, self.flags.unicode);
+        let class =
+            unicode::expand_code_point(c, self.flags.icase, self.flags.unicode_or_unicode_sets());
         match class.len() {
             1 => ir::Node::Char { c: class[0] },
             2..=MAX_CHAR_SET_LENGTH => ir::Node::CharSet(class),
@@ -635,7 +652,8 @@ where
                             self.consume('b');
                             result.push(ir::Node::WordBoundary {
                                 invert: false,
-                                unicode_icase: self.flags.unicode && self.flags.icase,
+                                unicode_icase: self.flags.unicode_or_unicode_sets()
+                                    && self.flags.icase,
                             });
                         }
                         // Term :: Assertion :: \B
@@ -643,12 +661,13 @@ where
                             self.consume('B');
                             result.push(ir::Node::WordBoundary {
                                 invert: true,
-                                unicode_icase: self.flags.unicode && self.flags.icase,
+                                unicode_icase: self.flags.unicode_or_unicode_sets()
+                                    && self.flags.icase,
                             });
                         }
                         // Term :: Atom :: \ AtomEscape :: CharacterEscape :: c AsciiLetter
                         // Term :: ExtendedAtom :: \ [lookahead = c]
-                        'c' if !self.flags.unicode => {
+                        'c' if !self.flags.unicode_or_unicode_sets() => {
                             self.consume('c');
                             if self
                                 .peek()
@@ -684,14 +703,14 @@ where
                 '(' => {
                     if self.try_consume_str("(?=") {
                         // Positive lookahead.
-                        quantifier_allowed = !self.flags.unicode;
+                        quantifier_allowed = !self.flags.unicode_or_unicode_sets();
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: false,
                             backwards: false,
                         })?);
                     } else if self.try_consume_str("(?!") {
                         // Negative lookahead.
-                        quantifier_allowed = !self.flags.unicode;
+                        quantifier_allowed = !self.flags.unicode_or_unicode_sets();
                         result.push(self.consume_lookaround_assertion(LookaroundParams {
                             negate: true,
                             backwards: false,
@@ -752,7 +771,7 @@ where
                     let negate_set = self.try_consume('^');
                     let mut class_set = self.consume_class_set_expression()?;
                     if negate_set {
-                        class_set.prepare_negation()?;
+                        class_set.prepare_negation(self.flags.icase)?;
                     }
                     result.push(class_set.node(self.flags.icase, negate_set));
                 }
@@ -762,7 +781,7 @@ where
                 }
 
                 // Term :: ExtendedAtom :: InvalidBracedQuantifier
-                '{' if !self.flags.unicode => {
+                '{' if !self.flags.unicode_or_unicode_sets() => {
                     if self.try_consume_braced_quantifier().is_some() {
                         return error("Invalid braced quantifier");
                     }
@@ -773,7 +792,7 @@ where
                 }
 
                 // Term :: Atom :: PatternCharacter :: SourceCharacter but not ^ $ \ . * + ? ( ) [ ] { } |
-                '*' | '+' | '?' | ']' | '{' | '}' if self.flags.unicode => {
+                '*' | '+' | '?' | ']' | '{' | '}' if self.flags.unicode_or_unicode_sets() => {
                     return error("Invalid atom character");
                 }
 
@@ -909,7 +928,7 @@ where
             invert,
             cps: CodePointSet::default(),
         };
-        let unicode_icase = self.flags.unicode && self.flags.icase;
+        let unicode_icase = self.flags.unicode_or_unicode_sets() && self.flags.icase;
 
         loop {
             match self.peek().map(to_char_sat) {
@@ -964,7 +983,7 @@ where
                 continue;
             }
 
-            if self.flags.unicode {
+            if self.flags.unicode_or_unicode_sets() {
                 return error("Invalid character range");
             }
 
@@ -1004,11 +1023,11 @@ where
                         Ok(Some(ClassAtom::CodePoint(u32::from('\x08'))))
                     }
                     // ClassEscape :: [+UnicodeMode] -
-                    '-' if self.flags.unicode => {
+                    '-' if self.flags.unicode_or_unicode_sets() => {
                         self.consume('-');
                         Ok(Some(ClassAtom::CodePoint(u32::from('-'))))
                     }
-                    'c' if !self.flags.unicode => {
+                    'c' if !self.flags.unicode_or_unicode_sets() => {
                         let input = self.input.clone();
                         self.consume('c');
                         match self.peek().map(to_char_sat) {
@@ -1079,7 +1098,7 @@ where
                     }
                     // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
                     // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] P{ UnicodePropertyValueExpression }
-                    'p' | 'P' if self.flags.unicode => {
+                    'p' | 'P' if self.flags.unicode_or_unicode_sets() => {
                         self.consume(ec);
                         let negate = ec == 'P' as u32;
                         match self.try_consume_unicode_property_escape()? {
@@ -1126,18 +1145,18 @@ where
         let op = match self.peek() {
             Some(0x5D /* ] */) => {
                 self.consume(']');
-                result.union_operand(first);
+                result.union_operand(first, self.flags.icase);
                 return Ok(result);
             }
             Some(0x26 /* & */) if self.try_consume_str("&&") => {
-                result.union_operand(first.clone());
+                result.union_operand(first.clone(), self.flags.icase);
                 ClassSetOperator::Intersection
             }
             Some(0x2D /* - */) => {
                 self.consume('-');
                 if self.peek() == Some(0x2D /* - */) {
                     self.consume('-');
-                    result.union_operand(first.clone());
+                    result.union_operand(first.clone(), self.flags.icase);
                     ClassSetOperator::Subtraction
                 } else {
                     match first {
@@ -1150,7 +1169,12 @@ where
                             if first > last {
                                 return error("Invalid class set range");
                             }
-                            result.codepoints.add(Interval { first, last });
+                            let mut cps = CodePointSet::new();
+                            cps.add(Interval { first, last });
+                            if self.flags.icase {
+                                cps = unicode::add_icase_code_points(cps);
+                            }
+                            result.codepoints.add_set(cps);
                         }
                         _ => {
                             return error("Invalid class set range");
@@ -1160,7 +1184,7 @@ where
                 }
             }
             Some(_) => {
-                result.union_operand(first.clone());
+                result.union_operand(first.clone(), self.flags.icase);
                 ClassSetOperator::Union
             }
             None => {
@@ -1191,14 +1215,19 @@ where
                                 if first > last {
                                     return error("Invalid class set range");
                                 }
-                                result.codepoints.add(Interval { first, last });
+                                let mut cps = CodePointSet::new();
+                                cps.add(Interval { first, last });
+                                if self.flags.icase {
+                                    cps = unicode::add_icase_code_points(cps);
+                                }
+                                result.codepoints.add_set(cps);
                             }
                             _ => {
                                 return error("Invalid class set range");
                             }
                         };
                     } else {
-                        result.union_operand(operand);
+                        result.union_operand(operand, self.flags.icase);
                     }
                 }
             }
@@ -1206,7 +1235,7 @@ where
             ClassSetOperator::Intersection => {
                 loop {
                     let operand = self.consume_class_set_operand()?;
-                    result.intersect_operand(operand);
+                    result.intersect_operand(operand, self.flags.icase);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
                         Some(0x26 /* & */) => {}
@@ -1222,7 +1251,7 @@ where
             ClassSetOperator::Subtraction => {
                 loop {
                     let operand = self.consume_class_set_operand()?;
-                    result.subtract_operand(operand);
+                    result.subtract_operand(operand, self.flags.icase);
                     match self.next() {
                         Some(0x5D /* ] */) => return Ok(result),
                         Some(0x2D /* - */) => {}
@@ -1254,12 +1283,7 @@ where
                 let negate_set = self.try_consume('^');
                 let mut result = self.consume_class_set_expression()?;
                 if negate_set {
-                    result.prepare_negation()?;
-                    // With the i flag, the complement is computed after case
-                    // folding, so close the set under case before inverting.
-                    if self.flags.icase {
-                        result.codepoints = unicode::add_icase_code_points(result.codepoints);
-                    }
+                    result.prepare_negation(self.flags.icase)?;
                     result.codepoints = result.codepoints.inverted();
                 }
                 self.depth -= 1;
@@ -1359,9 +1383,13 @@ where
                         self.consume('P');
                         match self.try_consume_unicode_property_escape()? {
                             PropertyEscapeKind::CharacterClass(s) => {
-                                Ok(CharacterClassEscape(CodePointSet::from_sorted_disjoint_intervals(
+                                let mut cps = CodePointSet::from_sorted_disjoint_intervals(
                                     s.to_vec(),
-                                ).inverted()))
+                                );
+                                if self.flags.icase {
+                                    cps = unicode::add_icase_code_points(cps);
+                                }
+                                Ok(CharacterClassEscape(cps.inverted()))
                             }
                             PropertyEscapeKind::StringSet(_) => error("Invalid character escape"),
                         }
@@ -1480,7 +1508,7 @@ where
             Some('{') => {
                 if let Some(quantifier) = self.try_consume_braced_quantifier() {
                     Ok(Some(quantifier))
-                } else if self.flags.unicode {
+                } else if self.flags.unicode_or_unicode_sets() {
                     // if there was a brace '{' that doesn't parse into a valid quantifier,
                     // it's not valid with the unicode flag
                     error("Invalid quantifier")
@@ -1600,7 +1628,7 @@ where
                     (Some(x1), Some(x2)) => Ok(x1 * 16 + x2),
                     // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
                     // Not a valid HexEscapeSequence. Restore the input.
-                    _ if !self.flags.unicode => {
+                    _ if !self.flags.unicode_or_unicode_sets() => {
                         self.input = orig_input;
                         Ok(c)
                     }
@@ -1611,7 +1639,7 @@ where
             'u' => {
                 if let Some(c) = self.try_escape_unicode_sequence() {
                     Ok(c)
-                } else if !self.flags.unicode {
+                } else if !self.flags.unicode_or_unicode_sets() {
                     // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
                     Ok(c)
                 } else {
@@ -1619,7 +1647,7 @@ where
                 }
             }
             // CharacterEscape :: [~UnicodeMode] LegacyOctalEscapeSequence
-            '0'..='7' if !self.flags.unicode => {
+            '0'..='7' if !self.flags.unicode_or_unicode_sets() => {
                 let Some(c1) = self.peek() else {
                     return Ok(c - '0' as u32);
                 };
@@ -1656,7 +1684,7 @@ where
             '^' | '$' | '\\' | '.' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
             | '/' => Ok(c),
             // CharacterEscape :: IdentityEscape :: SourceCharacterIdentityEscape
-            _ if !self.flags.unicode => Ok(c),
+            _ if !self.flags.unicode_or_unicode_sets() => Ok(c),
             _ => error("Invalid character escape"),
         }
     }
@@ -1696,7 +1724,7 @@ where
 
             // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
             // ClassEscape :: CharacterClassEscape :: [+UnicodeMode] P{ UnicodePropertyValueExpression }
-            'p' | 'P' if self.flags.unicode || self.flags.unicode_sets => {
+            'p' | 'P' if self.flags.unicode_or_unicode_sets() => {
                 self.consume(c);
                 let negate = c == 'P' as u32;
                 let property_escape = self.try_consume_unicode_property_escape()?;
@@ -1730,7 +1758,7 @@ where
 
             // [+UnicodeMode] DecimalEscape
             // Note: This is a backreference.
-            '1'..='9' if self.flags.unicode => {
+            '1'..='9' if self.flags.unicode_or_unicode_sets() => {
                 let group = self.try_consume_decimal_integer_literal().unwrap();
                 if group <= self.group_count_max as usize {
                     Ok(ir::Node::BackRef {
@@ -1762,7 +1790,7 @@ where
             }
 
             // [+NamedCaptureGroups] k GroupName
-            'k' if self.flags.unicode || !self.named_group_indices.is_empty() => {
+            'k' if self.flags.unicode_or_unicode_sets() || !self.named_group_indices.is_empty() => {
                 // The sequence `\k` must be the start of a backreference to a named capture group.
                 // Note multiple capture groups may have the same name; we must map all of them to their indices.
                 self.consume('k');
@@ -2172,7 +2200,7 @@ where
         if self.has_lookbehind {
             ir::walk_mut(
                 false,
-                re.flags.unicode,
+                re.flags.unicode_or_unicode_sets(),
                 &mut re.node,
                 &mut ir::Node::reverse_cats,
             );

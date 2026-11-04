@@ -118,6 +118,7 @@ impl CodePointSet {
         CodePointSet { ivs: Vec::new() }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn clear(&mut self) {
         self.ivs.clear();
     }
