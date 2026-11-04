@@ -405,8 +405,20 @@ fn codepoints_from_class_positive(ct: CharacterClassType) -> CodePointSet {
 }
 
 /// Returns code points for a character class, optionally inverted.
-fn codepoints_from_class(ct: CharacterClassType, positive: bool) -> CodePointSet {
-    let cps = codepoints_from_class_positive(ct);
+///
+/// With `unicode_icase` (the i flag in Unicode mode), the word characters also
+/// include U+017F and U+212A, which fold to s and k (WordCharacters in the
+/// spec). So `\W` does not contain them, and a case-closed class with `\W` does
+/// not match s or k.
+fn codepoints_from_class(
+    ct: CharacterClassType,
+    positive: bool,
+    unicode_icase: bool,
+) -> CodePointSet {
+    let mut cps = codepoints_from_class_positive(ct);
+    if unicode_icase && matches!(ct, CharacterClassType::Words) {
+        cps = unicode::add_icase_code_points(cps);
+    }
     if positive { cps } else { cps.inverted() }
 }
 
@@ -424,14 +436,15 @@ fn make_bracket_class(ct: CharacterClassType, positive: bool, icase: bool) -> ir
     ir::Node::Bracket(BracketContents { invert: false, cps })
 }
 
-fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom) {
+fn add_class_atom(bc: &mut BracketContents, atom: ClassAtom, unicode_icase: bool) {
     match atom {
         ClassAtom::CodePoint(c) => bc.cps.add_one(c),
         ClassAtom::CharacterClass {
             class_type,
             positive,
         } => {
-            bc.cps.add_set(codepoints_from_class(class_type, positive));
+            bc.cps
+                .add_set(codepoints_from_class(class_type, positive, unicode_icase));
         }
         ClassAtom::Range { iv, negate } => {
             if negate {
@@ -915,6 +928,7 @@ where
             invert,
             cps: CodePointSet::default(),
         };
+        let unicode_icase = self.flags.unicode_or_unicode_sets() && self.flags.icase;
 
         loop {
             match self.peek().map(to_char_sat) {
@@ -938,14 +952,18 @@ where
 
             // Check for a dash; we may have a range.
             if !self.try_consume('-') {
-                add_class_atom(&mut result, first);
+                add_class_atom(&mut result, first, unicode_icase);
                 continue;
             }
 
             let Some(second) = self.try_consume_bracket_class_atom()? else {
                 // No second atom. For example: [a-].
-                add_class_atom(&mut result, first);
-                add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
+                add_class_atom(&mut result, first, unicode_icase);
+                add_class_atom(
+                    &mut result,
+                    ClassAtom::CodePoint(u32::from('-')),
+                    unicode_icase,
+                );
                 continue;
             };
 
@@ -970,9 +988,13 @@ where
             }
 
             // If it does not match a range treat as any match single characters.
-            add_class_atom(&mut result, first);
-            add_class_atom(&mut result, ClassAtom::CodePoint(u32::from('-')));
-            add_class_atom(&mut result, second);
+            add_class_atom(&mut result, first, unicode_icase);
+            add_class_atom(
+                &mut result,
+                ClassAtom::CodePoint(u32::from('-')),
+                unicode_icase,
+            );
+            add_class_atom(&mut result, second, unicode_icase);
         }
     }
 
@@ -1310,39 +1332,37 @@ where
                         }
                         Ok(ClassStringDisjunction(ClassSetAlternativeStrings(alternatives), may_contain_strings))
                     }
+                    // The v flag is always Unicode mode, so the i flag alone selects the
+                    // extended word characters (see codepoints_from_class).
                     // CharacterClassEscape :: d
                     0x64 /* d */ => {
                         self.consume('d');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Digits, true)))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Digits, true, self.flags.icase)))
                     }
                     // CharacterClassEscape :: D
                     0x44 /* D */ => {
                         self.consume('D');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Digits, false)))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Digits, false, self.flags.icase)))
                     }
                     // CharacterClassEscape :: s
                     0x73 /* s */ => {
                         self.consume('s');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Spaces, true)))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Spaces, true, self.flags.icase)))
                     }
                     // CharacterClassEscape :: S
                     0x53 /* S */ => {
                         self.consume('S');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Spaces, false)))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Spaces, false, self.flags.icase)))
                     }
                     // CharacterClassEscape :: w
                     0x77 /* w */ => {
                         self.consume('w');
-                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Words, true)))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Words, true, self.flags.icase)))
                     }
                     // CharacterClassEscape :: W
                     0x57 /* W */ => {
                         self.consume('W');
-                        let mut cps = codepoints_from_class(CharacterClassType::Words, true);
-                        if self.flags.icase {
-                            cps = unicode::add_icase_code_points(cps);
-                        }
-                        Ok(CharacterClassEscape(cps.inverted()))
+                        Ok(CharacterClassEscape(codepoints_from_class(CharacterClassType::Words, false, self.flags.icase)))
                     }
                     // CharacterClassEscape :: [+UnicodeMode] p{ UnicodePropertyValueExpression }
                     0x70 /* p */ => {
