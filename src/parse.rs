@@ -1504,22 +1504,22 @@ where
         // if parsed input is actually invalid, keep the previous one for rollback
         let pre_input = self.input.clone();
         self.consume('{');
-        let optmin = self.try_consume_decimal_integer_literal();
-        let Some(optmin) = optmin else {
+        let Some(n) = self.try_consume_decimal_integer_literal() else {
             // not a valid quantifier, rollback consumption
             self.input = pre_input;
             return None;
         };
+        // A count too large for a usize is out of reach of any input. As a min
+        // it saturates; as a max it is unbounded (None).
         let mut quant = ir::Quantifier {
-            min: optmin,
-            max: Some(optmin),
+            min: n.unwrap_or(usize::MAX),
+            max: n,
             greedy: true,
         };
         if self.try_consume(',') {
-            let max = self.try_consume_decimal_integer_literal();
             // Either like {3,4} in which case we want to set the max;
             // or like {3,} in which case the max should be None to indicate unbounded.
-            quant.max = max;
+            quant.max = self.try_consume_decimal_integer_literal().flatten();
         } else {
             // Like {3}.
         }
@@ -1532,17 +1532,16 @@ where
     }
 
     /// ES6 11.8.3 DecimalIntegerLiteral.
-    /// If the value would overflow, usize::MAX is returned.
-    /// All decimal digits are consumed regardless.
-    fn try_consume_decimal_integer_literal(&mut self) -> Option<usize> {
-        let mut result: usize = 0;
+    /// None if there are no digits; Some(None) if the value does not fit in a
+    /// usize. All decimal digits are consumed regardless.
+    fn try_consume_decimal_integer_literal(&mut self) -> Option<Option<usize>> {
+        let mut result = Some(0usize);
         let mut char_count = 0;
         while let Some(c) = self.peek() {
             if let Some(digit) = char::from_u32(c).and_then(|c| char::to_digit(c, 10)) {
                 self.consume(c);
                 char_count += 1;
-                result = result.saturating_mul(10);
-                result = result.saturating_add(digit as usize);
+                result = result.and_then(|r| r.checked_mul(10)?.checked_add(digit as usize));
             } else {
                 break;
             }
@@ -1739,14 +1738,14 @@ where
             // [+UnicodeMode] DecimalEscape
             // Note: This is a backreference.
             '1'..='9' if self.flags.unicode_or_unicode_sets() => {
-                let group = self.try_consume_decimal_integer_literal().unwrap();
-                if group <= self.group_count_max as usize {
-                    Ok(ir::Node::BackRef {
-                        group: group as u32,
-                        icase: self.flags.icase,
-                    })
-                } else {
-                    error("Invalid character escape")
+                match self.try_consume_decimal_integer_literal().unwrap() {
+                    Some(group) if group <= self.group_count_max as usize => {
+                        Ok(ir::Node::BackRef {
+                            group: group as u32,
+                            icase: self.flags.icase,
+                        })
+                    }
+                    _ => error("Invalid character escape"),
                 }
             }
 
@@ -1755,17 +1754,18 @@ where
             // Note: This could be either a backreference, a legacy octal escape or an identity escape.
             '1'..='9' => {
                 let input = self.input.clone();
-                let group = self.try_consume_decimal_integer_literal().unwrap();
-
-                if group <= self.group_count_max as usize {
-                    Ok(ir::Node::BackRef {
-                        group: group as u32,
-                        icase: self.flags.icase,
-                    })
-                } else {
-                    self.input = input;
-                    let c = self.consume_character_escape()?;
-                    Ok(self.char_node(c))
+                match self.try_consume_decimal_integer_literal().unwrap() {
+                    Some(group) if group <= self.group_count_max as usize => {
+                        Ok(ir::Node::BackRef {
+                            group: group as u32,
+                            icase: self.flags.icase,
+                        })
+                    }
+                    _ => {
+                        self.input = input;
+                        let c = self.consume_character_escape()?;
+                        Ok(self.char_node(c))
+                    }
                 }
             }
 
