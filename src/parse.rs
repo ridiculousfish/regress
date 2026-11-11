@@ -1415,11 +1415,10 @@ where
             0x28 /* ( */ | 0x29 /* ) */ | 0x7B /* { */ | 0x7D /* } */ | 0x2F /* / */
             | 0x2D /* - */ | 0x7C /* | */ => error("Invalid class set character"),
             _ => {
-                if Self::is_class_set_reserved_double_punctuator(cp)
-                    && let Some(cp) = self.peek()
-                        && Self::is_class_set_reserved_double_punctuator(cp) {
-                            return error("Invalid class set character");
-                        }
+                // Only a doubled punctuator such as `&&` or `..` is reserved.
+                if Self::is_class_set_reserved_double_punctuator(cp) && self.peek() == Some(cp) {
+                    return error("Invalid class set character");
+                }
                 Ok(cp)
             }
         }

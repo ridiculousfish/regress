@@ -3398,3 +3398,39 @@ fn unicode_sets_unicode_mode() {
         }
     });
 }
+
+/// Only a doubled punctuator such as `&&` or `..` is reserved in a class.
+/// Two different punctuators next to each other are two class set characters.
+#[test]
+fn unicode_sets_adjacent_different_punctuators() {
+    const PUNCTUATORS: &str = "&!#$%*+,.:;<=>?@^`~";
+    test_with_configs(|tc| {
+        for x in PUNCTUATORS.chars() {
+            // A leading `^` would negate the class.
+            let pre = if x == '^' { "_" } else { "" };
+            test_parse_fails_flags(&format!("[a{x}{x}]"), "v");
+            test_parse_fails_flags(&format!("[{pre}{x}{x}a]"), "v");
+            test_parse_fails_flags(&format!(r"[\q{{{x}{x}}}]"), "v");
+            for y in PUNCTUATORS.chars().filter(|&y| y != x) {
+                let (xs, ys) = (x.to_string(), y.to_string());
+                test_unicode_sets_matches(tc, &format!("[{pre}{x}{y}]"), &[&xs, &ys], &["a"]);
+                test_unicode_sets_matches(tc, &format!("[{pre}{x}{y}{x}]"), &[&xs, &ys], &["a"]);
+                test_parse_fails_flags(&format!("[{pre}{x}{y}{y}]"), "v");
+            }
+        }
+        test_unicode_sets_matches(tc, "[<=>]", &["<", "=", ">"], &["a"]);
+        test_unicode_sets_matches(tc, "[^.,:;!?]", &["a"], &[".", ",", "?"]);
+        test_unicode_sets_matches(tc, "[!-#$]", &["!", "\"", "#", "$"], &["%"]);
+        test_unicode_sets_matches(tc, "[.,a-z]", &[".", ",", "m"], &["A"]);
+        test_unicode_sets_matches(tc, "[[.,][!?]]", &[".", ",", "!", "?"], &["a"]);
+        test_unicode_sets_matches(tc, "[[.,]--[,]]", &["."], &[","]);
+        test_unicode_sets_matches(tc, "[,&&[,;]]", &[","], &[";"]);
+        test_unicode_sets_matches(tc, "[.&&.]", &["."], &["a"]);
+        test_unicode_sets_matches(tc, "[!&&a]", &[], &["!", "a"]);
+        assert_eq!(tc.compilef(r"[\q{.,|!?}]", "v").match1f("!?"), "!?");
+        assert_eq!(tc.compilef("^[.,]$", "v").match1f(","), ",");
+        test_parse_fails_flags("[!-##]", "v");
+        test_parse_fails_flags("[.,&&,]", "v");
+        test_parse_fails_flags("[a&&&b]", "v");
+    });
+}
