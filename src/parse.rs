@@ -1878,12 +1878,13 @@ where
                 Ok(u) => {
                     if (0xD800..=0xDBFF).contains(&u) {
                         // Found a high surrogate. Try to parse a low surrogate next
-                        // to see if we can rebuild the original `char`
-
+                        // to see if we can rebuild the original `char`.
+                        // If there is none, back up to before the `\u`, so that
+                        // the next escape is parsed on its own.
+                        orig_input = self.input.clone();
                         if !self.try_consume_str("\\u") {
                             return Some(u as u32);
                         }
-                        orig_input = self.input.clone();
 
                         // A poor man's try block to handle the backtracking
                         // in a single place instead of every time we want to return.

@@ -1488,6 +1488,67 @@ fn run_regexp_unicode_escape_tc(tc: TestConfig) {
 }
 
 #[test]
+fn run_regexp_lead_surrogate_escape() {
+    test_with_configs(run_regexp_lead_surrogate_escape_tc)
+}
+
+fn run_regexp_lead_surrogate_escape_tc(tc: TestConfig) {
+    // A lead surrogate escape that isn't followed by a trail surrogate escape
+    // stands alone, and the escape after it is parsed on its own.
+    for flags in ["", "u", "v"] {
+        let re = tc.compilef(r"[\uD83D\u0041]", flags);
+        re.test_succeeds("A");
+        for s in ["0", "4", "1"] {
+            re.test_fails(s);
+        }
+        let re = tc.compilef(r"[\uD83D\u0030-\u0039]", flags);
+        re.test_succeeds("5");
+        re.test_fails("-");
+    }
+    for flags in ["u", "v"] {
+        let re = tc.compilef(r"[\uD83D\u{41}]", flags);
+        re.test_succeeds("A");
+        for s in ["4", "1", "{", "}"] {
+            re.test_fails(s);
+        }
+        tc.compilef(r"\uD83D\u{DC38}", flags)
+            .test_fails("\u{1F438}");
+        tc.compilef(r"\uD83D\u{3042}*", flags).test_fails("x");
+        tc.compilef(r"[\uD83D\u{1F438}]", flags)
+            .test_succeeds("\u{1F438}");
+    }
+
+    // A lead and a trail surrogate escape still form one code point.
+    for flags in ["", "u", "v"] {
+        tc.compilef(r"^\uD83D\uDC38$", flags)
+            .test_succeeds("\u{1F438}");
+        let re = tc.compilef(r"[\uD83D\uD83D\uDC38]", flags);
+        re.test_fails("8");
+        re.test_fails("D");
+    }
+    for flags in ["u", "v"] {
+        tc.compilef(r"^[\uD83D\uDC38]$", flags)
+            .test_succeeds("\u{1F438}");
+        tc.compilef(r"^[\uD83D\uD83D\uDC38]$", flags)
+            .test_succeeds("\u{1F438}");
+    }
+
+    // Without the u flag, an incomplete \u after a lead surrogate is an
+    // identity escape for u. With it, it's an error.
+    tc.compilef(r"[\uD83D\u]", "").test_succeeds("u");
+    tc.compilef(r"[\uD83D\uZZZZ]", "").test_succeeds("Z");
+    for pattern in [
+        r"\uD83D\u",
+        r"\uD83D\uZZZZ",
+        r"\uD83D\u004",
+        r"\uD83D\u{110000}",
+        r"[\uD83D\u]",
+    ] {
+        test_parse_fails_flags(pattern, "u");
+    }
+}
+
+#[test]
 fn run_regexp_unicode_property_classes() {
     test_with_configs(run_regexp_unicode_property_classes_tc)
 }
