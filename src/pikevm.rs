@@ -295,6 +295,7 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             min_iters,
             max_iters,
             greedy,
+            ..
         } => {
             let loop_ip = s.ip;
             let continuation = loop_ip + 2;

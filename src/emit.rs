@@ -340,7 +340,10 @@ impl Emitter {
                         stack.push(Emitter::Node(loopee));
                     }
                     Node::Loop1CharBody { loopee, quant } => {
+                        let id = self.result.loop1char_ips.len();
+                        self.result.loop1char_ips.push(self.next_offset());
                         self.emit_insn(Insn::Loop1CharBody {
+                            id: id.try_into().expect("Too many 1-char loops"),
                             min_iters: quant.min,
                             max_iters: quant.max.unwrap_or(usize::MAX),
                             greedy: quant.greedy,
@@ -450,6 +453,7 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
         result: CompiledRegex {
             insns: Vec::new(),
             brackets: Vec::new(),
+            loop1char_ips: Vec::new(),
             loops: 0,
             groups: 0,
             group_names: Box::new([]),

@@ -5,7 +5,7 @@ use alloc::{boxed::Box, vec::Vec};
 
 use crate::api;
 use crate::bytesearch::{AsciiBitmap, ByteArraySet, ByteBitmap};
-use crate::types::{BracketContents, CaptureGroupID, LoopID};
+use crate::types::{BracketContents, CaptureGroupID, Loop1CharID, LoopID};
 extern crate memchr;
 use memchr::memmem;
 
@@ -65,6 +65,8 @@ pub enum Insn {
     /// The next instruction is a "1Char" instruction which always matches one
     /// character. Attempt to match it [min, max] times.
     Loop1CharBody {
+        /// Index of this instruction's IP in `CompiledRegex::loop1char_ips`.
+        id: Loop1CharID,
         min_iters: usize,
         max_iters: usize,
         greedy: bool,
@@ -213,6 +215,10 @@ pub struct CompiledRegex {
 
     // The bracket contents, indexed by the value of the `Bracket` instruction.
     pub brackets: Vec<BracketContents>,
+
+    // The IP of each `Loop1CharBody` instruction, indexed by its id. A
+    // backtrack entry names a 1-char loop by id, which is smaller than an IP.
+    pub loop1char_ips: Vec<u32>,
 
     // Predicate to rapidly find the first potential match.
     pub start_pred: StartPredicate,

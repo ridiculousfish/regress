@@ -15,7 +15,9 @@ use crate::matchers::CharProperties;
 use crate::position::PositionType;
 use crate::scm;
 use crate::scm::SingleCharMatcher;
-use crate::types::{CaptureGroupID, GroupData, IP, LoopData, LoopID, MAX_CAPTURE_GROUPS};
+use crate::types::{
+    CaptureGroupID, GroupData, IP, Loop1CharID, LoopData, LoopID, MAX_CAPTURE_GROUPS,
+};
 use crate::util::DebugCheckIndex;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, vec::Vec};
@@ -33,6 +35,25 @@ const MAX_ITERS_STORED_IN_SET_LOOP_DATA: usize = if cfg!(debug_assertions) {
     u32::MAX as usize
 };
 
+/// The most iterations of a greedy 1-char loop that one GreedyLoop1Char entry
+/// covers; a longer run pushes an entry per chunk. A character is at most four
+/// code units, so an entry's count of code units always fits in its u32.
+///
+/// As with MAX_ITERS_STORED_IN_SET_LOOP_DATA, debug builds lower the limit so
+/// that tests reach that path.
+const LOOP1CHAR_CHUNK_ITERS: usize = if cfg!(debug_assertions) {
+    75
+} else {
+    u32::MAX as usize / 4
+};
+
+/// The code units from `from` to `to`, travelling in direction `Dir`.
+#[inline(always)]
+fn distance<Dir: Direction, P: PositionType>(from: P, to: P) -> usize {
+    if Dir::FORWARD { to - from } else { from - to }
+}
+
+// Note we work hard to ensure this stays 16 bytes with pointer positions.
 #[derive(Clone, Debug)]
 enum BacktrackInsn<Input: InputIndexer> {
     /// Nothing more to backtrack.
@@ -82,19 +103,22 @@ enum BacktrackInsn<Input: InputIndexer> {
         entry: Input::Position,
     },
 
+    /// Retry a greedy 1-char loop stopping one character earlier than `pos`,
+    /// where it last stopped. `remaining` is how far back, in code units, the
+    /// earlier stopping points go; at least one character's worth. `id`
+    /// locates the loop's instruction through `CompiledRegex::loop1char_ips`.
     GreedyLoop1Char {
-        // The IP to resume at.
-        continuation: u32,
-        min: Input::Position,
-        max: Input::Position,
+        id: Loop1CharID,
+        remaining: u32,
+        pos: Input::Position,
     },
 
     /// Retry a non-greedy 1-char loop stopping one character later than `pos`,
     /// where it last stopped, if its body matches there. `remaining` is how
     /// many more iterations the quantifier allows, or 0 if it is unbounded.
-    /// `continuation` is the IP to resume at.
+    /// `id` as for GreedyLoop1Char.
     NonGreedyLoop1Char {
-        continuation: u32,
+        id: Loop1CharID,
         remaining: u32,
         pos: Input::Position,
     },
@@ -109,6 +133,9 @@ struct State<Position: PositionType> {
 #[derive(Debug)]
 pub(crate) struct MatchAttempter<'a, Input: InputIndexer> {
     re: &'a CompiledRegex,
+    /// `re.loop1char_ips`, held directly to save a pointer hop on every 1-char
+    /// loop retry.
+    loop1char_ips: &'a [u32],
     bts: Vec<BacktrackInsn<Input>>,
     s: State<Input::Position>,
     /// Backtracking steps left before this attempter gives up, or `u64::MAX`
@@ -123,6 +150,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
     pub(crate) fn new(re: &'a CompiledRegex, entry: Input::Position) -> Self {
         Self {
             re,
+            loop1char_ips: &re.loop1char_ips,
             bts: vec![BacktrackInsn::Exhausted],
             s: State {
                 loops: vec![LoopData::new(entry); re.loops as usize].into_boxed_slice(),
@@ -459,36 +487,60 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
     // body matches a single character so we can backtrack by matching a
     // character backwards.
     // \return where the loop stops, or None if it failed.
+    #[allow(clippy::too_many_arguments)]
     fn run_greedy_loop1char<Dir: Direction>(
         &mut self,
         input: &Input,
         dir: Dir,
         pos: Input::Position,
+        id: Loop1CharID,
         min: usize,
         max: usize,
         ip: IP,
     ) -> Option<Input::Position> {
-        let (min_pos, max_pos) = Self::with_scm_loop_impl(self.re, input, pos, min, max, dir, ip)?;
-        if min_pos != max_pos {
-            // Backtracking is possible.
-            self.bts.push(BacktrackInsn::GreedyLoop1Char {
-                continuation: (ip + 2) as u32,
-                min: min_pos,
-                max: max_pos,
-            });
+        // Take as many iterations as possible. Each other stopping point, back
+        // to the end of the minimum iterations, is a retry. An entry counts how
+        // far back its stopping points go in code units, which costs one
+        // subtraction here; counting iterations would slow the walk. The walk
+        // goes in chunks so that each entry's count fits.
+        let mut left = max - min;
+        let mut n = left.min(LOOP1CHAR_CHUNK_ITERS);
+        let (mut start, mut end) =
+            Self::with_scm_loop_impl(self.re, input, pos, min, min + n, dir, ip)?;
+        loop {
+            let span = distance::<Dir, _>(start, end);
+            debug_assert!(span <= 4 * LOOP1CHAR_CHUNK_ITERS, "Chunk too long");
+            if span > 0 {
+                self.bts.push(BacktrackInsn::GreedyLoop1Char {
+                    id,
+                    remaining: span as u32,
+                    pos: end,
+                });
+            }
+            left -= n;
+            // Fewer than n code units means fewer than n iterations: the body
+            // stopped matching.
+            if left == 0 || span < n {
+                return Some(end);
+            }
+            core::hint::cold_path();
+            n = left.min(LOOP1CHAR_CHUNK_ITERS);
+            start = end;
+            (_, end) = Self::with_scm_loop_impl(self.re, input, start, 0, n, dir, ip)?;
         }
-        Some(max_pos)
     }
 
     // Run the non-greedy 1-char loop at \p ip from \p pos. It takes only the
     // minimum; each retry then tries one more iteration, so the loop never
     // looks further ahead than it has to.
     // \return where the loop stops, or None if it failed.
+    #[allow(clippy::too_many_arguments)]
     fn run_nongreedy_loop1char<Dir: Direction>(
         &mut self,
         input: &Input,
         dir: Dir,
         pos: Input::Position,
+        id: Loop1CharID,
         min: usize,
         max: usize,
         ip: IP,
@@ -500,7 +552,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
             let remaining = if max == usize::MAX { 0 } else { max - min };
             debug_assert!(remaining <= u32::MAX as usize, "Count should fit in u32");
             self.bts.push(BacktrackInsn::NonGreedyLoop1Char {
-                continuation: (ip + 2) as u32,
+                id,
                 remaining: remaining as u32,
                 pos: min_pos,
             });
@@ -668,46 +720,44 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 }
 
                 BacktrackInsn::GreedyLoop1Char {
-                    continuation,
-                    min,
-                    max,
+                    id,
+                    remaining,
+                    pos: stop,
                 } => {
-                    // The match failed at the max location.
-                    debug_assert!(
-                        if Dir::FORWARD { max >= min } else { max <= min },
-                        "max should be >= min (or <= if tracking backwards)"
-                    );
-                    // If min is equal to max, there is no more backtracking to be done;
-                    // otherwise move opposite the direction of the cursor.
-                    if *max == *min {
-                        // We have backtracked this loop as far as possible.
-                        self.bts.pop();
-                        continue;
-                    }
-                    let newmax = if Dir::FORWARD {
-                        input.next_left_pos(*max)
+                    // The match failed with the loop stopped at `stop`; stop one
+                    // character earlier, against the direction of travel.
+                    let loop_ip = *self.loop1char_ips.iat(*id as usize) as IP;
+                    let earlier = if Dir::FORWARD {
+                        input.next_left_pos(*stop)
                     } else {
-                        input.next_right_pos(*max)
+                        input.next_right_pos(*stop)
                     };
-                    if let Some(newmax) = newmax {
-                        *pos = newmax;
-                        *max = newmax;
+                    let Some(earlier) = earlier else {
+                        rs_unreachable!("Should be able to step back since retries remain")
+                    };
+                    // In debug builds, this panics if the step went past the
+                    // loop's minimum.
+                    *remaining -= distance::<Dir, _>(earlier, *stop) as u32;
+                    *pos = earlier;
+                    *ip = loop_ip + 2;
+                    if *remaining == 0 {
+                        // That was the last retry.
+                        self.pop_backtrack();
                     } else {
-                        rs_unreachable!("Should always be able to advance since min != max")
+                        *stop = earlier;
                     }
-                    *ip = *continuation as IP;
                     return true;
                 }
 
                 BacktrackInsn::NonGreedyLoop1Char {
-                    continuation,
+                    id,
                     remaining,
                     pos: stop,
                 } => {
                     // The match failed with the loop stopped at `stop`; try one
                     // more iteration there. If the body does not match, no later
                     // stopping point exists either.
-                    let loop_ip = *continuation as IP - 2;
+                    let loop_ip = *self.loop1char_ips.iat(*id as usize) as IP;
                     // With constant counts, this inlines to a single match.
                     let Some((later, _)) =
                         Self::with_scm_loop_inline(self.re, input, *stop, 1, 1, dir, loop_ip)
@@ -716,7 +766,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                         continue;
                     };
                     *pos = later;
-                    *ip = *continuation as IP;
+                    *ip = loop_ip + 2;
                     if *remaining == 1 {
                         // That was the last iteration the quantifier allows.
                         self.pop_backtrack();
@@ -1041,14 +1091,17 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     }
 
                     &Insn::Loop1CharBody {
+                        id,
                         min_iters,
                         max_iters,
                         greedy,
                     } => {
                         let stop = if greedy {
-                            self.run_greedy_loop1char(input, dir, pos, min_iters, max_iters, ip)
+                            self.run_greedy_loop1char(input, dir, pos, id, min_iters, max_iters, ip)
                         } else {
-                            self.run_nongreedy_loop1char(input, dir, pos, min_iters, max_iters, ip)
+                            self.run_nongreedy_loop1char(
+                                input, dir, pos, id, min_iters, max_iters, ip,
+                            )
                         };
                         let Some(stop) = stop else {
                             break 'backtrack;

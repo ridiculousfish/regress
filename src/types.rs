@@ -18,6 +18,11 @@ pub const MAX_CAPTURE_GROUPS: usize = 65535;
 pub const MAX_LOOPS: usize = 65535;
 pub type LoopID = u16;
 
+/// Identifies a 1-char loop (`Loop1CharBody`). Numbered separately from
+/// LoopID, since 1-char loops keep no per-match LoopData. Every 1-char loop
+/// comes from a parsed loop, so MAX_LOOPS bounds these too.
+pub type Loop1CharID = u16;
+
 /// The maximum nesting depth of groups, lookarounds, and nested classes.
 /// This bounds parser recursion to prevent a stack overflow on adversarial input.
 pub const MAX_NESTING_DEPTH: u32 = 256;

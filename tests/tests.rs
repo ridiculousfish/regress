@@ -2578,8 +2578,12 @@ fn test_nongreedy_loop1char_stops_at_body_mismatch() {
 
 #[test]
 fn test_loop1char_long_runs() {
-    // A non-greedy 1-char loop counts its allowance in its entry and grows one
-    // character per retry. Each case retries hundreds of times.
+    // A greedy 1-char loop's backtrack entry covers a limited number of
+    // iterations (75 in debug builds); a loop with more walks in chunks, with
+    // an entry per chunk. Non-greedy loops count their allowance
+    // in their entry. Each case retries hundreds of times. Several stopping points
+    // succeed, in different chunks, so the answer depends on trying them in
+    // the right order; one case also succeeds at the very first retry.
     test_with_configs(|tc| {
         // `len` copies of `fill`, with `mark` at each of `at`.
         let text = |len: usize, fill: char, mark: char, at: &[usize]| -> String {
@@ -2588,9 +2592,30 @@ fn test_loop1char_long_runs() {
                 .collect()
         };
 
+        // Greedy, forwards: stop at the last x.
+        let t = text(1000, 'a', 'x', &[100, 400, 700]);
+        tc.compile(r"^([ax]*)x")
+            .match1f(&t)
+            .test_eq(&format!("{},{}", &t[..701], &t[..700]));
+        // The first retry succeeds.
+        let t = text(1000, 'a', 'x', &[0, 999]);
+        tc.compile(r"^([ax]*)x")
+            .match1f(&t)
+            .test_eq(&format!("{},{}", t, &t[..999]));
+        // Whole entries only: 900 stopping points.
+        let t = text(900, 'a', 'x', &[100, 400, 700]);
+        tc.compile(r"^([ax]*)x")
+            .match1f(&t)
+            .test_eq(&format!("{},{}", &t[..701], &t[..700]));
+
         // Non-greedy, forwards: stop at the first b. Unbounded, then bounded.
         for pattern in [r"^([ab]*?)b", r"^([ab]{0,2000}?)b"] {
             let t = text(999, 'a', 'b', &[400, 700]);
+            tc.compile(pattern)
+                .match1f(&t)
+                .test_eq(&format!("{},{}", &t[..401], &t[..400]));
+            // Whole entries only.
+            let t = text(900, 'a', 'b', &[400, 700]);
             tc.compile(pattern)
                 .match1f(&t)
                 .test_eq(&format!("{},{}", &t[..401], &t[..400]));
@@ -2609,7 +2634,53 @@ fn test_loop1char_long_runs() {
         tc.compile(r"^([ab]{0,250}?)b")
             .test_fails(&text(999, 'a', 'b', &[251]));
 
+        // Multi-byte characters: greedy retries step back a whole character
+        // at a time, and chunks split between characters. 'é' and '€' take
+        // two and three bytes in UTF-8.
+        let wide = |len: usize, at: &[usize]| -> String {
+            (0..len)
+                .map(|i| {
+                    if at.contains(&i) {
+                        'x'
+                    } else if i % 2 == 0 {
+                        'é'
+                    } else {
+                        '€'
+                    }
+                })
+                .collect()
+        };
+        // The byte offset of character `chars` in `t`.
+        let at = |t: &str, chars: usize| t.char_indices().nth(chars).map_or(t.len(), |(i, _)| i);
+        let t = wide(400, &[50, 250]);
+        tc.compile(r"^([éx€]*)x").match1f(&t).test_eq(&format!(
+            "{},{}",
+            &t[..at(&t, 251)],
+            &t[..at(&t, 250)]
+        ));
+        let t = wide(400, &[0, 399]);
+        tc.compile(r"^([éx€]*)x")
+            .match1f(&t)
+            .test_eq(&format!("{},{}", t, &t[..at(&t, 399)]));
+        // Every retry fails, so the loop backs off all the way to its start.
+        tc.compile(r"^x[éx€]*y")
+            .test_fails(&format!("x{}z", wide(400, &[])));
+        let t = wide(400, &[150, 300]) + "b";
+        tc.compile(r"^[éx€]*(?<=x([éx€]*))b")
+            .match1f(&t)
+            .test_eq(&format!("{},{}", t, &t[at(&t, 151)..at(&t, 400)]));
+
         // Lookbehinds run backwards; anchoring the match evaluates each once.
+        // Greedy, backwards: the group starts just after the first x.
+        let t = text(1000, 'a', 'x', &[400, 700]) + "b";
+        tc.compile(r"^[ax]*(?<=x([ax]*))b")
+            .match1f(&t)
+            .test_eq(&format!("{},{}", t, &t[401..1000]));
+        // The first retry succeeds.
+        let t = text(1000, 'a', 'x', &[0, 400]) + "b";
+        tc.compile(r"^[ax]*(?<=x([ax]*))b")
+            .match1f(&t)
+            .test_eq(&format!("{},{}", t, &t[1..1000]));
         // Non-greedy, backwards: the group starts just after the last x.
         for pattern in [r"^[ax]*(?<=x([ax]*?))b", r"^[ax]*(?<=x([ax]{0,2000}?))b"] {
             let t = text(1000, 'a', 'x', &[100, 400]) + "b";
