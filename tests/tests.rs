@@ -2561,6 +2561,66 @@ fn test_backref_after_backtrack_into_group() {
 }
 
 #[test]
+fn test_nongreedy_loop1char_stops_at_body_mismatch() {
+    // A non-greedy 1-char loop grows one character per retry, and stops for
+    // good at the first character its body does not match, even if a later
+    // stopping point would let the rest of the pattern succeed.
+    test_with_configs(|tc| {
+        tc.compile(r"^(a*?)b").test_fails("aaxab");
+        tc.compile(r"^(a*?)b").match1f("aab").test_eq("aab,aa");
+        // Backwards, in a lookbehind.
+        tc.compile(r"^[axy]*(?<=x(a*?))b").test_fails("xyab");
+        tc.compile(r"^[axy]*(?<=x(a*?))b")
+            .match1f("yxaab")
+            .test_eq("yxaab,aa");
+    });
+}
+
+#[test]
+fn test_loop1char_long_runs() {
+    // A non-greedy 1-char loop counts its allowance in its entry and grows one
+    // character per retry. Each case retries hundreds of times.
+    test_with_configs(|tc| {
+        // `len` copies of `fill`, with `mark` at each of `at`.
+        let text = |len: usize, fill: char, mark: char, at: &[usize]| -> String {
+            (0..len)
+                .map(|i| if at.contains(&i) { mark } else { fill })
+                .collect()
+        };
+
+        // Non-greedy, forwards: stop at the first b. Unbounded, then bounded.
+        for pattern in [r"^([ab]*?)b", r"^([ab]{0,2000}?)b"] {
+            let t = text(999, 'a', 'b', &[400, 700]);
+            tc.compile(pattern)
+                .match1f(&t)
+                .test_eq(&format!("{},{}", &t[..401], &t[..400]));
+        }
+        // A bound allows exactly that many iterations.
+        let t = text(999, 'a', 'b', &[700]);
+        tc.compile(r"^([ab]{0,700}?)b")
+            .match1f(&t)
+            .test_eq(&format!("{},{}", &t[..701], &t[..700]));
+        tc.compile(r"^([ab]{0,700}?)b")
+            .test_fails(&text(999, 'a', 'b', &[701]));
+        let t = text(999, 'a', 'b', &[250]);
+        tc.compile(r"^([ab]{0,250}?)b")
+            .match1f(&t)
+            .test_eq(&format!("{},{}", &t[..251], &t[..250]));
+        tc.compile(r"^([ab]{0,250}?)b")
+            .test_fails(&text(999, 'a', 'b', &[251]));
+
+        // Lookbehinds run backwards; anchoring the match evaluates each once.
+        // Non-greedy, backwards: the group starts just after the last x.
+        for pattern in [r"^[ax]*(?<=x([ax]*?))b", r"^[ax]*(?<=x([ax]{0,2000}?))b"] {
+            let t = text(1000, 'a', 'x', &[100, 400]) + "b";
+            tc.compile(pattern)
+                .match1f(&t)
+                .test_eq(&format!("{},{}", t, &t[401..1000]));
+        }
+    });
+}
+
+#[test]
 fn test_nested_loop_reentry_long_inner_run() {
     // Each inner loop runs 400 iterations. In debug builds that is more than
     // the backtracker stores inline, so the outer loop re-entering it saves the

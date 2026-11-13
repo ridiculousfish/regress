@@ -365,6 +365,17 @@ fn promote_1char_loops(n: &mut Node, _w: &Walk) -> PassAction {
                 "Should have no enclosed groups"
             );
 
+            // The backtracker counts how many more iterations a non-greedy 1Char
+            // loop allows in a u32. Leave the absurd bounded loops that allow
+            // more as ordinary loops.
+            if !quant.greedy
+                && quant
+                    .max
+                    .is_some_and(|max| max - quant.min > u32::MAX as usize)
+            {
+                return PassAction::Keep;
+            }
+
             // This feels hackish?
             let mut new_loopee = Box::new(Node::Empty);
             core::mem::swap(&mut new_loopee, loopee);
