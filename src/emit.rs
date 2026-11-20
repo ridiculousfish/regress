@@ -54,9 +54,6 @@ struct Emitter {
 
     // List of group names, in order, with empties for unnamed groups.
     group_names: Vec<Box<str>>,
-
-    // Whether the current node is within a lookbehind.
-    in_lookbehind: bool,
 }
 
 impl Emitter {
@@ -217,7 +214,6 @@ impl Emitter {
             },
             NodeLookaroundAssertionFinish {
                 lookaround_instruction_index: u32,
-                prev_in_lookbehind: bool,
             },
             NodeAltMiddle {
                 alt_instruction_index: u32,
@@ -252,7 +248,6 @@ impl Emitter {
                 }
                 Emitter::NodeLookaroundAssertionFinish {
                     lookaround_instruction_index,
-                    prev_in_lookbehind,
                 } => {
                     self.emit_insn(Insn::Goal);
                     // Fix up the continuation.
@@ -262,7 +257,6 @@ impl Emitter {
                         Insn::Lookahead { continuation, .. } => *continuation = next_insn,
                         _ => panic!("Should be a Lookaround instruction"),
                     }
-                    self.in_lookbehind = prev_in_lookbehind;
                 }
                 Emitter::NodeAltMiddle {
                     alt_instruction_index,
@@ -401,11 +395,8 @@ impl Emitter {
                                 continuation: 0,
                             })
                         };
-                        let prev_in_lookbehind = self.in_lookbehind;
-                        self.in_lookbehind = *backwards;
                         stack.push(Emitter::NodeLookaroundAssertionFinish {
                             lookaround_instruction_index: lookaround,
-                            prev_in_lookbehind,
                         });
                         stack.push(Emitter::Node(contents));
                     }
@@ -453,7 +444,6 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
     let mut emitter = Emitter {
         next_loop_id: 0,
         group_names: Vec::new(),
-        in_lookbehind: false,
         result: CompiledRegex {
             insns: Vec::new(),
             brackets: Vec::new(),
