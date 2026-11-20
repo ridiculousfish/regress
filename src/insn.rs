@@ -11,8 +11,8 @@ use memchr::memmem;
 
 type JumpTarget = u32;
 
-/// The maximum size of a byte sequence instruction.
-pub const MAX_BYTE_SEQ_LENGTH: usize = 16;
+/// The maximum size of an inline byte sequence instruction.
+pub const MAX_INLINE_BYTE_SEQ_LENGTH: usize = 16;
 
 /// The maximum size of an array-type-charset instruction.
 /// This also happens to be the maximum number of characters in case-insensitive
@@ -160,6 +160,10 @@ pub enum Insn {
     ByteSeq15([u8; 15]),
     ByteSeq16([u8; 16]),
 
+    // Match an out-of-line sequence of literal bytes,
+    // indexing into the compiled regex's byte array as [start, end).
+    ByteSeqN((usize, usize)),
+
     /// An instruction that always fails, which may be produced in weird cases
     /// like an inverted bracket which matches everything.
     JustFail,
@@ -219,6 +223,9 @@ pub struct CompiledRegex {
     // The IP of each `Loop1CharBody` instruction, indexed by its id. A
     // backtrack entry names a 1-char loop by id, which is smaller than an IP.
     pub loop1char_ips: Vec<u32>,
+
+    // A vector of bytes for out-of-line byte matches.
+    pub byte_literal_buffer: Vec<u8>,
 
     // Predicate to rapidly find the first potential match.
     pub start_pred: StartPredicate,

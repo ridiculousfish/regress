@@ -318,6 +318,27 @@ fn test_lookbehinds() {
 }
 
 #[test]
+fn test_long_byte_sequences() {
+    // Byte sequences longer than 16 bytes are stored out-of-line.
+    test_with_configs(|tc| {
+        tc.compile(r"abcdefghijklmnopq")
+            .match1f("xxabcdefghijklmnopqyy")
+            .test_eq("abcdefghijklmnopq");
+        tc.compile(r"abcdefghijklmnopq")
+            .test_fails("abcdefghijklmnopQ");
+        tc.compile(r"ééééééééé")
+            .match1f("aéééééééééb")
+            .test_eq("ééééééééé");
+        tc.compile(r"(abcdefghijklmnopq)-(abcdefghijklmnopq)")
+            .match1f("abcdefghijklmnopq-abcdefghijklmnopq")
+            .test_eq("abcdefghijklmnopq-abcdefghijklmnopq,abcdefghijklmnopq,abcdefghijklmnopq");
+        tc.compile(r"(?<=abcdefghijklmnopqrst)\d")
+            .match1f("abcdefghijklmnopqrs1abcdefghijklmnopqrst2")
+            .test_eq("2");
+    });
+}
+
+#[test]
 fn test_lookbehinds_mjsunit() {
     test_with_configs(test_lookbehinds_mjsunit_tc)
 }

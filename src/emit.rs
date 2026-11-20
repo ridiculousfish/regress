@@ -1,7 +1,9 @@
 //! Regex compiler back-end: transforms IR into a CompiledRegex
 
 use crate::bytesearch::{AsciiBitmap, ByteArraySet};
-use crate::insn::{CompiledRegex, Insn, LoopFields, MAX_BYTE_SEQ_LENGTH, MAX_CHAR_SET_LENGTH};
+use crate::insn::{
+    CompiledRegex, Insn, LoopFields, MAX_CHAR_SET_LENGTH, MAX_INLINE_BYTE_SEQ_LENGTH,
+};
 use crate::ir;
 use crate::ir::Node;
 #[cfg(not(feature = "utf16"))]
@@ -72,11 +74,30 @@ impl Emitter {
         self.emit_insn(insn);
     }
 
-    // Emit a nonempty byte sequence instruction. The sequence must be at most MAX_BYTE_SEQ_LENGTH bytes.
+    /// Emit a nonempty byte sequence instruction.
+    /// Sequences longer than MAX_INLINE_BYTE_SEQ_LENGTH are stored out-of-line.
+    /// Bytes are stored in forward order even in a lookbehind, so they can be compared with memcmp.
     fn emit_byte_sequence_insn(&mut self, seq: &[u8]) {
+        debug_assert!(!seq.is_empty(), "Byte sequence should not be empty");
+        if seq.len() > MAX_INLINE_BYTE_SEQ_LENGTH {
+            // Out-of-line. Reuse an existing occurrence in the buffer if any.
+            let buffer = &mut self.result.byte_literal_buffer;
+            let start = match memchr::memmem::find(buffer, seq) {
+                Some(start) => start,
+                None => {
+                    let start = buffer.len();
+                    buffer.extend_from_slice(seq);
+                    start
+                }
+            };
+            self.emit_insn(Insn::ByteSeqN((start, start + seq.len())));
+            return;
+        }
+
+        // Inline.
         const {
             assert!(
-                MAX_BYTE_SEQ_LENGTH == 16,
+                MAX_INLINE_BYTE_SEQ_LENGTH == 16,
                 "Need to update our emitting logic"
             );
         };
@@ -97,7 +118,7 @@ impl Emitter {
             14 => Insn::ByteSeq14(seq.try_into().unwrap()),
             15 => Insn::ByteSeq15(seq.try_into().unwrap()),
             16 => Insn::ByteSeq16(seq.try_into().unwrap()),
-            _ => panic!("Unexpected chunk size"),
+            _ => panic!("Unexpected byte length"),
         };
         self.emit_insn(insn);
     }
@@ -420,24 +441,7 @@ impl Emitter {
                         }
                     }
 
-                    Node::ByteSequence(bytes) => {
-                        // In a lookbehind, instruction order is reversed, but ByteSequence contents are not,
-                        // to take advantage of optimized memcmp. For example, `(?<=abcd)` may be emitted
-                        // as "d", "c", "b", "a" char matches (traversing input from right to left), or
-                        // optimized to a single forwards ByteSequence("abcd"), which matches left-to-right.
-                        // Therefore if we split a byte sequence into multiple instructions,
-                        // we need to emit them in reverse order iff in a lookbehind.
-                        let chunks = bytes.chunks(MAX_BYTE_SEQ_LENGTH);
-                        if self.in_lookbehind {
-                            for chunk in chunks.rev() {
-                                self.emit_byte_sequence_insn(chunk);
-                            }
-                        } else {
-                            for chunk in chunks {
-                                self.emit_byte_sequence_insn(chunk);
-                            }
-                        }
-                    }
+                    Node::ByteSequence(seq) => self.emit_byte_sequence_insn(seq),
                 },
             }
         }
@@ -454,6 +458,7 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
             insns: Vec::new(),
             brackets: Vec::new(),
             loop1char_ips: Vec::new(),
+            byte_literal_buffer: Vec::new(),
             loops: 0,
             groups: 0,
             group_names: Box::new([]),

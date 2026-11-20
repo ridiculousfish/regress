@@ -147,6 +147,10 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         Insn::ByteSeq14(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
         Insn::ByteSeq15(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
         Insn::ByteSeq16(v) => nextinsn_or_fail!(cursor::try_match_lit(input, dir, &mut s.pos, v)),
+        Insn::ByteSeqN((start, end)) => {
+            let v = re.byte_literal_buffer.iat(*start..*end);
+            nextinsn_or_fail!(input.match_byte_slice(dir, &mut s.pos, v))
+        }
 
         Insn::StartOfLine { multiline } => {
             let multiline = *multiline;

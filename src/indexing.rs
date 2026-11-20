@@ -161,6 +161,15 @@ where
         pos: &mut Self::Position,
         bytes: &[u8; N],
     ) -> bool;
+
+    /// Return whether we match some literal bytes, whose length is known only at runtime.
+    /// If so, update the position. If not, the position is unspecified.
+    fn match_byte_slice<Dir: Direction>(
+        &self,
+        dir: Dir,
+        pos: &mut Self::Position,
+        bytes: &[u8],
+    ) -> bool;
 }
 
 /// \return the length of a UTF8 sequence starting with this byte.
@@ -586,6 +595,41 @@ impl<'a> InputIndexer for Utf8Input<'a> {
 
         bytes == new_range
     }
+
+    fn match_byte_slice<Dir: Direction>(
+        &self,
+        _dir: Dir,
+        pos: &mut Self::Position,
+        bytes: &[u8],
+    ) -> bool {
+        let len = bytes.len();
+        let (start, end) = if Dir::FORWARD {
+            if let Some(end) = self.try_move_right(*pos, len) {
+                let start = *pos;
+                *pos = end;
+                (start, end)
+            } else {
+                return false;
+            }
+        } else if let Some(start) = self.try_move_left(*pos, len) {
+            let end = *pos;
+            *pos = start;
+            (start, end)
+        } else {
+            return false;
+        };
+
+        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
+        let new_range = &self.contents()[core::ops::Range {
+            start: self.pos_to_offset(start),
+            end: self.pos_to_offset(end),
+        }];
+
+        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
+
+        bytes == new_range
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -852,6 +896,41 @@ impl<'a> InputIndexer for AsciiInput<'a> {
         bytes: &[u8; N],
     ) -> bool {
         let len = N;
+        let (start, end) = if Dir::FORWARD {
+            if let Some(end) = self.try_move_right(*pos, len) {
+                let start = *pos;
+                *pos = end;
+                (start, end)
+            } else {
+                return false;
+            }
+        } else if let Some(start) = self.try_move_left(*pos, len) {
+            let end = *pos;
+            *pos = start;
+            (start, end)
+        } else {
+            return false;
+        };
+
+        #[cfg(any(feature = "index-positions", feature = "prohibit-unsafe"))]
+        let new_range = &self.contents()[core::ops::Range {
+            start: self.pos_to_offset(start),
+            end: self.pos_to_offset(end),
+        }];
+
+        #[cfg(all(not(feature = "index-positions"), not(feature = "prohibit-unsafe")))]
+        let new_range = unsafe { core::slice::from_raw_parts(start.ptr(), end - start) };
+
+        bytes == new_range
+    }
+
+    fn match_byte_slice<Dir: Direction>(
+        &self,
+        _dir: Dir,
+        pos: &mut Self::Position,
+        bytes: &[u8],
+    ) -> bool {
+        let len = bytes.len();
         let (start, end) = if Dir::FORWARD {
             if let Some(end) = self.try_move_right(*pos, len) {
                 let start = *pos;
@@ -1194,6 +1273,15 @@ impl<'a> InputIndexer for Utf16Input<'a> {
     ) -> bool {
         panic!("Should never be matching bytes for utf16");
     }
+
+    fn match_byte_slice<Dir: Direction>(
+        &self,
+        _dir: Dir,
+        _pos: &mut Self::Position,
+        _bytes: &[u8],
+    ) -> bool {
+        panic!("Should never be matching bytes for utf16");
+    }
 }
 
 #[cfg(feature = "utf16")]
@@ -1374,6 +1462,15 @@ impl<'a> InputIndexer for Ucs2Input<'a> {
         _dir: Dir,
         _pos: &mut Self::Position,
         _bytes: &[u8; N],
+    ) -> bool {
+        panic!("Should never be matching bytes for ucs2");
+    }
+
+    fn match_byte_slice<Dir: Direction>(
+        &self,
+        _dir: Dir,
+        _pos: &mut Self::Position,
+        _bytes: &[u8],
     ) -> bool {
         panic!("Should never be matching bytes for ucs2");
     }
