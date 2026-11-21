@@ -624,7 +624,7 @@ mod tests {
             crate::parse::try_parse(pattern.chars().map(u32::from), crate::api::Flags::default())
                 .unwrap();
         crate::optimizer::optimize(&mut ire);
-        crate::emit::emit(&ire)
+        crate::emit::emit(&ire).unwrap()
     }
 
     #[test]

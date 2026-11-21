@@ -106,7 +106,7 @@ fn main() -> Result<(), Error> {
             println!("Optimized IR:\n{}", ire);
         }
     }
-    let cr = backends::emit(&ire);
+    let cr = backends::emit(&ire)?;
     if args.dump_phases || args.dump_bytecode {
         println!("Bytecode:\n{:#?}", cr);
     }

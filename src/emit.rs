@@ -8,6 +8,7 @@ use crate::ir;
 use crate::ir::Node;
 #[cfg(not(feature = "utf16"))]
 use crate::literal::lower_code_point_sequence;
+use crate::parse::Error;
 use crate::startpredicate;
 use crate::types::{BracketContents, CaptureGroupID, LoopID};
 #[cfg(feature = "utf16")]
@@ -74,7 +75,7 @@ impl Emitter {
     /// Emit a nonempty byte sequence instruction.
     /// Sequences longer than MAX_INLINE_BYTE_SEQ_LENGTH are stored out-of-line.
     /// Bytes are stored in forward order even in a lookbehind, so they can be compared with memcmp.
-    fn emit_byte_sequence_insn(&mut self, seq: &[u8]) {
+    fn emit_byte_sequence_insn(&mut self, seq: &[u8]) -> Result<(), Error> {
         debug_assert!(!seq.is_empty(), "Byte sequence should not be empty");
         if seq.len() > MAX_INLINE_BYTE_SEQ_LENGTH {
             // Out-of-line. Reuse an existing occurrence in the buffer if any.
@@ -88,7 +89,7 @@ impl Emitter {
                 }
             };
             self.emit_insn(Insn::ByteSeqN((start, start + seq.len())));
-            return;
+            return Ok(());
         }
 
         // Inline.
@@ -118,21 +119,23 @@ impl Emitter {
             _ => panic!("Unexpected byte length"),
         };
         self.emit_insn(insn);
+        Ok(())
     }
 
     // Emit a sequence of code points, lowering to literal bytes (UTF-8).
     #[cfg(not(feature = "utf16"))]
-    fn emit_code_point_sequence(&mut self, cps: &[u32], icase: bool) {
+    fn emit_code_point_sequence(&mut self, cps: &[u32], icase: bool) -> Result<(), Error> {
         let pieces =
             lower_code_point_sequence(cps, icase, self.result.flags.unicode_or_unicode_sets());
         for piece in pieces {
-            self.emit_node(&Node::from(piece));
+            self.emit_node(&Node::from(piece))?;
         }
+        Ok(())
     }
 
     // Emit a sequence of code points, in a UTF-16 friendly way.
     #[cfg(feature = "utf16")]
-    fn emit_code_point_sequence(&mut self, cps: &[u32], icase: bool) {
+    fn emit_code_point_sequence(&mut self, cps: &[u32], icase: bool) -> Result<(), Error> {
         let unicode = self.result.flags.unicode_or_unicode_sets();
         for &cp in cps {
             let chars = unicode::expand_code_point(cp, icase, unicode);
@@ -142,17 +145,18 @@ impl Emitter {
                 2..=MAX_CHAR_SET_LENGTH => Node::CharSet(chars),
                 _ => panic!("Unicode case fold exceeded maximum expansion"),
             };
-            self.emit_node(&node);
+            self.emit_node(&node)?;
         }
+        Ok(())
     }
 
     /// Lower a `Node::StringSet` to a right-leaning chain of `Insn::Alt` over the
     /// alternatives.
-    fn emit_string_set(&mut self, alternatives: &[Box<[u32]>], icase: bool) {
+    fn emit_string_set(&mut self, alternatives: &[Box<[u32]>], icase: bool) -> Result<(), Error> {
         let Some((last, priors)) = alternatives.split_last() else {
             // Empty string sets always fail.
             self.emit_insn(Insn::JustFail);
-            return;
+            return Ok(());
         };
         // Instruction offsets to fix up with jumps to the string set end.
         let mut jump_fixups: Vec<u32> = Vec::new();
@@ -160,7 +164,7 @@ impl Emitter {
         for cps in priors.iter() {
             // Start with an alt jumping to the next string.
             let alt_idx = self.emit_insn_offset(Insn::Alt { secondary: 0 });
-            self.emit_code_point_sequence(cps, icase);
+            self.emit_code_point_sequence(cps, icase)?;
             // On success, jump past the remaining alternatives.
             // On failure, the Alt resumes at the next alternative.
             jump_fixups.push(self.emit_insn_offset(Insn::Jump { target: 0 }));
@@ -172,7 +176,7 @@ impl Emitter {
         }
         // Emit the last alternative.
         // Note this naturally falls through to the end of the string set.
-        self.emit_code_point_sequence(last, icase);
+        self.emit_code_point_sequence(last, icase)?;
         // Fix up any "on success" jumps.
         let end = self.next_offset();
         for jump_idx in jump_fixups {
@@ -181,6 +185,7 @@ impl Emitter {
                 _ => unreachable!("Instruction should be Jump"),
             }
         }
+        Ok(())
     }
 
     /// Emit an instruction.
@@ -206,7 +211,7 @@ impl Emitter {
     }
 
     /// Emit instructions corresponding to a given node.
-    fn emit_node(&mut self, node: &Node) {
+    fn emit_node(&mut self, node: &Node) -> Result<(), Error> {
         enum Emitter<'a> {
             Node(&'a Node),
             NodeLoopFinish {
@@ -319,7 +324,7 @@ impl Emitter {
                     Node::StringSet {
                         alternatives,
                         icase,
-                    } => self.emit_string_set(alternatives, *icase),
+                    } => self.emit_string_set(alternatives, *icase)?,
                     Node::MatchAny => self.emit_insn(Insn::MatchAny),
                     Node::MatchAnyExceptLineTerminator => {
                         self.emit_insn(Insn::MatchAnyExceptLineTerminator)
@@ -432,15 +437,16 @@ impl Emitter {
                         }
                     }
 
-                    Node::ByteSequence(seq) => self.emit_byte_sequence_insn(seq),
+                    Node::ByteSequence(seq) => self.emit_byte_sequence_insn(seq)?,
                 },
             }
         }
+        Ok(())
     }
 }
 
-/// Compile the given IR to a CompiledRegex.
-pub fn emit(n: &ir::Regex) -> CompiledRegex {
+/// Compile the given IR to a CompiledRegex, or fail if it is too large.
+pub fn emit(n: &ir::Regex) -> Result<CompiledRegex, Error> {
     let mut emitter = Emitter {
         next_loop_id: 0,
         group_names: Vec::new(),
@@ -458,7 +464,13 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
             unit_start_pred: startpredicate::unit_predicate_for_re(n),
         },
     };
-    emitter.emit_node(&n.node);
+    emitter.emit_node(&n.node)?;
+    // Jump targets are u32.
+    if emitter.result.insns.len() > u32::MAX as usize {
+        return Err(Error {
+            text: "Too many instructions".to_string(),
+        });
+    }
     let mut result = emitter.result;
     // Populate group names, unless all are empty.
     debug_assert!(
@@ -471,5 +483,5 @@ pub fn emit(n: &ir::Regex) -> CompiledRegex {
     debug_assert!(
         result.group_names.is_empty() || result.group_names.len() == result.groups as usize
     );
-    result
+    Ok(result)
 }

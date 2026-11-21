@@ -441,7 +441,7 @@ mod units {
             if !flags.no_opt {
                 optimizer::optimize(&mut ire);
             }
-            Some(emit::emit(&ire))
+            emit::emit(&ire).ok()
         }
 
         fn predicate(pattern: &str, flags: &str) -> UnitStartPredicate {

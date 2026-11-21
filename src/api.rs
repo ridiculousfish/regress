@@ -449,7 +449,7 @@ impl Regex {
         if !flags.no_opt {
             optimizer::optimize(&mut ire);
         }
-        let cr = emit::emit(&ire);
+        let cr = emit::emit(&ire)?;
         Ok(Regex { cr })
     }
 
