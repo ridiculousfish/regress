@@ -407,7 +407,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::Char { c })
             }
             &Insn::Bracket(idx) => {
-                let bc = &re.brackets[idx];
+                let bc = re.brackets.iat(idx as usize);
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::Bracket { bc })
             }
             Insn::AsciiBracket(bitmap) => Self::run_scm_loop_impl(
@@ -883,11 +883,8 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     Insn::ByteSeq15(v) => {
                         next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
                     }
-                    Insn::ByteSeq16(v) => {
-                        next_or_bt!(cursor::try_match_lit(input, dir, &mut pos, v))
-                    }
-                    Insn::ByteSeqN((start, end)) => {
-                        let v = self.re.byte_literal_buffer.iat(*start..*end);
+                    &Insn::ByteSeqN((start, end)) => {
+                        let v = re.byte_literal_buffer.iat(start as usize..end as usize);
                         next_or_bt!(input.match_byte_slice(dir, &mut pos, v))
                     }
 
@@ -898,7 +895,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     &Insn::Bracket(idx) => {
                         next_or_bt!(
                             scm::Bracket {
-                                bc: &self.re.brackets[idx]
+                                bc: re.brackets.iat(idx as usize)
                             }
                             .matches(input, dir, &mut pos)
                         )

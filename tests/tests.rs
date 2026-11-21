@@ -319,8 +319,16 @@ fn test_lookbehinds() {
 
 #[test]
 fn test_long_byte_sequences() {
-    // Byte sequences longer than 16 bytes are stored out-of-line.
+    // Byte sequences longer than 15 bytes are stored out-of-line.
     test_with_configs(|tc| {
+        tc.compile(r"abcdefghijklmno")
+            .match1f("xxabcdefghijklmnoyy")
+            .test_eq("abcdefghijklmno");
+        tc.compile(r"abcdefghijklmnop")
+            .match1f("xxabcdefghijklmnopyy")
+            .test_eq("abcdefghijklmnop");
+        tc.compile(r"abcdefghijklmnop")
+            .test_fails("abcdefghijklmnoP");
         tc.compile(r"abcdefghijklmnopq")
             .match1f("xxabcdefghijklmnopqyy")
             .test_eq("abcdefghijklmnopq");

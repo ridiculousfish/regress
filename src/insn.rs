@@ -12,7 +12,7 @@ use memchr::memmem;
 type JumpTarget = u32;
 
 /// The maximum size of an inline byte sequence instruction.
-pub const MAX_INLINE_BYTE_SEQ_LENGTH: usize = 16;
+pub const MAX_INLINE_BYTE_SEQ_LENGTH: usize = 15;
 
 /// The maximum size of an array-type-charset instruction.
 /// This also happens to be the maximum number of characters in case-insensitive
@@ -99,7 +99,7 @@ pub enum Insn {
     },
 
     /// Match the next character against the bracket contents, stored at the given index in the CompiledRegex.
-    Bracket(usize),
+    Bracket(u32),
 
     /// A simple bitmap bracket for ASCII.
     /// It contains a bitmap of the range [0, 127].
@@ -158,11 +158,10 @@ pub enum Insn {
     ByteSeq13([u8; 13]),
     ByteSeq14([u8; 14]),
     ByteSeq15([u8; 15]),
-    ByteSeq16([u8; 16]),
 
     // Match an out-of-line sequence of literal bytes,
     // indexing into the compiled regex's byte array as [start, end).
-    ByteSeqN((usize, usize)),
+    ByteSeqN((u32, u32)),
 
     /// An instruction that always fails, which may be produced in weird cases
     /// like an inverted bracket which matches everything.

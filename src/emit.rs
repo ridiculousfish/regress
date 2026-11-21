@@ -88,14 +88,21 @@ impl Emitter {
                     start
                 }
             };
-            self.emit_insn(Insn::ByteSeqN((start, start + seq.len())));
+            let end = start + seq.len();
+            let range = (start.try_into(), end.try_into());
+            let (Ok(start), Ok(end)) = range else {
+                return Err(Error {
+                    text: "Byte literals too long".to_string(),
+                });
+            };
+            self.emit_insn(Insn::ByteSeqN((start, end)));
             return Ok(());
         }
 
         // Inline.
         const {
             assert!(
-                MAX_INLINE_BYTE_SEQ_LENGTH == 16,
+                MAX_INLINE_BYTE_SEQ_LENGTH == 15,
                 "Need to update our emitting logic"
             );
         };
@@ -115,7 +122,6 @@ impl Emitter {
             13 => Insn::ByteSeq13(seq.try_into().unwrap()),
             14 => Insn::ByteSeq14(seq.try_into().unwrap()),
             15 => Insn::ByteSeq15(seq.try_into().unwrap()),
-            16 => Insn::ByteSeq16(seq.try_into().unwrap()),
             _ => panic!("Unexpected byte length"),
         };
         self.emit_insn(insn);
@@ -318,6 +324,11 @@ impl Emitter {
                         } else {
                             let idx = self.result.brackets.len();
                             self.result.brackets.push(contents.clone());
+                            let Ok(idx) = idx.try_into() else {
+                                return Err(Error {
+                                    text: "Too many brackets".to_string(),
+                                });
+                            };
                             self.emit_insn(Insn::Bracket(idx))
                         }
                     }
