@@ -6,7 +6,7 @@ use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
-use crate::insn::{CompiledRegex, Insn, LoopFields, StartPredicate};
+use crate::insn::{CompiledRegex, Insn, LoopFields, StartPredicate, unpack_char_set};
 use crate::matchers;
 use crate::matchers::CharProperties;
 use crate::position::PositionType;
@@ -126,8 +126,8 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
             _ => StateMatch::Fail,
         },
 
-        Insn::CharSet(v) => match cursor::next(input, dir, &mut s.pos) {
-            Some(c) => nextinsn_or_fail!(charset_contains(v, c.as_u32())),
+        &Insn::CharSet { lo, hi } => match cursor::next(input, dir, &mut s.pos) {
+            Some(c) => nextinsn_or_fail!(charset_contains(&unpack_char_set(lo, hi), c.as_u32())),
             _ => StateMatch::Fail,
         },
 

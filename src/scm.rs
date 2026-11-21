@@ -28,15 +28,15 @@ impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Char
 }
 
 /// Insn::CharSet
-pub struct CharSet<'a> {
-    pub chars: &'a [u32; MAX_CHAR_SET_LENGTH],
+pub struct CharSet {
+    pub chars: [u32; MAX_CHAR_SET_LENGTH],
 }
 
-impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for CharSet<'_> {
+impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for CharSet {
     #[inline(always)]
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
         match cursor::next(input, dir, pos) {
-            Some(c) => charset_contains(self.chars, c.as_u32()),
+            Some(c) => charset_contains(&self.chars, c.as_u32()),
             None => false,
         }
     }

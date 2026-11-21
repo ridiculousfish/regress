@@ -2,7 +2,7 @@
 
 use crate::bytesearch::{AsciiBitmap, ByteArraySet};
 use crate::insn::{
-    CompiledRegex, Insn, LoopFields, MAX_CHAR_SET_LENGTH, MAX_INLINE_BYTE_SEQ_LENGTH,
+    CompiledRegex, Insn, LoopFields, MAX_CHAR_SET_LENGTH, MAX_INLINE_BYTE_SEQ_LENGTH, pack_char_set,
 };
 use crate::ir;
 use crate::ir::Node;
@@ -444,7 +444,7 @@ impl Emitter {
                         } else {
                             let mut arr = [chars[0]; MAX_CHAR_SET_LENGTH];
                             arr[..chars.len()].copy_from_slice(chars.as_slice());
-                            self.emit_insn(Insn::CharSet(arr))
+                            self.emit_insn(pack_char_set(arr))
                         }
                     }
 

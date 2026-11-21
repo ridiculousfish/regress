@@ -133,9 +133,13 @@ pub enum Insn {
         invert: bool,
     },
 
-    /// Match any of the contained chars
+    /// Match any of MAX_CHAR_SET_LENGTH chars: three packed as 21 bits each in
+    /// \p lo, and the last in \p hi. See `pack_char_set`.
     /// There is no length field; characters are simply duplicated as necessary.
-    CharSet([u32; MAX_CHAR_SET_LENGTH]),
+    CharSet {
+        lo: u64,
+        hi: u32,
+    },
 
     /// Match the next byte against some possibilities.
     ByteSet2(ByteArraySet<[u8; 2]>),
@@ -166,6 +170,31 @@ pub enum Insn {
     /// An instruction that always fails, which may be produced in weird cases
     /// like an inverted bracket which matches everything.
     JustFail,
+}
+
+/// Mask of a 21-bit lane of a packed `CharSet`.
+const CHAR_SET_LANE: u64 = 0x1F_FFFF;
+
+/// Make a `CharSet` instruction. A code point fits in 21 bits, so three of
+/// them fit in a u64, with no lane crossing a word boundary.
+pub fn pack_char_set(chars: [u32; MAX_CHAR_SET_LENGTH]) -> Insn {
+    let [a, b, c, d] = chars;
+    debug_assert!(chars.iter().all(|&c| c <= 0x10FFFF), "Not a code point");
+    Insn::CharSet {
+        lo: a as u64 | (b as u64) << 21 | (c as u64) << 42,
+        hi: d,
+    }
+}
+
+/// Unpack the chars of a `CharSet` instruction.
+#[inline(always)]
+pub fn unpack_char_set(lo: u64, hi: u32) -> [u32; MAX_CHAR_SET_LENGTH] {
+    [
+        (lo & CHAR_SET_LANE) as u32,
+        (lo >> 21 & CHAR_SET_LANE) as u32,
+        (lo >> 42) as u32,
+        hi,
+    ]
 }
 
 /// The peeled prefix start predicate.
@@ -248,4 +277,35 @@ pub struct CompiledRegex {
 
     // Flags controlling matching.
     pub flags: api::Flags,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn char_set_packing() {
+        let pack = |chars| match pack_char_set(chars) {
+            Insn::CharSet { lo, hi } => (lo, hi),
+            other => panic!("unexpected {:?}", other),
+        };
+
+        assert_eq!(
+            pack([0x10_2233, 0x04_5566, 0x07_8899, 0x0A_BBCC]),
+            (0x1E22_648A_ACD0_2233, 0x0A_BBCC)
+        );
+
+        let values = [0, 0xFF, 0x100, 0xFFFF, 0x10000, 0x10FFFF];
+        for a in values {
+            for b in values {
+                for c in values {
+                    for d in values {
+                        let chars = [a, b, c, d];
+                        let (lo, hi) = pack(chars);
+                        assert_eq!(unpack_char_set(lo, hi), chars);
+                    }
+                }
+            }
+        }
+    }
 }
