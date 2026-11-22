@@ -5,7 +5,8 @@ use alloc::{boxed::Box, vec::Vec};
 
 use crate::api;
 use crate::bytesearch::{ByteArraySet, ByteBitmap, TruncatedAsciiBitmap};
-use crate::types::{BracketContents, CaptureGroupID, Loop1CharID, LoopID};
+use crate::types::{BracketContents, CaptureGroupID, LargeLoopBoundsID, Loop1CharID, LoopID};
+use crate::util::DebugCheckIndex;
 extern crate memchr;
 use memchr::memmem;
 
@@ -19,11 +20,72 @@ pub const MAX_INLINE_BYTE_SEQ_LENGTH: usize = 15;
 /// equivalence classes.
 pub const MAX_CHAR_SET_LENGTH: usize = 4;
 
+/// The inclusive iteration bounds of a loop. An unbounded loop has a max of
+/// usize::MAX.
+#[derive(Debug, Copy, Clone)]
+pub struct LoopBounds {
+    pub min: usize,
+    pub max: usize,
+}
+
+/// Loop bounds small enough to store in an instruction, which nearly all are.
+/// Larger ones are stored in `CompiledRegex::large_loop_bounds`.
+#[derive(Debug, Copy, Clone)]
+pub struct InlineLoopBounds {
+    min: u32,
+    // Here u32::MAX is considered unbounded.
+    // Loops with a literal max count of u32::MAX are stored out-of-line.
+    max: u32,
+}
+
+impl InlineLoopBounds {
+    /// The inline form of usize::MAX, the max of an unbounded loop.
+    const UNBOUNDED: u32 = u32::MAX;
+
+    fn pack(bound: usize) -> Option<u32> {
+        if bound == usize::MAX {
+            Some(Self::UNBOUNDED)
+        } else {
+            u32::try_from(bound).ok().filter(|&b| b != Self::UNBOUNDED)
+        }
+    }
+
+    fn unpack(bound: u32) -> usize {
+        if bound == Self::UNBOUNDED {
+            usize::MAX
+        } else {
+            bound as usize
+        }
+    }
+}
+
+impl TryFrom<LoopBounds> for InlineLoopBounds {
+    type Error = ();
+
+    /// Fails if either bound is too large to store inline.
+    fn try_from(bounds: LoopBounds) -> Result<Self, ()> {
+        Ok(InlineLoopBounds {
+            min: Self::pack(bounds.min).ok_or(())?,
+            max: Self::pack(bounds.max).ok_or(())?,
+        })
+    }
+}
+
+impl From<InlineLoopBounds> for LoopBounds {
+    #[inline(always)]
+    fn from(bounds: InlineLoopBounds) -> Self {
+        LoopBounds {
+            min: InlineLoopBounds::unpack(bounds.min),
+            max: InlineLoopBounds::unpack(bounds.max),
+        }
+    }
+}
+
+/// The fields of a loop, from its `EnterLoop` or `EnterLoopLarge` instruction.
 #[derive(Debug, Clone)]
 pub struct LoopFields {
     pub loop_id: LoopID,
-    pub min_iters: usize,
-    pub max_iters: usize,
+    pub bounds: LoopBounds,
     pub greedy: bool,
     pub exit: JumpTarget,
 }
@@ -54,8 +116,23 @@ pub enum Insn {
     /// Match any character except a line terminator; emitted by '.'
     MatchAnyExceptLineTerminator,
 
-    /// Enter a loop from "outside".
-    EnterLoop(LoopFields),
+    /// Enter a loop from "outside". `CompiledRegex::loop_fields` reads this
+    /// as a `LoopFields`.
+    EnterLoop {
+        loop_id: LoopID,
+        greedy: bool,
+        bounds: InlineLoopBounds,
+        exit: JumpTarget,
+    },
+
+    /// An `EnterLoop` whose bounds are too large to store inline. They are at
+    /// this index in `CompiledRegex::large_loop_bounds`.
+    EnterLoopLarge {
+        loop_id: LoopID,
+        greedy: bool,
+        bounds: LargeLoopBoundsID,
+        exit: JumpTarget,
+    },
 
     /// Re-enter a loop.
     LoopAgain {
@@ -63,12 +140,12 @@ pub enum Insn {
     },
 
     /// The next instruction is a "1Char" instruction which always matches one
-    /// character. Attempt to match it [min, max] times.
+    /// character. Attempt to match it [min, max] times. A 1-char loop with
+    /// bounds too large to store inline is emitted as an ordinary loop.
     Loop1CharBody {
         /// Index of this instruction's IP in `CompiledRegex::loop1char_ips`.
         id: Loop1CharID,
-        min_iters: usize,
-        max_iters: usize,
+        bounds: InlineLoopBounds,
         greedy: bool,
     },
 
@@ -252,6 +329,9 @@ pub struct CompiledRegex {
     // backtrack entry names a 1-char loop by id, which is smaller than an IP.
     pub loop1char_ips: Vec<u32>,
 
+    // The loop bounds too large to store in an instruction, which are rare.
+    pub large_loop_bounds: Vec<LoopBounds>,
+
     // A vector of bytes for out-of-line byte matches.
     pub byte_literal_buffer: Vec<u8>,
 
@@ -279,9 +359,70 @@ pub struct CompiledRegex {
     pub flags: api::Flags,
 }
 
+impl CompiledRegex {
+    /// \return the bounds at \p id in `large_loop_bounds`.
+    #[inline(always)]
+    fn large_loop_bounds(&self, id: LargeLoopBoundsID) -> LoopBounds {
+        core::hint::cold_path();
+        *self.large_loop_bounds.iat(id as usize)
+    }
+
+    /// \return the fields of the loop whose `EnterLoop` or `EnterLoopLarge`
+    /// instruction is at \p ip.
+    #[inline(always)]
+    pub fn loop_fields(&self, ip: usize) -> LoopFields {
+        match *self.insns.iat(ip) {
+            Insn::EnterLoop {
+                loop_id,
+                greedy,
+                bounds,
+                exit,
+            } => LoopFields {
+                loop_id,
+                bounds: bounds.into(),
+                greedy,
+                exit,
+            },
+            Insn::EnterLoopLarge {
+                loop_id,
+                greedy,
+                bounds,
+                exit,
+            } => LoopFields {
+                loop_id,
+                bounds: self.large_loop_bounds(bounds),
+                greedy,
+                exit,
+            },
+            _ => rs_unreachable!("Should be an EnterLoop instruction"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literal_u32_max_loop_bound_is_large() {
+        let inline = |min, max| InlineLoopBounds::try_from(LoopBounds { min, max }).ok();
+        let max = u32::MAX as usize;
+
+        // An unbounded loop's usize::MAX is stored inline, as u32::MAX.
+        let unbounded = inline(0, usize::MAX).expect("Unbounded should be inline");
+        assert_eq!(LoopBounds::from(unbounded).max, usize::MAX);
+
+        // So a literal count of u32::MAX must not be stored inline, where it
+        // would read back as unbounded. It goes out-of-line, as would any
+        // larger count.
+        assert!(inline(0, max).is_none());
+        assert!(inline(max, usize::MAX).is_none());
+        assert!(inline(0, max + 1).is_none());
+
+        // One less is the largest inline count, and reads back exactly.
+        let largest = LoopBounds::from(inline(max - 1, max - 1).expect("Should be inline"));
+        assert_eq!((largest.min, largest.max), (max - 1, max - 1));
+    }
 
     #[test]
     fn char_set_packing() {

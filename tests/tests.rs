@@ -362,6 +362,34 @@ fn test_long_byte_sequences() {
 }
 
 #[test]
+fn test_huge_loop_bounds() {
+    // Loop bounds below u32::MAX are stored in the instruction. Larger ones
+    // are stored out-of-line, and must still be exact.
+    test_with_configs(|tc| {
+        tc.compile(r"a{0,4294967294}b")
+            .match1f("xaaab")
+            .test_eq("aaab");
+        tc.compile(r"a{0,4294967295}?b")
+            .match1f("xaaab")
+            .test_eq("aaab");
+        tc.compile(r"[a-c]{1,4294967296}d")
+            .match1f("xabcd")
+            .test_eq("abcd");
+        tc.compile(r"(?:ab){0,4294967296}c")
+            .match1f("xababc")
+            .test_eq("ababc");
+        tc.compile(r"(?:ab){1,4294967295}?c")
+            .match1f("xababc")
+            .test_eq("ababc");
+        tc.compile(r"a{4294967294}").test_fails("aaaa");
+        tc.compile(r"a{4294967295,}").test_fails("aaaa");
+        tc.compile(r"a{4294967296,4294967297}").test_fails("aaaa");
+        tc.compile(r"(?:ab){4294967294}").test_fails("abab");
+        tc.compile(r"(?:ab){4294967295,}?").test_fails("abab");
+    });
+}
+
+#[test]
 fn test_lookbehinds_mjsunit() {
     test_with_configs(test_lookbehinds_mjsunit_tc)
 }

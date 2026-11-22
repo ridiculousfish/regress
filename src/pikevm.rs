@@ -6,7 +6,7 @@ use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
 use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
-use crate::insn::{CompiledRegex, Insn, LoopFields, StartPredicate, unpack_char_set};
+use crate::insn::{CompiledRegex, Insn, LoopBounds, LoopFields, StartPredicate, unpack_char_set};
 use crate::matchers;
 use crate::matchers::CharProperties;
 use crate::position::PositionType;
@@ -53,7 +53,7 @@ fn run_loop<Position: PositionType>(
     lf: &LoopFields,
     is_initial_entry: bool,
 ) -> StateMatch<Position> {
-    debug_assert!(lf.max_iters >= lf.min_iters);
+    debug_assert!(lf.bounds.max >= lf.bounds.min);
     let ld = &mut s.loops[lf.loop_id as usize];
     let exit = lf.exit as usize;
     let skip_ok;
@@ -61,23 +61,23 @@ fn run_loop<Position: PositionType>(
     if is_initial_entry {
         // Entering the loop for the "first" time.
         ld.iters = 0;
-        enter_ok = lf.max_iters > 0;
-        skip_ok = lf.min_iters == 0;
+        enter_ok = lf.bounds.max > 0;
+        skip_ok = lf.bounds.min == 0;
     } else {
         // Note that iters is the number of complete iterations.
         ld.iters += 1;
         // We can enter the loop if we have iterated less than the maximum number of
         // times.
-        enter_ok = ld.iters < lf.max_iters;
+        enter_ok = ld.iters < lf.bounds.max;
 
         // We can skip the loop if we have iterated at least the minimum number of
         // times.
-        skip_ok = ld.iters >= lf.min_iters;
+        skip_ok = ld.iters >= lf.bounds.min;
 
         // Check if this iteration was beyond the minimum number of times, and our entry
         // position is the same as last time (ES6 21.2.2.5.1 note 4).
         // If so, we matched the empty string and we stop.
-        if ld.iters > lf.min_iters && ld.entry == s.pos {
+        if ld.iters > lf.bounds.min && ld.entry == s.pos {
             return StateMatch::Fail;
         }
     }
@@ -286,20 +286,18 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
                 StateMatch::Fail
             }
         }
-        Insn::EnterLoop(lf) => run_loop(s, lf, true),
+        Insn::EnterLoop { .. } | Insn::EnterLoopLarge { .. } => {
+            run_loop(s, &re.loop_fields(s.ip), true)
+        }
         &Insn::LoopAgain { begin } => {
             s.ip = begin as usize;
-            match re.insns.iat(s.ip) {
-                Insn::EnterLoop(lf) => run_loop(s, lf, false),
-                _ => panic!("LoopAgain does not point at EnterLoop"),
-            }
+            run_loop(s, &re.loop_fields(s.ip), false)
         }
-        &Insn::Loop1CharBody {
-            min_iters,
-            max_iters,
-            greedy,
-            ..
-        } => {
+        &Insn::Loop1CharBody { bounds, greedy, .. } => {
+            let LoopBounds {
+                min: min_iters,
+                max: max_iters,
+            } = bounds.into();
             let loop_ip = s.ip;
             let continuation = loop_ip + 2;
 

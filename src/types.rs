@@ -23,6 +23,9 @@ pub type LoopID = u16;
 /// comes from a parsed loop, so MAX_LOOPS bounds these too.
 pub type Loop1CharID = u16;
 
+/// Index of a loop's bounds in `CompiledRegex::large_loop_bounds`.
+pub type LargeLoopBoundsID = u32;
+
 /// The maximum nesting depth of groups, lookarounds, and nested classes.
 /// This bounds parser recursion to prevent a stack overflow on adversarial input.
 pub const MAX_NESTING_DEPTH: u32 = 256;

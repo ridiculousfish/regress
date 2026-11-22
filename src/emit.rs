@@ -2,7 +2,8 @@
 
 use crate::bytesearch::{ByteArraySet, TruncatedAsciiBitmap};
 use crate::insn::{
-    CompiledRegex, Insn, LoopFields, MAX_CHAR_SET_LENGTH, MAX_INLINE_BYTE_SEQ_LENGTH, pack_char_set,
+    CompiledRegex, InlineLoopBounds, Insn, LoopBounds, MAX_CHAR_SET_LENGTH,
+    MAX_INLINE_BYTE_SEQ_LENGTH, pack_char_set,
 };
 use crate::ir;
 use crate::ir::Node;
@@ -16,6 +17,17 @@ use crate::unicode;
 #[cfg(not(feature = "std"))]
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::convert::TryInto;
+use core::ops::Range;
+
+/// \return the bounds of a loop with the given quantifier.
+fn loop_bounds(quant: &ir::Quantifier) -> LoopBounds {
+    // If the loop is unbounded, just use usize::MAX, as we cannot match more
+    // characters than that.
+    LoopBounds {
+        min: quant.min,
+        max: quant.max.unwrap_or(usize::MAX),
+    }
+}
 
 /// \return an anchor instruction for a given IR anchor.
 fn make_anchor(anchor_type: ir::AnchorType, multiline: bool) -> Insn {
@@ -215,6 +227,41 @@ impl Emitter {
         ret
     }
 
+    /// Emit the `EnterLoop` or `EnterLoopLarge` instruction for a loop,
+    /// followed by resets for the capture groups it contains.
+    /// \return the offset of the loop instruction.
+    fn emit_enter_loop(&mut self, quant: &ir::Quantifier, enclosed_groups: Range<u16>) -> u32 {
+        let loop_id = self.next_loop_id;
+        self.next_loop_id += 1;
+        self.result.loops += 1;
+        let greedy = quant.greedy;
+        let bounds = loop_bounds(quant);
+        let insn = match InlineLoopBounds::try_from(bounds) {
+            Ok(bounds) => Insn::EnterLoop {
+                loop_id,
+                greedy,
+                bounds,
+                exit: 0,
+            },
+            Err(()) => {
+                let large = &mut self.result.large_loop_bounds;
+                let id = large.len().try_into().expect("Too many loop bounds");
+                large.push(bounds);
+                Insn::EnterLoopLarge {
+                    loop_id,
+                    greedy,
+                    bounds: id,
+                    exit: 0,
+                }
+            }
+        };
+        let loop_insn = self.emit_insn_offset(insn);
+        for gid in enclosed_groups {
+            self.emit_insn(Insn::ResetCaptureGroup(gid))
+        }
+        loop_insn
+    }
+
     /// Emit instructions corresponding to a given node.
     fn emit_node(&mut self, node: &Node) -> Result<(), Error> {
         enum Emitter<'a> {
@@ -252,7 +299,9 @@ impl Emitter {
                     // Fix up our loop exit.
                     let exit = self.next_offset();
                     match self.get_insn(loop_instruction_index) {
-                        Insn::EnterLoop(fields) => fields.exit = exit,
+                        Insn::EnterLoop { exit: e, .. } | Insn::EnterLoopLarge { exit: e, .. } => {
+                            *e = exit
+                        }
                         _ => panic!("Should be an EnterLoop instruction"),
                     }
                 }
@@ -348,36 +397,32 @@ impl Emitter {
                         quant,
                         enclosed_groups,
                     } => {
-                        let loop_id = self.next_loop_id;
-                        self.next_loop_id += 1;
-                        let loop_insn = self.emit_insn_offset(Insn::EnterLoop(LoopFields {
-                            loop_id,
-                            min_iters: quant.min,
-                            // If the loop is unbounded, just emit usize::MAX,
-                            // as we cannot match more characters than that.
-                            max_iters: quant.max.unwrap_or(usize::MAX),
-                            greedy: quant.greedy,
-                            exit: 0,
-                        }));
-                        self.result.loops += 1;
-                        // Emit a sequence of ResetCaptureGroup for any contained groups.
-                        for gid in enclosed_groups.start..enclosed_groups.end {
-                            self.emit_insn(Insn::ResetCaptureGroup(gid))
-                        }
+                        let loop_insn = self.emit_enter_loop(quant, enclosed_groups.clone());
                         stack.push(Emitter::NodeLoopFinish {
                             loop_instruction_index: loop_insn,
                         });
                         stack.push(Emitter::Node(loopee));
                     }
                     Node::Loop1CharBody { loopee, quant } => {
-                        let id = self.result.loop1char_ips.len();
-                        self.result.loop1char_ips.push(self.next_offset());
-                        self.emit_insn(Insn::Loop1CharBody {
-                            id: id.try_into().expect("Too many 1-char loops"),
-                            min_iters: quant.min,
-                            max_iters: quant.max.unwrap_or(usize::MAX),
-                            greedy: quant.greedy,
-                        });
+                        match InlineLoopBounds::try_from(loop_bounds(quant)) {
+                            Ok(bounds) => {
+                                let id = self.result.loop1char_ips.len();
+                                self.result.loop1char_ips.push(self.next_offset());
+                                self.emit_insn(Insn::Loop1CharBody {
+                                    id: id.try_into().expect("Too many 1-char loops"),
+                                    bounds,
+                                    greedy: quant.greedy,
+                                });
+                            }
+                            Err(()) => {
+                                // Too large for a 1-char loop: emit an ordinary
+                                // loop. It contains no capture groups.
+                                let loop_insn = self.emit_enter_loop(quant, 0..0);
+                                stack.push(Emitter::NodeLoopFinish {
+                                    loop_instruction_index: loop_insn,
+                                });
+                            }
+                        }
                         stack.push(Emitter::Node(loopee));
                     }
                     Node::CaptureGroup { id, contents, name } => {
@@ -464,6 +509,7 @@ pub fn emit(n: &ir::Regex) -> Result<CompiledRegex, Error> {
             insns: Vec::new(),
             brackets: Vec::new(),
             loop1char_ips: Vec::new(),
+            large_loop_bounds: Vec::new(),
             byte_literal_buffer: Vec::new(),
             loops: 0,
             groups: 0,
