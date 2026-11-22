@@ -4,7 +4,7 @@
 use alloc::{boxed::Box, vec::Vec};
 
 use crate::api;
-use crate::bytesearch::{AsciiBitmap, ByteArraySet, ByteBitmap};
+use crate::bytesearch::{ByteArraySet, ByteBitmap, TruncatedAsciiBitmap};
 use crate::types::{BracketContents, CaptureGroupID, Loop1CharID, LoopID};
 extern crate memchr;
 use memchr::memmem;
@@ -101,9 +101,9 @@ pub enum Insn {
     /// Match the next character against the bracket contents, stored at the given index in the CompiledRegex.
     Bracket(u32),
 
-    /// A simple bitmap bracket for ASCII.
-    /// It contains a bitmap of the range [0, 127].
-    AsciiBracket(AsciiBitmap),
+    /// Match an ASCII bracket whose members all lie in
+    /// `TruncatedAsciiBitmap::VALID_RANGE`.
+    AsciiBracket(TruncatedAsciiBitmap),
 
     /// Perform a lookahead assertion.
     Lookahead {

@@ -318,6 +318,21 @@ fn test_lookbehinds() {
 }
 
 #[test]
+fn test_ascii_bracket_bitmap_boundaries() {
+    test_with_configs(|tc| {
+        let inline = tc.compile(r"^[\x08-\x7f]+$");
+        inline.match1f("\x08az\x7f").test_eq("\x08az\x7f");
+        inline.test_fails("\x07");
+        inline.test_fails("\u{80}");
+
+        // One low control byte takes the entire bracket out of line.
+        tc.compile(r"^[\x07-\x09a-z]+?$")
+            .match1f("\x07z\t")
+            .test_eq("\x07z\t");
+    });
+}
+
+#[test]
 fn test_long_byte_sequences() {
     // Byte sequences longer than 15 bytes are stored out-of-line.
     test_with_configs(|tc| {

@@ -1,6 +1,6 @@
 //! Regex compiler back-end: transforms IR into a CompiledRegex
 
-use crate::bytesearch::{AsciiBitmap, ByteArraySet};
+use crate::bytesearch::{ByteArraySet, TruncatedAsciiBitmap};
 use crate::insn::{
     CompiledRegex, Insn, LoopFields, MAX_CHAR_SET_LENGTH, MAX_INLINE_BYTE_SEQ_LENGTH, pack_char_set,
 };
@@ -25,18 +25,17 @@ fn make_anchor(anchor_type: ir::AnchorType, multiline: bool) -> Insn {
     }
 }
 
-/// Weirdly placed optimization.
-/// If the given bracket can be represented as ASCII contents, return the
-/// bitmap. Otherwise nothing.
-fn bracket_as_ascii(bc: &BracketContents) -> Option<AsciiBitmap> {
-    let mut result = AsciiBitmap::default();
+/// Return an inline bitmap if every member of the bracket fits.
+fn bracket_as_ascii(bc: &BracketContents) -> Option<TruncatedAsciiBitmap> {
+    let mut result = TruncatedAsciiBitmap::default();
     // We just assume that inverted brackets contain non-ASCII characters.
     if bc.invert {
         return None;
     }
     for r in bc.cps.intervals() {
         debug_assert!(r.first <= r.last);
-        if r.last >= 128 {
+        let valid = TruncatedAsciiBitmap::VALID_RANGE;
+        if r.first < u32::from(*valid.start()) || r.last > u32::from(*valid.end()) {
             return None;
         }
         for bit in r.first..=r.last {

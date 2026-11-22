@@ -1,5 +1,6 @@
 use crate::insn::MAX_CHAR_SET_LENGTH;
 use core::fmt;
+use core::ops::RangeInclusive;
 extern crate memchr;
 
 /// Facilities for searching bytes.
@@ -151,25 +152,36 @@ where
     Ok(())
 }
 
-/// A bitmap covering ASCII characters.
+/// A bitmap covering ASCII 0x08..=0x7f, packed into the 15 bytes following
+/// the opcode. Bit `v` of the full 128-bit ASCII bitmap lives at bit `v - 8`.
 #[derive(Default, Copy, Clone)]
-#[repr(align(4))]
-pub struct AsciiBitmap(pub [u8; 16]);
+pub struct TruncatedAsciiBitmap([u8; 15]);
 
-impl AsciiBitmap {
-    /// Set a byte val in this bitmap.
-    #[inline(always)]
+impl TruncatedAsciiBitmap {
+    /// The characters this bitmap can hold. ASCII 0 through 7 are dropped so
+    /// the remaining 120 bits fit in the 15 bytes after the opcode.
+    pub const VALID_RANGE: RangeInclusive<u8> = 0x08..=0x7F;
+
     pub fn set(&mut self, val: u8) {
-        debug_assert!(val <= 127, "Value should be ASCII");
-        self.0[(val >> 3) as usize] |= 1 << (val & 0x7);
+        debug_assert!(Self::VALID_RANGE.contains(&val), "Value out of range");
+        let bit = val - *Self::VALID_RANGE.start();
+        self.0[usize::from(bit >> 3)] |= 1 << (bit & 7);
+    }
+
+    /// Expand into a full aligned 128-bit ASCII bitmap, with ASCII 0 through 7
+    /// absent.
+    #[inline(always)]
+    pub fn unpack(&self) -> AsciiBitmap {
+        let mut result = AsciiBitmap([0; 16]);
+        result.0[1..].copy_from_slice(&self.0);
+        result
     }
 }
 
-impl fmt::Debug for AsciiBitmap {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        format_bitmap("AsciiBitmap", f, |v| self.contains(v))
-    }
-}
+/// A full bitmap of ASCII characters, expanded from a `TruncatedAsciiBitmap`.
+#[derive(Copy, Clone)]
+#[repr(align(16))]
+pub struct AsciiBitmap([u8; 16]);
 
 impl ByteSet for AsciiBitmap {
     /// \return whether this bitmap contains a given value.
@@ -190,6 +202,24 @@ impl ByteSet for AsciiBitmap {
 
         // Probe the bitmap. We expect the compiler to elide the bounds check.
         (self.0[byte as usize] & mask) != 0
+    }
+}
+
+impl ByteSet for TruncatedAsciiBitmap {
+    /// Look up directly in the truncated form, without unpacking.
+    #[inline(always)]
+    fn contains(&self, val: u8) -> bool {
+        // ASCII 0 through 7 wrap to an out-of-range index.
+        let idx = usize::from((val & 0x7F) >> 3).wrapping_sub(1);
+        let mask = ((val >> 7) ^ 1) << (val & 7);
+        self.0.get(idx).is_some_and(|b| b & mask != 0)
+    }
+}
+
+impl fmt::Debug for TruncatedAsciiBitmap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let unpacked = self.unpack();
+        format_bitmap("TruncatedAsciiBitmap", f, |v| unpacked.contains(v))
     }
 }
 
@@ -436,6 +466,19 @@ mod tests {
             bm.set(b)
         }
         bm
+    }
+
+    #[test]
+    fn unpack_ascii_bitmap() {
+        for member in TruncatedAsciiBitmap::VALID_RANGE {
+            let mut truncated = TruncatedAsciiBitmap::default();
+            truncated.set(member);
+            let full = truncated.unpack();
+            for byte in 0..=255 {
+                assert_eq!(full.contains(byte), byte == member);
+                assert_eq!(truncated.contains(byte), byte == member);
+            }
+        }
     }
 
     #[test]

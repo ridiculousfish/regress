@@ -410,14 +410,18 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 let bc = re.brackets.iat(idx as usize);
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::Bracket { bc })
             }
-            Insn::AsciiBracket(bitmap) => Self::run_scm_loop_impl(
-                input,
-                pos,
-                min,
-                max,
-                dir,
-                scm::MatchByteSet { bytes: bitmap },
-            ),
+            Insn::AsciiBracket(bytes) => {
+                // A single iteration isn't worth unpacking for. This is the common
+                // case for lazy loops like `[a-z]+?`: on each backtrack they try
+                // just one more iteration, calling us with min = max = 1.
+                // Note max==1 is often known at compile time due to inlining.
+                if max == 1 {
+                    Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSet { bytes })
+                } else {
+                    let bytes = &bytes.unpack();
+                    Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSet { bytes })
+                }
+            }
             Insn::MatchAny => {
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchAny::new())
             }
