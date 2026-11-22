@@ -13,7 +13,7 @@ use crate::types::{BracketContents, CaptureGroupID, LoopID};
 #[cfg(feature = "utf16")]
 use crate::unicode;
 #[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::ToString, vec::Vec};
 use core::convert::TryInto;
 
 /// \return an anchor instruction for a given IR anchor.
