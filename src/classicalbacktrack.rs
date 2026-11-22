@@ -281,6 +281,11 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
     /// # Returns
     ///
     /// The next instruction pointer, or `None` if execution cannot continue.
+    //
+    // This runs for every EnterLoop and LoopAgain, so at least once per loop
+    // iteration. Inlining it into those two call sites keeps the loop fields
+    // in registers and makes `entering` a constant.
+    #[inline(always)]
     fn run_loop(
         &mut self,
         loop_fields: &'a LoopFields,
@@ -288,7 +293,7 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         ip: IP,
         entering: bool,
     ) -> Option<IP> {
-        let loop_data = &mut self.s.loops[loop_fields.loop_id as usize];
+        let loop_data = self.s.loops.mat(loop_fields.loop_id as usize);
         let iteration = if entering { 0 } else { loop_data.iters };
 
         let do_taken = iteration < loop_fields.max_iters;
