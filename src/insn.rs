@@ -249,6 +249,9 @@ pub enum Insn {
     JustFail,
 }
 
+// Instructions are squeezed hard. Don't grow these without a good reason.
+const _: () = assert!(core::mem::size_of::<Insn>() == 16);
+
 /// Mask of a 21-bit lane of a packed `CharSet`.
 const CHAR_SET_LANE: u64 = 0x1F_FFFF;
 
