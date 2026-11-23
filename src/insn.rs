@@ -182,6 +182,16 @@ pub enum Insn {
     /// `TruncatedAsciiBitmap::VALID_RANGE`.
     AsciiBracket(TruncatedAsciiBitmap),
 
+    /// Match an ASCII character in one of these ranges `[start, length]`,
+    /// i.e. `start..=start + length`.
+    AsciiRanges1([[u8; 2]; 1]),
+    AsciiRanges2([[u8; 2]; 2]),
+    AsciiRanges3([[u8; 2]; 3]),
+
+    /// Match a code point in this range `[start, length]`,
+    /// i.e. `start..=start + length`.
+    CodePointRange([u32; 2]),
+
     /// Perform a lookahead assertion.
     Lookahead {
         negate: bool,

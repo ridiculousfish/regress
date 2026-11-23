@@ -427,6 +427,18 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSet { bytes })
                 }
             }
+            Insn::AsciiRanges1(bytes) => {
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSet { bytes })
+            }
+            Insn::AsciiRanges2(bytes) => {
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSet { bytes })
+            }
+            Insn::AsciiRanges3(bytes) => {
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchByteSet { bytes })
+            }
+            &Insn::CodePointRange(range) => {
+                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::CodePointRange { range })
+            }
             Insn::MatchAny => {
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::MatchAny::new())
             }
@@ -903,6 +915,19 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                     Insn::AsciiBracket(bitmap) => next_or_bt!(
                         scm::MatchByteSet { bytes: bitmap }.matches(input, dir, &mut pos)
                     ),
+
+                    Insn::AsciiRanges1(bytes) => {
+                        next_or_bt!(scm::MatchByteSet { bytes }.matches(input, dir, &mut pos))
+                    }
+                    Insn::AsciiRanges2(bytes) => {
+                        next_or_bt!(scm::MatchByteSet { bytes }.matches(input, dir, &mut pos))
+                    }
+                    Insn::AsciiRanges3(bytes) => {
+                        next_or_bt!(scm::MatchByteSet { bytes }.matches(input, dir, &mut pos))
+                    }
+                    &Insn::CodePointRange(range) => {
+                        next_or_bt!(scm::CodePointRange { range }.matches(input, dir, &mut pos))
+                    }
 
                     &Insn::Bracket(idx) => {
                         next_or_bt!(

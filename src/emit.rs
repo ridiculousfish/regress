@@ -57,6 +57,29 @@ fn bracket_as_ascii(bc: &BracketContents) -> Option<TruncatedAsciiBitmap> {
     Some(result)
 }
 
+/// Return an instruction holding the bracket's ranges inline, if they fit.
+fn bracket_as_ranges(bc: &BracketContents) -> Option<Insn> {
+    // Inline ranges have no invert flag.
+    if bc.invert {
+        return None;
+    }
+    let ivs = bc.cps.intervals();
+    if ivs.iter().all(|iv| iv.last <= 0x7F) {
+        // All ASCII, so every bound fits in a byte.
+        let ascii = |i: usize| [ivs[i].first as u8, (ivs[i].last - ivs[i].first) as u8];
+        return match ivs.len() {
+            1 => Some(Insn::AsciiRanges1(core::array::from_fn(ascii))),
+            2 => Some(Insn::AsciiRanges2(core::array::from_fn(ascii))),
+            3 => Some(Insn::AsciiRanges3(core::array::from_fn(ascii))),
+            _ => None,
+        };
+    }
+    match ivs {
+        [iv] => Some(Insn::CodePointRange([iv.first, iv.last - iv.first])),
+        _ => None,
+    }
+}
+
 /// Type which wraps up the context needed to emit a CompiledRegex.
 struct Emitter {
     result: CompiledRegex,
@@ -367,7 +390,9 @@ impl Emitter {
                         stack.push(Emitter::Node(left));
                     }
                     Node::Bracket(contents) => {
-                        if let Some(ascii_contents) = bracket_as_ascii(contents) {
+                        if let Some(insn) = bracket_as_ranges(contents) {
+                            self.emit_insn(insn)
+                        } else if let Some(ascii_contents) = bracket_as_ascii(contents) {
                             self.emit_insn(Insn::AsciiBracket(ascii_contents))
                         } else {
                             let idx = self.result.brackets.len();

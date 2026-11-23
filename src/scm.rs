@@ -42,6 +42,25 @@ impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Char
     }
 }
 
+/// Insn::CodePointRange
+pub struct CodePointRange {
+    pub range: [u32; 2],
+}
+
+impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for CodePointRange {
+    #[inline(always)]
+    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
+        match cursor::next(input, dir, pos) {
+            Some(c) => {
+                // See the byte ranges' ByteSet impl.
+                let [start, length] = self.range;
+                c.as_u32().wrapping_sub(start) <= length
+            }
+            None => false,
+        }
+    }
+}
+
 /// Insn::Bracket
 pub struct Bracket<'a> {
     pub bc: &'a BracketContents,

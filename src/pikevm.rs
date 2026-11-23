@@ -370,6 +370,18 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
         Insn::AsciiBracket(bytes) => {
             nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(input, dir, &mut s.pos))
         }
+        Insn::AsciiRanges1(bytes) => {
+            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(input, dir, &mut s.pos))
+        }
+        Insn::AsciiRanges2(bytes) => {
+            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(input, dir, &mut s.pos))
+        }
+        Insn::AsciiRanges3(bytes) => {
+            nextinsn_or_fail!(scm::MatchByteSet { bytes }.matches(input, dir, &mut s.pos))
+        }
+        &Insn::CodePointRange(range) => {
+            nextinsn_or_fail!(scm::CodePointRange { range }.matches(input, dir, &mut s.pos))
+        }
         &Insn::ByteSet2(bytes) => {
             nextinsn_or_fail!(scm::MatchByteArraySet(bytes).matches(input, dir, &mut s.pos))
         }

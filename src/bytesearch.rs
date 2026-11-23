@@ -124,6 +124,20 @@ pub fn charset_contains(set: &[u32; MAX_CHAR_SET_LENGTH], c: u32) -> bool {
     result
 }
 
+/// An array of byte ranges `[start, length]`, i.e. `start..=start + length`.
+impl<const N: usize> ByteSet for [[u8; 2]; N] {
+    #[inline(always)]
+    fn contains(&self, b: u8) -> bool {
+        let mut result = false;
+        for &[start, length] in self.iter() {
+            // A single unsigned compare: bytes below start wrap around to
+            // large numbers.
+            result |= u32::from(b).wrapping_sub(u32::from(start)) <= u32::from(length);
+        }
+        result
+    }
+}
+
 /// A helper function for formatting bitmaps, using - ranges.
 fn format_bitmap<Func>(name: &str, f: &mut fmt::Formatter<'_>, contains: Func) -> fmt::Result
 where
@@ -477,6 +491,29 @@ mod tests {
             for byte in 0..=255 {
                 assert_eq!(full.contains(byte), byte == member);
                 assert_eq!(truncated.contains(byte), byte == member);
+            }
+        }
+    }
+
+    #[test]
+    fn byte_ranges() {
+        // Inclusive [first, last] pairs. Cases with fewer than three ranges
+        // repeat their last one, which doesn't change membership.
+        let cases: [[[u8; 2]; 3]; 8] = [
+            [[0, 0]; 3],
+            [[0x7F, 0x7F]; 3],
+            [*b"az"; 3],
+            [*b"AZ", *b"az", *b"az"],
+            [*b"09", *b"AF", *b"af"],
+            [[0, 0x7F]; 3],
+            [[0, 0xFF]; 3],
+            [[0xFF, 0xFF]; 3],
+        ];
+        for ranges in cases {
+            let encoded = ranges.map(|[first, last]| [first, last - first]);
+            for byte in 0..=255 {
+                let expected = ranges.iter().any(|r| (r[0]..=r[1]).contains(&byte));
+                assert_eq!(encoded.contains(byte), expected, "{:?} {}", ranges, byte);
             }
         }
     }

@@ -325,10 +325,77 @@ fn test_ascii_bracket_bitmap_boundaries() {
         inline.test_fails("\x07");
         inline.test_fails("\u{80}");
 
-        // One low control byte takes the entire bracket out of line.
+        // A low control byte doesn't fit in the bitmap. With few ranges the
+        // bracket is stored as inline ranges; with more, out of line.
         tc.compile(r"^[\x07-\x09a-z]+?$")
             .match1f("\x07z\t")
             .test_eq("\x07z\t");
+        let outline = tc.compile(r"^[\x07-\x09a-ce-gi-km-o]+?$");
+        outline.match1f("\x07ao\t").test_eq("\x07ao\t");
+        outline.test_fails("d");
+    });
+}
+
+#[test]
+fn test_inline_range_brackets() {
+    test_with_configs(|tc| {
+        // One to three ASCII ranges are stored inline.
+        let one = tc.compile(r"^[a-z]+$");
+        one.match1f("az").test_eq("az");
+        one.test_fails("`");
+        one.test_fails("{");
+        let ends = tc.compile(r"^[\x00-\x05\x7a-\x7f]+$");
+        ends.match1f("\x00\x05z\x7f").test_eq("\x00\x05z\x7f");
+        ends.test_fails("\x06");
+        ends.test_fails("y");
+        ends.test_fails("\u{80}");
+        ends.test_fails("\u{100}");
+        let hex = tc.compile(r"^[0-9A-Fa-f]+$");
+        hex.match1f("09AFaf").test_eq("09AFaf");
+        for c in ["/", ":", "@", "G", "`", "g", "\u{80}", "\u{17F}"] {
+            hex.test_fails(c);
+        }
+        tc.compile(r"[0-9A-Fa-f]{2,5}x")
+            .match1f("q0aF9xz")
+            .test_eq("0aF9x");
+
+        // Four ranges don't fit inline.
+        let four = tc.compile(r"^[0-9A-Z_a-z]+$");
+        four.match1f("09AZ_az").test_eq("09AZ_az");
+        for c in ["/", ":", "@", "[", "^", "`", "{", "\u{80}", "\u{17F}"] {
+            four.test_fails(c);
+        }
+
+        // One non-ASCII range is stored inline, as code points.
+        let latin1 = tc.compile(r"^[\x7f-\xff]+$");
+        latin1
+            .match1f("\x7f\u{80}\u{ff}")
+            .test_eq("\x7f\u{80}\u{ff}");
+        latin1.test_fails("\x7e");
+        latin1.test_fails("\u{100}");
+        let cyrillic = tc.compile(r"[\u0400-\u04ff]+");
+        cyrillic.match1f("abcЖизньxyz").test_eq("Жизнь");
+        cyrillic.test_fails("\u{3ff}\u{500}");
+        let backwards = tc.compile(r"(?<=[\u0400-\u04ff]{2})x");
+        backwards.match1f("aЖиx").test_eq("x");
+        backwards.test_fails("aЖx");
+
+        // Inverted brackets and two non-ASCII ranges stay out of line.
+        let not_az = tc.compile(r"^[^a-z]+$");
+        not_az.match1f("A\u{80}Ж").test_eq("A\u{80}Ж");
+        not_az.test_fails("m");
+        let two = tc.compile(r"^[\u0400-\u04ffa]+$");
+        two.match1f("aЖ").test_eq("aЖ");
+        two.test_fails("b");
+
+        // A code point range reaching the top of the code space, which needs
+        // surrogate pairs in UTF-16.
+        let astral = tc.compilef(r"^[\u{10000}-\u{10FFFF}]+$", "u");
+        astral
+            .match1f("\u{10000}\u{10FFFF}")
+            .test_eq("\u{10000}\u{10FFFF}");
+        astral.test_fails("\u{FFFF}");
+        astral.test_fails("a");
     });
 }
 
