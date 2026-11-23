@@ -400,6 +400,17 @@ fn test_inline_range_brackets() {
 }
 
 #[test]
+fn test_unencodable_char_loop() {
+    // A lone surrogate can't occur in UTF-8 input, but a loop over it may
+    // still match zero times.
+    test_with_configs(|tc| {
+        tc.compile(r"a\uD800*b").match1f("ab").test_eq("ab");
+        tc.compile(r"a\uD800{0,3}b").match1f("ab").test_eq("ab");
+        tc.compile(r"a\uD800+b").test_fails("ab");
+    });
+}
+
+#[test]
 fn test_long_byte_sequences() {
     // Byte sequences longer than 15 bytes are stored out-of-line.
     test_with_configs(|tc| {

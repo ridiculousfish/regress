@@ -373,7 +373,7 @@ impl Emitter {
                 Emitter::Node(node) => match node {
                     Node::Empty => {}
                     Node::Goal => self.emit_insn(Insn::Goal),
-                    Node::Char { c } => self.emit_insn(Insn::Char(*c)),
+                    Node::Char { c } => self.emit_insn(Insn::CodePointRange([*c, 0])),
                     Node::Cat(children) => {
                         for nn in children.iter().rev() {
                             stack.push(Emitter::Node(nn));

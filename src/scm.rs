@@ -13,20 +13,6 @@ pub trait SingleCharMatcher<Input: InputIndexer, Dir: Direction> {
     fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool;
 }
 
-/// Insn::Char
-pub struct Char<Input: InputIndexer> {
-    pub c: Input::Element,
-}
-impl<Input: InputIndexer, Dir: Direction> SingleCharMatcher<Input, Dir> for Char<Input> {
-    #[inline(always)]
-    fn matches(&self, input: &Input, dir: Dir, pos: &mut Input::Position) -> bool {
-        match cursor::next(input, dir, pos) {
-            Some(c2) => c2 == self.c,
-            _ => false,
-        }
-    }
-}
-
 /// Insn::CharSet
 pub struct CharSet {
     pub chars: [u32; MAX_CHAR_SET_LENGTH],

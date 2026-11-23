@@ -121,11 +121,6 @@ fn try_match_state<Input: InputIndexer, Dir: Direction>(
     match &re.insns[s.ip] {
         Insn::Goal => StateMatch::Complete,
         Insn::JustFail => StateMatch::Fail,
-        &Insn::Char(c) => match cursor::next(input, dir, &mut s.pos) {
-            Some(c2) => nextinsn_or_fail!(c == c2.as_u32()),
-            _ => StateMatch::Fail,
-        },
-
         &Insn::CharSet { lo, hi } => match cursor::next(input, dir, &mut s.pos) {
             Some(c) => nextinsn_or_fail!(charset_contains(&unpack_char_set(lo, hi), c.as_u32())),
             _ => StateMatch::Fail,

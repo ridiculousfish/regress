@@ -96,9 +96,6 @@ pub enum Insn {
     /// The match was successful.
     Goal,
 
-    /// Match a single char.
-    Char(u32),
-
     /// Match the start of a line (if multiline); emitted by '^'
     StartOfLine {
         multiline: bool,

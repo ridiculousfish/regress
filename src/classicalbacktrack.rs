@@ -5,7 +5,7 @@ use crate::bytesearch;
 use crate::cursor;
 use crate::cursor::{Backward, Direction, Forward};
 use crate::exec;
-use crate::indexing::{AsciiInput, ElementType, InputIndexer, Utf8Input};
+use crate::indexing::{AsciiInput, InputIndexer, Utf8Input};
 use crate::insn::StartPredicate;
 #[cfg(feature = "utf16")]
 use crate::insn::UnitStartPredicate;
@@ -407,10 +407,6 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
         ip: IP,
     ) -> Option<(Input::Position, Input::Position)> {
         match re.insns.iat(ip + 1) {
-            &Insn::Char(c) => {
-                let c = <<Input as InputIndexer>::Element as ElementType>::try_from(c)?;
-                Self::run_scm_loop_impl(input, pos, min, max, dir, scm::Char { c })
-            }
             &Insn::Bracket(idx) => {
                 let bc = re.brackets.iat(idx as usize);
                 Self::run_scm_loop_impl(input, pos, min, max, dir, scm::Bracket { bc })
@@ -837,15 +833,6 @@ impl<'a, Input: InputIndexer> MatchAttempter<'a, Input> {
                 }
 
                 match re.insns.iat(ip) {
-                    &Insn::Char(c) => {
-                        let m = match <<Input as InputIndexer>::Element as ElementType>::try_from(c)
-                        {
-                            Some(c) => scm::Char { c }.matches(input, dir, &mut pos),
-                            None => false,
-                        };
-                        next_or_bt!(m);
-                    }
-
                     &Insn::CharSet { lo, hi } => {
                         let chars = unpack_char_set(lo, hi);
                         let m = scm::CharSet { chars }.matches(input, dir, &mut pos);
