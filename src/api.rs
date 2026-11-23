@@ -1110,7 +1110,9 @@ mod pattern_impl {
         }
     }
 
-    impl<'r> Pattern for &'r Regex {
+    // SAFETY: `RegexSearcher::new` stores `haystack` unchanged and
+    // `Searcher::haystack` returns it, as `into_searcher` requires.
+    unsafe impl<'r> Pattern for &'r Regex {
         type Searcher<'a> = RegexSearcher<'r, 'a>;
 
         fn into_searcher(self, haystack: &str) -> Self::Searcher<'_> {
