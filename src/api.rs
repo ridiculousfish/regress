@@ -955,168 +955,76 @@ impl FromStr for Regex {
 #[cfg(feature = "pattern")]
 mod pattern_impl {
     use super::*;
-    use core::str::pattern::{Pattern, ReverseSearcher, SearchStep, Searcher};
+    use core::str::pattern::{Pattern, SearchStep, Searcher};
 
-    /// A searcher for a regex pattern.
+    /// A forward searcher for a regex pattern.
+    ///
+    /// Only forward searching is supported: methods like `rsplit` or
+    /// `ends_with`, which need a `ReverseSearcher`, do not accept a `&Regex`.
+    #[derive(Debug)]
     pub struct RegexSearcher<'r, 't> {
         haystack: &'t str,
-        regex: &'r Regex,
-        current_pos: usize,
-        done: bool,
-        // For reverse searching
-        reverse_pos: usize,
-        reverse_done: bool,
+        it: Matches<'r, 't>,
+        // End of the last step returned; the next step starts here.
+        last_step_end: usize,
+        // A match found after a gap, returned on the step after the gap's Reject.
+        next_match: Option<(usize, usize)>,
     }
 
-    impl<'r, 't> RegexSearcher<'r, 't> {
-        fn new(regex: &'r Regex, haystack: &'t str) -> Self {
-            Self {
-                haystack,
-                regex,
-                current_pos: 0,
-                done: false,
-                reverse_pos: haystack.len(),
-                reverse_done: false,
-            }
-        }
-
-        fn find_last_match_before(&self, pos: usize) -> Option<super::Match> {
-            // Find all matches up to the given position and return the last one
-            let mut last_match = None;
-            for m in self.regex.find_from(self.haystack, 0) {
-                if m.end() <= pos {
-                    last_match = Some(m);
-                } else {
-                    break;
-                }
-            }
-            last_match
-        }
-    }
-
+    // SAFETY: every step is adjacent to the previous one, starting at 0 and
+    // ending at haystack.len(), so the steps tile the haystack in order.
+    // Every endpoint is 0, haystack.len(), or a bound of a match from `it`,
+    // which searches this haystack and so returns char-boundary positions.
+    // next_match and next_reject are the provided methods.
     unsafe impl<'r, 't> Searcher<'t> for RegexSearcher<'r, 't> {
         fn haystack(&self) -> &'t str {
             self.haystack
         }
 
         fn next(&mut self) -> SearchStep {
-            if self.done {
-                return SearchStep::Done;
+            if let Some((s, e)) = self.next_match.take() {
+                self.last_step_end = e;
+                return SearchStep::Match(s, e);
             }
-
-            // Try to find the next match starting from current position
-            if let Some(m) = self.regex.find_from(self.haystack, self.current_pos).next() {
-                let match_start = m.start();
-                let match_end = m.end();
-
-                // Handle any gap between current position and match start
-                if self.current_pos < match_start {
-                    let reject_end = match_start;
-                    let reject_start = self.current_pos;
-                    self.current_pos = match_start;
-                    return SearchStep::Reject(reject_start, reject_end);
-                }
-
-                // Return the match
-                self.current_pos = match_end;
-
-                // Handle zero-width matches to avoid infinite loops
-                if match_start == match_end {
-                    // For zero-width matches, we need to advance at least one byte
-                    // to avoid infinite loops
-                    if match_end < self.haystack.len() {
-                        // Find the next character boundary
-                        let mut next_pos = match_end + 1;
-                        while next_pos < self.haystack.len()
-                            && !self.haystack.is_char_boundary(next_pos)
-                        {
-                            next_pos += 1;
-                        }
-                        self.current_pos = next_pos;
+            match self.it.next() {
+                None => {
+                    let len = self.haystack.len();
+                    if self.last_step_end < len {
+                        let last = self.last_step_end;
+                        self.last_step_end = len;
+                        SearchStep::Reject(last, len)
                     } else {
-                        // We're at the end of the string
-                        self.done = true;
+                        SearchStep::Done
                     }
                 }
-
-                SearchStep::Match(match_start, match_end)
-            } else {
-                // No more matches, reject remaining text if any
-                if self.current_pos < self.haystack.len() {
-                    let reject_start = self.current_pos;
-                    let reject_end = self.haystack.len();
-                    self.current_pos = self.haystack.len();
-                    self.done = true;
-                    SearchStep::Reject(reject_start, reject_end)
-                } else {
-                    self.done = true;
-                    SearchStep::Done
+                Some(m) => {
+                    let (s, e) = (m.start(), m.end());
+                    if s == self.last_step_end {
+                        self.last_step_end = e;
+                        SearchStep::Match(s, e)
+                    } else {
+                        self.next_match = Some((s, e));
+                        let last = self.last_step_end;
+                        self.last_step_end = s;
+                        SearchStep::Reject(last, s)
+                    }
                 }
             }
         }
     }
 
-    unsafe impl<'r, 't> ReverseSearcher<'t> for RegexSearcher<'r, 't> {
-        fn next_back(&mut self) -> SearchStep {
-            if self.reverse_done {
-                return SearchStep::Done;
-            }
-
-            // Try to find the last match before current reverse position
-            if let Some(m) = self.find_last_match_before(self.reverse_pos) {
-                let match_start = m.start();
-                let match_end = m.end();
-
-                // Handle any gap between match end and current reverse position
-                if match_end < self.reverse_pos {
-                    let reject_start = match_end;
-                    let reject_end = self.reverse_pos;
-                    self.reverse_pos = match_end;
-                    return SearchStep::Reject(reject_start, reject_end);
-                }
-
-                // Return the match
-                self.reverse_pos = match_start;
-
-                // Handle zero-width matches
-                if match_start == match_end {
-                    // For zero-width matches, move back by one character
-                    if match_start > 0 {
-                        let mut prev_pos = match_start - 1;
-                        while prev_pos > 0 && !self.haystack.is_char_boundary(prev_pos) {
-                            prev_pos -= 1;
-                        }
-                        self.reverse_pos = prev_pos;
-                    } else {
-                        // We're at the beginning of the string
-                        self.reverse_done = true;
-                    }
-                }
-
-                SearchStep::Match(match_start, match_end)
-            } else {
-                // No more matches, reject remaining text if any
-                if self.reverse_pos > 0 {
-                    let reject_start = 0;
-                    let reject_end = self.reverse_pos;
-                    self.reverse_pos = 0;
-                    self.reverse_done = true;
-                    SearchStep::Reject(reject_start, reject_end)
-                } else {
-                    self.reverse_done = true;
-                    SearchStep::Done
-                }
-            }
-        }
-    }
-
-    // SAFETY: `RegexSearcher::new` stores `haystack` unchanged and
+    // SAFETY: the searcher stores `haystack` unchanged and
     // `Searcher::haystack` returns it, as `into_searcher` requires.
     unsafe impl<'r> Pattern for &'r Regex {
         type Searcher<'a> = RegexSearcher<'r, 'a>;
 
         fn into_searcher(self, haystack: &str) -> Self::Searcher<'_> {
-            RegexSearcher::new(self, haystack)
+            RegexSearcher {
+                haystack,
+                it: self.find_iter(haystack),
+                last_step_end: 0,
+                next_match: None,
+            }
         }
     }
 }

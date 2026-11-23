@@ -38,15 +38,6 @@ fn test_pattern_starts_with() {
 }
 
 #[test]
-fn test_pattern_ends_with() {
-    let re = Regex::new(r"\d+").unwrap();
-
-    assert!(!"123abc".ends_with(&re));
-    assert!("abc123".ends_with(&re));
-    assert!("456".ends_with(&re));
-}
-
-#[test]
 fn test_pattern_split() {
     let re = Regex::new(r"\s+").unwrap();
     let text = "hello    world\t\nfoo  bar";
@@ -110,22 +101,12 @@ fn test_pattern_strip_prefix() {
 }
 
 #[test]
-fn test_pattern_strip_suffix() {
-    let re = Regex::new(r"\d+").unwrap();
-
-    assert_eq!("abc123".strip_suffix(&re), Some("abc"));
-    assert_eq!("123abc".strip_suffix(&re), None);
-    assert_eq!("789def456".strip_suffix(&re), Some("789def"));
-}
-
-#[test]
 fn test_pattern_with_anchors() {
     let re = Regex::new(r"^\d+").unwrap();
     let text = "123abc456";
 
     assert_eq!(text.find(&re), Some(0));
     assert!(text.starts_with(&re));
-    assert!(!text.ends_with(&re));
 }
 
 #[test]
@@ -190,7 +171,6 @@ fn test_pattern_no_match() {
     assert_eq!(text.find(&re), None);
     assert!(!text.contains(&re));
     assert!(!text.starts_with(&re));
-    assert!(!text.ends_with(&re));
 
     let matches: Vec<&str> = text.matches(&re).collect();
     assert!(matches.is_empty());
@@ -206,7 +186,6 @@ fn test_pattern_comprehensive_example() {
     assert!(text.contains(&year_regex));
     assert_eq!(text.find(&year_regex), Some(9)); // Position of "2023"
     assert!(!text.starts_with(&year_regex));
-    assert!(!text.ends_with(&year_regex));
 
     // Find all years
     let years: Vec<&str> = text.matches(&year_regex).collect();
@@ -237,4 +216,63 @@ fn test_pattern_comprehensive_example() {
         partial,
         "The year XXXX was followed by XXXX, and then 2025."
     );
+}
+
+/// Drain the searcher's steps and check the `Searcher::next` guarantees:
+/// steps are adjacent, cover the haystack, lie on char boundaries, and the
+/// matches are exactly `find_iter`'s.
+fn check_steps(pattern: &str, haystack: &str) {
+    use std::str::pattern::{Pattern, SearchStep, Searcher};
+    let re = Regex::new(pattern).unwrap();
+    let mut searcher = (&re).into_searcher(haystack);
+    let mut pos = 0;
+    let mut matches = Vec::new();
+    loop {
+        let (a, b) = match searcher.next() {
+            SearchStep::Done => break,
+            SearchStep::Match(a, b) => {
+                matches.push((a, b));
+                (a, b)
+            }
+            SearchStep::Reject(a, b) => (a, b),
+        };
+        assert_eq!(a, pos, "/{pattern}/ on {haystack:?}: gap or overlap");
+        assert!(a <= b && b <= haystack.len());
+        assert!(haystack.is_char_boundary(a) && haystack.is_char_boundary(b));
+        pos = b;
+    }
+    assert_eq!(
+        pos,
+        haystack.len(),
+        "/{pattern}/ on {haystack:?}: not covered"
+    );
+    let expected: Vec<_> = re
+        .find_iter(haystack)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+    assert_eq!(matches, expected, "/{pattern}/ on {haystack:?}");
+}
+
+#[test]
+fn test_pattern_steps_cover_haystack() {
+    for (pattern, haystack) in [
+        ("a*", "ab"),
+        ("", "ab"),
+        ("", "é!"),
+        ("", ""),
+        (r"\b", "hello world"),
+        ("x", "axbx"),
+        (r"\d+", "abc123def456ghi"),
+        ("x*", "éxé"),
+    ] {
+        check_steps(pattern, haystack);
+    }
+}
+
+#[test]
+fn test_pattern_split_empty_matches() {
+    let re = Regex::new("a*").unwrap();
+    assert_eq!("ab".split(&re).collect::<Vec<_>>(), vec!["", "", "b", ""]);
+    let re = Regex::new("").unwrap();
+    assert_eq!("é!".split(&re).collect::<Vec<_>>(), vec!["", "é", "!", ""]);
 }

@@ -137,7 +137,7 @@ The major interpreter is the "classical backtracking" which uses an explicit bac
 
 - **utf16**. When enabled, additional APIs are made available that allow matching text formatted in UTF-16 and UCS-2 (`&[u16]`) without going through a conversion to and from UTF-8 (`&str`) first. This is particularly useful when interacting with and/or (re)implementing existing systems that use those encodings, such as JavaScript, Windows, and the JVM.
 
-- **pattern**. When enabled (nightly only), implements the `std::str::pattern::Pattern` trait for `Regex`, allowing it to be used with standard string methods like `str::find`, `str::contains`, `str::split`, etc.
+- **pattern**. When enabled (nightly only), implements the `std::str::pattern::Pattern` trait for `Regex`, allowing it to be used with standard string methods like `str::find`, `str::contains`, `str::split`, etc. Only forward searching is supported, so methods that search from the end, like `str::rfind`, `str::rsplit`, `str::ends_with`, `str::strip_suffix`, and `str::trim_end_matches`, do not accept a `&Regex`.
 
 */
 
